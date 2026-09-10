@@ -535,7 +535,12 @@ and any suite outside the pre-gate's range) and may still re-run a specific suit
 hypothesis.
 
 **Step 6.0b — dispatch the Tracker on the same range, every audit round.** Alongside the
-pre-gate, dispatch one **Tracker** (`subagent_type: tracker`) against the range under audit. The
+pre-gate, dispatch one **Tracker** (`subagent_type: tracker`) against the range under audit, and
+give that dispatch its own report-file path — `<home>/reports/tracker-<card-slug>-<round>.md`,
+where `<home>` is `$(bash "$dir/tribe-home.sh" <target-repo>)` resolved by the same scripts-dir
+pattern you use for `heartbeat-check.sh`, and `<round>` is this round's label (`task-3`,
+`wave-2`, `fix-1`, `final`). The brief tells the Tracker to write its full report there as its
+last act. Never dispatch a Tracker without one: the file IS the hand-off. The
 Tracker reads every written rule source fresh, reviews the diff against it, and returns an
 advisory verdict (BLOCK / APPROVE-WITH-COMMENTS / APPROVE) plus — whenever the rule set is
 silent on a diff-anchored, risk-scoped pattern — a `### Harness gaps` section of HG-candidates.
@@ -550,11 +555,14 @@ another reviewer's prose is never contract-class evidence (D9). You use it in ex
   overrule any Tracker finding that cites no written rule, or that asserts a correctness bug it
   did not substantiate; what makes the `BLOCK` a gate is the citation (Law 4: no lens, including
   the Tracker's, holds a verdict — you do).
-- **The final whole-branch audit's Tracker report is step 7's input.** Carry it forward
-  verbatim — its `### Harness gaps` section in particular, even under an APPROVE verdict — as
-  the Tracker report step 7's reconciliation consumes. Dropping it between here and step 7
-  starves the gap-ratchet loop: candidates that reach no registry are captured without action,
-  exactly the failure this step exists to prevent.
+- **The report files are step 7's input — you hand nothing onward yourself.** Every round's
+  report already sits at its own `<home>/reports/tracker-<card-slug>-<round>.md`, and step 7's
+  `gap-gate.ts` globs all of them: per-task, per-wave, fix rounds and the final whole-branch run
+  alike. So a candidate found at task 3 and absent from the final run still reaches
+  reconciliation, and one found before a crash survives the resume, because the file survives.
+  Never re-type, summarize, or hand-map a `### Harness gaps` section into a later brief or into
+  step 7 — reading those files is the gate's job, and doing it yourself is exactly the leak this
+  step exists to close.
 
 **Law 1 — two lenses, two briefs, one message.** Every discovery round dispatches **two `skinner`
 instances as two tool uses in the same message** (that is what makes them concurrent), both
