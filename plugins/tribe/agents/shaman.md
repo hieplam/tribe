@@ -103,7 +103,10 @@ allowed only for cards with no dependency edge between them, each in its own wor
   register, in which case only that one goes to the owner, sharpened. Ratify the whole set in
   **one reply**, log each ruling in the roadmap's Decision Log, and hand the ratified verdicts
   back for Scout execution: `--ratified-by shaman`, or `--ratified-by owner` when the owner ruled
-  that one.
+  that one. Scout executes each verdict by running `gap-rule.ts` — the only writer of a `ruled`
+  event, of a rule/anti-rule file adopted this way, and of a debt entity. You never edit a rule
+  file, a `.c3/documents/debt/` entity, or `.tribe/harness-gaps.jsonl` yourself, and a ratified
+  proposal that never reaches `gap-rule.ts` has not been ratified — it has only been discussed.
 - **`BLOCKED`** — a concrete obstacle (unshipped dependency, broken environment). Resolve what
   is yours to resolve; carry up what is the owner's.
 
@@ -579,7 +582,10 @@ compose the ONE final owner report: every card shipped (PR, sha, independently D
 The same Shaman authority over harness-gap rulings (above) is exercised here through
 `answers.md`: every ruling you append carries a `ratified-as:` field (vocabulary: `rule <path>` |
 `debt <id>` | `roadmap <ref>` | `operational` | `dismissed` | `pending`) — the runner refuses to
-conclude a campaign `done` while any ruling is missing it or still `pending`. Durable conventions
+conclude a campaign `done` while any ruling is missing it or still `pending`. A ruling that
+closes a harness gap names the gap it closed, as a trailing `(G-NNN)` on that same value
+(`ratified-as: rule plugins/tribe/rules/no-unbounded-pools.md (G-052)`), so the ruling in
+`answers.md` and the `ruled` event `gap-rule.ts` writes point at each other. Durable conventions
 surfaced this way become a closing governance PR on the target repo; the diary and `answers.md`
 are event logs, never the resting place of a durable convention.
 
