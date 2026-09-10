@@ -10,17 +10,44 @@
 // stays a pure module (parse/fold/mint/serialize only). Fingerprint tokenization/validation is
 // its own pure module (`fingerprint.ts`) shared with `gap-rule.ts`/`debt-tree.ts`.
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import {
   foldToLatestStatus,
   mintNextId,
   parseLedger,
   serializeEvent,
+  LedgerError,
   type GapEvent,
   type OpenedEvent,
   type SeenEvent,
 } from './ledger.ts';
 import { validateFingerprint } from './fingerprint.ts';
+import { anyPathOverlap, pathsOverlap } from './paths.ts';
+
+/** Every external-input failure this CLI can meet, as ONE typed refusal (card C1,
+ * fail-closed-edges obligations 1 and 4). `main` converts it to a single stderr line + exit 2;
+ * it never reaches a user as a stack trace. */
+export class GapReconcileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GapReconcileError';
+  }
+}
+
+/** Resolves the registry path for a run. WITHOUT `repo` the path is used exactly as given —
+ * today's behaviour, unchanged, which is what keeps every pre-existing caller and test working.
+ * WITH `repo` (spec §2 step 4: "the registry path resolved against --repo") a relative path is
+ * joined onto the repo root and the result must stay inside it — an escaping path is refused
+ * before anything is opened or appended (fail-closed-edges obligation 4). */
+export function resolveRegistryPath(registryPath: string, repo?: string): string {
+  if (repo === undefined) return registryPath;
+  const root = resolve(repo);
+  const full = isAbsolute(registryPath) ? resolve(registryPath) : resolve(root, registryPath);
+  if (full !== root && !full.startsWith(root + sep)) {
+    throw new GapReconcileError(`registry path escapes --repo (${root}): ${registryPath}`);
+  }
+  return full;
+}
 
 /** Tracker's report candidate, already extracted into structured form by Warchief (spec §3):
  * `{category, paths, fingerprint, hits, description}`. `pr` is not part of that canonical
@@ -63,29 +90,18 @@ function buildRestrictedArgv(tokens: readonly string[], targets: readonly string
 /** Runs a validated grep argv directly via `Bun.spawn` (no shell — argv only, never a
  * string-interpolated shell command). "Fires" = grep's own matching exit code (0 = match
  * found); `hits` = number of non-empty output lines, used for `hits_now`. */
-async function runGrep(argv: readonly string[]): Promise<{ fired: boolean; hits: number }> {
-  const proc = Bun.spawn(argv as string[], { stdout: 'pipe', stderr: 'pipe' });
+async function runGrep(argv: readonly string[], cwd?: string): Promise<{ fired: boolean; hits: number }> {
+  const proc = Bun.spawn(argv as string[], {
+    ...(cwd === undefined ? {} : { cwd }),
+    stdout: 'pipe',
+    stderr: 'pipe',
+    timeout: 30_000,
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+  });
   const stdout = await new Response(proc.stdout).text();
   const exitCode = await proc.exited;
   const hits = stdout.split('\n').filter((line) => line.length > 0).length;
   return { fired: exitCode === 0, hits };
-}
-
-function normalizeDir(p: string): string {
-  return p.endsWith('/') ? p : `${p}/`;
-}
-
-/** True if path `a` and path `b` overlap — equal, or one is a directory-prefix of the other.
- * Used both for "entry paths overlap the changed files" (spec §3 step 2/8) and for deciding
- * whether a candidate represents the same gap as an entry that just fired (category + paths,
- * never prose/fingerprint — spec §6a scenario 3). */
-function pathsOverlap(a: string, b: string): boolean {
-  if (a === b) return true;
-  return b.startsWith(normalizeDir(a)) || a.startsWith(normalizeDir(b));
-}
-
-function anyPathOverlap(pathsA: readonly string[], pathsB: readonly string[]): boolean {
-  return pathsA.some((a) => pathsB.some((b) => pathsOverlap(a, b)));
 }
 
 /** Runs the full spec §3 reconciliation algorithm against a real registry file and a real
@@ -97,10 +113,23 @@ export async function reconcile(options: {
   registryPath: string;
   changedFiles: readonly string[];
   candidates: readonly Candidate[];
+  /** Target repo root (spec §2 step 4). Absent = today's behaviour: paths as given, grep in the
+   * shell's own cwd. */
+  repo?: string;
 }): Promise<ReconcileResult> {
-  const { registryPath, changedFiles, candidates } = options;
+  const { registryPath, changedFiles, candidates, repo } = options;
+  const resolvedRegistry = resolveRegistryPath(registryPath, repo);
 
-  const registryText = existsSync(registryPath) ? readFileSync(registryPath, 'utf8') : '';
+  let registryText = '';
+  if (existsSync(resolvedRegistry)) {
+    try {
+      registryText = readFileSync(resolvedRegistry, 'utf8');
+    } catch (err) {
+      throw new GapReconcileError(
+        `registry is unreadable: ${resolvedRegistry}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
   const events = parseLedger(registryText);
 
   // Every id's `opened` event carries its frozen identity (paths/category/fingerprint) — the
@@ -149,7 +178,7 @@ export async function reconcile(options: {
     }
 
     const argv = buildRestrictedArgv(validation.tokens!, overlappingChanged);
-    const { fired, hits } = await runGrep(argv);
+    const { fired, hits } = await runGrep(argv, repo);
     if (fired) {
       const seenEvent: SeenEvent = { id, event: 'seen', pr: currentPr, hits_now: hits };
       appended.push(seenEvent);
@@ -186,14 +215,19 @@ export async function reconcile(options: {
   }
 
   if (appended.length > 0) {
-    mkdirSync(dirname(registryPath), { recursive: true });
-    appendFileSync(registryPath, appended.map(serializeEvent).join(''));
+    mkdirSync(dirname(resolvedRegistry), { recursive: true });
+    appendFileSync(resolvedRegistry, appended.map(serializeEvent).join(''));
   }
 
   return { matched, minted, suppressed_count: suppressedCount, flagged };
 }
 
-function parseArgs(argv: readonly string[]): { registry: string; changedFiles: string[]; candidatesPath: string } {
+function parseArgs(argv: readonly string[]): {
+  registry: string;
+  changedFiles: string[];
+  candidatesPath: string;
+  repo?: string;
+} {
   const get = (flag: string): string | undefined => {
     const idx = argv.indexOf(flag);
     return idx >= 0 ? argv[idx + 1] : undefined;
@@ -201,25 +235,50 @@ function parseArgs(argv: readonly string[]): { registry: string; changedFiles: s
   const registry = get('--registry');
   const changedFilesArg = get('--changed-files');
   const candidatesPath = get('--candidates');
+  const repo = get('--repo');
   if (!registry || !changedFilesArg || !candidatesPath) {
-    throw new Error(
-      'Usage: gap-reconcile.ts --registry <path> --changed-files <comma-list> --candidates <json-file>',
+    throw new GapReconcileError(
+      'Usage: gap-reconcile.ts --registry <path> --changed-files <comma-list> --candidates <json-file> [--repo <target-repo>]',
     );
   }
   const changedFiles = changedFilesArg
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
-  return { registry, changedFiles, candidatesPath };
+  return { registry, changedFiles, candidatesPath, ...(repo === undefined ? {} : { repo }) };
 }
 
 /** CLI entrypoint: parses argv, reads the candidates JSON file, reconciles, and prints the
  * spec §3 output object as a single JSON line on stdout. */
 export async function main(argv: readonly string[] = Bun.argv.slice(2)): Promise<void> {
-  const { registry, changedFiles, candidatesPath } = parseArgs(argv);
-  const candidates = JSON.parse(readFileSync(candidatesPath, 'utf8')) as Candidate[];
-  const result = await reconcile({ registryPath: registry, changedFiles, candidates });
-  console.log(JSON.stringify(result));
+  try {
+    const { registry, changedFiles, candidatesPath, repo } = parseArgs(argv);
+    let candidates: unknown;
+    try {
+      candidates = JSON.parse(readFileSync(candidatesPath, 'utf8'));
+    } catch (err) {
+      throw new GapReconcileError(
+        `candidates file is unreadable or not JSON: ${candidatesPath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!Array.isArray(candidates)) {
+      throw new GapReconcileError(`candidates file is not a JSON array: ${candidatesPath}`);
+    }
+    const result = await reconcile({
+      registryPath: registry,
+      changedFiles,
+      candidates: candidates as Candidate[],
+      ...(repo === undefined ? {} : { repo }),
+    });
+    console.log(JSON.stringify(result));
+  } catch (err) {
+    const message =
+      err instanceof GapReconcileError || err instanceof LedgerError
+        ? err.message
+        : `unexpected failure: ${err instanceof Error ? err.message : String(err)}`;
+    console.error(`gap-reconcile: ${message}`);
+    process.exit(2);
+  }
 }
 
 if (import.meta.main) {

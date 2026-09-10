@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseLedger, type OpenedEvent, type RuledEvent, type Disposition } from './ledger.ts';
-import { reconcile, type Candidate } from './gap-reconcile.ts';
+import { reconcile, resolveRegistryPath, GapReconcileError, type Candidate } from './gap-reconcile.ts';
 
 /** Creates a fresh temp dir, runs `fn` against it, then always removes it — so a failing
  * assertion never leaks a fixture dir onto the real filesystem. */
@@ -418,5 +418,64 @@ describe('gap-reconcile — spec §6a scenario 9', () => {
       expect(result.flagged[0]).toContain('G-001');
       expect(readRegistryText(registryPath)).toBe(originalBytes);
     });
+  });
+});
+
+describe('--repo resolution, containment and grep cwd (card C1, spec §2 step 4)', () => {
+  test('a relative registry path resolves against repo, an absolute one inside repo is kept', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'gap-repo-'));
+    expect(resolveRegistryPath('.tribe/harness-gaps.jsonl', repo)).toBe(join(repo, '.tribe/harness-gaps.jsonl'));
+    expect(resolveRegistryPath(join(repo, '.tribe/harness-gaps.jsonl'), repo)).toBe(
+      join(repo, '.tribe/harness-gaps.jsonl'),
+    );
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test('a registry path that escapes --repo is a typed refusal, never a write outside the tree', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'gap-repo-'));
+    expect(() => resolveRegistryPath('../escape.jsonl', repo)).toThrow(GapReconcileError);
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test('with repo given, fingerprints run against the repo tree even though cwd is elsewhere', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'gap-repo-'));
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    writeFileSync(join(repo, 'src/a.ts'), 'try { x(); } catch {}\n');
+    const registry = '.tribe/harness-gaps.jsonl';
+    const opened: OpenedEvent = {
+      id: 'G-001',
+      event: 'opened',
+      category: 'error-handling',
+      paths: ['src/'],
+      fingerprint: 'grep -rn "catch {}"',
+      hits_at_detection: 1,
+      first_seen_pr: 1,
+    };
+    mkdirSync(join(repo, '.tribe'), { recursive: true });
+    writeFileSync(join(repo, registry), `${JSON.stringify(opened)}\n`);
+
+    const result = await reconcile({
+      registryPath: registry,
+      repo,
+      changedFiles: ['src/a.ts'],
+      candidates: [],
+    });
+
+    expect(result.matched).toEqual(['G-001']);
+    expect(result.minted).toEqual([]);
+    const appended = parseLedger(readFileSync(join(repo, registry), 'utf8'));
+    expect(appended).toHaveLength(2);
+    expect(appended[1]).toMatchObject({ id: 'G-001', event: 'seen' });
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  test('an unreadable ledger line surfaces as LedgerError, not as a bare JSON.parse throw', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'gap-repo-'));
+    mkdirSync(join(repo, '.tribe'), { recursive: true });
+    writeFileSync(join(repo, '.tribe/harness-gaps.jsonl'), 'not json at all\n');
+    await expect(
+      reconcile({ registryPath: '.tribe/harness-gaps.jsonl', repo, changedFiles: [], candidates: [] }),
+    ).rejects.toThrow('ledger line 1');
+    rmSync(repo, { recursive: true, force: true });
   });
 });

@@ -4,6 +4,7 @@ import {
   mintNextId,
   parseLedger,
   serializeEvent,
+  LedgerError,
   type GapEvent,
   type OpenedEvent,
   type RuledEvent,
@@ -186,5 +187,33 @@ describe('serializeEvent', () => {
     const events = parseLedger(text);
     const status = foldToLatestStatus(events);
     expect(status.get('G-001')).toEqual(ruledFixture);
+  });
+});
+
+describe('parseLedger typed refusals (card C1)', () => {
+  test('a malformed JSON line raises LedgerError naming its 1-based line number', () => {
+    const text = `${JSON.stringify(openedFixture)}\n{not json}\n`;
+    expect(() => parseLedger(text)).toThrow(LedgerError);
+    try {
+      parseLedger(text);
+    } catch (err) {
+      expect((err as LedgerError).line).toBe(2);
+      expect((err as LedgerError).message).toContain('ledger line 2');
+    }
+  });
+
+  test('the reported line number counts blank lines, so it matches the file a human opens', () => {
+    const text = `\n\n${JSON.stringify(openedFixture)}\n[]\n`;
+    try {
+      parseLedger(text);
+      throw new Error('expected parseLedger to throw');
+    } catch (err) {
+      expect((err as LedgerError).line).toBe(4);
+    }
+  });
+
+  test('a JSON object that is not a gap event is refused, not silently kept', () => {
+    expect(() => parseLedger('{"id":"G-001","event":"invented"}\n')).toThrow(LedgerError);
+    expect(() => parseLedger('{"event":"opened"}\n')).toThrow(LedgerError);
   });
 });

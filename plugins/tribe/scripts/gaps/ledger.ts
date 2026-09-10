@@ -47,16 +47,57 @@ export interface RuledEvent {
 /** The three JSONL event kinds, discriminated on `event` (spec §3). */
 export type GapEvent = OpenedEvent | SeenEvent | RuledEvent;
 
-/** Parses raw ledger text (one JSON object per line, per spec §3) into typed events,
- * in the same order they appear in the text (ledger append order). Blank lines
- * (a trailing newline, or a stray blank line) are skipped rather than producing
- * empty entries. */
+/** A ledger line that is not a gap event (card C1, fail-closed-edges obligation 1). Carries the
+ * 1-based line number of the offending line, counted over the RAW text including blank lines, so
+ * the message names the line a human sees when opening the file. */
+export class LedgerError extends Error {
+  readonly line: number;
+  constructor(message: string, line: number) {
+    super(message);
+    this.name = 'LedgerError';
+    this.line = line;
+  }
+}
+
+const KNOWN_EVENTS = new Set(['opened', 'seen', 'ruled']);
+
+/** Parses raw ledger text (one JSON object per line, per spec §3) into typed events, in ledger
+ * order. Blank lines are skipped. A line that is not valid JSON, not a JSON object, or not a gap
+ * event raises `LedgerError` naming its line number — never a bare `JSON.parse` SyntaxError,
+ * which reaches a user as a stack trace with no idea which line is broken (card C1). */
 export function parseLedger(text: string): GapEvent[] {
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as GapEvent);
+  const events: GapEvent[] = [];
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!.trim();
+    if (line.length === 0) continue;
+    const lineNo = i + 1;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch (err) {
+      throw new LedgerError(
+        `ledger line ${lineNo} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+        lineNo,
+      );
+    }
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new LedgerError(`ledger line ${lineNo} is not a JSON object`, lineNo);
+    }
+    const record = parsed as Record<string, unknown>;
+    if (
+      typeof record.id !== 'string' ||
+      typeof record.event !== 'string' ||
+      !KNOWN_EVENTS.has(record.event)
+    ) {
+      throw new LedgerError(
+        `ledger line ${lineNo} is not a gap event (needs a string id and event opened|seen|ruled)`,
+        lineNo,
+      );
+    }
+    events.push(parsed as GapEvent);
+  }
+  return events;
 }
 
 /** Folds an ordered event list to the latest event per id — "the latest event per id
