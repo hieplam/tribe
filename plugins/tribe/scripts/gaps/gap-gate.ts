@@ -265,7 +265,13 @@ export async function runGate(options: GateOptions): Promise<GateSummary> {
 function parseArgs(argv: readonly string[]): GateOptions {
   const get = (flag: string): string | undefined => {
     const idx = argv.indexOf(flag);
-    return idx >= 0 ? argv[idx + 1] : undefined;
+    if (idx < 0) return undefined;
+    const value = argv[idx + 1];
+    // fail-closed-edges: a flag whose value is missing or is itself another flag token (`--x`) is
+    // treated as absent, so the required-flag guard refuses instead of silently consuming the next
+    // flag's name (which would thread e.g. `--home` into `git -C`).
+    if (value === undefined || value.startsWith('--')) return undefined;
+    return value;
   };
   const repo = get('--repo');
   const home = get('--home');

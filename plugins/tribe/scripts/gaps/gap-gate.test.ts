@@ -222,4 +222,32 @@ describe('gap-gate CLI', () => {
     expect(err.startsWith('gap-gate: ')).toBe(true);
     expect(err).not.toContain('at ');
   });
+
+  test('a required flag whose value is itself the next flag refuses with the usage message, never threading the flag name into git -C', () => {
+    const { repo, home, base } = buildFixture();
+    writeReport(home, 'C1', 'final', CANDIDATE_BLOCK);
+
+    // --repo's own value is OMITTED; the next flag's NAME (`--home`) sits where the value
+    // should be. fail-closed-edges: this must be refused by the parser's own required-flag
+    // guard (repo undefined), never silently accepted as repo="--home" and threaded into
+    // `git -C --home ...` downstream — which is a confusing, wrong-diagnosis failure, not the
+    // designed usage refusal.
+    const proc = Bun.spawnSync(
+      ['bun', GATE, '--repo', '--home', home, '--card', 'C1', '--base', base],
+      { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } },
+    );
+
+    expect(proc.exitCode).toBe(2);
+    const err = proc.stderr.toString();
+    expect(err.trim().split('\n')).toHaveLength(1);
+    expect(err.startsWith('gap-gate: ')).toBe(true);
+    expect(err).not.toContain('at ');
+    // Load-bearing: the refusal must be the PARSER's own usage message (repo treated as
+    // missing), not a downstream `git -C --home` failure — which is what the unfixed parser
+    // produces instead (a different, misleading message, even though it happens to share this
+    // test's other assertions).
+    expect(err.trim()).toBe(
+      'gap-gate: usage: gap-gate.ts --repo <target-repo> --home <tribe-home> --card <slug> --base <sha> [--head HEAD] [--pr <n>] [--registry <path>] [--out <dir>]',
+    );
+  });
 });

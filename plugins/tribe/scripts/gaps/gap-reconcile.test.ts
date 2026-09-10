@@ -12,6 +12,8 @@ import { dirname, join } from 'node:path';
 import { parseLedger, type OpenedEvent, type RuledEvent, type Disposition } from './ledger.ts';
 import { reconcile, resolveRegistryPath, GapReconcileError, type Candidate } from './gap-reconcile.ts';
 
+const RECONCILE = join(import.meta.dir, 'gap-reconcile.ts');
+
 /** Creates a fresh temp dir, runs `fn` against it, then always removes it — so a failing
  * assertion never leaks a fixture dir onto the real filesystem. */
 async function withTmpDir(fn: (dir: string) => Promise<void>): Promise<void> {
@@ -477,5 +479,34 @@ describe('--repo resolution, containment and grep cwd (card C1, spec §2 step 4)
       reconcile({ registryPath: '.tribe/harness-gaps.jsonl', repo, changedFiles: [], candidates: [] }),
     ).rejects.toThrow('ledger line 1');
     rmSync(repo, { recursive: true, force: true });
+  });
+});
+
+describe('gap-reconcile CLI (fail-closed-edges: a flag-token value is never a silent accept)', () => {
+  test('a required flag whose value is itself the next flag refuses with a typed exit 2, never a silent accept', async () => {
+    await withTmpDir(async (dir) => {
+      const candidatesPath = writeFixtureFile(dir, 'candidates.json', '[]\n');
+
+      // --registry's own value is OMITTED; the next flag's NAME (`--changed-files`) sits where
+      // the value should be. Before the fix this is silently accepted (registry becomes the
+      // literal string "--changed-files", a nonexistent path treated as an empty registry) and
+      // the CLI exits 0 having reconciled nothing against the WRONG registry — never refusing
+      // at all. That silent wrong-value acceptance, not a crash, is the defect under test.
+      const proc = Bun.spawnSync(
+        ['bun', RECONCILE, '--registry', '--changed-files', 'nofile.ts', '--candidates', candidatesPath],
+        { cwd: dir },
+      );
+
+      expect(proc.exitCode).toBe(2);
+      const err = proc.stderr.toString();
+      expect(err.trim().split('\n')).toHaveLength(1);
+      expect(err.startsWith('gap-reconcile: ')).toBe(true);
+      expect(err).not.toContain('at ');
+      // Load-bearing: the refusal must be the PARSER's own usage message (registry treated as
+      // missing), never the unfixed parser's silent exit 0.
+      expect(err.trim()).toBe(
+        'gap-reconcile: Usage: gap-reconcile.ts --registry <path> --changed-files <comma-list> --candidates <json-file> [--repo <target-repo>]',
+      );
+    });
   });
 });
