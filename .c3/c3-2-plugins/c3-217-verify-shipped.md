@@ -1,6 +1,6 @@
 ---
 id: c3-217
-c3-seal: cf79abedf21d4a6a08b43413dca4e8cc8e978d30d024d891705984b5e0fcc132
+c3-seal: ae208eb7b18d8e390e56370d2373239efea31846a5c0476f7b99bdd210a8f3ba
 title: verify-shipped
 type: component
 category: feature
@@ -60,7 +60,7 @@ Owns the executable form of "PR squash-merged and ready to work on new feature w
 | Surface | Direction | Contract | Boundary | Evidence |
 | --- | --- | --- | --- | --- |
 | Skill trigger | IN | Fires on "is this actually shipped? / verify SHIPPED / confirm done" | Claude Code skill system | SKILL.md frontmatter |
-| scripts/verify-shipped.sh | IN/OUT | Read-only against git/GitHub; prints 4 pass/fail lines + verdict | shell CLI | plugins/verify-shipped/skills/verify-shipped/scripts/verify-shipped.sh |
+| scripts/verify-shipped.sh | IN/OUT | Read-only against git/GitHub; prints 4 pass/fail lines + verdict — pr_merged, master_in_sync, worktree_removed, and gap_gate_stamped (the merged PR body carries a gap-gate v1 stamp whose card= matches --card, spec CU-4 §3). --pr, --worktree and --card are all required: a claimed-done state with an unchecked corner is the gap this skill exists to close. Sha ancestry is deliberately not re-checked here — that is the campaign runner's gapGateStamped point, which has the merged repo in hand | shell CLI | plugins/verify-shipped/scripts/tests/test-verify-shipped.sh |
 
 ## Change Safety
 
