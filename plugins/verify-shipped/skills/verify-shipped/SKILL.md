@@ -1,6 +1,6 @@
 ---
 name: verify-shipped
-description: Use whenever a Warchief (or anyone) reports a piece of work as SHIPPED and that claim needs verifying before it's trusted — before marking a roadmap card shipped, before telling the owner a PR landed, or any time "done" needs mechanical proof instead of a prose report. Runs three checks against GitHub and git — PR state == merged, local master in sync with origin/master, worktree removed — and prints a pass/fail verdict on each. Trigger on phrases like "is this actually shipped?", "verify SHIPPED", "did this really merge?", "check the PR landed", "confirm done". Encodes the owner's own Definition of Done ("PR merged and ready to work on new feature with LATEST CHANGES") as a script instead of trusting a claim.
+description: Use whenever a Warchief (or anyone) reports a piece of work as SHIPPED and that claim needs verifying before it's trusted — before marking a roadmap card shipped, before telling the owner a PR landed, or any time "done" needs mechanical proof instead of a prose report. Runs four checks against GitHub and git — PR state == merged, local master in sync with origin/master, worktree removed, and the merged PR body carries this card's gap-gate v1 stamp — and prints a pass/fail verdict on each. Trigger on phrases like "is this actually shipped?", "verify SHIPPED", "did this really merge?", "check the PR landed", "confirm done". Encodes the owner's own Definition of Done ("PR merged and ready to work on new feature with LATEST CHANGES") as a script instead of trusting a claim.
 ---
 
 # Verify Shipped
@@ -21,7 +21,7 @@ asserted in prose. This skill turns that assertion into three cheap, scripted ch
 
 ## What it checks
 
-Three independent checks, each reported pass/fail (or `unknown` when the data needed to decide
+Four independent checks, each reported pass/fail (or `unknown` when the data needed to decide
 isn't available):
 
 1. **`pr_merged`** — the PR's state is `MERGED` (via `gh pr view`).
@@ -30,19 +30,24 @@ isn't available):
    LATEST CHANGES" half of the owner's definition.
 3. **`worktree_removed`** — the given worktree path is gone from both disk and
    `git worktree list`.
+4. **`gap_gate_stamped`** — the merged PR's body carries a `gap-gate v1` stamp whose `card=`
+   matches `--card`. This is the attended-session backstop for a PR opened by a session that
+   bypassed the Warchief and so never ran the gap gate; it deliberately does not re-check sha
+   ancestry (that is the campaign runner's job, which has the merged repo in hand).
 
 ## Usage
 
 ```bash
-bash ~/.claude/skills/verify-shipped/scripts/verify-shipped.sh --pr <number|url> --worktree <path> [--base master] [--repo owner/repo]
+bash ~/.claude/skills/verify-shipped/scripts/verify-shipped.sh --pr <number|url> --worktree <path> --card <slug> [--base master] [--repo owner/repo]
 ```
 
 - `--pr` — required. PR number or full URL.
 - `--worktree` — required. The worktree path used for the work being verified. May be relative
   or absolute — the script canonicalizes it against the caller's cwd (before changing directory
-  internally) so a relative path is always checked against the right location. All three checks
-  run every time; there is no partial/optional mode, because a claimed-done state with an
-  unchecked corner is exactly the gap this skill exists to close.
+  internally) so a relative path is always checked against the right location.
+- `--card` — required. The card slug the `gap-gate v1` stamp in the PR body must carry. All
+  four checks run every time; there is no partial/optional mode, because a claimed-done state
+  with an unchecked corner is exactly the gap this skill exists to close.
 - `--base` — optional, defaults to `master`.
 - `--repo` — optional; passed to `gh` as `--repo` when not run from inside the target repo's
   checkout, or when `gh`'s own repo inference would pick the wrong remote.
@@ -52,21 +57,23 @@ verdict is `PASS` or `FAIL` — a failed check is a normal result, not a script 
 `2` only on setup problems: `gh`/`git`/`python3` missing, not a git repo, or the PR/repo
 couldn't be resolved (bad PR number, no `gh` auth, etc.).
 
-Read the top-level `verdict` field (`PASS` only when all three checks pass) and each check's
+Read the top-level `verdict` field (`PASS` only when all four checks pass) and each check's
 `detail` string — that's what explains *why* a check failed, not just that it did.
 
 ## Example
 
 ```
-$ bash ~/.claude/skills/verify-shipped/scripts/verify-shipped.sh --pr 37 --worktree /tmp/wt-card4 --repo hieplam/tribe
+$ bash ~/.claude/skills/verify-shipped/scripts/verify-shipped.sh --pr 37 --worktree /tmp/wt-card4 --card card4 --repo hieplam/tribe
 {
   "pr_number": "37",
   "base_branch": "master",
   "worktree": "/tmp/wt-card4",
+  "card": "card4",
   "checks": {
     "pr_merged": {"status": "pass", "detail": "PR #37 state is MERGED"},
     "master_in_sync": {"status": "pass", "detail": "local master == origin/master"},
-    "worktree_removed": {"status": "pass", "detail": "/tmp/wt-card4 is gone from disk and from git worktree list"}
+    "worktree_removed": {"status": "pass", "detail": "/tmp/wt-card4 is gone from disk and from git worktree list"},
+    "gap_gate_stamped": {"status": "pass", "detail": "gap-gate v1 stamp present for card card4 (minted=none matched=none)"}
   },
   "verdict": "PASS"
 }
@@ -84,5 +91,5 @@ $ bash ~/.claude/skills/verify-shipped/scripts/verify-shipped.sh --pr 37 --workt
 
 ## Files in this skill
 
-- `scripts/verify-shipped.sh` — runs the three checks, emits a JSON summary. Requires `gh`
+- `scripts/verify-shipped.sh` — runs the four checks, emits a JSON summary. Requires `gh`
   (authenticated), `git`, and `python3` (used only to emit well-formed JSON).

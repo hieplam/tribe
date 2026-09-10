@@ -6,18 +6,20 @@
 # matter. This script checks that, mechanically, instead of trusting a
 # Warchief's prose SHIPPED report.
 #
-# Three checks, each reported independently:
+# Four checks, each reported independently:
 #   1. pr_merged              — PR state == MERGED
 #   2. master_in_sync         — local <base> branch has no divergence from
 #                                origin/<base> (0 ahead, 0 behind)
 #   3. worktree_removed       — the given worktree path is gone from both
 #                                `git worktree list` and disk
+#   4. gap_gate_stamped       — the merged PR's body carries a `gap-gate v1`
+#                                stamp whose `card=` matches --card
 #
 # Output: JSON summary on stdout only. Logs go to stderr.
 # Exit codes: 0 = ran to completion (regardless of pass/fail); 2 = setup error.
 #
 # Usage:
-#   verify-shipped.sh --pr <number|url> --worktree <path> [--base master] [--repo owner/repo]
+#   verify-shipped.sh --pr <number|url> --worktree <path> --card <slug> [--base master] [--repo owner/repo]
 #
 # Requires: gh (GitHub CLI, authenticated), git, python3.
 
@@ -30,6 +32,7 @@ PR_ARG=""
 WORKTREE_ARG=""
 BASE_BRANCH="master"
 REPO_ARG=""
+CARD_ARG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -37,13 +40,15 @@ while [[ $# -gt 0 ]]; do
     --worktree)  WORKTREE_ARG="$2"; shift 2 ;;
     --base)      BASE_BRANCH="$2"; shift 2 ;;
     --repo)      REPO_ARG="$2"; shift 2 ;;
+    --card)      CARD_ARG="$2"; shift 2 ;;
     -h|--help)   sed -n '2,25p' "$0"; exit 0 ;;
     *)           DIE "unknown arg: $1" ;;
   esac
 done
 
 [[ -n "$PR_ARG" ]]       || DIE "--pr <number|url> is required"
-[[ -n "$WORKTREE_ARG" ]] || DIE "--worktree <path> is required (all three checks must run)"
+[[ -n "$WORKTREE_ARG" ]] || DIE "--worktree <path> is required (all four checks must run)"
+[[ -n "$CARD_ARG" ]] || DIE "--card <slug> is required (all four checks must run)"
 
 command -v gh >/dev/null 2>&1      || DIE "gh (GitHub CLI) not found — required for PR checks"
 command -v git >/dev/null 2>&1     || DIE "git not found"
@@ -69,16 +74,17 @@ cd "$REPO_ROOT"
 LOG "resolving PR: $PR_ARG"
 if [[ -n "$REPO_ARG" ]]; then
   PR_JSON=$(gh pr view "$PR_ARG" --repo "$REPO_ARG" \
-    --json number,url,state,commits,baseRefName,headRefName,mergedAt 2>/dev/null) \
+    --json number,url,state,commits,baseRefName,headRefName,mergedAt,body 2>/dev/null) \
     || DIE "gh pr view failed for $PR_ARG (not found, no auth, or not a PR)"
 else
   PR_JSON=$(gh pr view "$PR_ARG" \
-    --json number,url,state,commits,baseRefName,headRefName,mergedAt 2>/dev/null) \
+    --json number,url,state,commits,baseRefName,headRefName,mergedAt,body 2>/dev/null) \
     || DIE "gh pr view failed for $PR_ARG (not found, no auth, or not a PR)"
 fi
 
 PR_NUMBER=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["number"])' "$PR_JSON")
 PR_STATE=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["state"])' "$PR_JSON")
+PR_BODY=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["body"] or "")' "$PR_JSON")
 
 # ---------- check 1: pr_merged ----------
 if [[ "$PR_STATE" == "MERGED" ]]; then
@@ -120,8 +126,32 @@ else
   CHECK3_DETAIL="$WORKTREE_ARG is gone from disk and from git worktree list"
 fi
 
+# ---------- check 4: gap_gate_stamped ----------
+# The merged PR's body must carry a `gap-gate v1` stamp for THIS card (spec CU-4 §3). This is
+# the attended-session backstop for a PR opened by any session that bypassed the Warchief and
+# so never ran the gap gate. Sha ancestry is deliberately NOT re-checked here — that is the
+# campaign runner's `gapGateStamped` point, which has the merged repo in hand.
+CHECK4_RAW=$(python3 - "$PR_BODY" "$CARD_ARG" <<'PY'
+import re, sys
+body, card = sys.argv[1], sys.argv[2]
+m = re.search(
+    r"<!--\s*gap-gate v1\s+card=(\S+)\s+base=(\S+)\s+head=(\S+)\s+minted=(\S+)\s+"
+    r"matched=(\S+)\s+debt-delta=(-?\d+)\s+ledger=(\S+?)\s*-->",
+    body,
+)
+if not m:
+    print("fail\tPR body carries no `gap-gate v1` stamp - the harness-gap gate never ran for this PR")
+elif m.group(1) != card:
+    print("fail\tPR body carries a gap-gate stamp for card=%s, not %s" % (m.group(1), card))
+else:
+    print("pass\tgap-gate v1 stamp present for card %s (minted=%s matched=%s)" % (card, m.group(4), m.group(5)))
+PY
+)
+CHECK4_STATUS="${CHECK4_RAW%%$'\t'*}"
+CHECK4_DETAIL="${CHECK4_RAW#*$'\t'}"
+
 # ---------- verdict ----------
-if [[ "$CHECK1_STATUS" == "pass" && "$CHECK2_STATUS" == "pass" && "$CHECK3_STATUS" == "pass" ]]; then
+if [[ "$CHECK1_STATUS" == "pass" && "$CHECK2_STATUS" == "pass" && "$CHECK3_STATUS" == "pass" && "$CHECK4_STATUS" == "pass" ]]; then
   VERDICT="PASS"
 else
   VERDICT="FAIL"
@@ -135,21 +165,26 @@ python3 - \
   "$CHECK1_STATUS" "$CHECK1_DETAIL" \
   "$CHECK2_STATUS" "$CHECK2_DETAIL" \
   "$CHECK3_STATUS" "$CHECK3_DETAIL" \
+  "$CHECK4_STATUS" "$CHECK4_DETAIL" \
+  "$CARD_ARG" \
   <<'PY'
 import json, sys
 
 (pr_number, base_branch, worktree, verdict,
  c1_status, c1_detail, c2_status, c2_detail,
- c3_status, c3_detail) = sys.argv[1:11]
+ c3_status, c3_detail, c4_status, c4_detail,
+ card_slug) = sys.argv[1:14]
 
 print(json.dumps({
     "pr_number": pr_number,
     "base_branch": base_branch,
     "worktree": worktree,
+    "card": card_slug,
     "checks": {
         "pr_merged":             {"status": c1_status, "detail": c1_detail},
         "master_in_sync":        {"status": c2_status, "detail": c2_detail},
         "worktree_removed":      {"status": c3_status, "detail": c3_detail},
+        "gap_gate_stamped":      {"status": c4_status, "detail": c4_detail},
     },
     "verdict": verdict,
 }, indent=2))
