@@ -65,7 +65,23 @@ that skips any of the five roles is not a Mammoth Hunt; do not silently downgrad
 
 4. **Verify before repeating "SHIPPED"**: read the warchief's report and check the
    evidence (test output, diff, PR link) against the idea card's goal yourself. A claim
-   without runnable evidence goes back to the warchief, not to the owner.
+   without runnable evidence goes back to the warchief, not to the owner. Two of those
+   checks are mechanical, not judgment: the PR body carries a `gap-gate v1` stamp whose
+   `card=` matches this hunt's card, and `verify-shipped`'s fourth line is green. A missing
+   or mismatched stamp means some session opened that PR without the gate — refuse the
+   SHIPPED claim and send it back.
+
+   **Then close the harness-gap loop yourself — a hunt has no closing pass.** In a campaign
+   the Stage D ratification pass rules on the whole batch; here you are the only ratifier
+   there will ever be, so a proposal you leave in the PR body dies there (PR #115's five
+   proposals and PR #123's five did exactly that). Read the gate's `open_ids` from
+   `<home>/reports/<card>-gap-gate.json`, ratify each of Scout's proposals yourself
+   (`rule` / `anti-rule` / `debt` / `dismissed`) — carrying only the escalation-register few
+   to the owner — and have **Scout** execute every ratified verdict by running `gap-rule.ts`
+   with `--ratified-by shaman` (or `--ratified-by owner`), so the `ruled` events and the
+   rule/anti-rule file or debt entity land through the CLI. Never edit a rule file, a debt
+   entity, or `.tribe/harness-gaps.jsonl` by hand, and never call the hunt done with a gap
+   still open in the registry.
 
 ## Forbidden substitutions
 
