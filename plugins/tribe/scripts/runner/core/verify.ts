@@ -29,6 +29,9 @@ export interface VerifyConfig {
    * (stateless-capability wall). An EMPTY list fails closed: nothing counts as docs-only, so
    * a code diff never auto-waives (see `isDocsOnlyDiff`). */
   docsOnlyPaths: string[];
+  /** Where ledger policy A (spec §4) keeps the gap registry inside the target repo. Campaign
+   * config, carried by the caller; defaults to the capability's own constant. */
+  gapLedgerPath?: string;
 }
 
 /** The D3 five points, each independently reported (never short-circuited) so a failed
@@ -38,7 +41,9 @@ export type VerifyPointId =
   | 'mergeShaAncestorOfMaster'
   | 'checksGreen'
   | 'worktreeAndBranchGone'
-  | 'schemaGuard';
+  | 'schemaGuard'
+  | 'gapGateStamped'
+  | 'ledgerCommitted';
 
 export interface VerifyPointResult {
   id: VerifyPointId;
@@ -376,21 +381,144 @@ async function checkSchemaGuard(card: Card, config: VerifyConfig, io: VerifyIO):
   };
 }
 
+/** The tribe's own artifact path under ledger policy A (spec §4) — NOT the target repo's
+ * layout, which is what the stateless-capability wall forbids hardcoding. */
+export const GAP_LEDGER_PATH = '.tribe/harness-gaps.jsonl';
+
+/** Third reader of the `gap-gate v1` wire format (writer: scripts/gaps/gap-stamp.ts; other
+ * reader: verify-shipped.sh). Keep this regex byte-identical to those two. The lazy `\S+?` on
+ * `ledger` is load-bearing: a greedy match swallows a `-->` written with no space before it. */
+const GAP_GATE_STAMP_RE =
+  /<!--\s*gap-gate v1\s+card=(\S+)\s+base=(\S+)\s+head=(\S+)\s+minted=(\S+)\s+matched=(\S+)\s+debt-delta=(-?\d+)\s+ledger=(\S+?)\s*-->/;
+
+export interface GapGateStamp {
+  card: string;
+  base: string;
+  head: string;
+  minted: string[];
+  matched: string[];
+}
+
+export function parseGapGateStamp(text: string): GapGateStamp | null {
+  const m = GAP_GATE_STAMP_RE.exec(text);
+  if (!m) return null;
+  const list = (v: string): string[] => (v === 'none' ? [] : v.split(',').filter((s) => s.length > 0));
+  return { card: m[1]!, base: m[2]!, head: m[3]!, minted: list(m[4]!), matched: list(m[5]!) };
+}
+
+/** D3 point 6 (spec §3): the merged PR's body carries a `gap-gate v1` stamp whose `card=` is
+ * THIS card and whose base/head shas are commits of the merged branch. A PR opened by a session
+ * that bypassed the Warchief (leak L4) has no stamp, so it cannot record `shipped`. */
+async function checkGapGateStamped(
+  cardId: string,
+  card: Card,
+  config: VerifyConfig,
+  io: VerifyIO,
+): Promise<{ point: VerifyPointResult; stamp: GapGateStamp | null }> {
+  const fail = (detail: string): { point: VerifyPointResult; stamp: null } => ({
+    point: { id: 'gapGateStamped', passed: false, detail },
+    stamp: null,
+  });
+  if (card.pr == null) return fail('card.pr is not set; cannot read the PR body');
+
+  const result = await run(io, config.repoRoot, ['gh', 'pr', 'view', String(card.pr), '--json', 'body']);
+  if (result.exitCode !== 0) {
+    return fail(`gh pr view ${card.pr} --json body failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
+  }
+  let body: string;
+  try {
+    body = String((JSON.parse(result.stdout) as { body?: unknown }).body ?? '');
+  } catch {
+    return fail(`gh pr view ${card.pr} --json body returned non-JSON output`);
+  }
+
+  const stamp = parseGapGateStamp(body);
+  if (!stamp) {
+    return fail(
+      `PR #${card.pr} body carries no \`gap-gate v1\` stamp — the harness-gap gate never ran for this PR`,
+    );
+  }
+  if (stamp.card !== cardId) {
+    return fail(`PR #${card.pr} body carries a gap-gate stamp for card=${stamp.card}, not ${cardId}`);
+  }
+
+  const target = `${config.remote}/${config.baseBranch}`;
+  for (const sha of [stamp.base, stamp.head]) {
+    const ancestry = await run(io, config.repoRoot, ['git', 'merge-base', '--is-ancestor', sha, target]);
+    if (ancestry.exitCode !== 0) {
+      return fail(`gap-gate stamp names ${sha}, which is not a commit of ${target} (exit ${ancestry.exitCode})`);
+    }
+  }
+
+  return {
+    point: {
+      id: 'gapGateStamped',
+      passed: true,
+      detail: `PR #${card.pr} carries a gap-gate v1 stamp for ${cardId} (minted=${stamp.minted.join(',') || 'none'})`,
+    },
+    stamp,
+  };
+}
+
+/** D3 point 7 (spec §3, ledger policy A): every id the stamp says was minted is present in the
+ * ledger as committed on the merged base branch — the check that the append actually rode the PR
+ * instead of dying with the worktree (leak L5). */
+async function checkLedgerCommitted(
+  stamp: GapGateStamp | null,
+  config: VerifyConfig,
+  io: VerifyIO,
+): Promise<VerifyPointResult> {
+  if (!stamp) {
+    return { id: 'ledgerCommitted', passed: false, detail: 'no gap-gate stamp available (point 6 did not report one)' };
+  }
+  if (stamp.minted.length === 0) {
+    return { id: 'ledgerCommitted', passed: true, detail: 'the stamp minted no ids; there is nothing to commit' };
+  }
+
+  const path = config.gapLedgerPath ?? GAP_LEDGER_PATH;
+  const ref = `${config.remote}/${config.baseBranch}:${path}`;
+  const result = await run(io, config.repoRoot, ['git', 'show', ref]);
+  if (result.exitCode !== 0) {
+    return {
+      id: 'ledgerCommitted',
+      passed: false,
+      detail: `${ref} does not exist, but the stamp minted ${stamp.minted.join(',')} — the ledger append never landed`,
+    };
+  }
+  const missing = stamp.minted.filter((id) => !result.stdout.includes(`"id":"${id}"`));
+  if (missing.length > 0) {
+    return { id: 'ledgerCommitted', passed: false, detail: `${ref} is missing minted id(s): ${missing.join(', ')}` };
+  }
+  return { id: 'ledgerCommitted', passed: true, detail: `${ref} carries every minted id (${stamp.minted.join(',')})` };
+}
+
 /** The D3 five-point replay, as code. The executor's `SHIPPED <pr> <sha>` line is a signal
  * only (spec §D3) — this is the acceptance. Every point is checked and reported
  * independently; a failure at one point never short-circuits the rest, so a failed result
  * names EVERY failing point (it feeds the escalation file a human reads). Never throws on
  * a verification failure — a failed check is a normal, reportable outcome. */
-export async function verifyShipped(card: Card, config: VerifyConfig, io: VerifyIO): Promise<VerifyResult> {
+export async function verifyShipped(
+  card: Card,
+  config: VerifyConfig,
+  io: VerifyIO,
+  cardId: string,
+): Promise<VerifyResult> {
   const merged = await checkMerged(card, config, io);
+  const ancestor = await checkAncestor(merged.mergeSha, config, io);
+  const checks = await checkChecksGreen(card, config, io);
+  const worktree = await checkWorktreeAndBranchGone(card, config, io);
+  const schema = await checkSchemaGuard(card, config, io);
+  const gapGate = await checkGapGateStamped(cardId, card, config, io);
+  const ledger = await checkLedgerCommitted(gapGate.stamp, config, io);
   const points: VerifyPointResult[] = [
     merged.point,
-    await checkAncestor(merged.mergeSha, config, io),
-    await checkChecksGreen(card, config, io),
-    await checkWorktreeAndBranchGone(card, config, io),
-    await checkSchemaGuard(card, config, io),
+    ancestor,
+    checks,
+    worktree,
+    schema,
+    gapGate.point,
+    ledger,
   ];
-
   const failedPoints = points.filter((p) => !p.passed).map((p) => p.id);
   return { shipped: failedPoints.length === 0, points, failedPoints };
 }

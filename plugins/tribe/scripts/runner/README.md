@@ -598,6 +598,37 @@ resolve: add `ratified-as:` to each named block in `answers.md` (or ratify it vi
 governance path it names) and re-trigger; nothing else about the campaign's cards is touched by
 this gate.
 
+## Harness-gap gate and the `gap-gate v1` stamp (spec CU-4 §2, §3)
+
+Before any card PR is opened, the executor runs the gap gate:
+
+```bash
+bun plugins/tribe/scripts/gaps/gap-gate.ts --repo <target-repo> --home <tribe-home> \
+    --card <card-slug> --base <merge-base-sha> [--head HEAD] [--pr <n>]
+```
+
+It reads every `<home>/reports/tracker-<card>-*.md` (so a candidate found at task 3 and absent
+from the final round still reaches reconciliation), reconciles them against
+`.tribe/harness-gaps.jsonl` in the target repo, runs the debt burn-down diff, and writes
+`<home>/reports/<card>-gap-gate.md` — the complete `## Harness gaps` PR-body section, ending in
+one machine-checkable stamp line. Exit 0 = green, 1 = red (positive debt delta, or an unsafe
+fingerprint), 2 = setup error (no Tracker report, bad range, unreadable ledger). Zero Tracker
+report files is a RED gate, never an empty set.
+
+Under ledger policy A the append is committed on the card branch with the trailer
+`Tribe-Milestone: gap-gate`, so the ledger rides the PR onto the base branch.
+
+`verifyShipped` therefore replays **seven** D3 points, not five. The two added by CU-4 §3 are:
+
+- `gapGateStamped` — the merged PR body carries a `gap-gate v1` stamp whose `card=` matches this
+  card and whose `base=`/`head=` shas are commits of the merged branch.
+- `ledgerCommitted` — every id the stamp says was minted is present in the ledger as committed
+  on the base branch.
+
+Both are reported like every other point (never short-circuited): a failure escalates the card
+instead of recording `shipped`, which is what makes a PR opened by a session that bypassed the
+Warchief a red verdict a human must act on.
+
 ## Report contract (spec §O5)
 
 On **every** exit path except `--dry-run` (zero side effects, by construction — nothing is

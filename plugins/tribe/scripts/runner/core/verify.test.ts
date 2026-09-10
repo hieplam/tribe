@@ -3,7 +3,7 @@
 // real binary. Fixture values are deliberately neutral (no repo names, no campaign-specific
 // values) — the stateless-capability wall.
 import { describe, expect, test } from 'bun:test';
-import { readAllowsSchemaChange, verifyShipped } from './verify.ts';
+import { parseGapGateStamp, readAllowsSchemaChange, verifyShipped } from './verify.ts';
 import type { ExecResult, VerifyConfig, VerifyIO } from './verify.ts';
 import type { Card } from './types.ts';
 
@@ -47,6 +47,8 @@ interface MockOptions {
    * `readFile` of it throws ENOENT — the shape a card leaves behind when its own merge
    * deleted its planning docs (C1). Defaults to present. */
   planExists?: boolean;
+  prBody?: string;
+  ledgerAtBase?: string;
 }
 
 function ok(stdout: string): ExecResult {
@@ -64,6 +66,10 @@ function buildIo(opts: MockOptions = {}): VerifyIO {
   const schemaDiffStdout = opts.schemaDiffStdout ?? '';
   const planContent = opts.planContent ?? '# plan\n\nno front matter here.\n';
   const planExists = opts.planExists ?? true;
+  const prBody =
+    opts.prBody ??
+    '## Harness gaps\n\n<!-- gap-gate v1 card=C1 base=base0001 head=head0001 minted=none matched=none debt-delta=0 ledger=none -->\n';
+  const ledgerAtBase = opts.ledgerAtBase ?? '';
 
   return {
     fileExists(): boolean {
@@ -75,7 +81,18 @@ function buildIo(opts: MockOptions = {}): VerifyIO {
         return ok(JSON.stringify({ merged, merge_commit_sha: mergeSha }));
       }
       if (bin === 'git' && rest[0] === 'merge-base') {
-        return { stdout: '', stderr: '', exitCode: ancestorExitCode };
+        // rest = ['merge-base', '--is-ancestor', <sha>, <target>]; only the MERGE sha is governed
+        // by ancestorExitCode — the stamp's base/head shas are ancestors unless a test says
+        // otherwise, so an unrelated ancestry failure never bleeds into the stamp point.
+        return { stdout: '', stderr: '', exitCode: rest[2] === mergeSha ? ancestorExitCode : 0 };
+      }
+      if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'view') {
+        return ok(JSON.stringify({ body: prBody }));
+      }
+      if (bin === 'git' && rest[0] === 'show') {
+        return ledgerAtBase.length > 0
+          ? ok(ledgerAtBase)
+          : { stdout: '', stderr: 'fatal: path does not exist', exitCode: 128 };
       }
       if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'checks') {
         return ok(JSON.stringify(checks));
@@ -127,11 +144,11 @@ function buildIoRecordingCalls(opts: MockOptions = {}): { io: VerifyIO; calls: s
 }
 
 describe('verifyShipped — happy path', () => {
-  test('all five points pass', async () => {
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo());
+  test('all seven points pass', async () => {
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo(), 'C1');
     expect(result.shipped).toBe(true);
     expect(result.failedPoints).toEqual([]);
-    expect(result.points).toHaveLength(5);
+    expect(result.points).toHaveLength(7);
     expect(result.points.every((p) => p.passed)).toBe(true);
   });
 });
@@ -139,7 +156,7 @@ describe('verifyShipped — happy path', () => {
 describe('verifyShipped — point 3: checks green + D6 flake classification', () => {
   test('a real red check (non-sonar) fails checksGreen', async () => {
     const io = buildIo({ checks: [{ name: 'unit-tests', bucket: 'fail' }] });
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     expect(result.shipped).toBe(false);
     expect(result.failedPoints).toContain('checksGreen');
   });
@@ -149,7 +166,7 @@ describe('verifyShipped — point 3: checks green + D6 flake classification', ()
       checks: [{ name: 'SonarCloud Code Analysis', bucket: 'fail', description: 'bootstrap failed: HTTP 504' }],
       docsOnlyDiffFiles: ['docs/superpowers/plans/2026-01-01-c1-plan.md'],
     });
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     const point = result.points.find((p) => p.id === 'checksGreen');
     expect(point?.passed).toBe(true);
     expect(point?.detail).toMatch(/waived/i);
@@ -160,7 +177,7 @@ describe('verifyShipped — point 3: checks green + D6 flake classification', ()
       checks: [{ name: 'SonarCloud Code Analysis', bucket: 'fail', description: 'bootstrap failed: HTTP 504' }],
       docsOnlyDiffFiles: ['packages/app/src/domain/sample-types.ts'],
     });
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     expect(result.shipped).toBe(false);
     expect(result.failedPoints).toContain('checksGreen');
   });
@@ -169,13 +186,13 @@ describe('verifyShipped — point 3: checks green + D6 flake classification', ()
 describe('verifyShipped — point 4: worktree/branch cleanup', () => {
   test('a still-present worktree fails worktreeAndBranchGone', async () => {
     const io = buildIo({ worktreeStillExists: true });
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     expect(result.failedPoints).toContain('worktreeAndBranchGone');
   });
 
   test('a still-present remote branch fails worktreeAndBranchGone', async () => {
     const io = buildIo({ remoteStillExists: true });
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     expect(result.failedPoints).toContain('worktreeAndBranchGone');
   });
 });
@@ -183,7 +200,7 @@ describe('verifyShipped — point 4: worktree/branch cleanup', () => {
 describe('verifyShipped — point 5: schema guard', () => {
   test('a non-empty schema-lock diff with no allow flag fails schemaGuard', async () => {
     const io = buildIo({ schemaDiffStdout: 'diff --git a/packages/app/src/domain/sample-types.ts ...\n' });
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     expect(result.shipped).toBe(false);
     expect(result.failedPoints).toContain('schemaGuard');
   });
@@ -193,7 +210,7 @@ describe('verifyShipped — point 5: schema guard', () => {
       schemaDiffStdout: 'diff --git a/packages/app/src/domain/sample-types.ts ...\n',
       planContent: '# c1 plan\n\nNo YAML front matter block at all.\n',
     });
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     expect(result.failedPoints).toContain('schemaGuard');
   });
 
@@ -203,7 +220,7 @@ describe('verifyShipped — point 5: schema guard', () => {
   // happened and the card would otherwise be left `running` forever.
   test('plan file gone at verify time with an empty schema-lock diff passes without throwing', async () => {
     const io = buildIo({ planExists: false, schemaDiffStdout: '' });
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     expect(result.shipped).toBe(true);
     const point = result.points.find((p) => p.id === 'schemaGuard');
     expect(point?.passed).toBe(true);
@@ -214,7 +231,7 @@ describe('verifyShipped — point 5: schema guard', () => {
       planExists: false,
       schemaDiffStdout: 'diff --git a/packages/app/src/domain/sample-types.ts ...\n',
     });
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     expect(result.shipped).toBe(false);
     expect(result.failedPoints).toContain('schemaGuard');
     const point = result.points.find((p) => p.id === 'schemaGuard');
@@ -227,7 +244,7 @@ describe('verifyShipped — point 5: schema guard', () => {
       schemaDiffStdout: 'diff --git a/packages/app/src/domain/sample-types.ts ...\n',
       planContent: '---\nallowsSchemaChange: true\n---\n\n# c1 plan\n',
     });
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     const point = result.points.find((p) => p.id === 'schemaGuard');
     expect(point?.passed).toBe(true);
   });
@@ -254,7 +271,7 @@ describe('verifyShipped — multi-failure reporting', () => {
       checks: [{ name: 'unit-tests', bucket: 'fail' }], // real red check -> point 3 fails
       schemaDiffStdout: 'diff --git a/packages/app/src/domain/sample-types.ts ...\n', // point 5 fails
     });
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     expect(result.shipped).toBe(false);
     expect(result.failedPoints).toEqual(expect.arrayContaining(['checksGreen', 'schemaGuard']));
     // points 1, 2, 4 are untouched by these mocks and should still pass.
@@ -276,7 +293,7 @@ describe('verifyShipped — never throws', () => {
         return io.exec(cmd);
       },
     };
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), failingIo);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), failingIo, 'C1');
     expect(result.shipped).toBe(false);
     expect(result.failedPoints).toContain('merged');
   });
@@ -290,7 +307,7 @@ describe('verifyShipped — never throws', () => {
 describe('verifyShipped — point 1: the real gh api path (F4)', () => {
   test('checkMerged calls gh api against repos/{owner}/{repo}/pulls/<pr>, never bare pulls/<pr>', async () => {
     const { io, calls } = buildIoRecordingCalls();
-    await verifyShipped(fixtureCard({ pr: 42 }), fixtureConfig(), io);
+    await verifyShipped(fixtureCard({ pr: 42 }), fixtureConfig(), io, 'C1');
 
     const apiCall = calls.find((cmd) => cmd[0] === 'gh' && cmd[1] === 'api');
     expect(apiCall).toEqual(['gh', 'api', 'repos/{owner}/{repo}/pulls/42']);
@@ -310,7 +327,7 @@ describe('verifyShipped — point 3: the skipping bucket is non-blocking (F2)', 
         { name: 'path-filtered-e2e', bucket: 'skipping' },
       ],
     });
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     const point = result.points.find((p) => p.id === 'checksGreen');
     expect(point?.passed).toBe(true);
   });
@@ -330,6 +347,7 @@ describe('verifyShipped — point 3: docs-only paths are config, not hardcoded (
       fixtureCard(),
       fixtureConfig({ docsOnlyPaths: ['notes/'] }),
       io,
+      'C1',
     );
     const point = result.points.find((p) => p.id === 'checksGreen');
     expect(point?.passed).toBe(true);
@@ -345,6 +363,7 @@ describe('verifyShipped — point 3: docs-only paths are config, not hardcoded (
       fixtureCard(),
       fixtureConfig({ docsOnlyPaths: ['docs/'] }),
       io,
+      'C1',
     );
     const point = result.points.find((p) => p.id === 'checksGreen');
     expect(point?.passed).toBe(false);
@@ -359,6 +378,7 @@ describe('verifyShipped — point 3: docs-only paths are config, not hardcoded (
       fixtureCard(),
       fixtureConfig({ docsOnlyPaths: [] }),
       io,
+      'C1',
     );
     const point = result.points.find((p) => p.id === 'checksGreen');
     expect(point?.passed).toBe(false);
@@ -369,14 +389,14 @@ describe('verifyShipped — point 3: docs-only paths are config, not hardcoded (
 describe('verifyShipped — remote/baseBranch are threaded, never hardcoded', () => {
   test('checkAncestor queries <remote>/<baseBranch>, not a hardcoded origin/master', async () => {
     const { io, calls } = buildIoRecordingCalls();
-    await verifyShipped(fixtureCard(), fixtureConfig({ remote: 'upstream', baseBranch: 'main' }), io);
+    await verifyShipped(fixtureCard(), fixtureConfig({ remote: 'upstream', baseBranch: 'main' }), io, 'C1');
     const ancestorCall = calls.find((c) => c[1] === 'merge-base');
     expect(ancestorCall).toEqual(['git', 'merge-base', '--is-ancestor', 'mergesha1', 'upstream/main']);
   });
 
   test('checkWorktreeAndBranchGone queries ls-remote against the resolved remote', async () => {
     const { io, calls } = buildIoRecordingCalls();
-    await verifyShipped(fixtureCard(), fixtureConfig({ remote: 'upstream' }), io);
+    await verifyShipped(fixtureCard(), fixtureConfig({ remote: 'upstream' }), io, 'C1');
     const lsRemoteCall = calls.find((c) => c[1] === 'ls-remote');
     expect(lsRemoteCall).toEqual(['git', 'ls-remote', '--heads', 'upstream', fixtureCard().branch as string]);
   });
@@ -388,14 +408,14 @@ describe('verifyShipped — remote/baseBranch are threaded, never hardcoded', ()
       checks: [{ name: 'SonarCloud Code Analysis', bucket: 'fail', description: 'bootstrap failed: HTTP 504' }],
       docsOnlyDiffFiles: ['docs/note.md'],
     });
-    await verifyShipped(fixtureCard(), fixtureConfig({ remote: 'upstream', baseBranch: 'main' }), io);
+    await verifyShipped(fixtureCard(), fixtureConfig({ remote: 'upstream', baseBranch: 'main' }), io, 'C1');
     const diffCall = calls.find((c) => c[0] === 'git' && c[1] === 'diff' && c.includes('--name-only'));
     expect(diffCall).toContain('base0001..upstream/main');
   });
 
   test('checkSchemaGuard diffs against <remote>/<baseBranch>', async () => {
     const { io, calls } = buildIoRecordingCalls();
-    await verifyShipped(fixtureCard(), fixtureConfig({ remote: 'upstream', baseBranch: 'main' }), io);
+    await verifyShipped(fixtureCard(), fixtureConfig({ remote: 'upstream', baseBranch: 'main' }), io, 'C1');
     const diffCall = calls.find(
       (c) => c[0] === 'git' && c[1] === 'diff' && c[2] === 'base0001..upstream/main',
     );
@@ -404,7 +424,7 @@ describe('verifyShipped — remote/baseBranch are threaded, never hardcoded', ()
 
   test('checkWorktreeAndBranchGone passing-case detail reflects the resolved remote, not a hardcoded "origin"', async () => {
     const io = buildIo(); // worktree gone, remote branch gone -> passing case
-    const result = await verifyShipped(fixtureCard(), fixtureConfig({ remote: 'upstream' }), io);
+    const result = await verifyShipped(fixtureCard(), fixtureConfig({ remote: 'upstream' }), io, 'C1');
     const point = result.points.find((p) => p.id === 'worktreeAndBranchGone');
     expect(point?.passed).toBe(true);
     expect(point?.detail).toContain(`upstream/${fixtureCard().branch}`);
@@ -417,10 +437,132 @@ describe('verifyShipped — remote/baseBranch are threaded, never hardcoded', ()
       fixtureCard({ baseSha: null }),
       fixtureConfig({ remote: 'upstream', baseBranch: 'main' }),
       io,
+      'C1',
     );
     const point = result.points.find((p) => p.id === 'schemaGuard');
     expect(point?.passed).toBe(false);
     expect(point?.detail).toContain('baseSha..upstream/main');
     expect(point?.detail).not.toContain('origin/master');
+  });
+});
+
+describe('gapGateStamped (spec §3, card goal G4)', () => {
+  const STAMP =
+    '<!-- gap-gate v1 card=C1 base=base0001 head=head0001 minted=G-001 matched=none debt-delta=0 ledger=none -->';
+
+  test('a PR body carrying a matching stamp passes the point', async () => {
+    const result = await verifyShipped(
+      fixtureCard(),
+      fixtureConfig(),
+      buildIo({ prBody: `text\n${STAMP}\n`, ledgerAtBase: '{"id":"G-001","event":"opened"}\n' }),
+      'C1',
+    );
+    const point = result.points.find((p) => p.id === 'gapGateStamped');
+    expect(point?.passed).toBe(true);
+  });
+
+  test('a PR body with no stamp fails the point, and the card is not shipped', async () => {
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo({ prBody: '## Why\n\nno stamp here\n' }), 'C1');
+    expect(result.shipped).toBe(false);
+    expect(result.failedPoints).toContain('gapGateStamped');
+    expect(result.points.find((p) => p.id === 'gapGateStamped')?.detail).toContain('no `gap-gate v1` stamp');
+  });
+
+  test("a stamp for a DIFFERENT card fails the point (a copied PR body is not this card's proof)", async () => {
+    const other = STAMP.replace('card=C1', 'card=C9');
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo({ prBody: other }), 'C1');
+    expect(result.failedPoints).toContain('gapGateStamped');
+  });
+
+  test('a stamp whose base sha is not an ancestor of the base branch fails the point', async () => {
+    const io = buildIo({ prBody: STAMP });
+    const spy: string[][] = [];
+    const wrapped = {
+      ...io,
+      async exec(cmd: string[], o?: { cwd?: string }) {
+        spy.push(cmd);
+        if (cmd[0] === 'git' && cmd[1] === 'merge-base' && cmd[3] === 'base0001') {
+          return { stdout: '', stderr: '', exitCode: 1 };
+        }
+        return io.exec(cmd, o);
+      },
+    };
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), wrapped, 'C1');
+    expect(result.failedPoints).toContain('gapGateStamped');
+    expect(spy.some((c) => c[1] === 'merge-base' && c[3] === 'base0001')).toBe(true);
+  });
+
+  test('every point is still reported even when this one fails (never short-circuited)', async () => {
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo({ prBody: 'nothing' }), 'C1');
+    expect(result.points.map((p) => p.id)).toEqual([
+      'merged',
+      'mergeShaAncestorOfMaster',
+      'checksGreen',
+      'worktreeAndBranchGone',
+      'schemaGuard',
+      'gapGateStamped',
+      'ledgerCommitted',
+    ]);
+  });
+});
+
+describe('ledgerCommitted (spec §3, ledger policy A)', () => {
+  const STAMP =
+    '<!-- gap-gate v1 card=C1 base=base0001 head=head0001 minted=G-004,G-005 matched=none debt-delta=0 ledger=none -->';
+
+  test('passes when the merged base tree carries every id the stamp says was minted', async () => {
+    const ledger = '{"id":"G-004","event":"opened"}\n{"id":"G-005","event":"opened"}\n';
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo({ prBody: STAMP, ledgerAtBase: ledger }), 'C1');
+    expect(result.points.find((p) => p.id === 'ledgerCommitted')?.passed).toBe(true);
+  });
+
+  test('fails, naming the missing id, when the ledger was never committed', async () => {
+    const result = await verifyShipped(
+      fixtureCard(),
+      fixtureConfig(),
+      buildIo({ prBody: STAMP, ledgerAtBase: '{"id":"G-004","event":"opened"}\n' }),
+      'C1',
+    );
+    expect(result.failedPoints).toContain('ledgerCommitted');
+    expect(result.points.find((p) => p.id === 'ledgerCommitted')?.detail).toContain('G-005');
+  });
+
+  test('a stamp that minted nothing needs no ledger at all', async () => {
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo(), 'C1');
+    expect(result.points.find((p) => p.id === 'ledgerCommitted')?.passed).toBe(true);
+  });
+
+  test('the ledger path is campaign config, defaulting to the capability constant', async () => {
+    const io = buildIo({ prBody: STAMP, ledgerAtBase: '{"id":"G-004"}{"id":"G-005"}' });
+    const seen: string[][] = [];
+    const wrapped = {
+      ...io,
+      async exec(cmd: string[], o?: { cwd?: string }) {
+        seen.push(cmd);
+        return io.exec(cmd, o);
+      },
+    };
+    await verifyShipped(fixtureCard(), fixtureConfig({ gapLedgerPath: 'ops/gaps.jsonl' }), wrapped, 'C1');
+    expect(seen.some((c) => c[0] === 'git' && c[1] === 'show' && c[2] === 'origin/master:ops/gaps.jsonl')).toBe(true);
+  });
+});
+
+describe('parseGapGateStamp', () => {
+  test('reads the canonical stamp of the gap gate', () => {
+    const parsed = parseGapGateStamp(
+      '<!-- gap-gate v1 card=gap-gate-scripts base=aaaa111 head=bbbb222 minted=G-004,G-005 matched=G-001 debt-delta=0 ledger=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 -->',
+    );
+    expect(parsed).toEqual({
+      card: 'gap-gate-scripts',
+      base: 'aaaa111',
+      head: 'bbbb222',
+      minted: ['G-004', 'G-005'],
+      matched: ['G-001'],
+    });
+  });
+
+  test('none means an empty list; a truncated stamp is not a stamp', () => {
+    expect(parseGapGateStamp('<!-- gap-gate v1 card=C1 base=a head=b minted=none matched=none debt-delta=0 ledger=none -->')?.minted).toEqual([]);
+    expect(parseGapGateStamp('<!-- gap-gate v1 card=C1 base=a -->')).toBeNull();
   });
 });
