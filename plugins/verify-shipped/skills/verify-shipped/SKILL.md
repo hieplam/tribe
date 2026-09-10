@@ -8,7 +8,7 @@ description: Use whenever a Warchief (or anyone) reports a piece of work as SHIP
 A Definition-of-Done gate. The owner's global CLAUDE.md already states what "done" means:
 **PR merged and ready to work on new feature with LATEST CHANGES.** Nothing in this repo
 checked that mechanically before — `SHIPPED` was just a status string a Warchief (or anyone)
-asserted in prose. This skill turns that assertion into three cheap, scripted checks.
+asserted in prose. This skill turns that assertion into four cheap, scripted checks.
 
 ## When to invoke
 

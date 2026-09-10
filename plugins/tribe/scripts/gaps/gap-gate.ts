@@ -106,6 +106,25 @@ async function changedFiles(repo: string, base: string, head: string): Promise<s
     .filter((s) => s.length > 0);
 }
 
+/** Resolves `ref` to a concrete commit sha at the edge — a symbolic ref (`HEAD`, a branch name)
+ * is never allowed to leak into the stamp (contract F1, spec §3: base/head are COMMITS of the
+ * merged branch, not a ref the post-merge runner re-resolves at verify time). Bounded and
+ * git-config-isolated like `changedFiles` (fail-closed-edges obligations 2, 3). */
+async function resolveSha(repo: string, ref: string): Promise<string> {
+  const proc = Bun.spawn(['git', '-C', repo, 'rev-parse', '--verify', `${ref}^{commit}`], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    timeout: 30_000,
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+  });
+  const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+  const code = await proc.exited;
+  if (code !== 0) {
+    throw new GapGateError(`cannot resolve ${ref} to a commit in ${repo}: ${err.trim() || `exit ${code}`}`);
+  }
+  return out.trim();
+}
+
 function ledgerDigest(resolvedRegistry: string): string {
   if (!existsSync(resolvedRegistry)) return 'none';
   return createHash('sha256').update(readFileSync(resolvedRegistry)).digest('hex');
@@ -150,8 +169,14 @@ export async function runGate(options: GateOptions): Promise<GateSummary> {
   }
   const candidates = dedupeCandidates(allCandidates, reports.map((r) => r.round));
 
+  // 2b. Resolve base/head to concrete commit shas BEFORE the diff and the stamp — the stamp
+  // freezes `head=<sha>`/`base=<sha>` (contract F1), never a symbolic ref like the literal
+  // `HEAD` a post-merge runner would re-resolve at verify time instead of the gated commit.
+  const baseSha = await resolveSha(options.repo, options.base);
+  const headSha = await resolveSha(options.repo, head);
+
   // 3. Changed files.
-  const changed = await changedFiles(options.repo, options.base, head);
+  const changed = await changedFiles(options.repo, baseSha, headSha);
 
   // 4. Reconcile — but a candidate whose fingerprint would never be executable is flagged and
   // withheld first (plan F3), so an unusable fingerprint is never frozen into the ledger.
@@ -187,8 +212,8 @@ export async function runGate(options: GateOptions): Promise<GateSummary> {
   const openIds = [...new Set([...result.matched, ...result.minted])].sort();
   const stamp = formatStamp({
     card: options.card,
-    base: options.base,
-    head,
+    base: baseSha,
+    head: headSha,
     minted: result.minted,
     matched: result.matched,
     debtDelta,
@@ -199,8 +224,8 @@ export async function runGate(options: GateOptions): Promise<GateSummary> {
   const red = debtEntries.some((entry) => entry.delta > 0) || flagged.length > 0;
   const summary: GateSummary = {
     card: options.card,
-    base: options.base,
-    head,
+    base: baseSha,
+    head: headSha,
     pr,
     reports: reports.map((r) => r.name),
     candidates,

@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
     --worktree)  WORKTREE_ARG="$2"; shift 2 ;;
     --base)      BASE_BRANCH="$2"; shift 2 ;;
     --repo)      REPO_ARG="$2"; shift 2 ;;
-    --card)      CARD_ARG="$2"; shift 2 ;;
+    --card)      CARD_ARG="${2:-}"; shift $(( $# >= 2 ? 2 : 1 )) ;;
     -h|--help)   sed -n '2,25p' "$0"; exit 0 ;;
     *)           DIE "unknown arg: $1" ;;
   esac

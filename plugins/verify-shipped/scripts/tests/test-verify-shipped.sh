@@ -84,5 +84,13 @@ check "the three original checks are still reported" \
   "$(printf '%s' "$out5" | python3 -c 'import json,sys; print(",".join(sorted(json.load(sys.stdin)["checks"])))')" \
   "gap_gate_stamped,master_in_sync,pr_merged,worktree_removed"
 
+repo6="$TMP/r6"; make_repo "$repo6"; bin6="$TMP/bin6"
+stub_gh "$bin6" "$STAMP"
+set +e
+( cd "$repo6" && PATH="$bin6:$PATH" bash "$SCRIPT" --pr 42 --worktree "$TMP/gone-worktree" --card >/dev/null 2>&1 )
+code=$?
+set -e
+check "valueless --card (no following value) -> setup error, exit 2 (not an unbound-variable crash)" "$code" "2"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 exit $((FAIL > 0))

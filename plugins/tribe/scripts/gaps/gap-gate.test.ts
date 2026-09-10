@@ -95,6 +95,11 @@ describe('gap-gate (spec §2)', () => {
     expect(stamp!.card).toBe('C1');
     expect(stamp!.minted).toEqual(['G-001']);
     expect(stamp!.base).toBe(base);
+    // F1 (spec §3): the stamp freezes RESOLVED COMMIT SHAs, never the literal `HEAD` a
+    // post-merge runner would re-resolve at verify time instead of binding to the gated commit.
+    expect(stamp!.head).toMatch(/^[0-9a-f]{40}$/);
+    expect(stamp!.head).not.toBe('HEAD');
+    expect(stamp!.base).toMatch(/^[0-9a-f]{40}$/);
     expect(stamp!.ledger).toMatch(/^[0-9a-f]{64}$/);
     expect(md.trimEnd().endsWith('-->')).toBe(true);
 
