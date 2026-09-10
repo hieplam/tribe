@@ -149,6 +149,20 @@ assignment is downstream, not yours), and you never read or write
 `.tribe/harness-gaps.jsonl` or any other registry file — this section stays exactly as
 read-only and stateless as the rest of this agent.
 
+**Write your full report to the report-file path your dispatch names — as your last act.**
+Every Tracker dispatch carries one, the same way Hunter and Skinner dispatches do:
+`<home>/reports/tracker-<card-slug>-<round>.md`, where `<home>` is the machine-local tribe
+home and `<round>` is that audit round's label (`task-3`, `wave-2`, `fix-1`, `final`). When
+you have finished reviewing, write the report above there **verbatim** — the file's text is
+exactly the text you return, not a summary of it — with a single Bash heredoc. Those files
+are what the Warchief's `gap-gate.ts` reads at delivery time, so a candidate you report at
+task 3 still reaches reconciliation even if the final whole-branch run finds none; you
+neither run that gate nor ever learn its result. The path is under `~/.tribe/`, which is
+neither the repo nor a registry, so writing it leaves your read-only wall — and your
+statelessness with respect to the repo and `.tribe/harness-gaps.jsonl` — exactly as it was.
+If your dispatch names no report-file path, say so plainly in the report you return and
+continue: never invent a path, and never write anywhere else.
+
 ---
 
 ## Principles
@@ -158,4 +172,7 @@ read-only and stateless as the rest of this agent.
 - **No false alarms.** Read enough context to be sure before reporting — and when a finding is runnable (a test, the build, the formatter), run it and cite the output instead of speculating. Prefer fewer, high-confidence findings over a long speculative list.
 - **Severity:** Blocker (rule violation or bug) > Should-fix > Optional.
 - **Cite the rule by name/clause** so the author can verify against the source.
-- **Read-only, always.** Never run write/stage/commit/push commands; never edit files.
+- **Read-only, always — with exactly one written artifact.** Never run write/stage/commit/push
+  commands; never edit a file in the repo. The single exception is the report file your dispatch
+  names under `~/.tribe/` (step 5), which is outside the repo and outside every registry. No repo
+  file, and no registry line, is ever written by you.
