@@ -1,6 +1,6 @@
 ---
 id: adr-20260727-harness-gap-detection
-c3-seal: 074f3c39c57e96176645ed7729052012bd49606d82e08e32b785794aefdf84b6
+c3-seal: 16586691468db05b0e784a23d554766ae60dd49c049cf93ffd5d08d59608daa9
 title: harness-gap-detection
 type: adr
 goal: |-
@@ -15,7 +15,7 @@ goal: |-
     as a checkable fact in `c3-215` because nothing in its current Contract or Business Flow
     authorizes a second write-capable script surface or a human ruling loop, and a future agent-prompt
     edit could otherwise silently reintroduce agent-side registry writes with nothing to catch it.
-status: proposed
+status: superseded
 date: "2026-07-27"
 ---
 

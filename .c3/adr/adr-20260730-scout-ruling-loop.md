@@ -1,6 +1,6 @@
 ---
 id: adr-20260730-scout-ruling-loop
-c3-seal: 1019cd043e9b8bfb84f6108a87fa03205a7fc0a1e893ffc4ccef706de9a48137
+c3-seal: 38cfb4514f82eda52975f13b24910067ffcc6d0274a25ac2425c8c171f78aeb6
 title: scout-ruling-loop
 type: adr
 goal: |-
@@ -18,7 +18,7 @@ goal: |-
     "a human reads the PR body"; without this record a later prompt edit could silently reintroduce
     agent-side ruling writes, or the debt burn-down gate could be removed with nothing in the
     component's canonical doc to catch it.
-status: proposed
+status: superseded
 date: "2026-07-30"
 ---
 
