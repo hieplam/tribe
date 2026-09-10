@@ -98,6 +98,60 @@ describe('parseTrackerReport', () => {
       unparsed: [],
     });
   });
+
+  // Audit-fix round 2: a Markdown-list-prefixed header (`- `, `* `, `+ `) must never be
+  // silently dropped — it is a real, plausible Tracker line shape, not a hypothetical one.
+  test('a `- ` list-prefixed shape B header parses to exactly one candidate', () => {
+    const text =
+      '- **HG-candidate 1 [error-handling]** — bare catch blocks, e.g. src/a.ts, src/b.ts. ' +
+      'Confirmed via grep -rn "catch {" src/ → 3 hits in 3 files';
+    const { candidates, unparsed } = parseTrackerReport(text, 'tracker-C1-final.md', 'final');
+    expect(unparsed).toEqual([]);
+    expect(candidates).toHaveLength(1);
+    const c = candidates[0]!;
+    expect(c.category).toBe('error-handling');
+    expect(c.fingerprint).toBe('grep -rn "catch {" src/');
+    expect(c.hits).toBe(3);
+    expect(c.paths).toContain('src/a.ts');
+    expect(c.paths).toContain('src/b.ts');
+    // The bullet marker must be consumed by the header match, not leak into the description.
+    expect(c.description.startsWith('-')).toBe(false);
+  });
+
+  test('a `* ` list-prefixed header also parses (not just `- `)', () => {
+    const text = '* HG-candidate 1 [test-presence] — Evidence: `grep -rn "TODO" src/` → 2 hits in 2 files, src/x.ts, src/y.ts';
+    const { candidates, unparsed } = parseTrackerReport(text, 'tracker-C1-final.md', 'final');
+    expect(unparsed).toEqual([]);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]!.category).toBe('test-presence');
+  });
+
+  test('a `+ ` list-prefixed header also parses (not just `- `)', () => {
+    const text = '+ HG-candidate 1 [test-presence] — Evidence: `grep -rn "TODO" src/` → 2 hits in 2 files, src/x.ts, src/y.ts';
+    const { candidates, unparsed } = parseTrackerReport(text, 'tracker-C1-final.md', 'final');
+    expect(unparsed).toEqual([]);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]!.category).toBe('test-presence');
+  });
+
+  test('existing F4 shapes A, B, C still parse exactly as before (list marker stays OPTIONAL)', () => {
+    const a = parseTrackerReport(SHAPE_A, 'tracker-C1-final.md', 'final');
+    expect(a.unparsed).toEqual([]);
+    expect(a.candidates).toHaveLength(1);
+    expect(a.candidates[0]!.category).toBe('input-validation');
+    expect(a.candidates[0]!.fingerprint).toBe('grep -rn "as string" src/');
+
+    const b = parseTrackerReport(SHAPE_B, 'tracker-C1-task-5.md', 'task-5');
+    expect(b.unparsed).toEqual([]);
+    expect(b.candidates).toHaveLength(1);
+    expect(b.candidates[0]!.category).toBe('error-handling');
+    expect(b.candidates[0]!.fingerprint).toBe('grep -rn "catch {" plugins/');
+
+    const c = parseTrackerReport(SHAPE_C, 'tracker-C1-wave-2.md', 'wave-2');
+    expect(c.unparsed).toEqual([]);
+    expect(c.candidates).toHaveLength(1);
+    expect(c.candidates[0]!.category).toBe('test-presence');
+  });
 });
 
 describe('dedupeCandidates', () => {

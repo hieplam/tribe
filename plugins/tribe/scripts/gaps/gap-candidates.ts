@@ -29,7 +29,10 @@ export interface ParseResult {
   unparsed: UnparsedBlock[];
 }
 
-const HEADER_RE = /^\s*(?:\*\*)?HG-candidate\s+(\d+)\s*(?:\*\*)?\s*\[([^\]]+)\]\s*(?:\*\*)?/;
+// An optional Markdown list marker (`- `, `* `, `+ `) may prefix the header — a real, plausible
+// Tracker line shape (audit-fix round 2). The `[-*+]\s+` group is OPTIONAL so the three existing
+// F4 shapes (unbulleted, bold-no-bullet, heading-prefixed) still match unchanged.
+const HEADER_RE = /^\s*(?:[-*+]\s+)?(?:\*\*)?HG-candidate\s+(\d+)\s*(?:\*\*)?\s*\[([^\]]+)\]\s*(?:\*\*)?/;
 const HEADING_RE = /^\s*#{1,6}\s/;
 const SUPPRESSED_RE = /^\s*\+\d+\s+more suppressed/;
 const LABEL_RE = /(?:^|\s)(Pattern|Evidence|Diff link|Not judged)\s*:/gi;
