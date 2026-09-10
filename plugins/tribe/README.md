@@ -56,7 +56,7 @@ Shaman  ──(vision: what/why)──▶  Warchief
 
 **Answers:** *How?*
 
-**What it actually does:** Receives **one idea card at a time** from the Shaman (the Shaman picks — the Warchief never chooses what to build), brainstorms, writes the spec/plan, then **dispatches** work to the Hunter. When the Hunter reports "done," the Warchief orchestrates the audit/review, opens the PR, and is the **only one with the authority to swing the hammer and merge**. At every audit round, alongside the mechanical pre-gate, it also dispatches the **Tracker** against the same range: a `BLOCK` verdict is a red gate — same class as a red pre-gate — routed back to a fixer Hunter with no Skinner dispatched, while the final whole-branch audit's `### Harness gaps` section carries forward, verbatim, as the input to harness-gap reconciliation below. Before every PR it also runs the **debt burn-down gate** (`debt-count.ts --diff`) — a positive delta blocks the PR outright and routes the new hits back to a Hunter — then runs **`debt-backfill.ts`** to open follow-up issues for the blacklist's still-open entries, then closes whatever the snapshot flags `closable`. The burn-down gate, the backfill, and the closable-closing all run **unconditionally on every PR**, whether or not any harness gap was reconciled. After merging, the Warchief reports the result up to the Shaman.
+**What it actually does:** Receives **one idea card at a time** from the Shaman (the Shaman picks — the Warchief never chooses what to build), brainstorms, writes the spec/plan, then **dispatches** work to the Hunter. When the Hunter reports "done," the Warchief orchestrates the audit/review, opens the PR, and is the **only one with the authority to swing the hammer and merge**. At every audit round, alongside the mechanical pre-gate, it also dispatches the **Tracker** against the same range — every dispatch carrying its own report-file path under the tribe home — and a `BLOCK` verdict is a red gate, same class as a red pre-gate, routed back to a fixer Hunter with no Skinner dispatched. Before every PR it runs the **harness-gap gate** (`gap-gate.ts`, resolved from the plugin root): the gate reads every Tracker report file this card produced — per-task, per-wave and final alike — reconciles `.tribe/harness-gaps.jsonl`, runs the debt burn-down, and writes the PR body's `## Harness gaps` section ending in a machine-checkable `gap-gate v1` stamp. Its exit code decides whether the PR may open at all; the Warchief pastes that section verbatim, commits the ledger append, then runs **`debt-backfill.ts`** and closes whatever the snapshot flags `closable`. The Warchief never reads a Tracker report to extract a candidate itself. The gate, the backfill, and the closable-closing all run **unconditionally on every PR**, whether or not any harness gap was found. After merging, the Warchief reports the result up to the Shaman.
 
 **Why the name Warchief:** The war chief is the one who takes the Shaman's word and turns it into concrete tactics — splitting the party, overseeing the battle, and being the only one to declare "victory" (merge). This fits the role of turning *what/why* into *how* and holding the final decision authority.
 
@@ -76,7 +76,7 @@ Shaman  ──(vision: what/why)──▶  Warchief
 
 **Answers:** *Does this diff follow our written rules?*
 
-**What it actually does:** The **cheap, frequently-run** gate — meant to run before every commit/PR while developing. The Tracker re-reads **every rule source fresh** (global rules, `CLAUDE.md`, formatter/linter config, C3…), inspects the diff, and attaches a **concrete fix** to each finding. Its verdict is **advisory**: `BLOCK` / `APPROVE-WITH-COMMENTS` / `APPROVE`. While walking the diff it also surfaces **harness gaps** — a diff-anchored, risk-scoped pattern (error handling, concurrency, cleanup, input validation, test presence) that no written rule covers yet — as a separate, read-only, never-judged report section; it is a fact about the rule set, not a violation. It also **grandfathers blacklisted legacy**: reads the open debt entities (the tech-debt blacklist), and a diff occurrence already inside a debt entity's recorded scope gets exactly one non-blocking `tracked in <debt-id>` note instead of a Blocker — a genuinely new occurrence of the same anti-rule still blocks normally.
+**What it actually does:** The **cheap, frequently-run** gate — meant to run before every commit/PR while developing. The Tracker re-reads **every rule source fresh** (global rules, `CLAUDE.md`, formatter/linter config, C3…), inspects the diff, and attaches a **concrete fix** to each finding. Its verdict is **advisory**: `BLOCK` / `APPROVE-WITH-COMMENTS` / `APPROVE`. While walking the diff it also surfaces **harness gaps** — a diff-anchored, risk-scoped pattern (error handling, concurrency, cleanup, input validation, test presence) that no written rule covers yet — as a separate, read-only, never-judged report section; it is a fact about the rule set, not a violation. Every dispatch names a report file under the tribe home and the Tracker writes its full report there as its last act — that file, never a hand-off in prose, is what the Warchief's `gap-gate.ts` later reads, so a candidate found at task 3 survives both the final round and a crash. It also **grandfathers blacklisted legacy**: reads the open debt entities (the tech-debt blacklist), and a diff occurrence already inside a debt entity's recorded scope gets exactly one non-blocking `tracked in <debt-id>` note instead of a Blocker — a genuinely new occurrence of the same anti-rule still blocks normally.
 
 **Ownership:** The Tracker is the **single source of truth** for *rule/style conformance*. It inspects the **process / the path** — whether the diff is following the trail (the rules).
 
@@ -100,7 +100,7 @@ Shaman  ──(vision: what/why)──▶  Warchief
 
 **Answers:** *Where will this code break next, and what shape is inviting it?*
 
-**What it actually does:** Surveys **existing, working code** — no diff required — for the structural and readability problems that invite future bugs. Its method encodes hard-won review lessons: read the recorded decisions (ADRs/C3/docs) *before* the code; sweep at **three altitudes** (line, component structure, design-vs-framework); diff reality against the **simplest from-scratch implementation**; hunt **dead states** (code servicing a state that can never occur) and **hand-rolled framework primitives**; distrust sibling conventions (a pattern repeated N times is still a choice); never satisfice on a requested finding count. Prefers fixes that **delete** code over fixes that add abstraction, and distills every finding into a **rule candidate** — so Scout's findings become Tracker's checklist tomorrow. Read-only for analysis; it also **adjudicates open harness gaps** when the Warchief dispatches it with them — proposing `rule` / `anti-rule` / `debt` / `dismissed` dispositions and, once ratified, authoring them through governance-artifact CLIs only. It never edits, stages, or commits source code, and never hand-writes a registry line or debt file.
+**What it actually does:** Surveys **existing, working code** — no diff required — for the structural and readability problems that invite future bugs. Its method encodes hard-won review lessons: read the recorded decisions (ADRs/C3/docs) *before* the code; sweep at **three altitudes** (line, component structure, design-vs-framework); diff reality against the **simplest from-scratch implementation**; hunt **dead states** (code servicing a state that can never occur) and **hand-rolled framework primitives**; distrust sibling conventions (a pattern repeated N times is still a choice); never satisfice on a requested finding count. Prefers fixes that **delete** code over fixes that add abstraction, and distills every finding into a **rule candidate** — so Scout's findings become Tracker's checklist tomorrow. Read-only for analysis; it also **adjudicates open harness gaps** when the Warchief dispatches it with the ids the gate left un-ruled (`open_ids`) — proposing `rule` / `anti-rule` / `debt` / `dismissed` dispositions and, once ratified, authoring them through governance-artifact CLIs only. It never edits, stages, or commits source code, and never hand-writes a registry line or debt file.
 
 **Ownership:** The Scout is the **single source of truth** for *pre-emptive design/structure analysis of working code*. It inspects the **terrain** — where the ground will give way — before anyone commits to a path across it.
 
@@ -223,6 +223,24 @@ only required flags — every campaign operational artifact (state, answers, esc
 lock, STOP) resolves to a fixed name under `--home` and is never committed to the target repo.
 Every real (non-`--dry-run`) invocation records a `run.json` under `--home` too (see that
 README's "Run record" section) — this is what the status viewer below reads.
+
+**The one committed exception: the harness-gap ledger.** Everything above is *campaign
+operational state* and stays under `--home`. The gap registry is not that: `gap-gate.ts` — the
+pre-PR gate every card runs before `gh pr create` — appends `.tribe/harness-gaps.jsonl` **in the
+target repo**, and the Warchief commits that append with the trailer `Tribe-Milestone: gap-gate`
+so the events ride the card's PR and land on master with the merge (owner ruling, 2026-09-10).
+That is deliberate: a rule or debt entity committed to the repo references a `G-NNN`, so the id
+it references has to live in the same tree. The gate also writes
+`<home>/reports/<card>-gap-gate.md` and `.json`; the Markdown is pasted verbatim as the PR body's
+`## Harness gaps` section and ends in a stamp line:
+
+```
+<!-- gap-gate v1 card=<slug> base=<sha> head=<sha> minted=G-004,G-005 matched=G-001 debt-delta=0 ledger=<sha256> -->
+```
+
+The stamp is the mechanical backstop for a PR opened by any session that bypassed the gate: the
+runner's D3 replay (`gapGateStamped`) and the `verify-shipped` skill both check it, and a merged
+PR whose body carries no valid stamp for its card is reported **not shipped**.
 
 ---
 
