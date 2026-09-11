@@ -527,6 +527,31 @@ describe('gapGateStamped (spec §3, card goal G4)', () => {
     expect(result.failedPoints).toContain('gapGateStamped');
     expect(result.points.find((p) => p.id === 'gapGateStamped')?.detail).toContain('some-other-card');
   });
+
+  test('a git log that FAILS but emits partial matching stdout does NOT pass (fail closed)', async () => {
+    const slugStamp = STAMP.replace('card=C1', 'card=gap-gate-wiring');
+    const io = buildIo({ prBody: slugStamp });
+    const wrapped = { ...io, async exec(cmd: string[], o?: { cwd?: string }) {
+      if (cmd[0] === 'git' && cmd[1] === 'log') return { stdout: 'gap-gate-wiring\n', stderr: 'fatal: bad revision', exitCode: 128 };
+      return io.exec(cmd, o);
+    } };
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), wrapped, 'C1');
+    expect(result.failedPoints).toContain('gapGateStamped');
+  });
+
+  test('a differing stamp card with a null merge sha fails clearly and never attempts git log', async () => {
+    const slugStamp = STAMP.replace('card=C1', 'card=gap-gate-wiring');
+    let logCalls = 0;
+    const io = buildIo({ prBody: slugStamp, mergeSha: null });
+    const wrapped = { ...io, async exec(cmd: string[], o?: { cwd?: string }) {
+      if (cmd[0] === 'git' && cmd[1] === 'log') { logCalls++; return { stdout: 'gap-gate-wiring\n', stderr: '', exitCode: 0 }; }
+      return io.exec(cmd, o);
+    } };
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), wrapped, 'C1');
+    expect(result.failedPoints).toContain('gapGateStamped');
+    expect(result.points.find((p) => p.id === 'gapGateStamped')?.detail).toContain('not C1');
+    expect(logCalls).toBe(0);
+  });
 });
 
 describe('ledgerCommitted (spec §3, ledger policy A)', () => {

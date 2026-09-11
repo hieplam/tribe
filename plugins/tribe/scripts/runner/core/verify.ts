@@ -454,6 +454,11 @@ async function checkGapGateStamped(
       '--format=%(trailers:key=Tribe-Card,valueonly)',
       `${mergeSha}^1..${mergeSha}`,
     ]);
+    if (trailerResult.exitCode !== 0) {
+      return fail(
+        `PR #${card.pr}: reading the merged commits' Tribe-Card trailers failed (git log exit ${trailerResult.exitCode}); cannot confirm card=${stamp.card}`,
+      );
+    }
     const trailerValues = trailerResult.stdout
       .split('\n')
       .map((v) => v.trim())
