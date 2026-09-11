@@ -125,6 +125,11 @@ const PATTERN_FLAGS = new Set(['-e', '--regexp', '-f', '--file']);
  * shared fingerprint splitter, so target tokens come from the same source as the executed argv. */
 export function fingerprintTargets(fingerprint: string): string[] {
   const tokens = tokenize(fingerprint);
+  // Only a real `grep` fingerprint has a grep search scope. A non-grep fingerprint is flagged and
+  // never executed (validateFingerprint), so its shell tokens must not become synthetic paths that
+  // collapse distinct flagged candidates in dedupeCandidates; its scope comes from the Evidence/
+  // Diff-link/body paths instead.
+  if (tokens[0] !== 'grep') return [];
   const out: string[] = [];
   let patternConsumed = false; // the positional search pattern is dropped exactly once
   for (let i = 1; i < tokens.length; i++) {

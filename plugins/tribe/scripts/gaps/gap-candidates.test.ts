@@ -209,6 +209,15 @@ describe('fingerprintTargets', () => {
     expect(fingerprintTargets('grep -rn "x" .')).toEqual([]);
     expect(fingerprintTargets('grep -rn "x" ./')).toEqual([]);
   });
+  test('a non-grep fingerprint contributes no target tokens (scope comes from evidence/diff-link paths)', () => {
+    expect(fingerprintTargets('for f in src/*.ts; do test -f "${f%.ts}.test.ts"; done')).toEqual([]);
+    expect(fingerprintTargets('find src -name "*.ts"')).toEqual([]);
+    expect(fingerprintTargets('')).toEqual([]);
+  });
+  test('pattern carried by -f / --file keeps the path scope', () => {
+    expect(fingerprintTargets('grep -rn -f pats.txt src/')).toEqual(['src/']);
+    expect(fingerprintTargets('grep -rn --file=pats.txt src/')).toEqual(['src/']);
+  });
 });
 
 describe('dedupeCandidates', () => {
@@ -256,6 +265,20 @@ describe('dedupeCandidates', () => {
     const b = parseTrackerReport(mk('silent-b', 'src/b.ts'), 'b.md', 'final').candidates;
     expect(a[0]!.paths).not.toContain('./');
     expect(a[0]!.paths).not.toContain('.');
+    expect(dedupeCandidates([...a, ...b], ['final'])).toHaveLength(2);
+  });
+
+  test('two distinct non-grep (flagged) candidates do not collapse on shared shell tokens', () => {
+    const mk = (dir: string): string => [
+      'HG-candidate 1  [test-presence]  diff FOLLOWS an undocumented pattern',
+      `  Pattern:    modules under ${dir} ship no sibling test`,
+      `  Evidence:   \`for f in ${dir}/*.ts; do test -f "\${f%.ts}.test.ts"; done\` → 2 hits in 2 files (\`${dir}/a.ts:1\`, \`${dir}/b.ts:1\`)`,
+      `  Diff link:  ${dir}/a.ts:1 repeats it`,
+    ].join('\n');
+    const a = parseTrackerReport(mk('alpha'), 'a.md', 'final').candidates;
+    const b = parseTrackerReport(mk('beta'), 'b.md', 'final').candidates;
+    expect(a).toHaveLength(1);
+    expect(b).toHaveLength(1);
     expect(dedupeCandidates([...a, ...b], ['final'])).toHaveLength(2);
   });
 });
