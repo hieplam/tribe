@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build-fixture.sh — empty-fixture reproduction of "the harness-gap loop never records a ledger event".
-# Builds a bare git repo with ONE planted gap (silent `catch {}` in 3 files, error-handling category,
-# no written rule), one card whose plan adds a 4th file following the same pattern, a campaign home,
+# Builds a bare git repo with planted patterns in 3 files (a silent `catch {}`, an unchecked `as string` cast, and —
+# added 2026-09-11, unused by the recorded runs — a fire-and-forget `void audit()` call), one card whose plan adds a 4th file following the same pattern, a campaign home,
 # and prints the runner launch line. Usage: build-fixture.sh <label> [<github-remote-url>]
 # With a GitHub remote the fixture gets TWO cards (C1 add-reader, C2 add-formatter depending on C1) so the
 # after-fix oracle can observe an `opened` event on C1's PR and a `seen` event on C2's; without one it keeps
@@ -24,10 +24,18 @@ cat > README.md <<'R'
 
 Tiny config-loading library. Run `bun test`.
 R
+cat > src/audit.ts <<'T'
+// audit.ts — append-only usage log; callers fire it and move on.
+export async function audit(caller: string, size: number): Promise<void> {
+  await Bun.write('/tmp/gap-repro-audit.log', `${caller} ${size}\n`);
+}
+T
 for m in loader parser writer; do
 cat > "src/$m.ts" <<T
 // $m.ts — reads its input, never throws: a bad input yields the fallback.
+import { audit } from './audit.ts';
 export function $m(input: string, fallback: string): string {
+  void audit('$m', input.length);
   try {
     return JSON.parse(input).value as string;
   } catch {}
@@ -67,7 +75,7 @@ cat > docs/plans/add-reader-plan.md <<'P'
 ## Global Constraints
 - Dispatch the implementation task to the `hunter` subagent per your Method; never write source inline.
 - Keep the change to `src/reader.ts` and `test/reader.test.ts`. No other files.
-- Consistency wall: `src/reader.ts` mirrors `src/loader.ts` line for line except the function name.
+- Consistency wall: `src/reader.ts` mirrors `src/loader.ts` line for line except the function name (including its `audit` call).
 
 ## Task 1: Add `src/reader.ts` with tests
 - [ ] Step 1: Write the failing test `test/reader.test.ts`: `reader('{"value":"ok"}','f')` is `'ok'`; `reader('nope','f')` is `'f'`. Run `bun test` (expected: fails, module missing).
@@ -99,7 +107,7 @@ cat > docs/plans/add-formatter-plan.md <<'P'
 ## Global Constraints
 - Dispatch the implementation task to the `hunter` subagent per your Method; never write source inline.
 - Keep the change to `src/formatter.ts` and `test/formatter.test.ts`. No other source files.
-- Consistency wall: `src/formatter.ts` mirrors `src/reader.ts` line for line except the function name.
+- Consistency wall: `src/formatter.ts` mirrors `src/reader.ts` line for line except the function name (including its `audit` call).
 
 ## Task 1: Add `src/formatter.ts` with tests
 - [ ] Step 1: Write the failing test `test/formatter.test.ts`: `formatter('{"value":"ok"}','f')` is `'ok'`; `formatter('nope','f')` is `'f'`. Run `bun test` (expected: fails, module missing).
