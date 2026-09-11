@@ -1,0 +1,107 @@
+/* Sea salt — design tokens. Light is the default; dark arrives via prefers-color-scheme or [data-theme="dark"]. */
+
+:root {
+  /* Surfaces — cool mist paper, a salt-flat panel, one lifted plane for cards. */
+  --paper: #eef1f3;
+  --surface: #e3e8ec;
+  --surface-raised: #f8fafb;
+
+  /* Ink — wet slate for body text, a weathered slate for metadata. */
+  --ink: #16212a;
+  --ink-soft: #4d5c68;
+
+  /* Structure — hairline rules only; colour never fills a large area. */
+  --rule: #cfd8de;
+
+  /* Accent — one blue: a deep harbour stroke for links, focus and active state. */
+  --accent: #1f5a77;
+  --accent-soft: #dce7ec;
+
+  /* Status — live is a growing transcript, warn and error are tool-call outcomes. */
+  --live: #2c6f4a;
+  --warn: #7a5a11;
+  --error: #98303a;
+
+  /* Badge — the campaign chip: salt ground, harbour lettering. */
+  --badge-bg: #dee7ec;
+  --badge-ink: #2c5064;
+
+  /* Type — humanist sans for chrome, monospace for transcript content, system stacks only. */
+  --font-sans: ui-sans-serif, -apple-system, "Segoe UI", "Helvetica Neue", "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Size scale — 12 micro, 13 meta, 14 transcript, 16 body, 20 screen title, 24 page title. */
+  --size-12: 0.75rem;
+  --size-13: 0.8125rem;
+  --size-14: 0.875rem;
+  --size-16: 1rem;
+  --size-20: 1.25rem;
+  --size-24: 1.5rem;
+
+  /* Line heights — generous, because these are hour-long reading sessions. */
+  --leading-tight: 1.25;
+  --leading-body: 1.65;
+  --leading-loose: 1.8;
+
+  /* Space scale — 4/8/12/16/24/32, nothing between. */
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+
+  /* Radius — a crisp 2, a gentle 8: sea salt's character is the most precise of the three. */
+  --radius-4: 2px;
+  --radius-8: 8px;
+
+  /* Shadow — one, barely there; depth comes from rules, not from lift. */
+  --shadow: 0 1px 2px rgba(22, 33, 42, 0.07), 0 2px 10px rgba(22, 33, 42, 0.05);
+
+  /* Focus ring — paper gap then accent stroke, legible on every surface. */
+  --focus-ring: 0 0 0 2px var(--paper), 0 0 0 4px var(--accent);
+
+  /* Character — per-theme detailing the mockups read from: stroke weight and chip shape. */
+  --rule-weight: 1px;
+  --rule-style: solid;
+  --badge-radius: 2px;
+  --card-stroke: 1px;
+}
+
+/* Dark — the same coast at night: ink-blue paper, sea-foam ink. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0f151a;
+    --surface: #151d23;
+    --surface-raised: #1b242b;
+    --ink: #e7edf2;
+    --ink-soft: #96a6b3;
+    --rule: #28333c;
+    --accent: #82c2dd;
+    --accent-soft: #1a2830;
+    --live: #6ec296;
+    --warn: #d4ad61;
+    --error: #ed8b94;
+    --badge-bg: #1a2830;
+    --badge-ink: #a9c6d6;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 10px rgba(0, 0, 0, 0.35);
+  }
+}
+
+/* Forced dark — the toggle sets data-theme on <html>; values must match the media query block. */
+[data-theme="dark"] {
+  --paper: #0f151a;
+  --surface: #151d23;
+  --surface-raised: #1b242b;
+  --ink: #e7edf2;
+  --ink-soft: #96a6b3;
+  --rule: #28333c;
+  --accent: #82c2dd;
+  --accent-soft: #1a2830;
+  --live: #6ec296;
+  --warn: #d4ad61;
+  --error: #ed8b94;
+  --badge-bg: #1a2830;
+  --badge-ink: #a9c6d6;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 10px rgba(0, 0, 0, 0.35);
+}
