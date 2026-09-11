@@ -45,6 +45,22 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
 - Work happens in the worktree `~/repo/tribe-wt/viewer-consolidation` on branch
   `docs/viewer-consolidation` (or the branch the Warchief names at dispatch); one PR at the end.
 
+### The three rulings that arrived with review round 2 (quoted, not paraphrased)
+
+- **D12** — "Drop byte-offset resume entirely: `id:` on frames is a per-stream monotonic sequence
+  used only for client-side dedupe; `Last-Event-ID` is ignored by the server; on reconnect the
+  client receives `hello` + the current window + current pairing state rebuilt from the file, and
+  dedupes by stable row id. Rotation/inode handling stays for the live stream."
+- **D13** — "The pure tail transition takes the raw byte chunk and the file observation; it finds
+  the last `0x0A` in the raw bytes itself, carries raw bytes (not a decoded string), and decodes
+  only complete lines. The adapter does no decoding."
+- **D14** — "Containment root for all transcript reads is the resolved `~/.claude/projects`
+  directory, not the session directory. Symlinks that resolve inside that root are accepted;
+  anything resolving outside is refused."
+
+**There is no `Last-Event-ID` handling anywhere in this plan.** If a task brief or a test name
+mentions resuming by byte offset, it predates D12 and is wrong.
+
 ### The oracle (quoted from spec §0, not paraphrased)
 
 > **The Claude Code transcript files on this machine are the oracle.** Kanna's code is a
@@ -52,8 +68,10 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
 > that the viewer drops silently) **is a bug. Over-rendering** (showing a raw-JSON fallback card
 > for an unknown row) **is by design.** File order is the display order — never sort by timestamp.
 
-Claude Code on this machine is 2.1.267. Counts cited in tasks come from the corpus scan recorded in
-spec §0; re-measure before disputing one.
+Claude Code on this machine is 2.1.267. Every count cited in a task comes from the **single** corpus
+scan recorded in spec §0 (2026-09-12). The corpus is live, so scans minutes apart legitimately
+disagree — if a number is disputed, re-run the whole scan and replace all of them together, never
+one in isolation.
 
 ### Adjudication rule for every audit on this card (verbatim, inherited by both skinners)
 
@@ -166,10 +184,11 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       find /tmp/vc-fixture -type f | sort
       ```
 
-      Expected: a listing containing exactly three `<project>/<session>.jsonl` files, five
+      Expected: a listing containing exactly four `<project>/<session>.jsonl` files, five
       `<session>/subagents/agent-*.jsonl` with five matching `.meta.json`, one
-      `<session>/tool-results/*.txt` and the two symlinks beside it. No other file. Paste the
-      listing (with `find -type l` shown separately) into the task report.
+      `<session>/tool-results/*.txt`, and exactly three symlinks. No other file. Paste the listing,
+      with `find -type l -ls` shown separately so each link's target is visible, into the task
+      report.
 - [ ] **Step 4: Run the suite.**
 
       ```sh
@@ -198,12 +217,23 @@ Model: **Sonnet**.
       route table plus the refusal matrix: a session id containing `..`, a percent-encoded slash, a
       double-encoded `..%2f`, a NUL byte, an empty id, a 500-character id, an unknown `/api` path,
       and an unknown asset name. Every refusal returns a typed route (`bad_request` with a reason,
-      or `not_found`), never a throw. Include `?all=1` on `/` and `/api/projects` (D10, spec §5.6)
-      and assert `/healthz` parses to the health route. Expected on first run:
-      `Cannot find module './routes.ts'`.
-- [ ] **Step 2: Implement** `V/core/routes.ts` and the type-only `V/core/model.ts` (spec §4,
-      verbatim — the `RenderNode` union is the contract three later tasks compile against).
-      Pure string math: `new URL(...)`, pattern matching, no path joins.
+      or `not_found`), never a throw. Include `?all=1` on `/` and `/api/projects` (D10, spec §5.6),
+      `?campaign=<repoKey>/<slug>` (spec §9 — the **pair**; assert a bare slug with no `/` is
+      rejected, because a slug-only filter merges two campaigns that really exist on this machine),
+      and assert `/healthz` parses to the health route.
+
+      Add `V/core/model.test.ts` for the runtime witness of spec §4:
+      `Object.keys(RENDER_NODE_KINDS)` is non-empty and every key is a string. The compiler does the
+      real work — `RENDER_NODE_KINDS: Record<RenderNode["k"], true>` fails to typecheck the moment a
+      kind joins the union without joining the witness — so this test exists to make the witness
+      **importable and iterable at runtime**, which is exactly what task 30's DOM proof needs (a
+      TypeScript union is erased and cannot be iterated).
+
+      Expected on first run: `Cannot find module './routes.ts'`.
+- [ ] **Step 2: Implement** `V/core/routes.ts` and `V/core/model.ts` (spec §4, verbatim — the
+      `RenderNode` union is the contract three later tasks compile against). `model.ts` is
+      types-only **except** `RENDER_NODE_KINDS`, the one runtime value it exports. Routes are pure
+      string math: `new URL(...)`, pattern matching, no path joins.
 - [ ] **Step 3: Run.**
 
       ```sh
@@ -243,7 +273,7 @@ Model: **Sonnet**.
 - [ ] **Step 2: Author the ADR** with `status: accepted`, `date: "2026-09-11"`,
       `supersedes: [adr-20260903-fix-viewer-launch-docs]`. Its Goal, Context and Decision restate
       spec §0, §3 and §11 — Context cites the measured numbers (83.6% log duplication, B1/B2/B3,
-      0 unparsable rows in 126,410). Its Consequences name the two change units tasks 21 and 29
+      0 unparsable rows in 127,085). Its Consequences name the two change units tasks 21 and 29
       will apply to `c3-215` rows 76 and 72.
 - [ ] **Step 3: Mark the old design spec superseded** — a header note at the top of
       `2026-09-02-campaign-live-viewer-design.md` pointing at this spec and this ADR. Do not delete
@@ -286,12 +316,19 @@ Model: **Sonnet**.
       throw, never a partial path.
 
       Then write `V/core/paths.containment.test.ts` for the **resolved** stage that lexical
-      containment cannot cover (spec §12.2): `isContainedResolved(root, resolved)` refuses a target
-      that resolves to `/etc/passwd`, refuses one resolving into a sibling session's directory,
-      refuses one whose resolved path is a prefix-collision (`/root-evil` against root `/root`), and
-      **accepts** a target that resolves back inside the root — a check that refuses everything
-      proves nothing, so the positive case is mandatory. Expected on first run:
-      `Cannot find module './paths.ts'`.
+      containment cannot cover. **The root is the resolved `~/.claude/projects` directory (D14), not
+      the session directory** — that is decided by the oracle: the one real symlink on this machine
+      is a sidecar pointing at the same agent file under a **sibling session**, and a session-rooted
+      check would refuse a row Claude Code itself wrote, which is under-rendering. Cases:
+      - **accept** a target resolving to a sibling session inside the projects root (the real shape);
+      - **refuse** a target resolving to `/tmp/evil`, i.e. anywhere outside the root;
+      - **refuse** a prefix-collision (`/root-evil` against root `/root`) — a `startsWith` without
+        the separator is the classic bug here;
+      - **refuse** a symlinked project directory whose target is outside the root;
+      - **accept** an ordinary non-symlinked file inside the root — a check that refuses everything
+        proves nothing, so the positive cases are mandatory.
+
+      Expected on first run: `Cannot find module './paths.ts'`.
 - [ ] **Step 2: Implement** `V/core/paths.ts`: `containedJoin(root, ...segments)` and
       `isContainedResolved(root, resolvedTarget)` per spec §12.2, plus the fixed-layout helpers
       (`transcriptPathOf`, `subagentsDirOf`, `toolResultsDirOf`). Pure string math; `node:path`'s
@@ -328,26 +365,38 @@ Model: **Sonnet**.
       a bare scalar, and invalid UTF-8 — each counted in `skipped`, never thrown.
 
       For `window.ts` (new, and the reason the adapter decides nothing — spec §5.3):
-      `completeLines(buffer, dropLeadingPartial)` returns only whole lines; with
-      `dropLeadingPartial` it discards bytes before the first newline; a buffer whose boundary lands
-      **exactly on** a newline drops nothing; a buffer with no newline at all returns no lines.
+      `completeLines(bytes, dropLeadingPartial)` takes **raw bytes** and returns only whole lines;
+      with `dropLeadingPartial` it discards bytes before the first `0x0A`; a buffer whose boundary
+      lands **exactly on** a `0x0A` drops nothing; a buffer with no `0x0A` returns no lines.
 
-      For `tail.ts`, carry over every existing case, then add the four this plan fixes:
-      1. `ackOffset` is returned alongside `offset` and equals `offset - byteLengthOf(carry)`; after
-         a chunk ending mid-row, `offset` advances past the partial bytes but **`ackOffset` does
-         not** (spec §6.1 — this is blocker 4's fix and the single most important assertion here);
-      2. `reset` fires on `obs.sizeBytes < state.offset` (truncation);
-      3. `reset` fires on `obs.inode !== state.inode` **even when the new file is the same size or
-         larger** (rotation), and does **not** fire when `state.inode` is 0 (platform without an
-         inode — degrade to trigger 2 alone, never a false reset);
+      For `tail.ts`, carry over every existing case, then add the four this plan fixes. **D13 is the
+      shape and it must be honoured literally: `advanceTail` takes the raw `Uint8Array` and the
+      `FileObservation`, finds the last `0x0A` in those bytes itself, carries RAW BYTES, and decodes
+      only complete lines.** A signature that accepts an already-decoded string is wrong, whatever
+      it then computes.
+      1. `ackOffset` is one byte past the last `0x0A` the transition found. The property to assert
+         is the one that matters: **for every state the machine passes through, the file has a
+         `0x0A` at `ackOffset - 1`.** Feed a chunk ending mid-row and assert `offset` advances past
+         the partial bytes while `ackOffset` does not;
+      2. **the UTF-8 case that the old decoded-string design got wrong**: a chunk whose final bytes
+         are an incomplete multi-byte sequence (e.g. a lone `0xC3`) after a complete line — the
+         complete line decodes, the partial bytes are carried raw, `ackOffset` still points after
+         the newline, and the character reassembles correctly when the next chunk arrives. Under
+         D13 there is no decoder state to hide bytes in, which is what makes this pass;
+      3. `reset` fires on `obs.sizeBytes < state.offset` (truncation), and on
+         `obs.inode !== state.inode` **even when the new file is the same size or larger**
+         (rotation), and does **not** fire when `state.inode` is 0 (a platform with no inode —
+         degrade to the truncation trigger alone, never a false reset);
       4. a carry crossing **1 MiB — the single cap, there is no second one** — emits one
-         `unreadable` node, drops the carry, and resynchronises at the next newline.
+         `unreadable` node, drops the carry, and resynchronises at the next `0x0A`.
 
       Expected on first run: all three modules missing.
 - [ ] **Step 2: Implement** all three. `tail.ts` keeps its current arithmetic exactly —
       `offset = base.offset + consumedBytes`, never `fileSize`, never `chunk.length` — and gains
-      `ackOffset`, the inode trigger and the one carry cap. It takes a `FileObservation` (spec §4),
-      not a bare size. Keep the existing doc comments; they encode why (F56).
+      `ackOffset`, the inode trigger and the one carry cap, over raw bytes per D13. It takes a
+      `FileObservation` (spec §4), not a bare size. Keep the existing doc comments; they encode why
+      (F56), and add one naming D13 so a later refactor does not reintroduce a decoded-string
+      signature.
 - [ ] **Step 3: Run.**
 
       ```sh
@@ -357,11 +406,12 @@ Model: **Sonnet**.
 - [ ] **Step 4: Commit**
 
 Audit lens (Sol, contract): run the tail state machine over a real 13 MB transcript in byte-ranged
-chunks of varying sizes (including a chunk boundary that splits a multi-byte character and one that
-splits a line) and prove the reassembled line set is identical to `readFileSync(...).split('\n')`.
-That is the only honest test of this module. Then check the invariant that matters most: **for every
-intermediate state, `ackOffset` is a byte index at which the file has a newline.** A single state
-where it is not re-opens blocker 4 and is a Critical finding.
+chunks of varying sizes — including boundaries that split a multi-byte character and that split a
+line — and prove the reassembled line set is identical to `readFileSync(...).split('\n')`. That is
+the only honest test of this module. Then check the invariant directly: **for every intermediate
+state, `readFileSync(path)[ackOffset - 1] === 0x0A`.** A single state where it is not means the
+transition is deriving the offset by arithmetic rather than by finding the byte, and is a Critical
+finding. Confirm by reading the signature that no decoded string enters this module (D13).
 
 ### Task 6: Markdown token emitter
 
@@ -500,7 +550,7 @@ bytes were chunked is a Critical finding: it silently breaks patching and dedupe
 ### Task 10: Title, liveness, and the bounded read window
 
 - Create: `V/core/title.ts`, `V/core/title.test.ts`, `V/core/liveness.ts`, `V/core/liveness.test.ts`
-- Create: `V/core/title.measure.ts` (a read-only measurement script, not a test)
+- Create: `V/tools/title-window.ts` (a read-only corpus measurement — **`tools/`, never `core/`**: it reads every file under `~/.claude/projects`, and the purity wall forbids that under `core/**`. It is a one-off measurement, not a request path)
 
 Model: **Sonnet**.
 
@@ -517,7 +567,7 @@ Model: **Sonnet**.
 
       ```sh
       cd plugins/tribe/scripts/viewer
-      bun core/title.measure.ts --head 65536 --tail 262144
+      bun tools/title-window.ts --head 65536 --tail 262144
       ```
 
       It reads every file under `~/.claude/projects`, resolves the title twice (windowed vs whole
@@ -576,10 +626,30 @@ Model: **Sonnet**.
       file contributes nothing and does not throw; `runnerAlive` is true only when `endedAt` is
       null **and** the pid probe says alive; the latest run is chosen by `startedAt`. Add the
       security case explicitly: a state file whose `sessionId` is `../../../etc/passwd` produces an
-      index entry for nothing and is counted in `skipped`. Expected: module missing.
+      index entry for nothing and is counted in `skipped`.
+
+      Then the identity cases, which are measured facts on this machine, not hypotheticals — 17
+      campaigns, of which **2 slugs exist under two repo keys** and **6 session ids appear under
+      both** (spec §9):
+      - the index is `Map<sessionId, Badge[]>`: one session id claimed by two campaigns yields
+        **two** badges, and neither overwrites the other whatever order the directories are scanned
+        in;
+      - a campaign is identified by the pair `(repoKey, slug)`: filtering by
+        `<repoKeyA>/<slug>` returns A's sessions only, and a bare slug matches nothing (the filter
+        takes a pair, and a slug-only filter would merge two unrelated campaigns);
+      - **no repo key is excluded**, including a `.migrated-*` one — guessing which is stale is a
+        product judgment the viewer has no standing to make.
+
+      Also write the cap as a **pure selection** (`pure-core.md`, spec §9):
+      `selectCampaigns(entries, cap)` picks which 200 campaign directories are admitted —
+      deterministic over supplied directory listings, newest `campaigns/<slug>` mtime first, ties by
+      name — so the adapter performs the reads the selection names and chooses nothing.
+
+      Expected: module missing.
 - [ ] **Step 2: Implement.** The module takes already-read JSON values and a
       `processAlive: (pid: number) => boolean` function — injected, never constructed
-      (`pure-core.md`). `statePath` from `run.json` is never read; there is no code path that could.
+      (`pure-core.md`), plus `selectCampaigns`. `statePath` from `run.json` is never read; there is
+      no code path that could.
 - [ ] **Step 3: Run.**
 
       ```sh
@@ -592,22 +662,33 @@ Audit lens (Sol, contract): this module closes B3. Verify by reading it that no 
 a JSON file is ever concatenated into a path, and run the traversal case yourself. Also confirm the
 module names neither `logsDir` nor `statePath` anywhere (D6).
 
-### Task 13: SSE frames and `Last-Event-ID`
+### Task 13: SSE frames, sequence ids, and frame batching
 
 - Create: `V/core/sse.ts`, `V/core/sse.test.ts`
 
 Model: **Sonnet**.
 
 - [ ] **Step 1: Write the failing test.** Encoding: every frame type of spec §6.2 round-trips,
-      **including `patch`**; `id:` is present on every frame and its value is the supplied
-      `ackOffset`, never a raw offset (assert by encoding a frame whose state has a non-empty carry
-      and checking the id is the smaller number); `retry:` appears exactly once, in the first frame;
-      a payload containing a newline, `U+2028`, `U+2029`, a BigInt, a cyclic object and `undefined`
-      each produce a well-formed frame (carry over the existing `serializeFrameData` cases and add
-      the two Unicode line separators, which the current code leaves unhandled, B24). Parsing:
-      `parseLastEventId` accepts a non-negative integer and rejects a float, a negative, a
-      non-numeric string, an empty string and a value exceeding a supplied file size. Expected:
-      module missing.
+      **including `patch`**; `id:` is present on every frame and is a **per-stream monotonic
+      sequence** starting at 1 on `hello` and incrementing by one per frame, of any type (D12) —
+      assert a `hello`/`rows`/`patch`/`meta`/`ping` sequence carries ids 1,2,3,4,5; `retry:` appears
+      exactly once, in the first frame; a payload containing a newline, `U+2028`, `U+2029`, a
+      BigInt, a cyclic object and `undefined` each produce a well-formed frame (carry over the
+      existing `serializeFrameData` cases and add the two Unicode line separators, which the
+      current code leaves unhandled).
+
+      **There is no `parseLastEventId`, and no test for one.** D12: the server ignores
+      `Last-Event-ID` entirely. Assert that absence the only way it can be asserted — the module
+      exports no such function and its source does not contain the string `Last-Event-ID` — so a
+      later revival is a red test rather than a silent regression.
+
+      Add the batching helper: `batchFrames(nodes, maxBytes)` splits a tick's nodes into as many
+      `rows` frames as needed so **no encoded frame exceeds 1 MiB** (spec §6.2). Cases: many small
+      nodes summing past the cap split into several frames, each under it, with every node present
+      exactly once and order preserved; a single node that alone exceeds the cap is emitted in its
+      own frame rather than dropped or split.
+
+      Expected: module missing.
 - [ ] **Step 2: Implement** `V/core/sse.ts`. Pure.
 - [ ] **Step 3: Run.**
 
@@ -619,7 +700,9 @@ Model: **Sonnet**.
 
 Audit lens (Sol, contract): feed the encoder a frame whose payload contains a literal
 `\ndata: injected` sequence and confirm the receiving side sees one frame, not two. Frame-splitting
-through a payload is a Critical finding.
+through a payload is a Critical finding. Then serialize a real 500-node window from the largest
+transcript on this machine and confirm every emitted frame is under 1 MiB — node-level elision does
+not bound a frame, and the initial window is exactly where the aggregate bites.
 
 ### Task 14: Phase 1 governance — the structural wall and the core README section
 
@@ -674,10 +757,14 @@ Model: **Sonnet**.
       `statOrNull` on a missing file returns null and on a real file returns a **`FileObservation`
       including `inode`** (spec §4 — task 5's rotation trigger is dead without it);
       `listDirOrEmpty` on a missing directory returns `[]`; `readRange` returns exactly the
-      requested bytes and throws on a genuine read failure (that throw is load-bearing — the poller
-      turns it into a frame); `readHead`/`readTail` return raw byte ranges and **do not** decide
-      line boundaries (that is `core/window.ts`, task 5); `readTextCapped` refuses past its cap;
-      `realpathOrNull` resolves a symlink and returns null for a broken one.
+      requested bytes **as a `Uint8Array`** and throws on a genuine read failure (that throw is
+      load-bearing — the poller turns it into a frame); `readHead`/`readTail` return raw byte ranges
+      and **do not** decide line boundaries (that is `core/window.ts`, task 5); `readTextCapped`
+      refuses past its cap; `realpathOrNull` resolves a symlink and returns null for a broken one.
+
+      **Assert the adapter decodes nothing (D13):** its source contains no `TextDecoder` and no
+      `readFileSync(..., 'utf8')` on a transcript path. Decoding complete lines is core's job, and
+      an adapter that decodes is what made the old `ackOffset` formula unsound.
 
       In `readonly.test.ts` — G4's proof, so it asserts the properties, not the implementation:
       1. the adapter module's exported surface contains **no** write-family function, and its source
@@ -687,8 +774,11 @@ Model: **Sonnet**.
          while a file that cannot be read (`EACCES`, via `chmod 000` in a temp dir, and `ENOENT`)
          yields the "absent" outcome — asserted as two **different** results, because a single
          `catch {}` swallowing both makes a permissions bug look like an empty campaign forever;
-      3. the **escaping symlink** in the fixture's `tool-results/` is refused once its `realpath` is
-         judged by `isContainedResolved`, and the legitimate symlink beside it is served.
+      3. the three symlink shapes of D14, judged against the resolved **`~/.claude/projects`** root
+         (never the session directory): the one resolving outside the root is refused, the one
+         resolving to a **sibling session inside** the root is served, and the broken one is refused
+         without a read. A session-rooted check would refuse the sibling case, which is a real shape
+         Claude Code writes on this machine.
 
       Expected: both modules missing.
 - [ ] **Step 2: Implement.** Carry over the existing adapter's primitives verbatim where they
@@ -722,7 +812,12 @@ Model: **Sonnet**.
       fixed-depth walk finds campaigns; a campaign with no `runs/` directory yields
       `runnerAlive: false`; a malformed `campaign-state.json` is isolated to its own campaign and is
       reported as **malformed**, while an unreadable one is reported as **absent** (the two-outcome
-      rule of task 15); the 200-campaign cap holds; `processAlive` is injected, not called directly.
+      rule of task 15); `processAlive` is injected, not called directly.
+
+      **The 200-campaign cap is not tested here, because it is not decided here.** Task 12's pure
+      `selectCampaigns` chooses which directories are admitted; this adapter's test asserts only
+      that it *reads exactly what the selection named and nothing else* — hand it a selection of two
+      out of five fixture campaigns and assert three were never opened.
 
       Cache policy is **not** the adapter's decision (`pure-core.md`, spec §5.3): write
       `V/core/cache.test.ts` for the pure `decideCache(key, existing, nowMs)` — a hit inside the
@@ -835,13 +930,17 @@ here is invisible until a live campaign — which is precisely how B4 and B12 su
       - a deletion emits `gone`;
       - a delta larger than the 4 MiB tick cap is delivered across two ticks with no byte lost or
         duplicated; `ping` fires at 15 s;
-      - **every frame's `id:` is the `ackOffset`**, and after a tick whose read ended mid-row the
-        published id is strictly less than the bytes consumed.
+      - **every frame's `id:` is the next per-stream sequence number** (D12), incrementing across
+        frame types, never an offset;
+      - **a tick whose nodes exceed 1 MiB encoded is split into several `rows` frames**, each under
+        the cap, every node present exactly once and in order — drive it with a 4 MiB tick of many
+        small nodes, which is the realistic catch-up shape.
 
       `serve.events.test.ts`: a real connection against the fixture receives `hello` then `rows`;
-      **a read that ends mid-row, then a disconnect, then a reconnect with `Last-Event-ID` yields
-      that row exactly once** (blocker 4's server-side form); a `Last-Event-ID` past EOF yields
-      `reset` plus a windowed restart; the 9th concurrent stream gets 503; closing a connection
+      **a reconnect is a fresh snapshot (D12)** — the server ignores the `Last-Event-ID` the browser
+      sends, replies with `hello` + the current window, and the pairing state is rebuilt from the
+      file, so a `tool_use`/`tool_result` pair that straddled the disconnect arrives **already
+      paired** rather than as an orphan; the 9th concurrent stream gets 503; closing a connection
       releases its slot (assert by opening, closing and reopening 9 times). Expected: the poller
       module is missing and `/events` 404s.
 - [ ] **Step 2: Implement** per spec §6. The clock is injected; this adapter is the package's only
@@ -854,13 +953,14 @@ here is invisible until a live campaign — which is precisely how B4 and B12 su
       Expected: all pass, including the stream-slot accounting.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run a real stream against a file you append to yourself, kill the
-connection **mid-row** (write half a line, reconnect, then write the rest), reconnect with the last
-`id:` you received, and diff the union of rows received across both connections against the file. A
-duplicated, truncated or missing row is a Critical finding — this is the exact defect blocker 4
-named. Then replace the file with a same-size file and confirm a `rotated` reset actually fires;
-if it does not, the inode is not reaching the transition. Finally, open and abandon 20 connections
-and confirm the slot counter returns to zero.
+Audit lens (Sol, contract): run a real stream against a file you append to yourself and kill the
+connection **between a `tool_use` row and its `tool_result`**; reconnect and confirm the tool card
+arrives complete, with no orphan and no duplicate. Then do the same **between a `rows` frame and its
+`patch`**. Those two are the cases an offset cursor could not express and the reason D12 exists.
+Confirm the server never reads `Last-Event-ID` (grep it in the handler; the browser will send one).
+Then replace the file with a same-size file while connected and confirm a `rotated` reset fires — if
+it does not, the inode is not reaching the transition. Finally, open and abandon 20 connections and
+confirm the slot counter returns to zero.
 
 ### Task 20: The composition root
 
@@ -1009,7 +1109,8 @@ Model: **Sonnet**.
       a project list renders one row per project with its `cwd` label and falls back to the encoded
       directory name when `cwd` is null; a session row shows title, short id, size, relative age,
       subagent count; `LiveDot` renders only when `live`; `CampaignBadge` renders slug, card,
-      status and the runner state, and clicking it sets `?campaign=<slug>`; the filter narrows the
+      status and the runner state; a session claimed by two campaigns renders **two** badges (spec §9);
+      clicking one sets `?campaign=<repoKey>/<slug>`; the filter narrows the
       list and the empty result shows a message, not a blank pane.
 
       D10 (spec §5.6): with `olderCount: 3` the sidebar renders a `show 3 older projects` link whose
@@ -1045,25 +1146,37 @@ container; this is the one client task with real state-machine risk, and B7 is t
 getting it wrong is easy and silent.
 
 - [ ] **Step 1: Write the failing test.** `rowStore.test.ts` first, because it is the contract the
-      other two rest on (spec §8.4):
-      - rows are keyed by `RowAnchor.id` and held in insertion order;
-      - **a `rows` node whose id is already present is ignored, not appended** — assert the row
-        count is unchanged (this is what makes resume and overlapping back-fill harmless);
-      - **a `patch` replaces the node with that id in place**, preserving its position, and the row
-        count is unchanged;
-      - a `patch` for an id that is absent (evicted, or never sent) is dropped silently, not an
-        error;
-      - at 2,000 nodes the head is evicted (spec §6.5) and "load earlier" re-fetches.
+      other two rest on (spec §8.4). The store holds **one contiguous window** of nodes,
+      `[first, last]` in byte offsets — never a sparse set of ranges:
+      - nodes are keyed by `RowAnchor.id` and held in file order;
+      - **a `rows` node whose id is already present is ignored, not appended** — assert the node
+        count is unchanged. This is what makes D12's reconnect-as-fresh-snapshot invisible: the
+        overlap between the old window and the new one is dropped rather than duplicating cards;
+      - **a `patch` replaces the node with that id in place**, preserving position, node count
+        unchanged;
+      - a `patch` for an id outside the window is dropped silently, not an error;
+      - **back-fill prepends**: nodes from `/api/rows?before=<first>` go on the front, `first` moves
+        backwards, order is preserved by concatenation because the range is contiguous;
+      - **at the 2,000-node cap, eviction is from the TAIL and following switches off in the same
+        operation** (spec §6.3). Assert both, and assert the oldest back-filled node survives —
+        head eviction would delete the history the user just requested and cap "load earlier" at
+        2,000 nodes forever, on four transcripts that already exceed it;
+      - **scrolling back to the bottom reloads the tail window** (a fresh fetch with no `before`)
+        and re-enables following.
 
       `useEventStream.test.ts` against a fake `EventSource`: `hello` then `rows` populates; a second
       `rows` frame appends; a `patch` frame routes to the store's patch path; `meta` updates the
-      agent tabs **without** touching rows; `reset` clears and re-populates; `gone` stops
-      reconnecting; a dropped connection reconnects passing the last `id` as `Last-Event-ID`.
+      agent tabs **without** touching nodes; `reset` clears and re-populates; `gone` stops
+      reconnecting; **a dropped connection reconnects and processes a fresh `hello` + window,
+      discarding its previous window rather than merging** (D12), and the user sees no duplicate
+      card because the store dedupes by id. The hook **never sets or reads `Last-Event-ID`** — the
+      browser may send one, and the server ignores it; assert the hook's source does not mention it.
 
       `session.test.tsx`: one rendering case per `RenderNode` kind in spec §4; every rendered row
-      carries `data-kind` and `data-row-id` and the list carries `data-scroll="rows"` (spec §12.6 —
-      these are the addresses the DOM e2e proofs use, so they are contract, not scaffolding); a
-      `tool` node renders its result attached to the call and an error result renders with the error
+      carries `data-kind` and `data-row-id`, a `tool` card also carries
+      `data-state="pending|ok|error"`, and the list carries `data-scroll="rows"` (spec §12.6 — these
+      are the addresses the DOM e2e proofs use, so they are contract, not scaffolding); a `tool`
+      node renders its result attached to the call and an error result renders with the error
       token; follow-the-tail scrolls on new rows while within 32 px of the bottom, does **not**
       scroll when outside it, shows the pill, and resumes on click (spec §8.3). Expected: modules
       missing.
@@ -1079,12 +1192,14 @@ getting it wrong is easy and silent.
 - [ ] **Step 4: Commit**
 
 Audit lens (Sol, contract): drive the scroll state machine yourself through the sequence bottom, new
-rows, scroll up, new rows, click pill, new rows — and assert the viewport moves only in states 2
-and 6. Then drive the store through the live sequence that B1's second half is about: a `rows` frame
-carrying a pending `tool` node, then a `patch` for it, then a **replay of the same `rows` frame**
-(what a resume produces). The correct end state is one card, with its result. Two cards, or a card
-that lost its result, is a Critical finding. Also confirm `dangerouslySetInnerHTML` appears nowhere
-in the built bundle.
+nodes, scroll up, new nodes, click pill, new nodes — and assert the viewport moves only in states 2
+and 6. Then drive the store through the sequence D12 makes routine: a `rows` frame carrying a
+pending `tool` node, a `patch` for it, then a **whole fresh window replayed** (what a reconnect
+produces), overlapping the existing one. The correct end state is one card, with its result, in its
+original position. Two cards, a lost result, or a window that is no longer one contiguous range is a
+Critical finding. Then back-fill past 2,000 nodes and confirm the oldest requested node is still
+present and the follow pill is off. Also confirm `dangerouslySetInnerHTML` appears nowhere in the
+built bundle.
 
 ### Task 25: Subagent tabs, expansion, attachments, and raw cards
 
@@ -1097,9 +1212,13 @@ Model: **Sonnet**.
 - [ ] **Step 1: Write the failing test.** Tabs render from `Agent[]` in tree order with depth
       indentation; selecting a tab navigates to `/s/<id>/a/<agentId>` and opens a new stream; a
       `Task` tool card whose node carries an `agentId` links to that tab; `ImageCard` fetches
-      `/api/block` only on expand; `ToolCard` with a spill result fetches `/api/spill` only on
-      expand and shows the preview before that; consecutive `attachment` nodes collapse into one
-      strip that expands to the individual entries; `RawCard` renders collapsed with the row type
+      `/api/block?at=<RowAnchor.at>&i=<blockIndex>` only on expand — **addressed by row offset and
+      block index, never a uuid** (spec §4: 14,032 measured `attachment` rows carry no uuid, which
+      is why one addressing scheme covers every expandable node); `ToolCard` with a spill result
+      fetches `/api/spill` only on expand and shows the preview before that; consecutive
+      `attachment` nodes collapse into one strip whose entries expand the same way, and an
+      `attachment` node with `expandable: false` renders **no** affordance rather than one that
+      would return nothing; `RawCard` renders collapsed with the row type
       visible; `UnreadableNote` shows the count. Expected: components missing.
 - [ ] **Step 2: Implement.**
 - [ ] **Step 3: Run.**
@@ -1161,10 +1280,13 @@ with phase 1 or 3 in its own worktree.
 Model: **Sonnet**. Mechanical against a precise brief; the risk is breadth (645 tests construct
 `LoopIO`), not depth, and `LinePort` already exists.
 
-- [ ] **Step 1: Write the failing test.** `viewer-launch.test.ts`: `viewerRootUrl(4321, 'my-slug')`
-      is exactly `http://127.0.0.1:4321/?campaign=my-slug`; a slug containing `&`, a space and a
-      non-ASCII character is percent-encoded; `sessionUrlFor(base, id)` is exactly
-      `<base-origin>/s/<id>`; the spawn argv no longer contains `--tribe-root`.
+- [ ] **Step 1: Write the failing test.** `viewer-launch.test.ts`:
+      `viewerRootUrl(4321, 'my-repo', 'my-slug')` is exactly
+      `http://127.0.0.1:4321/?campaign=my-repo/my-slug` — the **pair**, because a slug alone does
+      not identify a campaign on this machine (spec §9); a repo key or slug containing `&`, a space
+      or a non-ASCII character has **each half** percent-encoded with the `/` between them left
+      literal; `sessionUrlFor(base, id)` is exactly `<base-origin>/s/<id>`; the spawn argv no longer
+      contains `--tribe-root`.
 
       **The probe's three outcomes (spec §10.4), against a fake server:**
       1. a body of `{"ok":true,"viewer":"tribe-viewer","v":2}` → **reuse**;
@@ -1299,27 +1421,49 @@ Model: **Sonnet**.
       about what a person sees, so that is where they are observed.
 
       `dom-kinds.e2e.test.ts`: serve with `HOME` pointed at the task-1 tree and **no `~/.tribe`
-      inside it** (G1's precondition); open `/s/<session-1>` in a page; then for **every** `k` in
-      spec §4's `RenderNode` union assert `document.querySelectorAll('[data-kind="k"]').length >= 1`
-      — iterate the union itself, so a kind added to the model with no component fails here rather
-      than vanishing; click a subagent tab and assert it navigates and renders that agent's rows;
-      assert the spill card fetches nothing until expanded; assert the sidebar shows two projects
-      plus a `show 1 older projects` link and that `?all=1` shows three (D10); assert each of the
-      three empty shapes renders the "no sessions found" note rather than an error or a blank pane.
+      inside it** (G1's precondition); open `/s/<session-1>` in a page. Two layers:
+
+      **Layer 1 — kind coverage, driven by the runtime witness.** Iterate
+      `Object.keys(RENDER_NODE_KINDS)` (task 2) and assert
+      `document.querySelectorAll('[data-kind="k"]').length >= 1` for each. Iterate the **witness**,
+      never the TypeScript union — a union is erased at runtime and cannot be iterated; the witness's
+      `Record<RenderNode["k"], true>` annotation is what makes the compiler reject a kind added to
+      the model without a witness entry, so this test cannot drift from the union.
+
+      **Layer 2 — one assertion per distinguishable input shape**, because several real on-disk
+      shapes collapse to one `k` and kind coverage alone would pass while the array-prompt path (the
+      defect that hid every runner prompt) is broken. One case each, per spec §16.2's table: string
+      prompt; **array prompt**; `tool` pending (`[data-state="pending"]`); `tool` ok with its result
+      text; `tool` error (`[data-state="error"]`); `orphan_result`; **empty thinking asserted
+      absent**; non-empty thinking present; `image` with no bytes fetched before expand; compaction
+      `divider`; spill link with `/api/spill` not called before expand; unknown row type as a
+      collapsed `raw` card.
+
+      Also: click a subagent tab and assert it navigates and renders that agent's nodes; assert the
+      sidebar shows two projects plus a `show 1 older projects` link and that `?all=1` shows the
+      rest (D10); assert each of the three empty shapes renders the "no sessions found" note rather
+      than an error or a blank pane.
 
       `url-refusals.e2e.test.ts`: the URL matrix of spec §16.2 over HTTP — a valid id, `..`, a
       percent-encoded `/`, a double-encoded `..%2f`, a NUL byte, an id from the other project, an
-      absent id — plus **both symlinks** in the fixture's `tool-results/`: the escaping one refused,
-      the legitimate one served.
+      absent id — plus the **three symlink shapes** of D14: the one escaping the projects root
+      refused, the **sibling-session** one served, the broken one refused.
 
-      `served-build.e2e.test.ts` (G6, spec §16.5): hash every file of a **fresh** `bun run build`,
-      then fetch `/` and every asset the shell references from the **running** server and assert the
-      hashes are equal. That is what "the runner's spawn serves the built output" actually claims.
+      `served-build.e2e.test.ts` (G6, spec §16.5). The server serves its **fixed** `dist/` and gains
+      **no `--dist` flag** — an overridable asset root is a security surface for a read-only viewer,
+      and a proof that needs the server to serve somewhere else proves nothing about what it does.
+      The real mechanism, in order: move any existing `dist/` aside; `bun run build` into the real
+      `dist/`; hash every produced file; start the server on an ephemeral port; fetch `/` and every
+      asset the shell references and hash each body; assert `hash(GET /index.html)` equals
+      `hash(dist/index.html)` and likewise for every asset; stop the server; **restore the prior
+      `dist/` in a `finally`**, so a failing assertion cannot leave the tree half-built.
 
       `real-transcript.e2e.test.ts` runs the same DOM assertions read-only against the largest real
       transcript (13 MB) and one real session with subagents. `perf.test.ts` records every budget in
       spec §14 to `perf.json`, including RSS after 8 streams **and again after 10 minutes of
-      appends** (the eviction contract of spec §6.5 is a claim about lifetime, not about startup).
+      appends** (the eviction contract of spec §6.5 is a claim about lifetime, not about startup),
+      and the initial-window frame sizes for the largest real transcript (every encoded frame under
+      1 MiB).
 
       Expected: the e2e files do not exist and the old harness still does.
 - [ ] **Step 2: Implement,** carrying the current harness's proven parts: the bounded deadline
@@ -1335,9 +1479,9 @@ Model: **Sonnet**.
       ```
 
       Expected: the fixture DOM suites pass with **no** environment variable and with **zero** side
-      effects outside their `mkdtemp` (they spawn no campaign and spend no token — only the Haiku
-      suites in tasks 31 and 32 are gated); the opt-in run additionally produces `perf.json` and the
-      screenshots, each a real non-trivial PNG. Every budget in spec §14 is met or the shortfall is
+      effects outside their `mkdtemp` and the `dist/` they restore (they spawn no campaign and spend
+      no token — only the Haiku suites in tasks 31 and 32 are gated); the opt-in run additionally
+      produces `perf.json` and the screenshots, each a real non-trivial PNG. Every budget in spec §14 is met or the shortfall is
       recorded verbatim — never widened to make the test pass.
 - [ ] **Step 4: Commit**
 
@@ -1383,9 +1527,18 @@ Model: **Sonnet**.
       - **the patch case**: write a `tool_use` row, wait for its card, write the matching
         `tool_result` in a later tick; the card gains its result **and**
         `document.querySelectorAll('[data-row-id]').length` is unchanged;
-      - **resume**: drop the connection mid-row, reconnect, assert every row appears exactly once;
-      - **rotation**: replace the transcript with a **same-size** file of different content and
-        assert the view resets and re-renders.
+      - **reconnect between a row and its patch (D12)**: write a `tool_use` row, wait for the card,
+        drop the connection, write the matching `tool_result`, reconnect — assert the card shows its
+        result **exactly once** and no duplicate row exists. This is the case an offset cursor could
+        not express, and it is the single most important assertion in this task;
+      - **reconnect between a call and its result**: drop the connection after the `tool_use` row
+        and before the `tool_result` is written, reconnect, then write the result — assert the card
+        completes rather than orphaning (the reconnected stream rebuilds pairing from the file);
+      - **window on a >2,000-node transcript** (task 1's fourth fixture session): load earlier past
+        the cap, assert the oldest requested nodes are present and the follow pill is off, then
+        scroll to the bottom and assert the tail window reloads and following resumes;
+      - **rotation**: replace the transcript with a **same-size** file of different content while
+        connected, and assert the view resets and re-renders.
 
       A real `claude -p` Haiku 4.5 session runs alongside as the realism check (it writes a real
       transcript the page renders), but **no assertion depends on its content** — that is what makes
@@ -1398,16 +1551,20 @@ Model: **Sonnet**.
       cd plugins/tribe/scripts/viewer && TRIBE_VIEWER_E2E=1 bun test e2e/live-tail.e2e.test.ts
       ```
       Expected: `latency.json` written with all 40 samples; the worst under 1000 ms; every scroll,
-      patch, resume, rotation and mid-stream-subagent assertion passing; the screenshots real PNGs.
+      patch, reconnect, window, rotation and mid-stream-subagent assertion passing; the screenshots
+      real PNGs.
       If the budget is missed, record the real number — never widen the budget to make the test
       pass.
 - [ ] **Step 4: Commit**
 
 Audit lens (Sol, contract): re-run this yourself and read `latency.json`. Confirm every sample's
-start is the **writer's own** `performance.now()` — if any sample is derived from a row's
-`timestamp` field or a file mtime, the measurement has silently reverted to the proxy this revision
-removed, and that is a Critical finding. Then check the scroll assertions compare actual `scrollTop`
-numbers rather than a React state flag: only the DOM number can show the viewport did not move.
+start is the **writer's own** `performance.now()` — a sample derived from a row's `timestamp` field
+or a file mtime means the measurement has reverted to a proxy, and that is a Critical finding. Check
+the scroll assertions compare actual `scrollTop` numbers rather than a React state flag: only the
+DOM number can show the viewport did not move. Then run the two reconnect cases by hand with the
+browser open and watch the card: a duplicated card, a card that never gains its result, or an
+`orphan_result` where a paired card belongs, each means D12's fresh-snapshot path is not actually
+rebuilding pairing from the file.
 
 ### Task 32: Campaign-badge end-to-end on Haiku 4.5
 
@@ -1419,7 +1576,15 @@ Model: **Sonnet**.
       remote, a campaign home under the real tribe root, one staged card whose spec and plan force
       a `hunter` dispatch, validated with `--dry-run` first, then the real runner on
       `--viewer-port 4399`. Assertions per spec §16.4:
+      The fixture authors **two** campaign homes: the real one, and a second with the **same slug
+      under a different repo key** listing the same session id — the collision that exists on this
+      machine today (2 slugs and 6 session ids are shared across two repo keys, spec §9).
+
       - both stdout lines captured **verbatim**;
+      - the session row renders **two** badges, not one, and neither is dropped whatever order the
+        directory scan returns;
+      - `?campaign=<repoKeyA>/<slug>` filters to A's sessions and `?campaign=<repoKeyB>/<slug>` to
+        B's — a slug-only filter would merge them, which is what this case exists to catch;
       - the printed session URL is **opened in the browser** and renders that session — a printed
         URL that 404s is a G3 failure however green the unit tests are;
       - the badge is asserted **in the DOM** (slug, card, status, runner state);
@@ -1447,9 +1612,13 @@ Model: **Sonnet**.
 - [ ] **Step 4: Commit**
 
 Audit lens (Sol, contract): confirm the printed session URL actually opens that session in the
-running viewer — the test asserts it in the browser, so re-run it and watch. Then read the teardown:
-any code path that discovers a pid **from a port** rather than from its own spawn is a Should-fix at
-minimum, because it can kill a process this card never owned.
+running viewer — the test asserts it in the browser, so re-run it and watch. Then point the viewer
+at the **real** `~/.tribe` on this machine and confirm a session under both
+`-Users-hip-repo-tribe/followups-2026-09-04` and
+`-Users-hip-repo-todd-skills.migrated-1788705562/followups-2026-09-04` shows two badges — the
+fixture proves the code path, the real tree proves the model matches reality. Then read the
+teardown: any code path that discovers a pid **from a port** rather than from its own spawn is a
+Should-fix at minimum, because it can kill a process this card never owned.
 
 ### Task 33: Phase 5 governance — the evidence index and the final gate sweep
 
@@ -1508,5 +1677,8 @@ would rest on.
    `Tribe-Task: N/33` in one final paragraph.
 5. The toolchain traps: run every command from inside the package directory (`cd
    plugins/tribe/scripts/viewer` or the runner equivalent); `bun run check` is `tsc --noEmit && bun
-   test`; the e2e suites are gated behind `TRIBE_VIEWER_E2E=1` and must never run by accident;
-   never export a whole `.env` file into the shell.
+   test`; **only the two Haiku suites (`live-tail.e2e.test.ts`, `campaign-badge.e2e.test.ts`) are
+   gated behind `TRIBE_VIEWER_E2E=1`** — the DOM suites from task 30 run under a plain `bun test`
+   and *fail* rather than skip when no Chromium resolves, which is deliberate (spec §16.0);
+   C3 is reached only as `bunx @c3x/cli@11.6.3 <cmd> </dev/null`; never export a whole `.env` file
+   into the shell.
