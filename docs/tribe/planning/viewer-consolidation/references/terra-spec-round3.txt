@@ -1,0 +1,50 @@
+LOCATION: Opening “Card … State … References”
+WHAT BROKE: The page says its governing scope is settled in external files, so I cannot tell from this page alone what Option A or the full approval boundary actually is.
+SEVERITY: BLOCK
+
+LOCATION: §1, D3 “the Shaman drives the whole chain”
+WHAT BROKE: “Shaman,” “Warchief,” and “Sol audits” are used as operational roles before the page explains who or what they are.
+SEVERITY: BLOCK
+
+LOCATION: §2, G1 proof “B2”
+WHAT BROKE: The finding label is used as evidence before its meaning is introduced much later, forcing me to carry an unexplained reference through the proof table.
+SEVERITY: NIT
+
+LOCATION: §4, “RowAnchor.id … `${at}:${blockIndex}`”
+WHAT BROKE: The model defines `i` as a line index but the block route calls `i` a block index, while `blockIndex` is not a shared `RowAnchor` field, so I cannot determine the stable payload address.
+SEVERITY: BLOCK
+
+LOCATION: §4, “The 64 KiB ceiling applies to every kind”
+WHAT BROKE: The stated universal size-and-expansion contract does not match the node types, because tools, images, and tool results do not consistently expose the required `elided` and `expandable` fields.
+SEVERITY: BLOCK
+
+LOCATION: §6.1, “reset … re-stream from 0”
+WHAT BROKE: I cannot tell whether reset sends the whole file from byte zero, the first 500 nodes, or the normal tail window, and those choices have materially different behavior and performance.
+SEVERITY: BLOCK
+
+LOCATION: §6.2, “Reconnect is a fresh snapshot”
+WHAT BROKE: The page says reconnecting data is deduped into the existing client store but never says whether obsolete nodes are cleared, so the promised single contiguous window cannot be derived.
+SEVERITY: BLOCK
+
+LOCATION: §6.3, backward-window algorithm
+WHAT BROKE: The algorithm counts whole slices and anchors at the first row of the last slice, but never specifies how it trims an overshoot to exactly the last 500 nodes.
+SEVERITY: BLOCK
+
+LOCATION: §6.3, “Past the 2,000-node cap, eviction is from the TAIL”
+WHAT BROKE: The server continues sending new tail nodes, but the page never says whether those nodes are ignored or appended after tail eviction, so contiguity of the client window is undefined.
+SEVERITY: BLOCK
+
+LOCATION: §7.1, “three buckets, and nothing outside them”
+WHAT BROKE: Attachments are neither message rows nor one-line metadata chips nor raw cards, despite the claim that there are only three buckets.
+SEVERITY: NIT
+
+LOCATION: §12.6, “Permitted, in adapters/** only”
+WHAT BROKE: This is the hardest passage because it says permitted world-touching operations are adapter-only while also permits `Bun.serve` in `serve.ts`, leaving the exception implicit.
+SEVERITY: NIT
+
+LOCATION: §16.4, “The current harness’s recipe is carried over”
+WHAT BROKE: The campaign end-to-end proof depends on an unstated existing harness and on a card setup that “forces a hunter dispatch,” so I cannot reproduce or approve the test setup from this page.
+SEVERITY: BLOCK
+
+READER: FAIL 8 BLOCK
+terra exit=0
