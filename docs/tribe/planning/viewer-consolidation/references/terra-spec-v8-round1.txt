@@ -1,0 +1,42 @@
+LOCATION: G6 — “c3-215 updated; D9 applied”
+WHAT BROKE: I could not tell what “c3-215” requires until much later, so this goal is not independently readable at first mention.
+SEVERITY: NIT
+
+LOCATION: §3.2 — “GET /api/spill… contained (§7.4)”
+WHAT BROKE: The cited section is about system rows, not spill containment, so the reference does not lead to the promised explanation.
+SEVERITY: NIT
+
+LOCATION: §4 — “its encoded size is measured”
+WHAT BROKE: I understood the 64 KiB rule, but not which encoding supplies the byte count, so the threshold is not precisely anchored.
+SEVERITY: NIT
+
+LOCATION: §6.3 — “Finding where a 500-node window starts” (hardest passage)
+WHAT BROKE: I could follow it only after rereading because it rapidly switches among byte slices, rows, candidate nodes, retained nodes, and paired rendered nodes.
+SEVERITY: NIT
+
+LOCATION: §6.5 — “tail carry… emit one unreadable node”
+WHAT BROKE: This conflicts with §6.1, which says the same oversized-row case emits one `raw` node, so I could not determine which node the implementation must produce.
+SEVERITY: BLOCK
+
+LOCATION: §8.2 — “Mechanism”
+WHAT BROKE: Step 2 ends before the import example, and “3.” resumes as ordinary prose, making the sequence visually and logically broken.
+SEVERITY: NIT
+
+LOCATION: §8.4 — “node… already present is ignored… makes D12’s reconnect… invisible”
+WHAT BROKE: This sits beside the rule to clear the store on a changed generation, so I could not see what prior nodes would remain for reconnect deduplication to suppress.
+SEVERITY: NIT
+
+LOCATION: §12.1 — “Zero writes anywhere outside fixtures/e2e”
+WHAT BROKE: I could not tell whether this applies only to shipped viewer runtime or to the whole workflow, because §10.3 and §16.5 deliberately build into `dist/` outside those directories.
+SEVERITY: BLOCK
+
+LOCATION: §12.6 — “8. No catch…”
+WHAT BROKE: Item 8 appears outside the preceding ordered list after item 7’s subparts, which makes its relationship to the structural-wall rules unclear.
+SEVERITY: NIT
+
+LOCATION: §16.3 — “window.__viewerEventSource.close()… then let it reconnect”
+WHAT BROKE: The page does not explain how an explicitly closed `EventSource` is reopened, so I could not follow how this test reaches the claimed reconnect.
+SEVERITY: BLOCK
+
+READER: FAIL 3 BLOCK
+terra exit=0

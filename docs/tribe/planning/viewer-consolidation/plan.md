@@ -38,7 +38,11 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
 - The viewer reads the Claude transcript only, plus exactly two files under `~/.tribe`
   (`campaign-state.json`, `run.json`). No code path may open anything under `runs/*/logs/`
   (D6).
-- Zero writes anywhere outside `V/fixtures/` and `V/e2e/`.
+- **Zero writes by the SHIPPED RUNTIME** — `serve.ts`, `adapters/**`, `core/**` and the built
+  client answering a request write nothing, anywhere, ever (spec §12.1). Outside that claim by
+  name: the **build** writes `dist/` (that is Vite's job) and `tools/**` scripts write their own
+  measurement output; both are build-time and unreachable from a request. `V/fixtures/` and
+  `V/e2e/` write because a test must build its fixture.
 - **C3 has no `c3` or `c3x` executable on this machine's `PATH`.** Every governance task invokes
   `bunx @c3x/cli@11.6.3 <command> </dev/null` — the pinned version, and the stdin redirect, both
   matter: without `</dev/null` the CLI can block waiting on input inside a non-interactive hunter
@@ -495,7 +499,9 @@ Model: **Sonnet**.
          `skipping = true`, remember the oversized row's start offset, drop bytes until the next
          `0x0A`, emit **exactly one** `raw` node anchored at `{at: rowStart, i: 0}` with
          `rowType: "oversized"` and the text `row too large (<N> bytes)`, then clear the flag and
-         resume normally. Named test: **a 2 MiB single-line row is skipped, one `raw` "row too
+         resume normally. **It is a `raw` node, never an `unreadable` one** — `unreadable` is the
+         *unparsable-JSON* case (spec §13), a different failure with a different shape, and spec
+         §6.1 and §6.5 both name `raw` here. Assert the kind, not just the presence. Named test: **a 2 MiB single-line row is skipped, one `raw` "row too
          large" node is emitted at its offset, and the NEXT row parses normally** — that last clause
          is the point of the flag. Without it the remainder of the oversized row is fed back into
          the line splitter and a JSON fragment can masquerade as a record.
@@ -1496,11 +1502,21 @@ getting it wrong is easy and silent.
         not that a second card appears beside it. This is the user-visible half of "pairing runs
         after trimming".
 
-      `useEventStream` assigns its `EventSource` to `window.__viewerEventSource` **in dev builds
-      only** (guarded by `import.meta.env.DEV`), so an e2e test can close the stream
-      deterministically rather than racing a network-level kill (tasks 31, spec §16.3). Assert the
-      handle is **absent** in a production build — a test seam that ships is a test seam that
-      becomes an API.
+      **Reconnection has exactly two triggers, and the test seam exists because one of them cannot
+      be provoked from outside** (spec §8.4): the browser fires `error` when a connection drops and
+      the client reopens after the `retry:` interval — the production path — but an **explicitly
+      closed** stream fires no `error`, because `close()` is deliberate and the browser never
+      retries it. So `useEventStream` exposes, **in dev builds only**
+      (`import.meta.env.DEV`), two members:
+
+      ```ts
+      window.__viewerEventSource : EventSource   // the live handle — close() to simulate a drop
+      window.__viewerReconnect() : void          // open a NEW stream, by the error path's own route
+      ```
+
+      Assert both: that the `error` handler reopens a dropped stream unaided, that
+      `__viewerReconnect()` opens a new one after an explicit `close()`, and that **both members are
+      absent from a production build** — a test seam that ships is a test seam that becomes an API.
 
       `useEventStream.test.ts` against a fake `EventSource`: `hello` then `rows` populates; a second
       `rows` frame appends; a `patch` frame routes to the store's patch path; `meta` updates the
@@ -1921,11 +1937,13 @@ Model: **Sonnet**.
       - **the patch case**: write a `tool_use` row, wait for its card, write the matching
         `tool_result` in a later tick; the card gains its result **and**
         `document.querySelectorAll('[data-row-id]').length` is unchanged;
-      - **reconnect between a row and its patch (D12)**: write a `tool_use` row, wait for the card,
-        close the stream deterministically with
-        `page.evaluate(() => window.__viewerEventSource.close())` (the handle `useEventStream`
-        exposes in dev builds — far more reliable than racing a network-level kill), write the
-        matching `tool_result`, let it reconnect — assert the card shows its
+      - **reconnect between a row and its patch (D12)** — four steps, because an explicitly closed
+        `EventSource` never retries itself (spec §16.3): write a `tool_use` row and wait for the
+        card; `page.evaluate(() => window.__viewerEventSource.close())` to drop the stream
+        deterministically; write the matching `tool_result`;
+        `page.evaluate(() => window.__viewerReconnect())` to open a new one; then **wait for a
+        `hello` whose `generation` differs** from the one held before the close — waiting on
+        anything else races a late frame from the old stream. Assert the card shows its
         result **exactly once** and no duplicate row exists. This is the case an offset cursor could
         not express, and it is the single most important assertion in this task;
       - **reconnect between a call and its result**: drop the connection after the `tool_use` row

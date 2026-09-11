@@ -220,7 +220,7 @@ unit boundary. Layer-local tests still exist and are still required — they are
 | G1 | `~/.tribe` absent; list + render every kind from a fixture tree built from nothing | `e2e/dom-kinds.e2e.test.ts` — headless Chromium against the real server, driven by the runtime `RENDER_NODE_KINDS` witness (§4) so the kind list cannot silently drift from the model, **plus one DOM assertion per distinguishable input shape** (§16.2): kind-coverage alone is not enough, because a string prompt and an array prompt are both `k:"prompt"` and a pending, an ok and an error tool are all `k:"tool"`. (**B2** = the pre-consolidation viewer dropped array-form prompts.) | `core/normalize.coverage.test.ts` (one case per row of §7), `e2e/real-transcript.e2e.test.ts` | §7, §16.2 |
 | G2 | Appended line rendered within 1 s; follows tail at bottom, stops when scrolled up | `e2e/live-tail.e2e.test.ts` — a **controlled writer** appends a row and records its own `performance.now()`; the browser reports when that row's `[data-row-id]` first exists; worst sample ≤ 1000 ms. Follow proved on `scrollTop`: it advances on append while at bottom and is byte-identical before/after append while scrolled up | `adapters/poller.adapter.test.ts`, `client/src/useEventStream.test.ts` | §6, §16.3 |
 | G3 | Badge from campaign state; click filters; runner prints root URL + one session URL per card | `e2e/campaign-badge.e2e.test.ts` — the real runner on Haiku 4.5; both stdout lines captured verbatim; the badge asserted in the DOM; the filter proved by **clicking the badge element** and asserting the resulting session-row count and the URL. Its fixture carries **two campaigns sharing one slug under two repo keys** — the collision that exists on this machine today (§9) | `core/badge.test.ts`, `runner/core/viewer-launch.test.ts` | §9, §10, §16.4 |
-| G4 | Read-only, 127.0.0.1, zero writes, every path contained, fail-closed refusals, `Host` checked | `core/paths.containment.test.ts` (lexical **and** resolved-symlink containment), `adapters/readonly.test.ts` (the D16 allowlist holds; narrow catches distinguish a parse error from a filesystem error), the fixture-tree **before/after hash** in `e2e/dom-kinds.e2e.test.ts` (no write actually happened), `serve.security.test.ts` (`Host`/`Origin`, the refusal matrix), `deletion-guard.test.ts` rule 5 | `structure.test.ts` (§12.6) | §12, §13 |
+| G4 | Read-only **at runtime** (`serve.ts`, `adapters/**`, `core/**`, the built client serving a request — the build's `dist/` and `tools/**` output are build-time and outside the claim, §12.1), 127.0.0.1 only, every path contained, fail-closed refusals, `Host` checked | `core/paths.containment.test.ts` (lexical **and** resolved-symlink containment), `adapters/readonly.test.ts` (the D16 allowlist holds; narrow catches distinguish a parse error from a filesystem error), the fixture-tree **before/after hash** in `e2e/dom-kinds.e2e.test.ts` (no write actually happened), `serve.security.test.ts` (`Host`/`Origin`, the refusal matrix), `deletion-guard.test.ts` rule 5 | `structure.test.ts` (§12.6) | §12, §13 |
 | G5 | Status page, `/live`, scan adapter, session-tail reader, `--tribe-root` gone; no `runs/*/logs/` read | `deletion-guard.test.ts` (grep guard over the package) + `git diff --stat` in the PR body | — | §11 |
 | G6 | `install.sh` builds the client; runner spawn serves the built output; `bun test` green both packages; c3-215 updated; D9 applied | `e2e/served-build.e2e.test.ts` — rebuild into the **real** `dist/`, hash it, start the server, fetch `/` and every asset it references and assert the hashes match, then restore the prior `dist/` (§16.5 — the server serves its fixed `dist/`, so a proof that needs it to serve somewhere else is not a proof of anything it does); plus `test-install-viewer-build.sh` | `bun run check` in both packages, `bunx @c3x/cli@11.6.3 check`, ADR + change units | §10.3, §10.4, §11.3, §15 |
 
@@ -1106,7 +1106,7 @@ a bound — the oracle is open-world.
 
 | Structure | Bound | What happens at the bound |
 | --- | --- | --- |
-| tail carry (raw bytes) | 1 MiB | emit one `unreadable` node, drop the carry, resync at the next `0x0A` |
+| tail carry (raw bytes) | 1 MiB | the discard state machine of §6.1: skip to the next `0x0A` and emit **one `raw` node** (`rowType: "oversized"`, text `row too large (N bytes)`) anchored at the oversized row's own offset. **Not an `unreadable` node** — that kind is the unparsable-JSON case (§13), which is a different failure with a different shape |
 | per-tick read | 4 MiB | the remainder arrives next tick |
 | one node, any kind | 64 KiB encoded | its text is truncated to a prefix; `elided` and `expandable` are set; the full body is at `/api/block` (D15) |
 | one encoded SSE frame | 1 MiB | the tick's nodes are split across several `rows` frames; no single node can exceed the cap, so batching is total (§6.2) |
@@ -1518,6 +1518,22 @@ window contract work together:
   below expressible without a merge algorithm.
 - Every rendered element carries `data-row-id` and `data-kind`; the list carries
   `data-scroll="rows"`. These are the addresses §16's DOM proofs assert against.
+- **Reconnection is the client's own job, and there are exactly two triggers.** (1) The browser
+  fires `error` on the `EventSource` when the connection drops — the client's handler reopens the
+  stream after the `retry:` interval. That is the production path and it needs no help. (2) An
+  **explicitly closed** stream fires no `error` — `close()` is a deliberate act, so the browser
+  never retries it. For that case `useEventStream` exposes, **in dev builds only**
+  (`import.meta.env.DEV`), two members on `window`:
+
+  ```ts
+  window.__viewerEventSource : EventSource   // the live handle — close() it to simulate a drop
+  window.__viewerReconnect() : void          // open a NEW stream, exactly as the error path would
+  ```
+
+  Both are absent from a production build, and §12.6 asserts that: a test seam that ships is a test
+  seam that becomes an API. They exist so an e2e test can drop and restore a connection
+  *deterministically* rather than racing a network-level kill (§16.3).
+
 - **The sequence watermark is per connection and is cleared on every `EventSource` `open`.** Frame
   `id:` restarts at 1 on each connection (§6.2), so a watermark carried across a reconnect would
   make the new stream's `hello` (id 1) look already-processed and silently discard the whole window.
@@ -1851,9 +1867,22 @@ only intent**: `serve.security.test.ts` checks that the configured hostname is e
 (resolve a LAN/interface address with `os.networkInterfaces()`, attempt a socket, expect
 `ECONNREFUSED`; skip only if the machine has no non-loopback interface, and say so in the output
 rather than passing silently). A server bound to `0.0.0.0` passes the first check and fails the
-second, which is exactly the mistake worth catching. Zero writes anywhere outside `fixtures/`/`e2e/`,
-enforced by §11.4 rule 5. No `git`, no `gh`, no outbound network — the only `fetch` in the tree is
-the runner's own probe, which lives in the runner package.
+second, which is exactly the mistake worth catching.
+
+**Zero writes — and the claim is about the SHIPPED RUNTIME, which is what makes it checkable.** The
+runtime is `serve.ts`, `adapters/**`, `core/**` and the built client answering a request: **none of
+them writes anything, anywhere, ever.** Outside that claim, deliberately and by name: the **build**
+writes `dist/` (§10.3, §16.5 — that is Vite's whole job) and the `tools/**` scripts (§12.6's (7a))
+write their own measurement output. Both are build-time, neither is reachable from a request, and
+conflating them with the runtime would make the rule either false or unenforceable.
+
+Enforced **structurally** by §12.6's allowlist, over exactly that runtime file set, and
+**observationally** by §16.2's per-suite digests, which cover every byte the viewer must not touch
+*while it is serving* (`homeA` whole; E2's own copy minus the file its writer appends to;
+`homeB/.claude` only, because `homeB/.tribe` is the runner's to write).
+
+No `git`, no `gh`, no outbound network — the only `fetch` in the tree is the runner's own probe,
+which lives in the runner package.
 
 ### 12.2 Path containment (`fail-closed-edges` obligation 4)
 
@@ -2022,7 +2051,7 @@ Every row is "what the user sees", and no row is a stack trace.
 | transcript deleted while streamed | `gone` frame, stream closed, client shows "this session's file is gone" and stops retrying |
 | transcript truncated or replaced **while streamed** | `reset` frame, then the **normal tail window** — never the file from byte 0; the client clears its store first (§6.1) |
 | transcript truncated or replaced **while disconnected** | nothing special is needed: a reconnect is a fresh snapshot of whatever file is there now, under a new `generation` (D12, §6.2) |
-| carry exceeds the 1 MiB cap | one `unreadable` node, the carry is dropped, the tail resyncs at the next `0x0A` (§6.1) |
+| a single row exceeds the 1 MiB carry cap | one **`raw`** node, `rowType: "oversized"`, text `row too large (N bytes)`, anchored at that row's offset; the rest of the row is skipped to the next `0x0A` (§6.1). Distinct from the `unreadable` row above: that one is a line that failed to parse, this one is a line too big to hold |
 | `/api/spill` name fails the charset or containment check | `400 spill name refused`; the preview text already on the card still shows |
 | `/api/block` names an `at`/`i` that does not resolve to a block | `404`, the card keeps its elided placeholder |
 | 9th concurrent SSE stream | `503 too many live streams` |
@@ -2379,12 +2408,19 @@ Then, in the same run:
 - **The patch case of §6.4**: write a `tool_use` row, wait for its card, then write the matching
   `tool_result` row in a later tick; assert the card's DOM element gains its result **and** that
   `document.querySelectorAll('[data-row-id]').length` is unchanged.
-- **Reconnect**: kill the page's connection mid-write — the mechanism is
-  `page.evaluate(() => window.__viewerEventSource.close())`, the client's own `EventSource` handle,
-  which `useEventStream` assigns to `window.__viewerEventSource` **in dev builds only** so a test
-  can close it deterministically instead of racing a network-level kill — then let it reconnect and
-  assert every row appears exactly once — the store clears on the new `generation` and re-applies the snapshot (§6.2), so a
-  duplicate card here means the generation rule is not being honoured.
+- **Reconnect** — four steps, because "then let it reconnect" is not a mechanism and an explicitly
+  closed `EventSource` never retries itself:
+  1. `page.evaluate(() => window.__viewerEventSource.close())` — a deterministic drop, not a race
+     with a network-level kill. The browser fires **no** `error` for a deliberate `close()`, which is
+     exactly why step 2 exists.
+  2. `page.evaluate(() => window.__viewerReconnect())` — the dev-only entry point (§8.4) that opens
+     a new stream by the same path the production `error` handler uses.
+  3. Wait for a `hello` whose **`generation` differs** from the one held before step 1. That is the
+     signal that this is a genuinely new stream rather than a late frame from the old one; waiting
+     on anything else races.
+  4. Assert **each row id appears exactly once** in the DOM. The store cleared on the changed
+     generation and re-applied the snapshot (§6.2), so a duplicate card here means the generation
+     rule is not being honoured — which is the whole point of the test.
 - **Rotation**: replace the transcript with a **same-size** file of different content and assert the
   view clears and re-renders **the tail window** (§6.1) — this is B12, rotation re-emitting the
   whole file, in its user-visible form.
