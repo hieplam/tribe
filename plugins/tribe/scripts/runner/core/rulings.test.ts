@@ -171,3 +171,40 @@ describe('unratifiedRulingIds', () => {
     expect(unratifiedRulingIds(content)).toEqual([]);
   });
 });
+
+describe('isRulingRatified — a gap id may ride the ratified value (spec §5)', () => {
+  test('a rule disposition with a trailing (G-NNN) is ratified', () => {
+    expect(isRulingRatified('rule plugins/tribe/rules/no-unbounded-pools.md (G-052)')).toBe(true);
+  });
+
+  test('a debt disposition with a trailing (G-NNN) is ratified', () => {
+    expect(isRulingRatified('debt debt-idle-conn-no-timeout (G-053)')).toBe(true);
+  });
+
+  test('a roadmap disposition with a trailing (G-NNN) is ratified', () => {
+    expect(isRulingRatified('roadmap ROADMAP.md#i74 (G-054)')).toBe(true);
+  });
+
+  test('a bare operational/dismissed value may carry an id too', () => {
+    expect(isRulingRatified('operational (G-055)')).toBe(true);
+    expect(isRulingRatified('dismissed (G-056)')).toBe(true);
+  });
+
+  test('pending stays unratified even with an id — the explicit spelling of not-yet', () => {
+    expect(isRulingRatified('pending (G-057)')).toBe(false);
+  });
+
+  test('a malformed id suffix is still free text, and free text is unratified', () => {
+    expect(isRulingRatified('rule x.md (G-)')).toBe(false);
+    expect(isRulingRatified('rule x.md G-052')).toBe(false);
+    expect(isRulingRatified('rule x.md (052)')).toBe(false);
+  });
+
+  test('the no-id forms are unchanged', () => {
+    expect(isRulingRatified('rule plugins/tribe/rules/x.md')).toBe(true);
+    expect(isRulingRatified('operational')).toBe(true);
+    expect(isRulingRatified('pending')).toBe(false);
+    expect(isRulingRatified('')).toBe(false);
+    expect(isRulingRatified(null)).toBe(false);
+  });
+});

@@ -33,8 +33,17 @@ const RATIFIED_AS_RE = /^(?:[-*]\s*)?ratified-as\s*:\s*(.*)$/i;
  * `dismissed` each take the ruling out of "unratified". `pending` is a valid vocabulary word
  * but deliberately does NOT count as ratified — it is the explicit spelling of "not yet". Every
  * other value, and a present-but-empty value, falls through to `isRulingRatified`'s default
- * `false` (strict by design — the gate exists to force the discipline, per the brief). */
-const RATIFIED_VALUE_RE = /^(rule\s+\S+|debt\s+\S+|roadmap\s+\S+|operational|dismissed)$/i;
+ * `false` (strict by design — the gate exists to force the discipline, per the brief).
+ *
+ * A ruling that closes a harness gap may name the gap it closed, as a trailing `(G-NNN)`
+ * suffix — `rule plugins/tribe/rules/x.md (G-052)` (harness-gap gate spec, §5: "records it as
+ * `ratified-as: rule <path> (G-NNN)`"). The suffix is optional and strictly shaped: `G-` plus
+ * at least one digit, in parentheses, at the end. Anything looser stays free text and stays
+ * unratified — the id is a cross-reference to the registry, never a licence to relax the
+ * vocabulary. `pending` is excluded before this regex is ever reached, so `pending (G-057)` is
+ * unratified too. */
+const RATIFIED_VALUE_RE =
+  /^(rule\s+\S+|debt\s+\S+|roadmap\s+\S+|operational|dismissed)(\s+\(G-\d+\))?$/i;
 
 /** Parses `content` into ruling blocks, one per `## ` heading. Absent content (`null`/
  * `undefined`) and content with no `## ` heading at all both produce zero blocks — there is

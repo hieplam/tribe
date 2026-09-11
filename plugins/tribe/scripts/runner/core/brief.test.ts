@@ -106,9 +106,21 @@ that proves them — paste gate output verbatim into worker reports.
 Your agent Method already carries these; they are walls here because campaigns
 starve them silently:
 
-- Dispatch the Tracker at every audit round (Method step 6.0b) and reconcile any
-  HG-candidates via the gap-reconcile script (Method step 7) — never by hand.
-- The debt burn-down gate and debt-backfill run on EVERY PR, unconditionally.
+- Dispatch the Tracker at every audit round (Method step 6.0b), and give every dispatch its
+  own report-file path under the BASE tribe home's \`reports/\` directory that Method step 6.0b
+  names — the one \`gap-gate.ts\` globs, NOT the campaign-nested \`reports/\` of ${FIXTURE_REPORT_PATH} above — named
+  \`tracker-C7-<round>.md\` (\`<round>\` = \`task-3\`, \`wave-2\`, \`fix-1\`,
+  \`final\`). You never read those files yourself.
+- Before \`gh pr create\`, run \`gap-gate.ts\` from the plugin root (Method step 7). It reads
+  every one of those Tracker report files, reconciles \`.tribe/harness-gaps.jsonl\`, and runs
+  the debt burn-down. Its exit code is a gate: 0 green, 1 red (fix the listed hits and re-run),
+  2 setup error (most often: no Tracker report for this card). Paste
+  \`C7-gap-gate.md\` verbatim as the PR body's \`## Harness gaps\` section — including
+  its \`gap-gate v1\` stamp line, which is what verify-shipped and the runner's D3 replay
+  check — and commit the \`.tribe/harness-gaps.jsonl\` append with the trailer
+  \`Tribe-Milestone: gap-gate\` BEFORE the PR opens. A merged PR with no valid stamp for its
+  card is not shipped.
+- \`debt-backfill.ts\` runs on EVERY PR, unconditionally.
 - Scout's governance proposals ride THIS card's PR: rule/anti-rule drafts as reviewable
   text, a debt proposal as its recorded check command + description only — the debt
   entity itself is created later, by ratified \`gap-rule.ts\` execution, never here. Do

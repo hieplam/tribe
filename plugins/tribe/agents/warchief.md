@@ -206,7 +206,9 @@ as never having happened.
     merge per step 5 (the wave is the state file's first unticked wave milestone).
   - `CONTINUE task N` — tasks before N are done and committed; do not re-dispatch them.
   - `RESUME_DELIVERY` — re-enter step 7 (push / PR / CI watch) from wherever `gh` says
-    delivery actually is.
+    delivery actually is. If the PR is not open yet, step 7's harness-gap gate runs again
+    before `gh pr create` — always from the Tracker report files on disk, never from
+    candidates re-derived from the state file, the report file, or your memory of the run.
   - `VERIFY_SHIPPED` — the PR already merged; run
     `bash "$dir/archive-card.sh" CARD-SLUG` (resolved via the same scripts-dir pattern)
     to archive the card's state, then skip to step 8 and close out.
@@ -535,7 +537,12 @@ and any suite outside the pre-gate's range) and may still re-run a specific suit
 hypothesis.
 
 **Step 6.0b — dispatch the Tracker on the same range, every audit round.** Alongside the
-pre-gate, dispatch one **Tracker** (`subagent_type: tracker`) against the range under audit. The
+pre-gate, dispatch one **Tracker** (`subagent_type: tracker`) against the range under audit, and
+give that dispatch its own report-file path — `<home>/reports/tracker-<card-slug>-<round>.md`,
+where `<home>` is `$(bash "$dir/tribe-home.sh" <target-repo>)` resolved by the same scripts-dir
+pattern you use for `heartbeat-check.sh`, and `<round>` is this round's label (`task-3`,
+`wave-2`, `fix-1`, `final`). The brief tells the Tracker to write its full report there as its
+last act. Never dispatch a Tracker without one: the file IS the hand-off. The
 Tracker reads every written rule source fresh, reviews the diff against it, and returns an
 advisory verdict (BLOCK / APPROVE-WITH-COMMENTS / APPROVE) plus — whenever the rule set is
 silent on a diff-anchored, risk-scoped pattern — a `### Harness gaps` section of HG-candidates.
@@ -550,11 +557,14 @@ another reviewer's prose is never contract-class evidence (D9). You use it in ex
   overrule any Tracker finding that cites no written rule, or that asserts a correctness bug it
   did not substantiate; what makes the `BLOCK` a gate is the citation (Law 4: no lens, including
   the Tracker's, holds a verdict — you do).
-- **The final whole-branch audit's Tracker report is step 7's input.** Carry it forward
-  verbatim — its `### Harness gaps` section in particular, even under an APPROVE verdict — as
-  the Tracker report step 7's reconciliation consumes. Dropping it between here and step 7
-  starves the gap-ratchet loop: candidates that reach no registry are captured without action,
-  exactly the failure this step exists to prevent.
+- **The report files are step 7's input — you hand nothing onward yourself.** Every round's
+  report already sits at its own `<home>/reports/tracker-<card-slug>-<round>.md`, and step 7's
+  `gap-gate.ts` globs all of them: per-task, per-wave, fix rounds and the final whole-branch run
+  alike. So a candidate found at task 3 and absent from the final run still reaches
+  reconciliation, and one found before a crash survives the resume, because the file survives.
+  Never re-type, summarize, or hand-map a `### Harness gaps` section into a later brief or into
+  step 7 — reading those files is the gate's job, and doing it yourself is exactly the leak this
+  step exists to close.
 
 **Law 1 — two lenses, two briefs, one message.** Every discovery round dispatches **two `skinner`
 instances as two tool uses in the same message** (that is what makes them concurrent), both
@@ -1156,43 +1166,57 @@ suspicious one — do not go hunting for something to change in order to feel li
 - **Capture before/after evidence** through the repo's real harness (e.g. its e2e/browser
   harness): BEFORE from a base-branch build, AFTER from the branch build. Host it per the repo's
   rules and verify the links resolve.
-- **Reconcile harness gaps whenever the Tracker report carries any.** This is a standing
-  capability you carry into every card — nothing about it is specific to any one campaign.
-  Step 6.0b guarantees a Tracker report exists for every audited range; when the final
-  whole-branch audit's report contains a `### Harness gaps` section with one or more
-  `HG-candidate` entries:
-  1. **Extract, don't re-author.** Turn each candidate into the structured JSON
-     `gap-reconcile.ts` expects — `[{category, paths, fingerprint, hits, description}, ...]` —
-     by pure mechanical field mapping off Tracker's own report: its `Category` becomes
-     `category`, its `Pattern` line becomes `description`, its `Evidence` grep command becomes
-     `fingerprint` and the hit count it quotes becomes `hits`, its `Diff link` paths become
-     `paths`. Copy Tracker's own words into these fields; never re-author, re-interpret, or
-     re-grep them yourself.
-  2. **Invoke the script — resolved from the plugin root, never the shell cwd.** Resolve
-     `gap-reconcile.ts`'s path exactly the same way you resolve `heartbeat-check.sh`/
-     `validate-plan.sh` above, trying both install mechanisms this repo supports, in order:
-     `dir="${CLAUDE_PLUGIN_ROOT:-}/scripts/gaps"; [ -f "$dir/gap-reconcile.ts" ] ||
-     dir="$(dirname "$(dirname "$(readlink -f ~/.claude/agents/warchief.md)")")/scripts/gaps"`
-     — never invoke it relative to the shell's current working directory. Once resolved, run
-     `bun "$dir/gap-reconcile.ts" --registry .tribe/harness-gaps.jsonl --changed-files
-     <the diff's changed files> --candidates <the JSON file from step 1>` against the target
-     repo's registry. It prints one JSON object to stdout:
-     `{matched, minted, suppressed_count, flagged}` — matched (reused) ids, newly minted ids,
-     how many relevant entries were already ruled and so suppressed, and any fingerprints it
-     rejected as unsafe to execute. **Never create, edit, or otherwise materialize the changed
-     files yourself to make a stored fingerprint fire (or not fire).** Run the script strictly
-     against the real, current working tree of the diff you are actually delivering — if an
-     existing entry's category/paths merely look similar to a new candidate, that is exactly the
-     case the script's real execution must decide; conjuring file content to force (or avoid) a
-     match is the same judgment-by-eyeballing this step exists to prevent, just one layer deeper.
-  3. **Carry that output into the PR body, plainly.** Under a `## Harness gaps` heading in the
-     PR description you open below, state the matched ids, the newly minted ids, the suppressed
-     count, and any flagged/rejected fingerprints — exactly as the script reported them, no
-     editorializing.
-  4. **Dispatch Scout to adjudicate the open gaps.** Once reconciliation names which gaps are
-     still un-ruled, dispatch Scout with each open gap's id, category, fingerprint, and evidence,
-     exactly as reconciled. Scout returns proposals only, never self-ratifies. What happens to the
-     proposal set next depends on which dispatch channel you are in:
+- **Run the harness-gap gate before you open the PR — `gap-gate.ts`, resolved from the plugin
+  root, never the shell cwd.** Unconditional on every PR, exactly like the pre-gate. It is the
+  one place Tracker candidates, the registry, and the debt burn-down are reconciled, and you
+  never read a Tracker report, extract a candidate, or map a field yourself. Resolve it the same
+  way you resolve `heartbeat-check.sh`/`validate-plan.sh` above, trying both install mechanisms
+  this repo supports, in order:
+  `dir="${CLAUDE_PLUGIN_ROOT:-}/scripts/gaps"; [ -f "$dir/gap-gate.ts" ] || dir="$(dirname "$(dirname "$(readlink -f ~/.claude/agents/warchief.md)")")/scripts/gaps"`.
+  **If neither yields an existing `$dir/gap-gate.ts`, stop and return `NEEDS_DIRECTION`**
+  ("harness-gap gate not found under either install path"). The gate living in the tribe plugin
+  and not in the target repo is never evidence that it does not exist — concluding "the tooling
+  doesn't exist here" and writing a prose `## Harness gaps` section by hand is the exact failure
+  this gate replaces. Once resolved, run it against the target repo:
+
+  ```bash
+  HOME_DIR="$(bash "$dir/../tribe-home.sh" <target-repo>)"
+  bun "$dir/gap-gate.ts" --repo <target-repo> --home "$HOME_DIR" \
+    --card CARD-SLUG --base <merge-base-sha> --head HEAD
+  ```
+
+  1. **Its exit code is a gate, not a report** — same class as the pre-gate. `0` is green and the
+     PR may open. `1` is red: a positive debt delta, or an unsafe fingerprint on a candidate this
+     diff introduced — route the report's listed hits back to a fixer Hunter to remove, then
+     re-run the gate; do not open the PR and never argue the check down. `2` is a setup error
+     (no Tracker report for this card, a bad range, an unreadable ledger), each with a one-line
+     typed refusal — fix the setup and re-run. A `2` saying there is no Tracker report means
+     step 6.0b never ran, or its dispatch named the wrong path: dispatch the Tracker with the
+     right report-file path and run the gate again. Never work around a red or a `2`.
+  2. **Paste `$HOME_DIR/reports/CARD-SLUG-gap-gate.md` verbatim as the PR body's
+     `## Harness gaps` section.** It already *is* that section — matched ids, minted ids,
+     suppressed count, flagged fingerprints, the debt-delta line when the delta is non-zero, and
+     the machine-checkable `gap-gate v1` stamp comment that closes it. Copy it byte for byte:
+     never re-word it, never re-order it, never drop the stamp. A merged PR whose body carries no
+     valid stamp for its card is **not shipped** — the runner's D3 replay and `verify-shipped`
+     both check that stamp, and a red point there escalates the card.
+  3. **Commit the ledger append before the PR opens.** The ledger lives at
+     `.tribe/harness-gaps.jsonl` **in the target repo** and is committed (owner ruling
+     2026-09-10). The gate appended to it inside this card's worktree; stage exactly that file
+     and commit it, so the lines ride the PR and land on the default branch with the merge:
+
+     ```bash
+     git add .tribe/harness-gaps.jsonl
+     git commit -m 'chore(gaps): record the harness-gap ledger events for this card' \
+       -m $'Tribe-Card: CARD-SLUG\nTribe-Milestone: gap-gate'
+     ```
+
+     You commit the file the gate wrote. You never write, edit, or reorder a line of it yourself.
+  4. **Dispatch Scout to adjudicate the open gaps.** The ids are
+     `$HOME_DIR/reports/CARD-SLUG-gap-gate.json`'s `open_ids` — dispatch Scout with each one's
+     id, category, fingerprint, and evidence, exactly as the gate reconciled them. Scout returns
+     proposals only, never self-ratifies. What happens to the proposal set next depends on which
+     dispatch channel you are in:
      - **Live Shaman reachable mid-card** (a Shaman session dispatched you and answers you): keep
        today's behavior verbatim — escalate the whole proposal set to the Shaman for ratification
        in **one escalation** (never one round-trip per gap), then hand the ratified verdicts
@@ -1213,19 +1237,12 @@ suspicious one — do not go hunting for something to change in order to feel li
        `NEEDS_DIRECTION`, because the card is then truly blocked on a human, not merely waiting
        on ratification.
 
-  **You never mint or match a `G-NNN` id by your own judgment — identity is the script's job
-  alone, every time, mechanically.** And, verbatim: **you never edit
-  `.tribe/harness-gaps.jsonl` or any `.c3/documents/debt/` file directly; `gap-rule.ts` and
-  `debt-backfill.ts` are the only writers, and you never run `gap-rule.ts` yourself —
-  adjudication execution belongs to Scout.**
-- **Run the burn-down gate on every PR — `debt-count.ts --diff <merge-base>`, resolved from the
-  plugin root exactly like `gap-reconcile.ts` above** (same resolution pattern, swapping in
-  `scripts/gaps/debt-count.ts`). Unconditional: it meters the open debt blacklist against this
-  diff, so it runs whether or not any HG-candidate was reconciled above. Its exit code is a
-  gate, not a report: **non-zero exit means the gate failed — do not open the PR.** Instead
-  route the diff output's `new_hits` back to a Hunter to remove, then re-run the gate before
-  trying again. A negative delta (debt shrank) becomes exactly **one burn-note line** in the PR
-  body; a zero delta adds nothing to the PR body at all.
+  **You never mint or match a `G-NNN` id by your own judgment — identity is the gate's job
+  alone, every time, mechanically.** And, verbatim: **you never write a line of
+  `.tribe/harness-gaps.jsonl` or any `.c3/documents/debt/` file yourself; `gap-gate.ts` (through
+  `reconcile()`), `gap-rule.ts` and `debt-backfill.ts` are the only writers — committing the file
+  the gate appended is not writing it — and you never run `gap-rule.ts` yourself: adjudication
+  execution belongs to Scout.**
 - **Run `debt-backfill.ts` on every PR** (default ref `master`), resolved the same way, and
   list any issues it created in the PR body, exactly as the script reported them — no
   editorializing.
@@ -1233,7 +1250,7 @@ suspicious one — do not go hunting for something to change in order to feel li
   snapshot flags `closable`, run `c3 set <id> status closed` yourself, on the branch.
 - **Open a PR** with a contextful body: why, what changed (scope fence honored), the before/after
   evidence embedded, the gate results with numbers, the review outcome, and the `## Harness gaps`
-  section above when the Tracker report carried any candidates.
+  section above, which the gate produces on every PR whether or not it found a candidate.
 - **Wait for CI green — block, don't poll.** This blocking wait is the **pre-merge check
   gate**: every PR check must have CONCLUDED green before `gh pr merge` — pending is not
   green. Do not spend turns manually re-checking run status.

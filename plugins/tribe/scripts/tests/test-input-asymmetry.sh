@@ -164,7 +164,7 @@ by_id = {e.get("id"): e for e in evals}
 def out(name, ok):
     print(("OK " if ok else "BAD ") + name)
 
-out("evals-file-has-47-evals", len(evals) == 47)
+out("evals-file-has-52-evals", len(evals) == 52)
 out("evals-file-ids-are-unique", len(ids) == len(set(ids)))
 
 e10 = (by_id.get(10) or {}).get("expected_output", "").lower()

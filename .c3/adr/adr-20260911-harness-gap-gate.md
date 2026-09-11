@@ -1,6 +1,6 @@
 ---
 id: adr-20260911-harness-gap-gate
-c3-seal: e0cf13f3cfd1f2286e9c46261ed72befe0d9432bb7ec3c2c9f4a806932199fe3
+c3-seal: 65a1ef29e6c676e734843a701355eec441047c10d9d7f47987cb232ced256716
 title: harness-gap-gate
 type: adr
 goal: |-
@@ -12,6 +12,9 @@ goal: |-
     mechanically, with a stamp the runner and `verify-shipped.sh` can both check after merge.
 status: accepted
 date: "2026-09-11"
+supersedes:
+    - adr-20260727-harness-gap-detection
+    - adr-20260730-scout-ruling-loop
 ---
 
 # ADR: the harness-gap gate
