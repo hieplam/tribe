@@ -70,13 +70,16 @@ starve them silently:
 - Dispatch the Tracker at every audit round (Method step 6.0b), and give every dispatch its
   own report-file path under the BASE tribe home's `reports/` directory that Method step 6.0b
   names — the one `gap-gate.ts` globs, NOT the campaign-nested `reports/` of {{REPORT_PATH}} above — named
-  `tracker-{{CARD_ID}}-<round>.md` (`<round>` = `task-3`, `wave-2`, `fix-1`,
+  `tracker-<your card slug>-<round>.md` (`<round>` = `task-3`, `wave-2`, `fix-1`,
   `final`). You never read those files yourself.
+  Your card slug is the value you put in every `Tribe-Card:` trailer (the runner accepts that
+  slug in the stamp, and also the id {{CARD_ID}} above); use the same slug for the Tracker
+  report files, `gap-gate.ts --card`, and the trailers.
 - Before `gh pr create`, run `gap-gate.ts` from the plugin root (Method step 7). It reads
   every one of those Tracker report files, reconciles `.tribe/harness-gaps.jsonl`, and runs
   the debt burn-down. Its exit code is a gate: 0 green, 1 red (fix the listed hits and re-run),
   2 setup error (most often: no Tracker report for this card). Paste
-  `{{CARD_ID}}-gap-gate.md` verbatim as the PR body's `## Harness gaps` section — including
+  `<your card slug>-gap-gate.md` verbatim as the PR body's `## Harness gaps` section — including
   its `gap-gate v1` stamp line, which is what verify-shipped and the runner's D3 replay
   check — and commit the `.tribe/harness-gaps.jsonl` append with the trailer
   `Tribe-Milestone: gap-gate` BEFORE the PR opens. A merged PR with no valid stamp for its

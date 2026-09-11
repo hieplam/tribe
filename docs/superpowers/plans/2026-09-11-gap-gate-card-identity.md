@@ -30,8 +30,8 @@ One wave, two tasks, sequential (Task 2 edits the brief template whose snapshot 
 
 Files: `plugins/tribe/scripts/runner/core/verify.ts`, `plugins/tribe/scripts/runner/core/verify.test.ts`, `plugins/tribe/scripts/runner/README.md`.
 
-- [ ] Step 1: Read `checkGapGateStamped` in `plugins/tribe/scripts/runner/core/verify.ts` and the `gapGateStamped` describe block in `verify.test.ts`; note how `buildIo` stubs `exec` and how point 1 returns `mergeSha`.
-- [ ] Step 2: Write the failing tests in the `gapGateStamped` describe block (keep every existing assertion):
+- [x] Step 1: Read `checkGapGateStamped` in `plugins/tribe/scripts/runner/core/verify.ts` and the `gapGateStamped` describe block in `verify.test.ts`; note how `buildIo` stubs `exec` and how point 1 returns `mergeSha`.
+- [x] Step 2: Write the failing tests in the `gapGateStamped` describe block (keep every existing assertion):
 
 ```ts
 test('a stamp naming the Tribe-Card slug of the merged commits passes (runner id differs)', async () => {
@@ -59,16 +59,16 @@ test('a stamp naming a slug that NO merged commit carries still fails', async ()
 ```
 
   Run `cd plugins/tribe/scripts/runner && bun test core/verify.test.ts` (expected: the first new test FAILS with "not C1", the second passes; all pre-existing tests still pass).
-- [ ] Step 3: Implement in `verify.ts`: in `checkGapGateStamped`, when `stamp.card !== cardId`, run through the io seam `['git', 'log', '--format=%(trailers:key=Tribe-Card,valueonly)', `${mergeSha}^1..${mergeSha}`]` in `config.repoRoot` (thread `mergeSha` from point 1 into the function as a parameter; when it is `null`, fall back to the pre-existing failure whose detail ends in `, not ` followed by the runner card id). Split stdout on newlines, trim, drop empties; if `stamp.card` is in that set, continue to the ancestry checks; otherwise fail with the detail `PR #<pr> body carries a gap-gate stamp for card=<stamp.card>, which is neither <cardId> nor a Tribe-Card trailer of its merged commits (<comma-joined values or 'none'>)`. The pass detail names which identity matched. Keep the function's shape (pure decision on strings after the one exec).
-- [ ] Step 4: Run `cd plugins/tribe/scripts/runner && bun test` (expected: all tests pass, count = previous count + 2).
-- [ ] Step 5: Update `plugins/tribe/scripts/runner/README.md` `gapGateStamped` bullet (around line 623) to say the stamp's `card=` must match this card's id or a `Tribe-Card:` trailer of the merged commits, quoting the git command.
-- [ ] **Step 6: Commit** — `git add plugins/tribe/scripts/runner/core/verify.ts plugins/tribe/scripts/runner/core/verify.test.ts plugins/tribe/scripts/runner/README.md docs/superpowers/plans/2026-09-11-gap-gate-card-identity.md && git commit -m "fix(runner): gapGateStamped accepts the merged commits' Tribe-Card slug (CU-4 §3a)" -m $'Tribe-Card: gap-gate-card-identity\nTribe-Task: 1/2\nCampaign: gap-gate-2026-09-10'` (expected: one commit, trailers present in `git log -1 --format=%(trailers)`).
+- [x] Step 3: Implement in `verify.ts`: in `checkGapGateStamped`, when `stamp.card !== cardId`, run through the io seam `['git', 'log', '--format=%(trailers:key=Tribe-Card,valueonly)', `${mergeSha}^1..${mergeSha}`]` in `config.repoRoot` (thread `mergeSha` from point 1 into the function as a parameter; when it is `null`, fall back to the pre-existing failure whose detail ends in `, not ` followed by the runner card id). Split stdout on newlines, trim, drop empties; if `stamp.card` is in that set, continue to the ancestry checks; otherwise fail with the detail `PR #<pr> body carries a gap-gate stamp for card=<stamp.card>, which is neither <cardId> nor a Tribe-Card trailer of its merged commits (<comma-joined values or 'none'>)`. The pass detail names which identity matched. Keep the function's shape (pure decision on strings after the one exec).
+- [x] Step 4: Run `cd plugins/tribe/scripts/runner && bun test` (expected: all tests pass, count = previous count + 2).
+- [x] Step 5: Update `plugins/tribe/scripts/runner/README.md` `gapGateStamped` bullet (around line 623) to say the stamp's `card=` must match this card's id or a `Tribe-Card:` trailer of the merged commits, quoting the git command.
+- [x] **Step 6: Commit** — `git add plugins/tribe/scripts/runner/core/verify.ts plugins/tribe/scripts/runner/core/verify.test.ts plugins/tribe/scripts/runner/README.md docs/superpowers/plans/2026-09-11-gap-gate-card-identity.md && git commit -m "fix(runner): gapGateStamped accepts the merged commits' Tribe-Card slug (CU-4 §3a)" -m $'Tribe-Card: gap-gate-card-identity\nTribe-Task: 1/2\nCampaign: gap-gate-2026-09-10'` (expected: one commit, trailers present in `git log -1 --format=%(trailers)`).
 
 ### Task 2: the campaign brief names one identity — the card slug
 
 Files: `plugins/tribe/scripts/runner/core/brief-template.md`, `plugins/tribe/scripts/runner/core/brief.test.ts`.
 
-- [ ] Step 1: In `brief-template.md`, make exactly these two substitutions and one insertion, keeping every other line byte-identical:
+- [x] Step 1: In `brief-template.md`, make exactly these two substitutions and one insertion, keeping every other line byte-identical:
 
 ```text
 tracker-{{CARD_ID}}-<round>.md      ->  tracker-<your card slug>-<round>.md
@@ -78,9 +78,9 @@ insert after the sentence ending "You never read those files yourself.":
   slug in the stamp, and also the id {{CARD_ID}} above); use the same slug for the Tracker
   report files, `gap-gate.ts --card`, and the trailers.
 ```
-- [ ] Step 2: Update the `EXPECTED_BRIEF` string in `brief.test.ts` to the new rendered text (this is the one assertion this plan changes). Run `cd plugins/tribe/scripts/runner && bun test core/brief.test.ts` (expected: pass).
-- [ ] Step 3: Run `bash plugins/tribe/scripts/tests/test-input-asymmetry.sh` (expected: PASS) and `cd plugins/tribe/scripts/runner && bun test` (expected: all pass).
-- [ ] **Step 4: Commit** — `git add plugins/tribe/scripts/runner/core/brief-template.md plugins/tribe/scripts/runner/core/brief.test.ts docs/superpowers/plans/2026-09-11-gap-gate-card-identity.md && git commit -m "fix(runner): the executor brief names the card slug as the one stamp identity (CU-4 §3a)" -m $'Tribe-Card: gap-gate-card-identity\nTribe-Task: 2/2\nCampaign: gap-gate-2026-09-10'` (expected: one commit, trailers present).
+- [x] Step 2: Update the `EXPECTED_BRIEF` string in `brief.test.ts` to the new rendered text (this is the one assertion this plan changes). Run `cd plugins/tribe/scripts/runner && bun test core/brief.test.ts` (expected: pass).
+- [x] Step 3: Run `bash plugins/tribe/scripts/tests/test-input-asymmetry.sh` (expected: PASS) and `cd plugins/tribe/scripts/runner && bun test` (expected: all pass).
+- [x] **Step 4: Commit** — `git add plugins/tribe/scripts/runner/core/brief-template.md plugins/tribe/scripts/runner/core/brief.test.ts docs/superpowers/plans/2026-09-11-gap-gate-card-identity.md && git commit -m "fix(runner): the executor brief names the card slug as the one stamp identity (CU-4 §3a)" -m $'Tribe-Card: gap-gate-card-identity\nTribe-Task: 2/2\nCampaign: gap-gate-2026-09-10'` (expected: one commit, trailers present).
 
 ## Card acceptance — run before opening the PR
 

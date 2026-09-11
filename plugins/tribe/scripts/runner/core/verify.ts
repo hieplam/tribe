@@ -406,14 +406,19 @@ export function parseGapGateStamp(text: string): GapGateStamp | null {
   return { card: m[1]!, base: m[2]!, head: m[3]!, minted: list(m[4]!), matched: list(m[5]!) };
 }
 
-/** D3 point 6 (spec §3): the merged PR's body carries a `gap-gate v1` stamp whose `card=` is
- * THIS card and whose base/head shas are commits of the merged branch. A PR opened by a session
- * that bypassed the Warchief (leak L4) has no stamp, so it cannot record `shipped`. */
+/** D3 point 6 (spec §3, amendment §3a): the merged PR's body carries a `gap-gate v1` stamp
+ * whose `card=` names an identity of THIS card and whose base/head shas are commits of the
+ * merged branch. A card has two names (spec §3a): the runner's campaign-local id (`cardId`)
+ * and the Warchief's slug, which lands as a `Tribe-Card:` trailer on the merged branch's
+ * commits — `stamp.card` matching EITHER is accepted; naming neither is still a failure. A PR
+ * opened by a session that bypassed the Warchief (leak L4) has no stamp, so it cannot record
+ * `shipped`. */
 async function checkGapGateStamped(
   cardId: string,
   card: Card,
   config: VerifyConfig,
   io: VerifyIO,
+  mergeSha: string | null,
 ): Promise<{ point: VerifyPointResult; stamp: GapGateStamp | null }> {
   const fail = (detail: string): { point: VerifyPointResult; stamp: null } => ({
     point: { id: 'gapGateStamped', passed: false, detail },
@@ -438,8 +443,36 @@ async function checkGapGateStamped(
       `PR #${card.pr} body carries no \`gap-gate v1\` stamp — the harness-gap gate never ran for this PR`,
     );
   }
-  if (stamp.card !== cardId) {
-    return fail(`PR #${card.pr} body carries a gap-gate stamp for card=${stamp.card}, not ${cardId}`);
+  let matchedIdentity = stamp.card === cardId ? `card id ${cardId}` : null;
+  if (!matchedIdentity) {
+    if (!mergeSha) {
+      return fail(`PR #${card.pr} body carries a gap-gate stamp for card=${stamp.card}, not ${cardId}`);
+    }
+    const trailerResult = await run(io, config.repoRoot, [
+      'git',
+      'log',
+      '--format=%(trailers:key=Tribe-Card,valueonly)',
+      `${mergeSha}^1..${mergeSha}`,
+    ]);
+    if (trailerResult.exitCode !== 0) {
+      return fail(
+        `PR #${card.pr}: reading the merged commits' Tribe-Card trailers failed (git log exit ${trailerResult.exitCode}); cannot confirm card=${stamp.card}`,
+      );
+    }
+    const trailerValues = trailerResult.stdout
+      .split('\n')
+      .map((v) => v.trim())
+      .filter((v) => v.length > 0);
+    const trailerSet = new Set(trailerValues);
+    if (trailerSet.has(stamp.card)) {
+      matchedIdentity = `Tribe-Card trailer ${stamp.card}`;
+    } else {
+      return fail(
+        `PR #${card.pr} body carries a gap-gate stamp for card=${stamp.card}, which is neither ${cardId} nor a Tribe-Card trailer of its merged commits (${
+          trailerValues.length > 0 ? [...new Set(trailerValues)].join(',') : 'none'
+        })`,
+      );
+    }
   }
 
   const target = `${config.remote}/${config.baseBranch}`;
@@ -454,7 +487,7 @@ async function checkGapGateStamped(
     point: {
       id: 'gapGateStamped',
       passed: true,
-      detail: `PR #${card.pr} carries a gap-gate v1 stamp for ${cardId} (minted=${stamp.minted.join(',') || 'none'})`,
+      detail: `PR #${card.pr} carries a gap-gate v1 stamp for ${cardId} (matched ${matchedIdentity}, minted=${stamp.minted.join(',') || 'none'})`,
     },
     stamp,
   };
@@ -508,7 +541,7 @@ export async function verifyShipped(
   const checks = await checkChecksGreen(card, config, io);
   const worktree = await checkWorktreeAndBranchGone(card, config, io);
   const schema = await checkSchemaGuard(card, config, io);
-  const gapGate = await checkGapGateStamped(cardId, card, config, io);
+  const gapGate = await checkGapGateStamped(cardId, card, config, io, merged.mergeSha);
   const ledger = await checkLedgerCommitted(gapGate.stamp, config, io);
   const points: VerifyPointResult[] = [
     merged.point,
