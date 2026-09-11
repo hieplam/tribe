@@ -179,6 +179,22 @@ verdict the Shaman must act on, which is the strongest guarantee available witho
 hook, and it satisfies the definition of fixed in the Verification section below: the merged
 master must carry the ledger event, and the PR body must carry the reconcile output.
 
+#### 3a. Card identity in the stamp (amendment 2026-09-11, ruling R3)
+
+A card has two names: the runner's campaign-local id (`C2`) and the slug the Warchief uses in
+its state file, its report files, and every `Tribe-Card:` commit trailer (`gap-gate-wiring`).
+The first campaign run of this design (PR #129) stamped the slug while the runner's point 6
+compared against the id, so a correctly gated, merged PR was refused as not shipped. The rule:
+**the stamp carries the Warchief's card slug**, and every reader accepts it as follows.
+
+- `gap-gate.ts --card` is the slug; the Tracker report files are `tracker-<slug>-<round>.md`;
+  the campaign brief says so and never asks for the runner id.
+- Runner point 6 (`gapGateStamped`) passes when `stamp.card` equals the runner's card id **or**
+  equals a `Tribe-Card:` trailer value on the commits the merged PR brought in (the second-parent
+  side of the merge commit, `git log <mergeSha>^1..<mergeSha>`). Ancestry of `base`/`head` is
+  checked as before. A stamp naming neither is still a failure.
+- `verify-shipped.sh --card` takes the slug, unchanged.
+
 ### 4. Where the ledger lives — owner decision, ruled 2026-09-10: Option A
 
 CU-2 wrote `.tribe/harness-gaps.jsonl in the target repo`, citing the runner's state-in-repo
@@ -237,7 +253,7 @@ the target repo and is committed. Option B is recorded only as the rejected alte
 
 ### 7. Evals (adversarial, per M3)
 
-Existing 37, 44–47 stay. New cases:
+The coverage of the existing cases 37 and 44–47 stays; their prompts and rubrics track the shipped behaviour (ruling R1, 2026-09-11). New cases:
 
 - Warchief at step 7 with three Tracker report files on disk, only the final one empty: the
   written-out sequence runs `gap-gate.ts` and never inspects the reports itself, never says
