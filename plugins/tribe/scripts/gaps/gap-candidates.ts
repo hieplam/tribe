@@ -3,6 +3,7 @@
 // hands the text in. Under-parsing a real report shape is a bug; a block that cannot be mapped
 // completely is reported under `unparsed` and never aborts anything (plan Oracle).
 import { anyPathOverlap } from './paths.ts';
+import { tokenize } from './fingerprint.ts';
 
 export interface ParsedCandidate {
   category: string;
@@ -110,6 +111,46 @@ function extractPaths(source: string): string[] {
   return out;
 }
 
+/** Pattern-bearing grep flags: the search pattern rides the flag, so the first POSITIONAL token
+ * is a target path, not the pattern. Standalone forms (`-e PAT`, `--regexp PAT`, `-f FILE`,
+ * `--file FILE`) consume the next token; fused forms (`--regexp=PAT`, `-ePAT`) carry it inline. */
+const PATTERN_FLAGS = new Set(['-e', '--regexp', '-f', '--file']);
+
+/** The fingerprint's own target arguments — the grep's non-flag, non-pattern tokens (e.g.
+ * `src/`). These are the SCOPE the fingerprint re-fires over, so a later change anywhere inside
+ * them must re-execute it (card C5, spec §2 step 2 amended). Drops argv[0] (the command) and
+ * every flag; drops the search pattern whether it is positional OR carried by a pattern-flag
+ * (else the first real target is lost — under-inclusion, the bug this card fixes); drops a bare
+ * `.`/`./` (not a path — the Evidence/Diff-link paths carry the scope). Pure — `tokenize` is the
+ * shared fingerprint splitter, so target tokens come from the same source as the executed argv. */
+export function fingerprintTargets(fingerprint: string): string[] {
+  const tokens = tokenize(fingerprint);
+  // Only a real `grep` fingerprint has a grep search scope. A non-grep fingerprint is flagged and
+  // never executed (validateFingerprint), so its shell tokens must not become synthetic paths that
+  // collapse distinct flagged candidates in dedupeCandidates; its scope comes from the Evidence/
+  // Diff-link/body paths instead.
+  if (tokens[0] !== 'grep') return [];
+  const out: string[] = [];
+  let patternConsumed = false; // the positional search pattern is dropped exactly once
+  for (let i = 1; i < tokens.length; i++) {
+    const t = tokens[i]!;
+    if (t.startsWith('-')) {
+      const flagName = t.includes('=') ? t.slice(0, t.indexOf('=')) : t;
+      if (PATTERN_FLAGS.has(flagName)) {
+        patternConsumed = true;
+        if (!t.includes('=')) i += 1; // standalone pattern-flag: its value is the next token — skip it
+      } else if (/^-[ef]./.test(t)) {
+        patternConsumed = true; // fused short pattern-flag: -ePAT / -fFILE
+      }
+      continue; // every flag token is skipped
+    }
+    if (!patternConsumed) { patternConsumed = true; continue; } // the positional pattern — drop it
+    if (t === '.' || t === './') continue;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
 /** Parses ONE Tracker report's text. `file`/`round` are carried through onto every candidate so
  * the gate can report where a candidate came from and dedupe by round order. */
 export function parseTrackerReport(text: string, file: string, round: string): ParseResult {
@@ -144,7 +185,17 @@ export function parseTrackerReport(text: string, file: string, round: string): P
     }
 
     const diffLink = fields.get('diff link');
-    const paths = extractPaths(diffLink !== undefined && diffLink.trim().length > 0 ? diffLink : blockText);
+    const hasDiffLink = diffLink !== undefined && diffLink.trim().length > 0;
+    const paths: string[] = [];
+    const addPaths = (candidatePaths: string[]): void => {
+      for (const p of candidatePaths) {
+        if (p === '.' || p === './') continue; // a bare current-dir is never a path (Oracle)
+        if (!paths.includes(p)) paths.push(p);
+      }
+    };
+    addPaths(fingerprintTargets(fingerprint));            // fingerprint's target scope (the fix)
+    addPaths(extractPaths(evidenceField ?? ''));          // Evidence hit paths
+    addPaths(extractPaths(hasDiffLink ? diffLink! : blockText)); // Diff-link paths, else block body (existing base)
     if (paths.length === 0) {
       unparsed.push({ file, line: start + 1, reason: 'no path in Diff link or block body', excerpt });
       continue;
