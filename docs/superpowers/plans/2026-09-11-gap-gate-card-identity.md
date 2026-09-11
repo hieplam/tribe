@@ -68,7 +68,7 @@ test('a stamp naming a slug that NO merged commit carries still fails', async ()
 
 Files: `plugins/tribe/scripts/runner/core/brief-template.md`, `plugins/tribe/scripts/runner/core/brief.test.ts`.
 
-- [ ] Step 1: In `brief-template.md`, make exactly these two substitutions and one insertion, keeping every other line byte-identical:
+- [x] Step 1: In `brief-template.md`, make exactly these two substitutions and one insertion, keeping every other line byte-identical:
 
 ```text
 tracker-{{CARD_ID}}-<round>.md      ->  tracker-<your card slug>-<round>.md
@@ -78,9 +78,9 @@ insert after the sentence ending "You never read those files yourself.":
   slug in the stamp, and also the id {{CARD_ID}} above); use the same slug for the Tracker
   report files, `gap-gate.ts --card`, and the trailers.
 ```
-- [ ] Step 2: Update the `EXPECTED_BRIEF` string in `brief.test.ts` to the new rendered text (this is the one assertion this plan changes). Run `cd plugins/tribe/scripts/runner && bun test core/brief.test.ts` (expected: pass).
-- [ ] Step 3: Run `bash plugins/tribe/scripts/tests/test-input-asymmetry.sh` (expected: PASS) and `cd plugins/tribe/scripts/runner && bun test` (expected: all pass).
-- [ ] **Step 4: Commit** — `git add plugins/tribe/scripts/runner/core/brief-template.md plugins/tribe/scripts/runner/core/brief.test.ts docs/superpowers/plans/2026-09-11-gap-gate-card-identity.md && git commit -m "fix(runner): the executor brief names the card slug as the one stamp identity (CU-4 §3a)" -m $'Tribe-Card: gap-gate-card-identity\nTribe-Task: 2/2\nCampaign: gap-gate-2026-09-10'` (expected: one commit, trailers present).
+- [x] Step 2: Update the `EXPECTED_BRIEF` string in `brief.test.ts` to the new rendered text (this is the one assertion this plan changes). Run `cd plugins/tribe/scripts/runner && bun test core/brief.test.ts` (expected: pass).
+- [x] Step 3: Run `bash plugins/tribe/scripts/tests/test-input-asymmetry.sh` (expected: PASS) and `cd plugins/tribe/scripts/runner && bun test` (expected: all pass).
+- [x] **Step 4: Commit** — `git add plugins/tribe/scripts/runner/core/brief-template.md plugins/tribe/scripts/runner/core/brief.test.ts docs/superpowers/plans/2026-09-11-gap-gate-card-identity.md && git commit -m "fix(runner): the executor brief names the card slug as the one stamp identity (CU-4 §3a)" -m $'Tribe-Card: gap-gate-card-identity\nTribe-Task: 2/2\nCampaign: gap-gate-2026-09-10'` (expected: one commit, trailers present).
 
 ## Card acceptance — run before opening the PR
 
