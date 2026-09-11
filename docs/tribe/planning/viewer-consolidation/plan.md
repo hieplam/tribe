@@ -31,8 +31,10 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
   the theme.** Do not reinterpret "the build" as "the Vite build" or "the client phase" — an
   earlier draft of this plan did exactly that and it was overruled.
 - No design token, colour, font, radius, or spacing literal is invented by the implementer. The
-  client reads `var(--token)` only, using the token names of spec §8.2 **verbatim** from the
-  owner's `design/<theme>/tokens.css`. There is no alias layer and no invented scale.
+  client reads `var(--token)` only, using the token names of spec §8.2 **verbatim** from
+  **`design/sea-salt/tokens.css`** (the owner's choice, STATE.md D17). `matcha/` and `coffee/`
+  remain in the repo as the rejected candidates and are **never imported**. There is no alias layer
+  and no invented scale.
 - The viewer reads the Claude transcript only, plus exactly two files under `~/.tribe`
   (`campaign-state.json`, `run.json`). No code path may open anything under `runs/*/logs/`
   (D6).
@@ -129,17 +131,19 @@ Concurrency is available but not required. The only genuinely independent bundle
 run one hunter at a time per worktree. If the Warchief runs task 27 in a second worktree, its
 `owns_files` is exactly `plugins/tribe/scripts/runner/**`.
 
-**The P1 gate, concretely.** Before dispatching task 1, confirm all three:
+**The P1 gate, concretely — and it is now SATISFIED.** Before dispatching task 1, confirm all three:
 
-1. `docs/tribe/planning/viewer-consolidation/design/` holds the candidate themes (it does:
-   `matcha/`, `coffee/`, `sea-salt/`, one shared token schema);
-2. the owner has **named one** of them, recorded in STATE.md as a ruling;
-3. `design/<that-theme>/tokens.css` exists and defines every token in spec §8.2's table.
+1. `docs/tribe/planning/viewer-consolidation/design/` holds the candidate themes — it does:
+   `matcha/`, `coffee/`, `sea-salt/`, one shared token schema;
+2. the owner has **named one**, recorded in STATE.md as a ruling — **D17, 2026-09-12: sea salt**;
+3. `design/<that-theme>/tokens.css` exists and defines every token in spec §8.2's table —
+   `design/sea-salt/tokens.css` does, all 38, verified 2026-09-12.
 
-If any is missing, the Warchief returns `NEEDS_DIRECTION` to the Shaman and dispatches nothing. The
-cost of this stricter reading is low — the three candidates share one schema, so nothing in phases
-0–2 would change if the owner picked differently — and the benefit is that the owner's handover
-rule is honoured literally instead of being reinterpreted by the people it governs.
+All three hold, so the gate is **open** and task 1 may be dispatched. **The check is not retired by
+being satisfied**: re-run it at dispatch. A theme decision that later changes STATE.md without
+adding the matching `tokens.css` (or the reverse) is exactly the drift this gate catches, and a
+check that is only written down after it fails is not a check. If any condition stops holding, the
+Warchief returns `NEEDS_DIRECTION` to the Shaman and dispatches nothing.
 
 ### Model per hunter
 
@@ -531,8 +535,9 @@ Model: **Sonnet**.
       outside the window (asserts an `orphan_result` node **at the result's file position**, never
       a drop — this is B1's other half); a call with no result (stays `pending`); two calls with the
       same id; a result with `is_error`; a `Task` call whose id matches a sidecar `toolUseId`
-      (asserts `agentId` is set); a tool input over 64 KiB (asserts `inputElided: true` and no
-      payload in the node); a result over 64 KiB (same).
+      (asserts `agentId` is set); a tool input over 64 KiB (asserts the node's `elided: true`,
+      `expandable: true`, and no full payload in the node); a result over 64 KiB (same, with the
+      `ToolResult`'s own `elided` set so the client knows which half it is expanding).
 
       **Then D15, which is what makes the frame budget satisfiable:** every *text-bearing* kind
       gets the same treatment. A **2 MiB assistant text row** produces **one node under 64 KiB**
@@ -566,7 +571,7 @@ Model: **Sonnet**.
 - [ ] **Step 4: Commit**
 
 Audit lens (Sol, contract): measure the elision threshold's effect on a real transcript — count how
-many nodes carry `inputElided` or an elided result, and confirm no node's serialized size exceeds
+many nodes carry `elided: true`, and confirm no node's serialized size exceeds
 the 1 MiB frame budget of spec §14. Then feed the same transcript through the normalizer twice, once
 as one batch and once split into 50 arbitrary tick boundaries, and assert the resulting
 (nodes + patches) collapse to an identical final state. A `RowAnchor.id` that depends on how the
@@ -696,7 +701,9 @@ Model: **Sonnet**.
 - [ ] **Step 1: Write the failing test.** Encoding: every frame type of spec §6.2 round-trips,
       **including `patch`**; `id:` is present on every frame and is a **per-stream monotonic
       sequence** starting at 1 on `hello` and incrementing by one per frame, of any type (D12) —
-      assert a `hello`/`rows`/`patch`/`meta`/`ping` sequence carries ids 1,2,3,4,5; `retry:` appears
+      assert a `hello`/`rows`/`patch`/`meta`/`ping` sequence carries ids 1,2,3,4,5; **`hello` carries a
+      `generation`** and two connections to the same session produce **different** generations
+      (spec §6.2 — it is what tells the client to clear rather than merge); `retry:` appears
       exactly once, in the first frame; a payload containing a newline, `U+2028`, `U+2029`, a
       BigInt, a cyclic object and `undefined` each produce a well-formed frame (carry over the
       existing `serializeFrameData` cases and add the two Unicode line separators, which the
@@ -956,8 +963,13 @@ Model: **Sonnet**.
       node is a rendered unit, and one row can yield several nodes or none). It returns the **last
       500 nodes** by default, found by spec §6.3's backwards-stepping algorithm — read backwards
       from EOF in 256 KiB steps, drop the leading partial row unless at BOF, parse complete rows,
-      accumulate the node count, stop at ≥500 nodes or BOF. Assert on a fixture row carrying four
-      blocks that a 500-node window spans **fewer than 500 rows**: that is the one assertion that
+      accumulate the node count, stop at ≥500 nodes or BOF, then **trim from the FRONT to exactly
+      500 nodes and set the anchor to the first retained node's row offset** — the loop reads whole
+      slices and normally overshoots, so without the trim the window size would depend on where
+      slice boundaries fell. `truncatedBefore` is true iff **any row precedes the anchor**. Assert
+      an overshooting case returns exactly 500 nodes with the anchor on the first retained node's
+      row. Assert on a fixture row carrying four blocks that a 500-node window spans **fewer than
+      500 rows**: that is the one assertion that
       distinguishes a correct implementation from a row-counting one. `from` is the first row's byte
       offset; `truncatedBefore` is **true iff BOF was not reached**; `before` past EOF or negative is
       refused with 400; a `before` window is contiguous with the one it precedes.
@@ -1006,11 +1018,13 @@ here is invisible until a live campaign — which is precisely how B4 and B12 su
       - a tick that finds growth emits one `rows` frame; a tick with no growth emits nothing;
       - **a `tool_use` on tick 1 and its `tool_result` on tick 3 emits a `patch` frame on tick 3 and
         no new row** (spec §6.4);
-      - a truncation emits `reset{reason:"truncated"}` and re-streams from zero **exactly once**
-        (B12);
+      - a truncation emits `reset{reason:"truncated"}` **followed by the normal tail window** — the
+        last 500 nodes per spec §6.3, **never the file from byte 0** (a rotated 13 MB file would
+        otherwise re-deliver everything through a 1 MiB-framed pipe). Assert the first `rows` frame
+        after a `reset` starts at the tail anchor, not at offset 0, and that it happens exactly once;
       - **the file is replaced with a same-size file of different content** (the fixture's rotation
-        pair from task 1) — emits `reset{reason:"rotated"}` and re-streams; the same with a
-        **larger** replacement. Size alone cannot see either; the inode can;
+        pair from task 1) — emits `reset{reason:"rotated"}` then the same tail window; the same with
+        a **larger** replacement. Size alone cannot see either; the inode can;
       - **a new `agent-*.jsonl` + `.meta.json` appears while the parent stream is open** — emits a
         `meta` frame containing the new agent, with no reconnect (spec §6.2);
       - a deletion emits `gone`;
@@ -1024,9 +1038,9 @@ here is invisible until a live campaign — which is precisely how B4 and B12 su
 
       `serve.events.test.ts`: a real connection against the fixture receives `hello` then `rows`;
       **a reconnect is a fresh snapshot (D12)** — the server ignores the `Last-Event-ID` the browser
-      sends, replies with `hello` + the current window, and the pairing state is rebuilt from the
-      file, so a `tool_use`/`tool_result` pair that straddled the disconnect arrives **already
-      paired** rather than as an orphan; the 9th concurrent stream gets 503; closing a connection
+      sends, replies with `hello` **carrying a new `generation`** plus the current window, and the
+      pairing state is rebuilt from the file, so a `tool_use`/`tool_result` pair that straddled the
+      disconnect arrives **already paired** rather than as an orphan; the 9th concurrent stream gets 503; closing a connection
       releases its slot (assert by opening, closing and reopening 9 times). Expected: the poller
       module is missing and `/events` 404s.
 - [ ] **Step 2: Implement** per spec §6. The clock is injected; this adapter is the package's only
@@ -1127,10 +1141,10 @@ finding — this row is the architecture record and it was stale before.
 
 ## Phase 3 — the client (blocked on precondition P1)
 
-P1 gates **every** phase (see Global Constraints), so by the time this phase is reached the theme is
-already named and `design/<chosen-theme>/tokens.css` already exists. What is specific to this phase
-is the *use* of it: the token names in spec §8.2 are copied **verbatim** from that file, there is no
-alias layer, and no component may introduce a name the file does not define.
+P1 gates **every** phase (see Global Constraints) and is satisfied: the theme is **sea salt**
+(STATE.md D17) and `design/sea-salt/tokens.css` defines all 38 tokens spec §8.2 names. What is
+specific to this phase is the *use* of it: the token names are copied **verbatim** from that one
+file, there is no alias layer, and no component may introduce a name the file does not define.
 
 ### Task 22: Vite scaffold, token wiring, and the client half of the structural wall
 
@@ -1153,8 +1167,10 @@ Model: **Sonnet**.
       Add `V/client/src/routes.test.ts` asserting the four URL shapes of spec §3.2 parse and
       round-trip through `pushState`. Expected: the client rules fail against the old `app.css`,
       which is full of literals.
-- [ ] **Step 2: Implement** the scaffold. `vite.config.ts` copies the owner's chosen theme file to
-      `client/src/styles/tokens.css` as a pre-build step and sets `build.outDir` to `../dist` with
+- [ ] **Step 2: Implement** the scaffold. `vite.config.ts` copies
+      **`docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css`** (STATE.md D17) to
+      `client/src/styles/tokens.css` as a pre-build step — verbatim, no edits; `matcha/` and
+      `coffee/` are never imported and sets `build.outDir` to `../dist` with
       `base: '/assets/'`. Pin react and react-dom at 19.2.x and vite at its current major; add
       `playwright-core@1.63.0` as a devDependency (spec §16.0 — **vendored in the package, never
       read from `/tmp/pwshot`**, which is scratch and is cleared); commit `bun.lock`.
@@ -1178,9 +1194,10 @@ Model: **Sonnet**.
 Audit lens (Sol, contract): run the build from a clean `node_modules` and confirm `dist/` is
 produced and git-ignored. Then grep the built bundle for any hex colour outside the token block — a
 literal reaching `dist/` from a source file the wall does not cover means the wall has a hole. Then
-check the token-name rule against the owner's actual file: every name the client uses must be
-defined there, and the names must be the candidates' own (`--space-12`, `--radius-8`,
-`--surface-raised`, `--size-14`), not an invented scale.
+diff `client/src/styles/tokens.css` against `design/sea-salt/tokens.css`: it must be **byte-
+identical**, and no file may import from `design/matcha/` or `design/coffee/`. Finally check every
+`var(--name)` the client uses is defined in that file, with the candidates' own names
+(`--space-12`, `--radius-8`, `--surface-raised`, `--size-14`), not an invented scale.
 
 ### Task 23: The list view
 
@@ -1247,8 +1264,20 @@ getting it wrong is easy and silent.
         operation** (spec §6.3). Assert both, and assert the oldest back-filled node survives —
         head eviction would delete the history the user just requested and cap "load earlier" at
         2,000 nodes forever, on four transcripts that already exceed it;
-      - **scrolling back to the bottom reloads the tail window** (a fresh fetch with no `before`)
-        and re-enables following.
+      - **while at the cap with follow-live off, an incoming `rows` frame is COUNTED, NOT
+        APPENDED** (spec §6.3) — assert the node count is unchanged and a counter increments;
+        appending during tail eviction would put a hole in the middle of the window;
+      - **clicking the "N new below" pill, or scrolling back to the bottom, reloads the tail
+        window** (a fresh fetch with no `before`), replaces the store's contents, re-enables
+        following and zeroes the counter;
+      - **the store clears on `reset`** and then applies the window that follows (spec §6.1);
+      - **the store clears when `hello` carries a different `generation`** than the one it holds,
+        then applies the snapshot; ids seen under the previous generation mean nothing (spec §6.2).
+        Assert the failing shape directly: hold a window under generation A, deliver a `hello` with
+        generation B carrying nodes with the **same ids**, and assert the store ends holding B's
+        nodes — a merge here would silently keep stale content from a file that may have rotated;
+      - **the window is always one contiguous range** — assert it as an invariant after every
+        operation above, not just at the end.
 
       `useEventStream.test.ts` against a fake `EventSource`: `hello` then `rows` populates; a second
       `rows` frame appends; a `patch` frame routes to the store's patch path; `meta` updates the
@@ -1297,7 +1326,7 @@ built bundle.
 ### Task 25: Subagent tabs, expansion, attachments, and raw cards
 
 - Create: `V/client/src/components/AgentTabs.tsx`, `OrphanResultCard.tsx`, `ImageCard.tsx`,
-  `AttachmentStrip.tsx`, `RawCard.tsx`, `UnreadableNote.tsx`
+  `AttachmentStrip.tsx`, `RawCard.tsx`, `UnreadableNote.tsx`, `NewBelowPill.tsx`
 - Create: `V/client/src/components/agents.test.tsx`
 
 Model: **Sonnet**.
@@ -1305,8 +1334,8 @@ Model: **Sonnet**.
 - [ ] **Step 1: Write the failing test.** Tabs render from `Agent[]` in tree order with depth
       indentation; selecting a tab navigates to `/s/<id>/a/<agentId>` and opens a new stream; a
       `Task` tool card whose node carries an `agentId` links to that tab; `ImageCard` fetches
-      `/api/block?at=<RowAnchor.at>&i=<blockIndex>` only on expand — **addressed by row offset and
-      block index, never a uuid** (spec §4: 14,032 measured `attachment` rows carry no uuid, which
+      `/api/block?at=<RowAnchor.at>&i=<RowAnchor.i>` only on expand — **addressed by the node's own
+      `at`+`i`, never a uuid** (an `attachment` row has no `message.content`, so its `i` is 0) (spec §4: 14,032 measured `attachment` rows carry no uuid, which
       is why one addressing scheme covers every expandable node); `ToolCard` with a spill result
       fetches `/api/spill` only on expand and shows the preview before that; consecutive
       `attachment` nodes collapse into one strip whose entries expand the same way, and an
@@ -1642,7 +1671,11 @@ Model: **Sonnet**.
         the cap, assert the oldest requested nodes are present and the follow pill is off, then
         scroll to the bottom and assert the tail window reloads and following resumes;
       - **rotation**: replace the transcript with a **same-size** file of different content while
-        connected, and assert the view resets and re-renders.
+        connected, and assert the view **clears and re-renders the tail window** — not the file from
+        byte 0, and not a merge of old and new nodes (spec §6.1);
+      - **generation**: after any reconnect, assert the store was cleared because `hello` carried a
+        new `generation`, by loading earlier nodes first and confirming they are gone after the
+        reconnect rather than silently merged with the new window.
 
       A real `claude -p` Haiku 4.5 session runs alongside as the realism check (it writes a real
       transcript the page renders), but **no assertion depends on its content** — that is what makes
@@ -1680,6 +1713,11 @@ Model: **Sonnet**.
       remote, a campaign home under the real tribe root, one staged card whose spec and plan force
       a `hunter` dispatch, validated with `--dry-run` first, then the real runner on
       `--viewer-port 4399`. Assertions per spec §16.4:
+      **Spec §16.4 states this harness in full** — the throwaway repo, the fake `HOME`, both campaign
+      home layouts, the card whose plan forces one `Task`-tool subagent dispatch, the exact runner
+      invocation, every assertion and the teardown. Build it from that section; nothing here is
+      "carried over" from a harness the reader cannot see.
+
       The fixture authors **two** campaign homes: the real one, and a second with the **same slug
       under a different repo key** listing the same session id — the collision that exists on this
       machine today (2 slugs and 6 session ids are shared across two repo keys, spec §9).

@@ -5,6 +5,30 @@ State: `~/.tribe/-Users-hip-repo-tribe/viewer-consolidation/STATE.md` (D1–D9, 
 References: `references/` next to this file — read `tribe-viewer-research.md` (B1–B25),
 `kanna-store-vs-transcript.md` (L1–L9), `runner-log-vs-transcript.md`, `option-a.body.html`.
 
+**The short-code glossary**, so every `B`/`L`/`F` id on this page is followable without leaving it.
+`B<n>` = a defect of the **pre-consolidation viewer** (`tribe-viewer-research.md`); `L<n>` = a
+**limitation of the transcript format** (`kanna-store-vs-transcript.md`); `F<n>` = a **fix already
+in the current code** whose reasoning must survive a rewrite.
+
+| Id | In three words | Used in |
+| --- | --- | --- |
+| B1 | tool results dropped | §6.4, §16.1 |
+| B2 | array prompts dropped | §2, §7.1, §7.2, §16.1 |
+| B3 | state-file path traversal | §9, §12.2 |
+| B4 | stream frozen to one card | §9 |
+| B7 | never auto-scrolls | §8.3 |
+| B10 | system rows dropped | §7.1, §7.4 |
+| B16 | no Host check | §12.5 |
+| B25 | status page unbounded | §16.1 |
+| L1 | no `result` row on disk | §7.1, §7.7 |
+| L7 | cwd encoding non-injective | §17 |
+| L9 | stream-only events never on disk | §7.7 |
+| F34 / F36 | subagent orphan / cycle guards | §5.5 |
+| F44 | multi-byte char split across reads | §3.1 |
+| F51 | latency measured per event, not per frame | §16.3 |
+| F54 | shell metacharacters quoted in `commands.md` | §16 |
+| F56 | offset advances by bytes consumed | §6.1 |
+
 This document answers **How**. It does not reopen What or Why: the scope fence in the card is
 settled law, and every ruling D1–D9 below is quoted, never paraphrased.
 
@@ -59,6 +83,28 @@ symlink** is why §12.2's containment root is the projects directory and not the
 ---
 
 ## 1. Standing constraints this design is built to (quoted)
+
+### Who reads this, and what Option A is
+
+**Option A, in three sentences.** One local web server over `~/.claude/projects`, the folder where
+Claude Code writes every session transcript: it lists every session on the machine, renders any one
+of them, and follows the ones still being written. Campaign facts — which session belongs to which
+card of an automated run — appear as a small **badge** on a session, read from exactly two files
+under `~/.tribe` (`campaign-state.json` for session-to-card, `run.json` for whether the runner
+process is alive). The previous viewer's status page and its `/live` route are deleted, and the
+viewer never reads the runner's own log.
+
+**The roles this page names**, each in one clause. The **Shaman** decides What and Why and is the
+owner's delegate. The **Warchief** decides How: it writes this spec and the plan beside it, and
+dispatches the work. A **hunter** implements one planned task at a time under test-first
+discipline. A **skinner** — run on the GPT-5.6 Sol model, hence "Sol audits" — audits a finished
+change by *running* its proof rather than reading claims. **Terra** is a blind reader: a fresh model
+given this page and nothing else, whose job is to find what cannot be understood from the page
+alone.
+
+Everything below is settled law for the build: the rulings are quoted, never paraphrased, and this
+document does not reopen them.
+
 
 - **D6** — "The viewer reads the Claude transcript ONLY. The runner's per-session log stays as a
   watchdog/debug artifact; the viewer never reads it."
@@ -138,7 +184,7 @@ unit boundary. Layer-local tests still exist and are still required — they are
 
 | # | Goal (abridged) | Proof (the assertion that decides the goal) | Supporting | Where |
 | --- | --- | --- | --- | --- |
-| G1 | `~/.tribe` absent; list + render every kind from a fixture tree built from nothing | `e2e/dom-kinds.e2e.test.ts` — headless Chromium against the real server, driven by the runtime `RENDER_NODE_KINDS` witness (§4) so the kind list cannot silently drift from the model, **plus one DOM assertion per distinguishable input shape** (§16.2): kind-coverage alone is not enough, because a string prompt and an array prompt are both `k:"prompt"` and a pending, an ok and an error tool are all `k:"tool"` | `core/normalize.coverage.test.ts` (one case per row of §7), `e2e/real-transcript.e2e.test.ts` | §7, §16.2 |
+| G1 | `~/.tribe` absent; list + render every kind from a fixture tree built from nothing | `e2e/dom-kinds.e2e.test.ts` — headless Chromium against the real server, driven by the runtime `RENDER_NODE_KINDS` witness (§4) so the kind list cannot silently drift from the model, **plus one DOM assertion per distinguishable input shape** (§16.2): kind-coverage alone is not enough, because a string prompt and an array prompt are both `k:"prompt"` and a pending, an ok and an error tool are all `k:"tool"`. (**B2** = the pre-consolidation viewer dropped array-form prompts.) | `core/normalize.coverage.test.ts` (one case per row of §7), `e2e/real-transcript.e2e.test.ts` | §7, §16.2 |
 | G2 | Appended line rendered within 1 s; follows tail at bottom, stops when scrolled up | `e2e/live-tail.e2e.test.ts` — a **controlled writer** appends a row and records its own `performance.now()`; the browser reports when that row's `[data-row-id]` first exists; worst sample ≤ 1000 ms. Follow proved on `scrollTop`: it advances on append while at bottom and is byte-identical before/after append while scrolled up | `adapters/poller.adapter.test.ts`, `client/src/useEventStream.test.ts` | §6, §16.3 |
 | G3 | Badge from campaign state; click filters; runner prints root URL + one session URL per card | `e2e/campaign-badge.e2e.test.ts` — the real runner on Haiku 4.5; both stdout lines captured verbatim; the badge asserted in the DOM; the filter proved by **clicking the badge element** and asserting the resulting session-row count and the URL. Its fixture carries **two campaigns sharing one slug under two repo keys** — the collision that exists on this machine today (§9) | `core/badge.test.ts`, `runner/core/viewer-launch.test.ts` | §9, §10, §16.4 |
 | G4 | Read-only, 127.0.0.1, zero writes, every path contained, fail-closed refusals, `Host` checked | `core/paths.containment.test.ts` (lexical **and** resolved-symlink containment), `adapters/readonly.test.ts` (the D16 allowlist holds; narrow catches distinguish a parse error from a filesystem error), the fixture-tree **before/after hash** in `e2e/dom-kinds.e2e.test.ts` (no write actually happened), `serve.security.test.ts` (`Host`/`Origin`, the refusal matrix), `deletion-guard.test.ts` rule 5 | `structure.test.ts` (§12.6) | §12, §13 |
@@ -374,51 +420,72 @@ export type MdToken =
   | { t: 'li'; ordered: boolean; c: MdToken[] }
   | { t: 'br' };
 
+/** THE address of a node and of its payload — one scheme, used everywhere.
+ *
+ *   `at` = the byte offset of the ROW's first byte in the file.
+ *   `i`  = the 0-based index of this node's content block within that row's
+ *          `message.content` array.
+ *
+ * A row with no `message.content` — an `attachment`, a `last-prompt`, a `system` row, an unknown
+ * row rendered as a raw card — produces exactly one node and uses **`i = 0`**, meaning "the row
+ * itself". There is no third case.
+ *
+ * `id` is the pair rendered as a string, and it is what the `patch` frame (§6.4), the client's
+ * dedupe (§8.4), the DOM's `data-row-id` and `GET /api/block?at=&i=` all address. Both halves are
+ * properties of the bytes on disk, so the same node re-derived on a later tick, on a back-fill, or
+ * after a reconnect gets the SAME id. There is no line index anywhere in this model: a line index
+ * would change the moment the window moved. */
 export interface RowAnchor {
-  id: string;             // STABLE identity: `${at}:${blockIndex}` — see below
-  uuid: string | null;    // the row's own uuid, when it has one
-  i: number;              // 0-based line index in the file
-  at: number;             // byte offset of the line's first byte
+  id: string;             // `${at}:${i}` — the two fields below, joined
+  at: number;             // byte offset of the ROW's first byte
+  i: number;              // index of the block within message.content; 0 for a whole-row node
+  uuid: string | null;    // the row's own uuid, when it has one; NEVER the identity
   ts: string | null;      // the row's timestamp, verbatim; NEVER used for ordering
 }
 
-/** D15: every text-bearing node carries the same two fields, so NO node kind can exceed the
- * 64 KiB ceiling. `elided` means `body` holds a truncated prefix; `expandable` means the full
- * payload is fetchable at `/api/block?at=<at>&i=<blockIndex>`. A 2 MiB assistant row therefore
- * becomes one small node plus an on-demand fetch, exactly like an oversized tool result. */
+/** D15: EVERY node kind carries these two fields — there is no exception and no kind without
+ * them, which is what makes "no node exceeds 64 KiB" a total statement rather than a list.
+ *
+ *   `elided`     — true when the node holds a truncated prefix of its payload.
+ *   `expandable` — true when the full payload is fetchable at `/api/block?at=&i=`.
+ *
+ * Where a kind cannot have a larger payload — a `divider`, a `chip`, an `unreadable` note — both
+ * are `false`. They are still present, because a consumer that has to ask "does this kind have
+ * them?" is a consumer that will one day guess wrong. */
 export interface Sized { elided: boolean; expandable: boolean }
 
-export type RenderNode = RowAnchor & (
-  | ({ k: 'prompt';    body: MdToken[]; chips: Chip[] } & Sized)
-  | ({ k: 'assistant'; body: MdToken[]; model: string | null } & Sized)
-  | ({ k: 'thinking';  body: MdToken[] } & Sized)
-  | { k: 'tool';      name: string; input: unknown; inputElided: boolean;
-                      state: 'pending'|'ok'|'error'; result: ToolResult | null;
-                      toolUseId: string | null; agentId: string | null }
+export type RenderNode = RowAnchor & Sized & (
+  | { k: 'prompt';        body: MdToken[]; chips: Chip[] }
+  | { k: 'assistant';     body: MdToken[]; model: string | null }
+  | { k: 'thinking';      body: MdToken[] }
+  | { k: 'tool';          name: string; input: unknown; state: 'pending'|'ok'|'error';
+                          result: ToolResult | null; toolUseId: string | null;
+                          agentId: string | null }
   | { k: 'orphan_result'; toolUseId: string; result: ToolResult }
-  | { k: 'image';     mediaType: string; bytes: number; blockIndex: number }
-  | { k: 'attachment';label: string; detail: string | null; expandable: boolean }
-  | { k: 'chip';      label: string; detail: string | null; href: string | null }
-  | { k: 'divider';   label: string }
-  | ({ k: 'error';    status: number | null; body: MdToken[] } & Sized)
-  | ({ k: 'raw';      rowType: string; json: string; bytes: number } & Sized)
-  | { k: 'unreadable'; count: number }
+  | { k: 'image';         mediaType: string; bytes: number }
+  | { k: 'attachment';    label: string; detail: string | null }
+  | { k: 'chip';          label: string; detail: string | null; href: string | null }
+  | { k: 'divider';       label: string }
+  | { k: 'error';         status: number | null; body: MdToken[] }
+  | { k: 'raw';           rowType: string; json: string; bytes: number }
+  | { k: 'unreadable';    count: number }
 );
 
+/** A tool call's result, once it has one. `elided` here mirrors the node's own field for the
+ * result half specifically — a call can have a small input and a 2 MiB result, and the client
+ * needs to know which half it is being offered an expansion of. The expansion address is the
+ * node's own `at`+`i`, never a separate one. */
 export type ToolResult =
   | { r: 'text';   body: MdToken[]; isError: boolean; elided: boolean }
   | { r: 'spill';  name: string; note: string; previewBody: MdToken[] } // <persisted-output>
-  | { r: 'images'; count: number; blockIndex: number }
+  | { r: 'images'; count: number }
   | { r: 'refs';   count: number };                                     // array[tool_reference]
 ```
 
-**`RowAnchor.id` is the node's stable identity across frames**, and it is what makes the `patch`
-frame (§6.2) and the client's dedupe (§8.4) possible. It is `` `${at}:${blockIndex}` `` — the byte
-offset of the row's first byte, then the index of the block within that row. Both halves are
-properties of the bytes on disk, so the same node re-derived on a later tick, on a back-fill, or
-after a reconnect gets the **same** id. `uuid` is deliberately *not* the identity: 14,032 measured
-`attachment` rows and every `last-prompt`/`ai-title` row carry no uuid at all, and one row can
-produce several nodes.
+**`uuid` is deliberately not the identity.** 14,032 measured `attachment` rows and every
+`last-prompt` / `ai-title` row carry no uuid at all, and one row can produce several nodes, so a
+uuid is neither always present nor ever unique per node. `at` + `i` is both, for every node, with no
+exceptions — which is why it is also the only address `/api/block` accepts.
 
 `RowAnchor.at` is the byte offset the `/api/rows` back-fill addresses by, and half of the
 `/api/block` address. **There is no SSE cursor at all** (D12): frame `id:` is a per-stream sequence
@@ -455,11 +522,12 @@ export interface FileObservation {
 }
 ```
 
-**The 64 KiB ceiling applies to every kind (D15).** Before a node is emitted, its encoded size is
-measured; past 64 KiB its text is truncated to a prefix, `elided` is set, and `expandable` is set so
-the client can fetch the rest. This holds for a prompt, an assistant message, a thinking block, a
-raw card, an error body, a tool input, a tool result, an image and an attachment alike — there is no
-kind without a bound. Two consequences fall out, and both are contracts elsewhere in this document:
+**The 64 KiB ceiling applies to every kind (D15), and `Sized` is on the union itself so the type
+system says so.** Before a node is emitted, its encoded size is measured; past 64 KiB its text is
+truncated to a prefix, `elided` becomes true, and `expandable` becomes true so the client can fetch
+the rest at the node's own `at`+`i`. A `divider`, a `chip` and an `unreadable` note carry
+`elided: false, expandable: false` — they have no larger payload, and saying so explicitly is
+cheaper than a reader inferring it. Two consequences fall out, and both are contracts elsewhere in this document:
 no single node can exceed the 1 MiB frame cap, so `batchFrames` (§6.2) needs no "emit an oversized
 node alone" branch; and `/api/block` is the one mechanism that serves every full payload.
 
@@ -656,8 +724,16 @@ Trigger 2 exists because size alone cannot detect a rotation whose replacement i
 larger, and the spec promises a `"rotated"` reason it would otherwise have no way to produce. The
 inode arrives on the `FileObservation`; a platform that cannot supply one reports `0` and the
 transition degrades to trigger 1 alone — toward the behaviour we already had, never toward a false
-reset. On either trigger the state resets to offset 0, the normalize and pairing state are dropped,
-and a `reset` frame precedes the re-stream.
+reset.
+
+**What a reset actually sends, exactly.** The server drops its tail, normalize and pairing state,
+emits a `reset` frame carrying the reason, and then streams **the normal tail window — the last 500
+nodes computed by §6.3's algorithm against the file as it now is.** It does **not** stream the file
+from byte 0, and it does not send the first 500 nodes. A rotated 13 MB file would otherwise
+re-deliver everything the viewer has ever seen through a 1 MiB-framed pipe, which is both the worst
+case for the frame budget and not what the user wants: after a rotation, the interesting bytes are
+the new ones at the end. The client **clears its store on `reset`** (§8.4) and then applies the
+window that follows, so the two sides agree with no merge step.
 
 Rotation **while disconnected** needs no mechanism at all: under D12 a reconnecting client is a new
 client and gets a fresh snapshot of whatever file is there now.
@@ -677,7 +753,7 @@ that decorates it. Switching tabs navigates to `/s/<id>/a/<agent>`, which closes
 
 | `event:` | `data` | Emitted |
 | --- | --- | --- |
-| `hello` | `{"session":SessionSummary,"agents":[Agent],"badges":[Badge],"from":n,"to":n,"truncatedBefore":bool}` | once, on connect (§6.3) |
+| `hello` | `{"generation":string,"session":SessionSummary,"agents":[Agent],"badges":[Badge],"from":n,"to":n,"truncatedBefore":bool}` | once, on connect (§6.3); `generation` is new per connection |
 | `rows` | `{"nodes":[RenderNode],"from":n,"to":n}` | the initial window, then on every growth tick. Append-only: every node in a `rows` frame is new |
 | `patch` | `{"patches":[Patch]}` | a later-arriving fact about a node already sent (§6.4) |
 | `meta` | `{"agents":[Agent],"badges":[Badge],"live":bool}` | whenever the agent set, the badges, or liveness changes — including a **new sidecar appearing mid-stream** |
@@ -698,6 +774,21 @@ will send it on reconnect and the server discards it.
 **Reconnect is a fresh snapshot, and that is the whole mechanism (D12).** A reconnecting client is
 treated as a brand-new client: a new `hello`, the current window read from the file as it is *now*,
 and pairing state rebuilt by the forward pass over that window. Nothing is "resumed".
+
+**The `generation` is what tells the client the snapshot replaces rather than extends what it
+holds.** Every connection mints a fresh `generation` (an opaque string; a counter or a random token
+both work) and puts it on `hello`. The client's rule is two lines and covers every case:
+
+1. If the incoming `generation` **differs** from the one the store holds, **clear the store**, adopt
+   the new generation, then apply the snapshot.
+2. Dedupe by row id **only within a generation** — an id seen under the previous generation means
+   nothing now, because the window it belonged to has been discarded.
+
+Without this the client cannot know whether an arriving `rows` frame extends its window or replaces
+it, and the promised "one contiguous window" is underivable: it would be merging a window read from
+a file it may no longer recognise into one it read minutes ago. Sequence-id dedupe (§8.4) is a
+separate, narrower mechanism — it drops a duplicated *frame* within one connection; the generation
+drops a stale *window* across connections. Both are needed and they do not overlap.
 
 This is a deliberate trade: a reconnect costs one window read instead of a delta. What it buys is
 the disappearance of an entire class of defects that a byte cursor cannot avoid — the connection
@@ -731,35 +822,37 @@ tool result, and a disconnect landing between a row and its patch:
 
 ```mermaid
 sequenceDiagram
-  participant B as "Browser (EventSource)"
-  participant S as "serve.ts /events"
-  participant P as "poller.adapter (250 ms clock)"
-  participant C as "core (tail, normalize, pair, sse)"
-  participant F as "transcript file"
-  B->>S: "GET /events?session=ID"
-  S->>P: "open stream (slot 1 of 8)"
-  P->>F: "stat: size, mtime, inode"
-  P->>F: "read the window: the last 500 nodes worth of bytes"
-  P->>C: "advanceTail on raw bytes, then normalizeRows"
-  C-->>B: "hello (id: 1)"
-  C-->>B: "rows: the window, batched so each frame is under 1 MiB (id: 2, 3, ...)"
-  loop "every 250 ms while the file grows"
-    P->>F: "stat, then read from offset, capped at 4 MiB"
-    P->>C: "advanceTail: complete lines out, raw partial line carried"
-    C-->>B: "rows: new nodes only"
-    C-->>B: "patch: a tool_result whose tool_use was sent on an earlier tick"
-    C-->>B: "meta: a new sidecar appeared, or a badge changed"
+  participant B as Browser EventSource
+  participant S as serve.ts /events
+  participant P as poller.adapter 250ms clock
+  participant C as core tail normalize pair sse
+  participant F as transcript file
+  B->>S: GET /events?session=ID
+  S->>P: open stream, slot 1 of 8
+  P->>F: stat for size, mtime, inode
+  P->>F: read the window, the last 500 nodes worth of bytes
+  P->>C: advanceTail on raw bytes, then normalizeRows
+  C-->>B: hello with generation G and id 1
+  C-->>B: rows, the window, batched so each frame stays under 1 MiB
+  loop every 250 ms while the file grows
+    P->>F: stat, then read from offset, capped at 4 MiB
+    P->>C: advanceTail, complete lines out, raw partial line carried
+    C-->>B: rows, new nodes only
+    C-->>B: patch, a tool_result whose tool_use was sent on an earlier tick
+    C-->>B: meta, a new sidecar appeared or a badge changed
   end
-  Note over C,B: "every 15 s with no growth: ping"
-  B-xS: "connection drops between a rows frame and its patch"
-  B->>S: "GET /events again (Last-Event-ID sent by the browser, IGNORED by the server)"
-  Note over S,C: "D12: a reconnecting client is a NEW client"
-  C-->>B: "hello, then the CURRENT window, with pairing rebuilt from the file"
-  Note over B: "the tool card arrives already complete; dedupe by row id hides the overlap"
-  alt "inode changed, or size < offset, while connected"
-    C-->>B: "reset (rotated | truncated), then the window from byte 0"
-  else "file deleted"
-    C-->>B: "gone: the client stops retrying"
+  Note over C,B: every 15 s with no growth, ping
+  B-xS: connection drops between a rows frame and its patch
+  B->>S: GET /events again, Last-Event-ID sent by the browser and ignored by the server
+  Note over S,C: D12, a reconnecting client is a new client
+  C-->>B: hello with a NEW generation, then the current window, pairing rebuilt from the file
+  Note over B: generation differs, so the client clears its store, then applies the snapshot
+  Note over B: the tool card arrives already complete
+  alt inode changed or size shrank while connected
+    C-->>B: reset, then the normal tail window, never the whole file
+    Note over B: the client clears its store on reset
+  else file deleted
+    C-->>B: gone, the client stops retrying
   end
 ```
 
@@ -787,26 +880,50 @@ with each other.
       parse the complete rows in that slice
       nodes  += the node count those rows produce      # core/normalize.ts, counted only
       anchor := offset of the FIRST complete row in the slice
-  windowStart      := anchor
-  truncatedBefore  := anchor > 0                       # true iff BOF was not reached
+  # the loop reads whole 256 KiB slices, so it usually OVERSHOOTS 500 nodes. Trim it:
+  nodes    := the accumulated node list, in file order
+  keep     := the LAST 500 of them                     # trim from the FRONT
+  anchor   := the row offset of the FIRST node in `keep`
+  truncatedBefore := anchor > 0                        # true iff any row precedes the anchor
   ```
 
-  Reading backwards in 256 KiB steps costs one or two reads for a typical session (≈19 KB per row
-  measured, so 256 KiB holds ≈13 rows of the largest file and far more of an ordinary one) and
-  terminates at BOF for a short one. The window's **first row offset is the anchor**, which is what
-  makes `from` a real row boundary and the back-fill below contiguous with it. `truncatedBefore` is
-  a boolean, not an estimate: it is true exactly when the scan stopped before the beginning of the
-  file. `hello` carries it together with `from`/`to`, the window's byte bounds.
+  **The trim is the step that makes "500 nodes" exact.** The loop reads whole 256 KiB slices and a
+  slice can push the count well past 500 — the largest rows measured are ≈19 KB, so one slice can
+  add a dozen rows and many more nodes. Stopping at "the first slice that reached 500" would make
+  the window size depend on where slice boundaries happened to fall. So the accumulated nodes are
+  trimmed **from the front** to exactly the last 500, and **the anchor is then set to the first
+  retained node's row offset** — not to the first row of the last slice read.
+
+  `truncatedBefore` follows from the trimmed anchor, not from the scan: it is true iff **any row
+  precedes the anchor**, which covers both "the scan stopped early" and "the scan reached BOF but
+  the trim discarded rows". Reading backwards costs one or two slices for a typical session and
+  terminates at BOF for a short one. `hello` carries `truncatedBefore` with `from`/`to`, the
+  window's byte bounds; `from` is a real row boundary because the anchor is one.
 - **"Load earlier"** calls `GET /api/rows?session=…&before=<first>&limit=500`, a ranged read
   backwards from a known byte offset — no index, no store. The returned nodes are **prepended**, and
   `first` moves backwards. Order is preserved because the new range is contiguous with the old one.
-- **Past the 2,000-node cap, eviction is from the TAIL** — the newest end — and the follow-live pill
-  is switched **off** at the same moment. This is the one non-obvious rule and it is deliberate: the
+- **Past the 2,000-node cap, eviction is from the TAIL** — the newest end — and follow-live is
+  switched **off** at the same moment. This is the one non-obvious rule and it is deliberate: the
   user is reading history, so dropping the history they just asked for (head eviction) would make
   "load earlier" unable to reach past 2,000 nodes at all. Four transcripts on this machine exceed
   2,000 rows, so this is a real case, not a theoretical one.
-- **Scrolling back to the bottom reloads the tail window** — a fresh `GET /api/rows` with no
-  `before` — and re-enables following. The window stays contiguous throughout.
+
+- **While the window is at the cap AND the user has loaded earlier rows — that is, follow-live is
+  off — incoming `rows` frames are COUNTED, NOT APPENDED.** This is the rule that keeps contiguity
+  true, and it is the case the earlier draft left undefined. Appending them while the tail is being
+  evicted would produce a window with a hole in the middle; dropping them silently would lose the
+  user's place in the live session. So they are counted, and the count is shown as a **"N new
+  below"** pill.
+
+  Clicking that pill — or simply scrolling back to the bottom — **reloads the tail window**: a fresh
+  `GET /api/rows` with no `before`, exactly equivalent to what `hello` delivers, replacing the
+  store's contents. Follow-live is re-enabled at the same moment and the counter resets to zero.
+
+- **Contiguity therefore holds unconditionally**: the client's window is always `[first, last]` of
+  what it actually holds, in file order, with nothing missing between them. The window either grows
+  at the tail (following), or grows at the head (reading history, tail frozen), or is replaced
+  wholesale (reset, reconnect with a new generation, or the "N new below" reload). There is no
+  fourth transition and no state where the window is a set of disjoint ranges.
 
 A `tool_result` whose `tool_use` is before the window is an **orphan** and renders as an
 `orphan_result` node; it is never dropped (§0: under-rendering is a bug). Today's code drops exactly
@@ -814,8 +931,9 @@ this case.
 
 ### 6.4 Live tool results: the `patch` frame
 
-The historical case is easy: one window, one forward pass, the pair is found. The **live** case is
-the common one during a campaign: a `tool_use` arrives on tick *n* and is emitted immediately as a
+(**B1** = the pre-consolidation viewer dropped tool results already on disk at connect time.) The
+historical half is easy: one window, one forward pass, the pair is found. The **live** half is the
+common one during a campaign: a `tool_use` arrives on tick *n* and is emitted immediately as a
 `tool` node with `state: "pending"` (it must be — holding it back until its result would defeat live
 rendering and make the `pending` state unreachable), and its `tool_result` arrives on tick *n+k*,
 after the client has already rendered the card.
@@ -850,7 +968,8 @@ a bound — the oracle is open-world.
 | one encoded SSE frame | 1 MiB | the tick's nodes are split across several `rows` frames; no single node can exceed the cap, so batching is total (§6.2) |
 | pending tool map (`core/pair.ts`) | 512 entries | evict the oldest; its eventual result renders as an `orphan_result` — a visible outcome rather than unbounded growth |
 | server-side normalize state | the pending map plus a seq counter | nothing else is retained; nodes are **not** buffered server-side |
-| client window | 2,000 nodes | evict from the **tail** and turn following off (§6.3); scrolling to the bottom reloads the tail window |
+| client window | 2,000 nodes | evict from the **tail** and turn follow-live off (§6.3) |
+| incoming nodes while at the cap with follow-live off | not stored at all | counted into the "N new below" pill; the tail window is reloaded on click or on scroll-to-bottom (§6.3) |
 | client patch targets | the window above | a `patch` for an id outside the window is dropped |
 | open streams | 8 | the 9th gets `503`; a closed connection releases its slot exactly once |
 
@@ -896,13 +1015,17 @@ later one, which is what lets these counts be compared with each other.
 | `fork-context-ref` | 0 | 2 | `raw`, collapsed | |
 | **anything else** | — | — | `raw`, collapsed | the open-world case; this is the rule, not the exception |
 
-**The rule that makes this maintainable:** three buckets, and nothing outside them.
-1. **Message rows** (`assistant`, `user`) render per block.
+**The rule that makes this maintainable:** four buckets, and nothing outside them.
+1. **Message rows** (`assistant`, `user`) render per content block.
 2. **Named metadata rows** render as a one-line `chip` or a `divider`.
-3. **Everything else** renders as a collapsed `raw` card carrying `rowType` and the row's JSON
-   (elided past 8 KiB, expandable via `/api/block`).
+3. **`attachment` rows** render as an `attachment` node, grouped by the client into one collapsed
+   strip (§7.3). They are their own bucket, not a sub-case of the others: there are 14,032 of them,
+   more than every metadata row type combined, and collapsing them into chips would bury the
+   conversation while rendering them as raw cards would bury it differently.
+4. **Everything else** renders as a collapsed `raw` card carrying `rowType` and the row's JSON
+   (elided past 64 KiB per D15, expandable via `/api/block`).
 
-A new Claude Code release that invents a row type therefore renders as a raw card on day one and
+A new Claude Code release that invents a row type therefore falls into bucket 4 and renders as a raw card on day one and
 is never silently dropped. **`core/normalize.ts` has no `continue` that discards a row.** The one
 mechanical guarantee: `normalizeRows(rows).length >= rows.length - <metadata rows folded into
 chips>`; expressed as the test `every input row produces at least one node or is accounted for in
@@ -917,7 +1040,7 @@ a fold`, asserted over a fixture containing one row of every type in this table.
 | assistant | `thinking` (non-empty) | 9,462 | `thinking`, collapsed |
 | assistant | `thinking` (empty string) | 8,411 | **not rendered** — see the named exception below |
 | assistant | `text` | 10,640 | `assistant` with `MdToken[]` |
-| user | `text` | 402 | `prompt` with `MdToken[]` — the array-prompt case |
+| user | `text` | 402 | `prompt` with `MdToken[]` — **B2**, array-form prompts dropped today |
 | user | `image` | 15 | `image` node; bytes fetched on expand |
 | — | `message.content` is a bare string (user) | 1,799 | `prompt` |
 | — | `message.content` is a bare string (assistant) | 0 measured | handled anyway: treated as one `text` block |
@@ -946,7 +1069,8 @@ Nothing is dropped; nothing dominates.
 **Expansion, concretely** (the node's `expandable` flag, §4): a `rendered` field is present on 5,817
 measured rows and, when it is, it becomes the node's `detail` and is shown inline — that costs no
 fetch. Beyond that, an attachment expands exactly like every other elided payload: the strip's
-entry calls `GET /api/block?session=…&at=<RowAnchor.at>&i=<blockIndex>`, which re-reads that one row
+entry calls `GET /api/block?session=…&at=<RowAnchor.at>&i=0` — an `attachment` row has no
+`message.content` array, so `i` is 0, "the row itself" — which re-reads that one row
 and returns the attachment object. **The address is `at` + `i`, never a uuid** — 14,032 measured
 `attachment` rows carry no uuid at all, which is precisely why §4 addresses blocks by row offset.
 An attachment whose whole content is its label sets `expandable: false` and the client offers no
@@ -967,7 +1091,7 @@ affordance, rather than an expansion that would return nothing.
 | absent `subtype` | 0 measured | `raw` |
 
 `system` payload is the **top-level `content` string** (350 rows carry it), not `message` — today's
-normalizer looks for `message` and therefore drops all of them (B10). A row also carrying
+normalizer looks for `message` and therefore drops all of them (**B10**, system rows dropped today). A row also carrying
 `isCompactSummary: true` (1 measured, on a `user` row) renders as the compaction divider; Kanna
 matches a string prefix instead, which we do not need.
 
@@ -1015,8 +1139,10 @@ A `tool_use` whose `name` is `Task` and whose `id` matches a sidecar's `toolUseI
 
 No `result` row exists on disk in any version (L1: 0 of 181 files), so there is no per-turn
 cost/duration footer, no `task_notification`, no `background_tasks_changed`. `cost-state` rows
-(76) give a cumulative cost chip and that is the whole of it. **Any audit finding that the viewer
-is missing a Kanna behaviour whose data is not on disk is REFUTED in advance** (plan.md's
+(76) give a cumulative cost chip and that is the whole of it. (**L1** and **L9** are limitations measured in `references/kanna-store-vs-transcript.md`: L1 = no
+`result` row is ever written to disk, L9 = 9.2% of a live chat's events never reach disk at all.)
+**Any audit finding that the viewer is missing a Kanna behaviour whose data is not on disk is
+REFUTED in advance** (plan.md's
 adjudication rule, clause (b)).
 
 ---
@@ -1065,7 +1191,8 @@ package's value is the parsing, not the framework surface.
 │           ├── <Markdown>              MdToken[] -> elements       tokens: ink, font-sans, font-mono,
 │           │                                                              accent (links), surface (code)
 │           ├── <LoadEarlier>           back-fill button            tokens: accent
-│           └── <FollowTail>            "⇣ follow live" pill        tokens: accent, live
+│           ├── <FollowTail>            "⇣ follow live" pill        tokens: accent, live
+│           └── <NewBelowPill>          "N new below" (§6.3)        tokens: accent, live
 └── <ConnectionNote>                    SSE state                   tokens: warn, ink-soft
 ```
 
@@ -1080,18 +1207,23 @@ value** — §12.6 enforces it mechanically, and §8.2's table is the complete v
 The card's fence: *"No design tokens invented by the implementer: the client consumes the owner's
 design system (P1). Until P1 is delivered, the spec names tokens; the build does not start."*
 
-**P1's candidates exist** at `docs/tribe/planning/viewer-consolidation/design/` — three themes
-(`matcha/`, `coffee/`, `sea-salt/`) that share **one schema**; only the values differ. What remains
-open is the *choice*, not the interface, which is why this section can name the real tokens without
-naming a theme.
+**P1 is met.** Three candidate themes were offered at
+`docs/tribe/planning/viewer-consolidation/design/` — `matcha/`, `coffee/`, `sea-salt/` — sharing
+**one schema**, differing only in values. The owner chose **sea salt**, recorded in STATE.md as D17
+(2026-09-12). So:
 
-**This spec deliberately does not name the theme.** The chosen theme is **whatever the owner records
-in STATE.md as P1**, and the build gate checks two things mechanically before any task is
-dispatched: that STATE.md names a theme, and that
-`docs/tribe/planning/viewer-consolidation/design/<that-theme>/tokens.css` exists. Naming one here
-would let a stale document overrule a later owner decision, which is exactly the authority inversion
-the P1 gate exists to prevent. Everything below is true of all three candidates, so nothing in this
-spec changes when the choice lands.
+> **The client's single token source is
+> `docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css`, copied verbatim.**
+
+`matcha/` and `coffee/` stay in the repo as the rejected candidates — the record of what was
+considered — and are **never imported**. Verified 2026-09-12: `sea-salt/tokens.css` defines all 38
+tokens in the table below, with none missing.
+
+**The gate stays, and stays mechanical.** Naming the theme here does not retire the check; before
+any task is dispatched the gate still asserts (1) STATE.md names a theme and (2)
+`design/<that-theme>/tokens.css` exists. Both hold today. Keeping the check executable is what makes
+the decision auditable later and what would catch a future theme change that updated one of the two
+and not the other — a spec sentence alone can go stale, an assertion cannot.
 
 **There is no alias layer, and the implementer invents nothing.** The token names below are copied
 from `design/matcha/tokens.css` and are identical in all three candidates. Every component style
@@ -1121,10 +1253,11 @@ invented `--space-1…6` and `--radius-1…3`; those names exist nowhere and are
 
 Mechanism:
 
-1. The owner records the theme in STATE.md. Its `tokens.css` is the single stylesheet imported once
-   at the app root, before any component style.
-2. `vite.config.ts` copies `design/<the STATE.md theme>/tokens.css` to `client/src/styles/tokens.css`
-   as a pre-build step; the copy is git-ignored and the owner's file stays the source of truth.
+1. `design/sea-salt/tokens.css` (the theme STATE.md names) is the single stylesheet imported once at
+   the app root, before any component style.
+2. `vite.config.ts` copies it to `client/src/styles/tokens.css` as a pre-build step; the copy is
+   git-ignored and the owner's file stays the source of truth. The copy reads the theme name from
+   the gate's own source of truth, so a future D-number change needs no code edit.
 3. `client/src/styles/app.css` and every `.tsx` reference tokens only via `var(--…)`. §12.6 bans a
    literal colour, font, radius or `px` length anywhere under `client/` except `tokens.css` itself.
 
@@ -1133,14 +1266,15 @@ values twice — under `@media (prefers-color-scheme: dark)` and under `[data-th
 client follows the OS with no application code. The client sets `data-theme` only if it later
 offers a manual override, which this card does not.
 
-**The chosen theme's `preview.html` is the reference implementation of both screens.** Its class names
+**`design/sea-salt/preview.html` is the reference implementation of both screens.** Its class names
 (`.item`, `.badge`, `.tool`, `.tab`, `.thinking`, `.pill`) map one-to-one onto the components in
 §8.1, so a hunter building `SessionRow` or `ToolCard` has a rendered target to match rather than a
 description to interpret.
 
 **The gate: no phase starts before STATE.md names the theme and that theme's `tokens.css` exists** —
-see §17 R1 and plan.md's Global Constraints. This is the card's "the build does not start", read at
-its word, and it is checkable without judgment.
+see §17 R1 and plan.md's Global Constraints. Both conditions are satisfied as of D17, so the gate is
+**open**; it stays in the plan because a check that is only written down after it fails is not a
+check.
 
 ### 8.3 Follow-the-tail (G2)
 
@@ -1191,15 +1325,21 @@ window contract work together:
 - **Back-fill prepends.** `GET /api/rows?before=<first>` returns the nodes immediately preceding the
   window; they go on the front and `first` moves backwards. The result is still one contiguous
   range, which is why no ordering logic is needed beyond concatenation.
-- **At the 2,000-node cap, eviction is from the tail**, and the follow-live pill switches off in the
-  same operation (§6.3). Head eviction would delete the history the user just requested and cap
+- **At the 2,000-node cap, eviction is from the tail**, and follow-live switches off in the same
+  operation (§6.3). Head eviction would delete the history the user just requested and cap
   "load earlier" at 2,000 nodes forever.
-- **Scrolling back to the bottom reloads the tail window** (a fresh `/api/rows` with no `before`)
-  and re-enables following. That is the only transition that discards the back-filled range, and it
-  is user-initiated.
+- **With follow-live off and the window at the cap, an incoming `rows` frame increments a counter
+  and is not appended** (§6.3); the count renders as the "N new below" pill.
+- **Clicking that pill, or scrolling back to the bottom, reloads the tail window** (a fresh
+  `/api/rows` with no `before`), replaces the store's contents, re-enables following and zeroes the
+  counter. That is the only transition that discards the back-filled range, and it is
+  user-initiated.
+- **The store clears itself on `reset` and on a changed `generation`** (§6.1, §6.2), then applies
+  the window that follows. Those are the two server-initiated replacements.
 
-The store is therefore always in one of two honest states: *following the tail*, or *reading
-history with following off*. There is no third state where it claims both.
+The store is therefore always in one of two honest states: *following the tail*, or *reading history
+with following off and a count of what it is not showing*. There is no third state where it claims
+both, and no state where its window is anything other than one contiguous range.
 
 ---
 
@@ -1597,9 +1737,15 @@ Added:
    `Bun.write`, `createWriteStream`, `copyFile`, `truncate`, a write-mode `open` and
    `fs/promises` entirely open. Inverted, the rule is total:
 
-   **Permitted, in `adapters/**` only:** from `node:fs` — `readFileSync`, `openSync` (read flags
-   only), `readSync`, `closeSync`, `statSync`, `lstatSync`, `readdirSync`, `realpathSync`;
-   `Bun.file(...)` read methods; `Bun.serve` (in `serve.ts`).
+   **Permitted in `adapters/**`:** from `node:fs` — `readFileSync`, `openSync` (read flags only),
+   `readSync`, `closeSync`, `statSync`, `lstatSync`, `readdirSync`, `realpathSync`; and
+   `Bun.file(...)` read methods.
+
+   **One named exception, in `serve.ts` only: `Bun.serve`.** It is the single place the process
+   binds a socket, and `serve.ts` is the composition root — not an adapter — so "adapters only"
+   would be the wrong home for it. Stating the exception as its own rule rather than a parenthesis
+   is deliberate: an allowlist with an unexplained aside in it invites the next reader to add a
+   second one.
 
    **Refused anywhere in the package** (outside `fixtures/` and `e2e/`): any other `node:fs` member,
    any `fs/promises` import, `Bun.write`, `node:child_process`, `node:net`, `node:http`,
@@ -1637,8 +1783,8 @@ Every row is "what the user sees", and no row is a stack trace.
 | a transcript line fails `JSON.parse` | counted; the window emits one `{"k":"unreadable","count":n}` node; never a throw (measured: 0 in 127,085 rows, so this is defence, not a hot path) |
 | a row is a JSON array or a bare scalar | same as above |
 | transcript deleted while streamed | `gone` frame, stream closed, client shows "this session's file is gone" and stops retrying |
-| transcript truncated or replaced **while streamed** | `reset` frame, re-stream from 0 (§6.1) |
-| transcript truncated or replaced **while disconnected** | nothing special is needed: a reconnect is a fresh snapshot of whatever file is there now (D12) |
+| transcript truncated or replaced **while streamed** | `reset` frame, then the **normal tail window** — never the file from byte 0; the client clears its store first (§6.1) |
+| transcript truncated or replaced **while disconnected** | nothing special is needed: a reconnect is a fresh snapshot of whatever file is there now, under a new `generation` (D12, §6.2) |
 | carry exceeds the 1 MiB cap | one `unreadable` node, the carry is dropped, the tail resyncs at the next `0x0A` (§6.1) |
 | `/api/spill` name fails the charset or containment check | `400 spill name refused`; the preview text already on the card still shows |
 | `/api/block` names an `at`/`i` that does not resolve to a block | `404`, the card keeps its elided placeholder |
@@ -1919,30 +2065,83 @@ numbers.
 
 ### 16.4 E3 — campaign badge and runner lines (G3)
 
-`e2e/campaign-badge.e2e.test.ts`, opt-in, model **Haiku 4.5**. The current harness's recipe is
-carried over: a throwaway `git init` repo with no remote, a campaign home under the real
-`$HOME/.tribe`, one staged card whose spec and plan force a `hunter` dispatch, validated with
-`--dry-run` first, then the real `run.ts` on `--viewer-port 4399`.
+`e2e/campaign-badge.e2e.test.ts`, opt-in behind `TRIBE_VIEWER_E2E=1`, model **Haiku 4.5**. Stated in
+full here, because a proof that points at "the existing harness" cannot be reviewed or reproduced
+from this page.
 
-**The fixture additionally authors a second campaign home with the SAME slug under a different repo
-key, listing the same session id** — the collision that exists on this machine today (§9: 2 slugs
-and 6 session ids are shared across two repo keys). Assertions: the session row renders **two**
-badges, not one; `?campaign=<repoKeyA>/<slug>` filters to A's sessions only and
-`?campaign=<repoKeyB>/<slug>` to B's; and neither badge is dropped, whatever order the directory
-scan returns. A slug-only filter would merge them, which is the defect this case exists to catch.
+**1. The throwaway target repo.** `mkdtemp` a directory, `git init` it, write one trivial file,
+commit it with a fixture identity (`-c user.email=… -c user.name=…`, so the run never depends on the
+machine's git config), and assert `git remote -v` is **empty**. No remote is deliberate: the card
+can then never open a real pull request, and the run's purpose is the viewer, not the card's
+outcome.
 
-- Both stdout lines asserted **verbatim**: `campaign viewer: http://127.0.0.1:4399/?campaign=<repoKey>/<slug> (read-only)`
-  and `card C1: http://127.0.0.1:4399/s/<sessionId>`.
-- The printed session URL is **opened in the browser** and asserted to render that session — a
-  printed URL that 404s is a G3 failure however green the unit tests are.
-- The badge is asserted in the DOM (slug, card, status, runner state), then **the badge element is
-  clicked** and the resulting session-row count and `location.search` are asserted. G3's click leg
-  is a click, not a component test.
+**2. The fake HOME and the two campaign homes.** As in §16.2 the fixture root is a fake `HOME`. Two
+campaign homes are written under it, sharing one slug across two repo keys — the collision that
+exists on this machine today (§9):
+
+```
+<tmp>/.tribe/<repoKeyA>/campaigns/<slug>/campaign-state.json
+<tmp>/.tribe/<repoKeyB>/campaigns/<slug>/campaign-state.json
+```
+
+`<repoKeyA>` is exactly what `plugins/tribe/scripts/tribe-home.sh <target-repo>` prints for the
+throwaway repo; `<repoKeyB>` is any second key (the test writes one directly). Each
+`campaign-state.json` has the shape the runner guarantees:
+`{ v, campaign, sequence: ["C1"], cards: { C1: { status, spec, plan, sessionId, … } } }`. Both list
+the **same** session id once the runner has assigned it, which is what makes the two-badge assertion
+real rather than synthetic.
+
+**3. The card.** One card, `C1`, whose committed spec and plan in the target repo make the executor
+**spawn exactly one subagent through the `Task` tool**, because a subagent transcript is what the
+tab tree needs. The plan's Global Constraints carry the line this plan carries —
+*"dispatch each implementation/fix task to the `hunter` subagent — never a generic implementer"* —
+and its single task is deliberately trivial: *append one line to `README.md` and commit it*. Small
+enough for Haiku 4.5 to finish inside the timeout; structured so it cannot be done without a
+dispatch.
+
+**4. The invocation**, after a `--dry-run` pass has validated the state file:
+
+```sh
+HOME=<tmp> bun plugins/tribe/scripts/runner/run.ts \
+  --repo <throwaway-repo> \
+  --model claude-haiku-4-5-20251001 \
+  --home <tmp>/.tribe/<repoKeyA>/campaigns/<slug> \
+  --session-timeout 6m \
+  --viewer-port 4399
+```
+
+`--viewer-port 4399` is never the default 4321, so the run cannot collide with a viewer the owner is
+already using. If anything is already listening on 4399 the test **refuses to run** with a clear
+message rather than clearing the port.
+
+**5. The assertions.**
+
+- Both stdout lines captured **verbatim**:
+  `campaign viewer: http://127.0.0.1:4399/?campaign=<repoKeyA>/<slug> (read-only)` and, once the SDK
+  assigns the session id, `card C1: http://127.0.0.1:4399/s/<sessionId>`.
+- The printed session URL is **opened in the browser** and renders that session — a printed URL that
+  404s is a G3 failure however green the unit tests are.
+- The session row renders **two** badges, one per repo key, neither dropped whatever order the scan
+  returns; each shows slug, card, status and runner state.
+- **The badge element is clicked**, and the resulting session-row count and `location.search` are
+  asserted. G3's click leg is a click, not a component test.
+- `?campaign=<repoKeyA>/<slug>` filters to A's sessions and `?campaign=<repoKeyB>/<slug>` to B's — a
+  slug-only filter would merge them.
 - After the runner exits, a reload shows `runnerAlive: false`.
-- **Teardown kills only what this test spawned**: the runner's process group by the pid the test
-  holds, and the viewer child by the pid the test holds. It never kills "whatever holds port 4399"
-  — that is someone else's process and outside this card's authority. If the port is occupied at
-  start, the test **refuses to run** with a clear message rather than clearing it.
+- Two screenshots: the badged list, and the list filtered to one campaign.
+
+**6. Teardown**, all of it in a `finally`.
+
+- Kill **only the pids this test spawned**: the runner's process group by the pid the test holds,
+  and the viewer child by the pid the test holds. Never "whatever holds port 4399" — that may be an
+  unrelated process, and terminating one is outside this card's authority.
+- Delete the throwaway repo.
+- Delete **both campaign homes by the exact paths the test recorded when it created them** — never a
+  glob, never a pattern. They live under the fake `HOME`, so this is removing the test's own
+  scratch, not the owner's state.
+- The evidence — captured stdout, assertion output, screenshots — is written under
+  `docs/tribe/planning/viewer-consolidation/evidence/`, which is where §16.6 keeps it and why
+  nothing needs to survive under `~/.tribe`.
 
 ### 16.5 E4 — the served build is the built build (G6)
 
@@ -1984,7 +2183,7 @@ link is opened and verified before the PR is reported green.
 
 | # | Risk | Mitigation |
 | --- | --- | --- |
-| R1 | **P1: the owner has not yet named a theme.** The candidates exist (`design/matcha`, `design/coffee`, `design/sea-salt`, one shared schema), so the token *interface* is settled (§8.2) — only the choice is open. | The card says "the build does not start", and that is read at its word: **every phase is gated on P1**, not just the client. The cost of the stricter reading is low precisely because the schema is already fixed — nothing in phases 0–2 would change if the owner picked a different theme — and the benefit is that the owner's handover rule is honoured literally rather than reinterpreted by the implementer. |
+| R1 | ~~P1: the owner has not yet named a theme.~~ **Closed 2026-09-12 (D17): sea salt.** | The gate was never removed, only satisfied: it still asserts STATE.md names a theme and that theme's `tokens.css` exists, and the plan still gates **every phase** on it — the card's "the build does not start", read at its word. Residual risk is now only that a later theme change updates one of the two and not the other, which the surviving check catches. |
 | R2 | The head+tail title window (§5.3) misses on unusual files. | T1.5b measures it over all 181 real files with a ≥99% threshold before the client is built; the window is a constant, not a design. |
 | R3 | Adding `react`/`vite`/`playwright-core` makes the package's `bun install` a network dependency where today it has zero runtime deps. | Pinned versions + committed `bun.lock`; `bun install --frozen-lockfile` in the build; the **server** keeps zero runtime deps — React and Vite are client-only, so `serve.ts` itself imports nothing from `node_modules` and needs no install to *start*. That is a different claim from §10.3's refusal: the server starts, discovers `dist/index.html` is absent, and **deliberately** exits with one line telling the reader to build. Dependency-free startup means the failure is a clear message rather than a module-resolution stack trace. |
 | R4 | Claude Code changes the transcript format (L2: system rows vanished 2.1.211–2.1.215 and returned at ~2.1.233). | The open-world rule in §7.1: an unknown type is a raw card, never a drop. The coverage table records the version it was measured on (2.1.267). |
