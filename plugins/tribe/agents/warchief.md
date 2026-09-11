@@ -1207,7 +1207,7 @@ suspicious one — do not go hunting for something to change in order to feel li
 
      ```bash
      git add .tribe/harness-gaps.jsonl
-     git commit -m 'chore(gaps): record this card's harness-gap ledger events' \
+     git commit -m 'chore(gaps): record the harness-gap ledger events for this card' \
        -m $'Tribe-Card: CARD-SLUG\nTribe-Milestone: gap-gate'
      ```
 

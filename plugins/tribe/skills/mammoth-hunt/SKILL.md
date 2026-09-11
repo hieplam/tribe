@@ -75,7 +75,7 @@ that skips any of the five roles is not a Mammoth Hunt; do not silently downgrad
    the Stage D ratification pass rules on the whole batch; here you are the only ratifier
    there will ever be, so a proposal you leave in the PR body dies there (PR #115's five
    proposals and PR #123's five did exactly that). Read the gate's `open_ids` from
-   `<home>/reports/<card>-gap-gate.json`, ratify each of Scout's proposals yourself
+   `<home>/reports/<card>-gap-gate.json` (`<home>` = `$(plugins/tribe/scripts/tribe-home.sh <target-repo>)`, the base tribe home), ratify each of Scout's proposals yourself
    (`rule` / `anti-rule` / `debt` / `dismissed`) — carrying only the escalation-register few
    to the owner — and have **Scout** execute every ratified verdict by running `gap-rule.ts`
    with `--ratified-by shaman` (or `--ratified-by owner`), so the `ruled` events and the

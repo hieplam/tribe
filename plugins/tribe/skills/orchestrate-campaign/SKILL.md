@@ -478,7 +478,9 @@ build the single message the owner reads:
    `shipped`, in your final report.
 2. **The ratification pass.** Collect every convention surfaced across the whole campaign. The
    authoritative list per card is **the gate's own JSON**, not a PR body you re-read: for each
-   card, read `<home>/reports/<card>-gap-gate.json` and take its `open_ids` — the gaps the gate
+   card, read `<base-home>/reports/<card>-gap-gate.json` (where `<base-home>` is
+   `$(plugins/tribe/scripts/tribe-home.sh <target-repo>)` — the BASE tribe home the gate writes to,
+   NOT the campaign-nested `--home` above) and take its `open_ids` — the gaps the gate
    reconciled and left un-ruled. Add each `shipped` card's `## Harness gaps` PR record (the
    proposals its Warchief landed as reviewable drafts but did not self-ratify, per its brief)
    plus every ruling already in `answers.md`. Every one of them must end this pass
