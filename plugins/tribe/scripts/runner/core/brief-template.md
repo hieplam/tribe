@@ -68,7 +68,8 @@ Your agent Method already carries these; they are walls here because campaigns
 starve them silently:
 
 - Dispatch the Tracker at every audit round (Method step 6.0b), and give every dispatch its
-  own report-file path: the same `reports/` directory as {{REPORT_PATH}} above, named
+  own report-file path under the BASE tribe home's `reports/` directory that Method step 6.0b
+  names — the one `gap-gate.ts` globs, NOT the campaign-nested `reports/` of {{REPORT_PATH}} above — named
   `tracker-{{CARD_ID}}-<round>.md` (`<round>` = `task-3`, `wave-2`, `fix-1`,
   `final`). You never read those files yourself.
 - Before `gh pr create`, run `gap-gate.ts` from the plugin root (Method step 7). It reads
