@@ -233,39 +233,42 @@ the signal; the watchdog is the watcher. For the runner, the heartbeat is the ru
 a new line every few seconds while a session is working.</p>
 
 <p>Four files are involved. <code>run.json</code> is the runner's own record of one run: its
-process id, start time, and, once the run ends normally, its end time and exit code; a run.json
-with no end time whose process is dead means the runner crashed. The runner log is the heartbeat
-file above. <code>campaign-report.json</code> is the summary the runner writes as its very last act
-when it finishes a pass over the cards, so its presence means "this pass is complete". And the
-watchdog's own <code>status.json</code> is where it writes its current state and the reason for
-any exit.</p>
+process id, start time, and, when the run ends, its exit code. The runner's exit codes carry the
+meaning: 0 is done, 2 means a card is parked on a question for you, 3 means a session ended
+before its card finished (quota, overload, or crash), 4 and 5 are errors that need a person. The
+runner log is the heartbeat file above. A <code>STOP</code> file in the campaign home is how you
+ask everything to stand down. And the watchdog's own <code>status.json</code> is where it writes
+its current state and the reason for any exit.</p>
 
 <figure class="diagram">
 <div class="mermaid">flowchart TD
-    T["Tick, every 30 s"] --> A{"campaign-report.json<br/>exists? (pass complete)"}
-    A -- yes --> D["exit: done"]
-    A -- no --> B{"runner process alive?<br/>(pid from run.json)"}
-    B -- yes --> W["keep watching that runner"]
-    B -- no --> Q{"last log lines say<br/>quota rejected?"}
+    T["Tick, every 30 s"] --> Z{"STOP file<br/>in the campaign home?"}
+    Z -- yes --> D0["exit: done (stop requested)"]
+    Z -- no --> B{"runner process alive?<br/>(pid from run.json)"}
+    B -- yes --> ST{"runner log unchanged<br/>for 30 min?"}
+    ST -- yes --> H["exit: needs human (stalled)"]
+    ST -- no --> W["keep watching that runner"]
+    B -- "no run.json at all" --> L["launch the runner"]
+    B -- "no: exited" --> E{"recorded exit code"}
+    E -- "0" --> D["exit: done"]
+    E -- "2, 4 or 5" --> N["exit: needs human<br/>(escalations pending / error /<br/>rulings unratified)"]
+    E -- "3: session incomplete" --> Q{"last log lines say<br/>quota rejected?"}
     Q -- "yes, with reset time" --> S["sleep until reset time,<br/>then relaunch<br/>(at most 6 times)"]
     Q -- no --> O{"last log lines say<br/>server overloaded (5xx)?"}
     O -- yes --> K["back off 30, 60, 120, 240, 480 s,<br/>then relaunch (at most 5 times)"]
-    O -- no --> C{"run.json has an end time?<br/>(ended normally vs crashed)"}
-    C -- "no: crashed" --> R["relaunch (at most once)"]
-    C -- "yes: ended normally" --> W
-    W --> ST{"log file unchanged<br/>for 30 min?"}
-    ST -- yes --> H["exit: needs human"]
-    ST -- no --> T
+    O -- no --> R["plain crash: relaunch<br/>(at most once)"]
 </div>
-<figcaption>One tick of the watchdog, top to bottom: is the pass complete, is the runner alive,
-and if not, why did it stop and what is the right way to bring it back. Every wait is capped so
-it can never loop forever; when a cap is hit it exits with "needs human" and writes the reason to
-its status file.</figcaption>
+<figcaption>One tick of the watchdog, top to bottom: was a stop requested, is the runner alive,
+and if it has exited, what its exit code says. Only exit code 3, "session incomplete", leads to
+the quota, overload and crash branches. Every wait is capped so it can never loop forever; when a
+cap is hit it exits with "needs human" and writes the reason to its status file.</figcaption>
 </figure>
 
-<p>Three of those decisions read the runner log. Two of them could read the Claude transcript
-instead: "unchanged for 30 minutes" is just the file's modification time, and a quota rejection
-also appears in the transcript as an assistant row flagged as an API error. The third cannot. The
+<p>Three of those decisions depend on the runner log: the stall check uses its modification time,
+the quota and overload checks read its last lines. Two of the three could use the Claude
+transcript instead: "unchanged for 30 minutes" works just as well on the transcript's
+modification time, and a quota rejection also appears in the transcript as an assistant row
+flagged as an API error. The third cannot. The
 exact reset time, a timestamp the watchdog sleeps until, exists only in the stream's rate-limit
 event. The transcript carries the human sentence "resets 6:20am (Asia/Saigon)" and nothing
 structured. That one field is the whole reason the log is still written.</p>
