@@ -620,8 +620,13 @@ Under ledger policy A the append is committed on the card branch with the traile
 
 `verifyShipped` therefore replays **seven** D3 points, not five. The two added by CU-4 §3 are:
 
-- `gapGateStamped` — the merged PR body carries a `gap-gate v1` stamp whose `card=` matches this
-  card and whose `base=`/`head=` shas are commits of the merged branch.
+- `gapGateStamped` — the merged PR body carries a `gap-gate v1` stamp whose `base=`/`head=` shas
+  are commits of the merged branch, and whose `card=` names an identity of this card: either the
+  runner's campaign-local card id, OR a `Tribe-Card:` trailer value on the commits the merged PR
+  brought in (a card has two names — spec §3a — the runner id and the Warchief's slug used in
+  every `Tribe-Card:` trailer). The trailer check runs
+  `git log --format=%(trailers:key=Tribe-Card,valueonly) <mergeSha>^1..<mergeSha>` and accepts
+  `stamp.card` if it appears among those trailer values. A stamp naming neither still fails.
 - `ledgerCommitted` — every id the stamp says was minted is present in the ledger as committed
   on the base branch.
 
