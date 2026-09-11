@@ -4,7 +4,7 @@
 // (shape B, session 56af20da), and the heading-prefixed em-dash form with a non-grep evidence
 // command (shape C, session 93fe0a83).
 import { describe, expect, test } from 'bun:test';
-import { dedupeCandidates, parseTrackerReport } from './gap-candidates.ts';
+import { dedupeCandidates, fingerprintTargets, parseTrackerReport } from './gap-candidates.ts';
 
 const SHAPE_A = [
   'HG-candidate 1  [input-validation]  diff FOLLOWS an undocumented pattern',
@@ -180,6 +180,35 @@ describe('parseTrackerReport', () => {
     expect(c.candidates).toHaveLength(1);
     expect(c.candidates[0]!.category).toBe('test-presence');
   });
+
+  test('a pattern carried by --regexp= still freezes the directory scope so a later change re-fires it', () => {
+    const report = [
+      'HG-candidate 1  [error-handling]  diff FOLLOWS an undocumented pattern',
+      '  Pattern:    silent catch',
+      '  Evidence:   `grep -rn --regexp="catch {" src` → 3 hits in 3 files (`src/a.ts:1`, `src/b.ts:1`, `src/c.ts:1`)',
+      '  Diff link:  src/c.ts:1 repeats it',
+      '  Not judged: this is a gap in the rule set, not a violation',
+    ].join('\n');
+    const { candidates } = parseTrackerReport(report, 'tracker-X-final.md', 'final');
+    expect(candidates[0]!.paths).toContain('src');            // the directory scope, not dropped as the pattern
+    expect(candidates[0]!.paths).toEqual(expect.arrayContaining(['src', 'src/a.ts', 'src/b.ts', 'src/c.ts']));
+  });
+});
+
+describe('fingerprintTargets', () => {
+  test('positional pattern: drops the command, flags, and the pattern; keeps the path scope', () => {
+    expect(fingerprintTargets('grep -rn "as string" src/')).toEqual(['src/']);
+  });
+  test('pattern carried by --regexp= keeps the positional path as scope (no under-inclusion)', () => {
+    expect(fingerprintTargets('grep -rn --regexp="catch {" src')).toEqual(['src']);
+  });
+  test('pattern carried by standalone -e keeps the path and excludes the pattern value', () => {
+    expect(fingerprintTargets('grep -rn -e "catch {" src/')).toEqual(['src/']);
+  });
+  test('a bare . or ./ target yields no path (the scope is carried by evidence/diff-link paths)', () => {
+    expect(fingerprintTargets('grep -rn "x" .')).toEqual([]);
+    expect(fingerprintTargets('grep -rn "x" ./')).toEqual([]);
+  });
 });
 
 describe('dedupeCandidates', () => {
@@ -214,5 +243,19 @@ describe('dedupeCandidates', () => {
       'final',
     ).candidates;
     expect(dedupeCandidates([...one, ...two], ['task-3', 'final'])).toHaveLength(2);
+  });
+
+  test('a bare "./" from Evidence is not a shared path, so disjoint same-category gaps stay distinct', () => {
+    const mk = (pat: string, file: string): string => [
+      'HG-candidate 1  [error-handling]  diff FOLLOWS an undocumented pattern',
+      `  Pattern:    ${pat}`,
+      `  Evidence:   \`grep -rn "${pat}" ./\` → 1 hits in 1 files (\`${file}:1\`)`,
+      `  Diff link:  ${file}:1 repeats it`,
+    ].join('\n');
+    const a = parseTrackerReport(mk('silent-a', 'lib/a.ts'), 'a.md', 'final').candidates;
+    const b = parseTrackerReport(mk('silent-b', 'src/b.ts'), 'b.md', 'final').candidates;
+    expect(a[0]!.paths).not.toContain('./');
+    expect(a[0]!.paths).not.toContain('.');
+    expect(dedupeCandidates([...a, ...b], ['final'])).toHaveLength(2);
   });
 });

@@ -111,16 +111,35 @@ function extractPaths(source: string): string[] {
   return out;
 }
 
+/** Pattern-bearing grep flags: the search pattern rides the flag, so the first POSITIONAL token
+ * is a target path, not the pattern. Standalone forms (`-e PAT`, `--regexp PAT`, `-f FILE`,
+ * `--file FILE`) consume the next token; fused forms (`--regexp=PAT`, `-ePAT`) carry it inline. */
+const PATTERN_FLAGS = new Set(['-e', '--regexp', '-f', '--file']);
+
 /** The fingerprint's own target arguments — the grep's non-flag, non-pattern tokens (e.g.
  * `src/`). These are the SCOPE the fingerprint re-fires over, so a later change anywhere inside
- * them must re-execute it (card C5, spec §2 step 2 amended). Drops argv[0] (the command), every
- * flag (`-…`), and the first remaining token (the search pattern); a bare `.`/`./` is not a path
- * and is dropped (the Evidence/Diff-link paths carry the scope). Pure — `tokenize` is the shared
- * fingerprint splitter, so target tokens come from the same source as the executed argv. */
+ * them must re-execute it (card C5, spec §2 step 2 amended). Drops argv[0] (the command) and
+ * every flag; drops the search pattern whether it is positional OR carried by a pattern-flag
+ * (else the first real target is lost — under-inclusion, the bug this card fixes); drops a bare
+ * `.`/`./` (not a path — the Evidence/Diff-link paths carry the scope). Pure — `tokenize` is the
+ * shared fingerprint splitter, so target tokens come from the same source as the executed argv. */
 export function fingerprintTargets(fingerprint: string): string[] {
-  const nonFlag = tokenize(fingerprint).slice(1).filter((t) => !t.startsWith('-'));
+  const tokens = tokenize(fingerprint);
   const out: string[] = [];
-  for (const t of nonFlag.slice(1)) {          // slice(1) drops the search pattern
+  let patternConsumed = false; // the positional search pattern is dropped exactly once
+  for (let i = 1; i < tokens.length; i++) {
+    const t = tokens[i]!;
+    if (t.startsWith('-')) {
+      const flagName = t.includes('=') ? t.slice(0, t.indexOf('=')) : t;
+      if (PATTERN_FLAGS.has(flagName)) {
+        patternConsumed = true;
+        if (!t.includes('=')) i += 1; // standalone pattern-flag: its value is the next token — skip it
+      } else if (/^-[ef]./.test(t)) {
+        patternConsumed = true; // fused short pattern-flag: -ePAT / -fFILE
+      }
+      continue; // every flag token is skipped
+    }
+    if (!patternConsumed) { patternConsumed = true; continue; } // the positional pattern — drop it
     if (t === '.' || t === './') continue;
     if (!out.includes(t)) out.push(t);
   }
@@ -164,7 +183,10 @@ export function parseTrackerReport(text: string, file: string, round: string): P
     const hasDiffLink = diffLink !== undefined && diffLink.trim().length > 0;
     const paths: string[] = [];
     const addPaths = (candidatePaths: string[]): void => {
-      for (const p of candidatePaths) if (!paths.includes(p)) paths.push(p);
+      for (const p of candidatePaths) {
+        if (p === '.' || p === './') continue; // a bare current-dir is never a path (Oracle)
+        if (!paths.includes(p)) paths.push(p);
+      }
     };
     addPaths(fingerprintTargets(fingerprint));            // fingerprint's target scope (the fix)
     addPaths(extractPaths(evidenceField ?? ''));          // Evidence hit paths
