@@ -72,7 +72,7 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
   (runtime code). `tools/**` (measurement scripts, never imported by runtime code;
   `structure.test.ts` asserts no runtime import of `tools/`) and `fixtures/**`, `e2e/**` are outside
   the wall. Token delivery: no fs copy step; Vite imports
-  `../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css` by path from
+  `../../../../../../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css` (seven parents — verified) by path from
   `client/src/styles/index.css` (`@import`), so the build reads it and nothing copies it."
 - **D19** — "A tool node carries two anchors: `call: {at,i}` (the `tool_use` block) and
   `result: {at,i} | null` (the `tool_result` block in its later row, set by pairing). `/api/block`
@@ -83,6 +83,11 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
   therefore exceed 500 by at most one row's nodes. `from` = the first retained row's offset. Pairing
   runs AFTER trimming, on retained rows only: a result whose call is outside the window renders as
   `orphan_result` with label 'call is above the window'."
+
+- **D21** — "The window count used for the boundary is the PRE-pairing node count: every row's
+  nodes are counted as the normalizer emits them before pairing, and a `tool_result` block counts as
+  one candidate node. The boundary is therefore derivable before pairing; after pairing the rendered
+  node count may be lower."
 
 **There is no `Last-Event-ID` handling anywhere in this plan.** If a task brief or a test name
 mentions resuming by byte offset, it predates D12 and is wrong.
@@ -153,7 +158,9 @@ run one hunter at a time per worktree. If the Warchief runs task 27 in a second 
    `matcha/`, `coffee/`, `sea-salt/`, one shared token schema;
 2. the owner has **named one**, recorded in STATE.md as a ruling — **D17, 2026-09-12: sea salt**;
 3. `design/<that-theme>/tokens.css` exists and defines every token in spec §8.2's table —
-   `design/sea-salt/tokens.css` does, all 38, verified 2026-09-12.
+   `design/sea-salt/tokens.css` does, all 38, verified 2026-09-12. **The gate resolves the exact
+   relative path the build uses**, from `plugins/tribe/scripts/viewer/client/src/styles/`:
+   `../../../../../../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css` — the same string, so a gate that passes and a build that fails cannot happen.
 
 All three hold, so the gate is **open** and task 1 may be dispatched. **The check is not retired by
 being satisfied**: re-run it at dispatch. A theme decision that later changes STATE.md without
@@ -168,8 +175,9 @@ Sonnet by default — every task below states its model. Opus is warranted on ex
 - **Task 7 and Task 8** (the normalizer): the oracle-bearing tasks. Getting "nothing is silently
   dropped" right across 30 row types and 8 block shapes is judgment over a measured table, not
   transcription.
-- **Task 19** (the SSE poller): resume-by-byte-offset, reset-on-truncate, and the tick caps
-  interact; a subtle error here is invisible until a live run.
+- **Task 19** (the SSE poller): the tail transition, reset-on-rotate, frame batching and the tick
+  caps interact, and a subtle error is invisible until a live run. (There is no resume to get wrong
+  — D12 removed byte-offset resume entirely; what remains is getting the *live* stream right.)
 - **Task 24** (the session view): follow-the-tail, windowed back-fill and incoming frames interact
   in the scroll container; this is the one client task with real state-machine risk.
 
@@ -205,10 +213,38 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       `buildEmptyProject()`, `buildEmptyProjectsRoot()`, `buildHomeWithoutClaude()`. Every one comes
       from `mkdtemp`, never a fixed path.
 
-      Assert over `homeA`: two project directories; session 1's `.jsonl` contains at least one row
-      for **every** `type` in spec §7.1 and one block for every row of spec §7.2; a `subagents/`
-      directory holds five sidecars forming the depth-2 tree, the missing-parent orphan and the
-      self-cycle; a `tool-results/` file exists whose name the `persisted-output` marker points at.
+      **Build and assert EVERY shape a later task consumes — spec §16.2 carries the full table and
+      this test is its enforcement.** A shape a later task needs but this test does not pin is a
+      shape that can silently disappear:
+
+      | Shape | Where | Consumed by |
+      | --- | --- | --- |
+      | one row of every `type` in spec §7.1, one block of every row in §7.2 | `<session-1>.jsonl` | task 30 layer 1 |
+      | string prompt **and** array prompt | `<session-1>.jsonl` | task 30 layer 2 |
+      | `tool_use` pending / paired ok / paired error | `<session-1>.jsonl` | tasks 9, 30 |
+      | a `tool_result` whose call is before the window | `<session-1>.jsonl` | tasks 9, 24, 30 |
+      | empty **and** non-empty `thinking` | `<session-1>.jsonl` | task 30 (absence asserted) |
+      | base64 `image` block | `<session-1>.jsonl` | tasks 25, 30 |
+      | `isCompactSummary` row | `<session-1>.jsonl` | task 8 |
+      | `<persisted-output>` marker + its file | `<session-1>.jsonl`, `tool-results/<id>.txt` | task 18 |
+      | an invented `type`; one malformed line | `<session-1>.jsonl` | tasks 8, 30 |
+      | depth-2 subagent tree + missing-parent orphan + self-cycle (5 sidecars) | `subagents/` | tasks 11, 25 |
+      | **three symlinks**: `escaping.txt`, `in-session.txt`, sibling-session sidecar | `tool-results/`, `subagents/` | tasks 4, 15, 30 |
+      | **`<session-4>`: 2,400 rows / 2,600 pre-pairing nodes** | `<session-4>.jsonl` | tasks 18, 24, 31 |
+      | **a four-block row positioned to straddle the 500-node boundary** | `<session-4>.jsonl` | task 18 (D20) |
+      | **rotation pair**: same-size, different content | `<session-4>.rotated` | tasks 5, 19, 31 |
+      | **a THIRD project, newest session 90 days old** | `<proj-C>/<session-3>.jsonl` | tasks 17, 23, 30 (D10) |
+      | two campaigns, same slug, two repo keys, same session id | `homeB/.tribe/...` | tasks 12, 16, 32 |
+
+      **Three projects in `homeA`, not two** — D10 hides projects whose newest session is older than
+      30 days, so a two-project fixture cannot produce the "show N older projects" link at all and
+      task 23's and task 30's assertions would be untestable.
+
+      `<session-4>`'s counts are exact and load-bearing: **2,400 rows producing 2,600 pre-pairing
+      nodes** (D21's unit). Above the 2,000-node client cap, so tail eviction and the pill are
+      reachable; above the 500-node window, so the backward scan overshoots and the whole-row trim
+      runs; and the four-block row sits where the boundary falls, so the trim is forced *through* a
+      multi-block row.
 
       **Assert all three symlinks by name** — each exists, each is a symlink
       (`lstatSync(...).isSymbolicLink()`), and each `realpathSync` resolves to the stated target:
@@ -216,7 +252,8 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       **sibling-session sidecar** inside `<session-2>`. A fixture whose own test does not pin these
       three cannot support tasks 4, 15 and 30, which all assert behaviour against them.
 
-      Assert `homeB` adds exactly the two `campaign-state.json` files and nothing else. Assert each
+      Assert `homeB` adds exactly the two `campaign-state.json` files under its own `.tribe/` and
+      nothing else. Assert each
       empty shape produces exactly the layout it names and nothing else.
 
       Expected on first run: `error: Cannot find module './build.ts'`.
@@ -573,6 +610,12 @@ Model: **Sonnet**.
       `expandable: true`, and no full payload in the node); a result over 64 KiB (same, with the
       `ToolResult`'s own `elided` set so the client knows which half it is expanding).
 
+      **D21 — the normalizer exposes a pre-pairing node count.** Task 18's window boundary needs
+      "how many nodes would this row emit" **before** pairing runs, so expose it as a pure function
+      over rows (each `tool_result` block counts as one candidate). Assert it agrees with the
+      emitted-node count when nothing pairs, and is **greater** than the post-pairing rendered count
+      when a result pairs into its call.
+
       **D19 — a tool node carries TWO anchors, and this is the case a single address cannot serve.**
       `call` is the `tool_use` block's `{at,i}` (always this node's own); `resultAnchor` is the
       `tool_result` block's `{at,i}` in its **later row**, filled by pairing and `null` while
@@ -817,9 +860,21 @@ Model: **Sonnet**.
       open. Inverted, the rule is total. **Permitted, in `adapters/**` only:** from `node:fs` —
       `readFileSync`, `openSync` (read flags only), `readSync`, `closeSync`, `statSync`, `lstatSync`,
       `readdirSync`, `realpathSync`; `Bun.file` read methods; `Bun.serve` (in `serve.ts`).
-      **Refused anywhere else in the package** (outside `fixtures/` and `e2e/`): any other `node:fs`
-      member, any `fs/promises` import, `Bun.write`, `node:child_process`, `node:net`, `node:http`,
-      `node:https`. Resolve imports with Bun's transpiler as the existing wall does, **and** scan
+      **Refused everywhere the wall COVERS** — and the covered set is D18's, literally, not "the
+      package minus fixtures and e2e" (an earlier draft said that and it contradicts D18, because
+      `tools/` is outside too). Write the two lists into the test as data, so the scope is
+      inspectable rather than implied:
+
+      ```ts
+      const COVERED = ['core/', 'adapters/', 'serve.ts', 'client/src/'];
+      const OUTSIDE = ['tools/', 'fixtures/', 'e2e/'];
+      ```
+
+      Refused inside `COVERED`: any other `node:fs` member, any `fs/promises` import, `Bun.write`,
+      `node:child_process`, `node:net`, `node:http`, `node:https`. Nothing under `OUTSIDE` is
+      scanned at all — and the rule that keeps that honest is the separate one below: **no file
+      under `COVERED` may import from `tools/`**. Resolve imports with Bun's transpiler as the
+      existing wall does, **and** scan
       member expressions, so `fs.writeFileSync` reached through a namespace import is caught as well
       as a named import.
 
@@ -1019,6 +1074,14 @@ Model: **Sonnet**.
       from EOF in 256 KiB steps, drop the leading partial row unless at BOF, parse complete rows,
       accumulate the node count, stop at ≥500 nodes or BOF, then trim.
 
+      **The count is the PRE-PAIRING node count (D21)** — what the normalizer emits per row before
+      pairing runs, with each `tool_result` block counting as **one candidate node**. It has to be:
+      pairing runs after the trim, so a count that depended on pairing would be circular. Assert the
+      consequence explicitly, because it looks like a bug to a reader who does not know D21: after
+      pairing, the **rendered** node count of a window may be **lower** than 500, since a result
+      that finds its call becomes a patch rather than a node. The contract is "at least 500
+      candidates", never "exactly 500 cards".
+
       **The trim is by WHOLE ROWS (D20), and "exactly 500 nodes" is deliberately NOT the contract.**
       Drop the largest prefix of whole rows that still leaves ≥500 nodes; the window may exceed 500
       by at most one row's nodes. `from` is the **first retained row's** offset.
@@ -1141,6 +1204,18 @@ Model: **Sonnet**.
       mismatched `Origin` gets 403; `127.0.0.1:PORT` and `localhost:PORT` are accepted; the CSP and
       `nosniff` headers are present on the shell; `/assets/<unknown>` is 404.
 
+      **Loopback is asserted two ways, because reading the config only proves intent** (spec §12.1):
+      the configured hostname is exactly `127.0.0.1`, **and** a socket to the machine's own
+      non-loopback address on that port is **refused** — find one with `os.networkInterfaces()`,
+      attempt a connection, expect `ECONNREFUSED`; if the machine has no non-loopback interface,
+      skip **loudly** rather than pass silently. A server bound to `0.0.0.0` passes the first check
+      and fails the second, which is exactly the mistake worth catching.
+
+      **Unlisted paths follow the one rule of spec §3.2**: `/`, `/index.html`, `/p/*` and `/s/*`
+      return the index shell; everything else returns JSON `404`. Assert both sides, including
+      `/s/does-not-exist` → shell (the client renders "no session with that id") while
+      `/api/session/does-not-exist` → `404`.
+
       **`/healthz` returns exactly `{"ok":true,"viewer":"tribe-viewer","v":2}`** — assert the exact
       string. This is a deliberate break from the old `{"ok":true,"viewer":"tribe-live-viewer","v":1}`
       and the whole point of spec §10.4: an already-running pre-consolidation viewer does not reload
@@ -1214,6 +1289,7 @@ file, there is no alias layer, and no component may introduce a name the file do
 
 - Create: `V/vite.config.ts`, `V/index.html`, `V/tsconfig.client.json`,
   `V/client/src/main.tsx`, `V/client/src/App.tsx`, `V/client/src/routes.ts`,
+  **`V/client/src/styles/index.css`** (the one file that `@import`s the owner's tokens — D18),
   `V/client/src/styles/app.css`
 - Modify: `V/package.json` (react, react-dom, vite, the plugin, the type packages,
   **`playwright-core` pinned at 1.63.0**, the build script), `V/.gitignore` (add `dist/`)
@@ -1233,9 +1309,19 @@ Model: **Sonnet**.
       round-trip through `pushState`. Expected: the client rules fail against the old `app.css`,
       which is full of literals.
 - [ ] **Step 2: Implement** the scaffold. **Tokens arrive by `@import`, not by a copy step (D18).**
-      `client/src/styles/index.css` carries
-      `@import "../../../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css";`
-      (STATE.md D17) and Vite resolves it at build time. Do **not** add a copy step to
+      `client/src/styles/index.css` carries exactly:
+
+      ```css
+      @import "../../../../../../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css";
+      ```
+
+      **Seven `../` — count them against the worktree before writing the line rather than trusting
+      this plan's rendering of it**: from `plugins/tribe/scripts/viewer/client/src/styles` the hops
+      are `src`, `client`, `viewer`, `scripts`, `tribe`, `plugins`, repo root. Verify with an `ls`
+      of that exact relative path from the styles directory before moving on — a wrong count fails
+      the build with a resolver error and nothing else. (STATE.md D17 names the theme.)
+
+      Vite resolves it at build time. Do **not** add a copy step to
       `vite.config.ts`: that would need a filesystem write from runtime-adjacent build code, which
       the D16 wall forbids, and inventing an exception for it would weaken the wall to save a line.
       `matcha/` and `coffee/` are never imported. `vite.config.ts` sets `build.outDir` to `../dist`
@@ -1640,16 +1726,30 @@ Model: **Sonnet**.
       defect that hid every runner prompt) is broken. One case each, per spec §16.2's table: string
       prompt; **array prompt**; `tool` pending (`[data-state="pending"]`); `tool` ok with its result
       text; `tool` error (`[data-state="error"]`); `orphan_result`; **empty thinking asserted
-      absent**; non-empty thinking present; **`image` displayed**: on expand an `<img>` exists whose `src` is a `data:` URL of the expected
-      byte length, and the browser's request log shows **no network fetch** for those bytes — G1
-      says the image renders, so a node that merely claims one is not the proof; compaction
+      absent**; non-empty thinking present; **`image` displayed** — the same three clauses spec §16.2
+      and task 25 state, word for word: **before expand**, zero requests for its bytes; **on
+      expand**, exactly **one** request, `GET /api/block?at=&i=`; and then an `<img>` whose `src` is
+      a `data:` URL of the **expected byte length**. Do **not** assert that the page issues no request
+      at all for the bytes: the bytes must come from somewhere, and the claim is that they arrive
+      once, lazily, through the one documented route. Compaction
       `divider`; spill link with `/api/spill` not called before expand; unknown row type as a
       collapsed `raw` card.
 
-      Also: click a subagent tab and assert it navigates and renders that agent's nodes; assert the
-      sidebar shows two projects plus a `show 1 older projects` link and that `?all=1` shows the
-      rest (D10); assert each of the three empty shapes renders the "no sessions found" note rather
-      than an error or a blank pane.
+      **Layer 3 — "lists every session", asserted as a SET.** G1's first clause is that the viewer
+      lists every session on the machine, and "at least one row rendered" does not prove it. Collect
+      the rendered `SessionRow` ids from the DOM and assert **set equality** against the ids
+      `fixtures/build.ts` actually wrote, twice:
+      1. default view — exactly the sessions in projects inside D10's 30-day window (`<proj-A>`'s
+         two and `<proj-B>`'s one), with `<proj-C>`'s session **absent**;
+      2. after **clicking "show 1 older projects"** (and again via `?all=1`) — exactly **every**
+         session the fixture built, `<proj-C>`'s included.
+
+      Equality in both directions: a missing id is under-listing, an extra id is a row the fixture
+      never created, and only the whole-set comparison catches both.
+
+      Also: click a subagent tab and assert it navigates and renders that agent's nodes; assert each
+      of the three empty shapes — each its own directory, not a variant of `homeA` — renders the "no
+      sessions found" note rather than an error or a blank pane.
 
       **The zero-write proof is a hash (D16/G4), not an inspection.** Take a recursive digest of the
       whole fixture HOME — every path, size and content hash under it — before the DOM suites run,
@@ -1834,12 +1934,12 @@ Model: **Sonnet**.
       is outside this card's authority (the old harness did exactly that and it is being removed,
       not carried over).
 
-      **Teardown also removes both synthetic campaign homes it created under `~/.tribe`**, in a
-      `finally`, by the exact paths it recorded when creating them — never a glob, never a pattern.
-      An earlier draft kept them "as evidence"; that is persistent mutation of the owner's real
-      state, and the card reserves writes outside the repo to the owner. The evidence lives under
+      **Teardown removes `homeB` in a `finally`** — the whole fake HOME, by the exact path the test
+      recorded when `mkdtemp` created it, never a glob and never a pattern. Both campaign homes live
+      inside it (`<homeB>/.tribe/<repoKeyA>/...` and `<homeB>/.tribe/<repoKeyB>/...`), so removing
+      `homeB` removes them. Delete the throwaway repo the same way. The evidence lives under
       `docs/tribe/planning/viewer-consolidation/evidence/`: the captured stdout lines, the assertion
-      output and the screenshots. Delete the throwaway repo too.
+      output and the screenshots — nothing needs to survive teardown.
 - [ ] **Step 3: Run.**
 
       ```sh
@@ -1850,11 +1950,13 @@ Model: **Sonnet**.
 - [ ] **Step 4: Commit**
 
 Audit lens (Sol, contract): confirm the printed session URL actually opens that session in the
-running viewer — the test asserts it in the browser, so re-run it and watch. Then point the viewer
-at the **real** `~/.tribe` on this machine and confirm a session under both
+running viewer — the test asserts it in the browser, so re-run it and watch. Then, **separately and read-only**, start the viewer with the
+machine's own `HOME` and confirm a session under both
 `-Users-hip-repo-tribe/followups-2026-09-04` and
 `-Users-hip-repo-todd-skills.migrated-1788705562/followups-2026-09-04` shows two badges — the
-fixture proves the code path, the real tree proves the model matches reality. Then read the
+fixture proves the code path, the real tree proves the model matches reality. That is a read of the
+owner's state by the auditor, never a write by the test: the test itself only ever touches
+`homeB`. Then read the
 teardown: any code path that discovers a pid **from a port** rather than from its own spawn is a
 Should-fix at minimum, because it can kill a process this card never owned.
 

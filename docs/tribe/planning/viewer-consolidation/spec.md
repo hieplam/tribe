@@ -2,8 +2,9 @@
 
 Card: `~/.tribe/-Users-hip-repo-tribe/cards/viewer-consolidation.md` (Option A, approved 2026-09-11).
 State: `~/.tribe/-Users-hip-repo-tribe/viewer-consolidation/STATE.md` (D1–D9, P1, F1/F2).
-References: `references/` next to this file — read `tribe-viewer-research.md` (B1–B25),
-`kanna-store-vs-transcript.md` (L1–L9), `runner-log-vs-transcript.md`, `option-a.body.html`.
+References (background, **not required to read this page** — the glossary below makes every id
+here self-contained): `references/` next to this file holds `tribe-viewer-research.md` (B1–B25),
+`kanna-store-vs-transcript.md` (L1–L9), `runner-log-vs-transcript.md` and `option-a.body.html`.
 
 **The short-code glossary**, so every `B`/`L`/`F` id on this page is followable without leaving it.
 `B<n>` = a defect of the **pre-consolidation viewer** (`tribe-viewer-research.md`); `L<n>` = a
@@ -24,6 +25,7 @@ in the current code** whose reasoning must survive a rewrite.
 | B16 | no Host check | §12.5 |
 | B25 | status page unbounded | §16.1 |
 | L1 | no `result` row on disk | §7.1, §7.7 |
+| L2 | transcript format drifts between releases | §17 |
 | L7 | cwd encoding non-injective | §17 |
 | L9 | stream-only events never on disk | §7.7 |
 | F34 / F36 | subagent orphan / cycle guards | §5.5 |
@@ -153,11 +155,11 @@ Three further rulings arrived with review round 2 and **supersede** the earlier 
   thinking, raw card) whose encoded size exceeds 64 KiB are elided the same way tool payloads are,
   with `expandable` and `/api/block?at=&i=` for the full body. Therefore no single node can exceed
   the frame cap and `batchFrames` has no 'emit oversized alone' branch."*
-- **D18 — the scope of the D16 wall, and how tokens reach the build.** *"The allowlist applies to
+- **D18 — the scope of the zero-write wall (D16, below), and how tokens reach the build.** *"The allowlist applies to
   `core/**`, `adapters/**`, `serve.ts` and `client/src/**` — runtime code. `tools/**` (measurement
   scripts, never imported by runtime code; `structure.test.ts` asserts no runtime import of
   `tools/`) and `fixtures/**`, `e2e/**` are outside the wall. Token delivery: no fs copy step; Vite
-  imports `../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css` by path from
+  imports `../../../../../../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css` (seven parents — verified) by path from
   `client/src/styles/index.css` (`@import`), so the build reads it and nothing copies it."*
 - **D19 — a tool node carries two anchors.** *"`call: {at,i}` (the `tool_use` block) and
   `result: {at,i} | null` (the `tool_result` block in its later row, set by pairing). `/api/block`
@@ -170,6 +172,10 @@ Three further rulings arrived with review round 2 and **supersede** the earlier 
   back-fill with `before=from` never loses blocks). Pairing runs AFTER trimming, on retained rows
   only: a result whose call is outside the window renders as `orphan_result` with label 'call is
   above the window'; loading earlier and re-pairing replaces it with the paired card."*
+- **D21 — the window boundary counts PRE-pairing nodes.** *"The window count used for the boundary
+  is the pre-pairing node count: every row's nodes are counted as the normalizer emits them before
+  pairing, and a `tool_result` block counts as one candidate node. The boundary is therefore
+  derivable before pairing; after pairing the rendered node count may be lower."*
 - **D16 — the zero-write wall is an allowlist, not a denylist.** *"`structure.test.ts` permits only
   these world-touching imports in adapters (`node:fs` readFile / open with read flags / stat / lstat
   / readdir / realpath / read; `Bun.file` read; `Bun.serve`) and fails on any other `node:fs`,
@@ -578,7 +584,10 @@ export interface FileObservation {
 **The 64 KiB ceiling applies to every kind (D15), and `Sized` is on the union itself so the type
 system says so.** Before a node is emitted, its encoded size is measured; past 64 KiB its text is
 truncated to a prefix, `elided` becomes true, and `expandable` becomes true so the client can fetch
-the rest at the node's own `at`+`i`. A `divider`, a `chip` and an `unreadable` note carry
+the rest at **that payload's own anchor** — `at`+`i` for every kind, with one refinement: a tool
+card has two payloads, so its input expands through `call` and its result through `resultAnchor`
+(D19). "The node's own `at`+`i`" is right for every kind except `tool` and `orphan_result`, and
+saying so here rather than three sections later is the difference between a rule and a trap. A `divider`, a `chip` and an `unreadable` note carry
 `elided: false, expandable: false` — they have no larger payload, and saying so explicitly is
 cheaper than a reader inferring it. Two consequences fall out, and both are contracts elsewhere in this document:
 no single node can exceed the 1 MiB frame cap, so `batchFrames` (§6.2) needs no "emit an oversized
@@ -764,9 +773,30 @@ Two offsets remain in the state, and their meanings are now trivial:
 | `offset` | every byte read so far, including the raw carry |
 | `ackOffset` | one byte past the last `0x0A` seen — always a real line boundary in the file |
 
-`ackOffset` is **no longer a wire value** (D12 removed byte-offset resume). It survives because the
-*live* stream still needs it: it is where the next tick's read begins after a reset, and it is what
-makes "we have processed exactly these complete rows" a checkable statement in tests.
+`ackOffset` is **no longer a wire value** (D12 removed byte-offset resume). It survives for two
+reasons: it is what makes "we have processed exactly these complete rows" checkable in a test, and
+it is where a re-read starts after a reset.
+
+**How the next tick combines the carry with new bytes — the formula, because a reader cannot derive
+it from the two definitions alone:**
+
+```
+read     := bytes [state.offset, min(fileSize, state.offset + 4 MiB))   # NOT from ackOffset
+combined := state.carry ++ read           # raw bytes, concatenated
+cut      := index of the LAST 0x0A in `combined`
+lines    := decode(combined[0 .. cut])    # complete rows only, each decoded whole
+carry'   := combined[cut+1 ..]            # raw bytes, still incomplete
+offset'  := state.offset + read.length
+ack'     := offset' - carry'.length       # equivalently: one past that last 0x0A
+```
+
+**The next read starts at `offset`, not at `ackOffset`** — that is the whole point of keeping both.
+`offset` is "every byte I have already pulled off disk", so reading from it takes each byte exactly
+once; the bytes between `ackOffset` and `offset` are not re-read, they are already **in `carry`**
+and are re-joined by the concatenation above. Reading from `ackOffset` instead would re-read the
+carry bytes and duplicate them; dropping the carry and reading from `offset` would lose the partial
+row. Carrying the tail and advancing by what was read is what makes the pair lossless and
+duplication-free at once.
 
 **Reset — two triggers.** `reset` fires when **either**:
 
@@ -933,6 +963,8 @@ with each other.
       parse the complete rows in that slice
       nodes  += the node count those rows produce      # core/normalize.ts, counted only
       anchor := offset of the FIRST complete row in the slice
+  # nodeCount() above and below is the PRE-PAIRING count (D21): what the normalizer emits
+  # per row before pairing runs, with each tool_result block counting as one candidate node.
   # the loop reads whole 256 KiB slices, so it usually OVERSHOOTS. Trim by WHOLE ROWS (D20):
   rows     := the accumulated rows, in file order
   # drop the largest prefix of whole rows that still leaves >= 500 nodes
@@ -961,6 +993,15 @@ with each other.
   `truncatedBefore` is true iff any row precedes the anchor, covering both "the scan stopped early"
   and "the scan reached BOF but the trim discarded rows". Reading backwards costs one or two slices
   for a typical session and terminates at BOF for a short one.
+
+  **The count is the PRE-PAIRING node count (D21).** Pairing runs after the trim, so a count that
+  depended on pairing would be circular — the boundary would depend on the pairing, which depends on
+  which rows survive the boundary. D21 breaks it: count what the normalizer emits per row **before**
+  pairing, with each `tool_result` block counting as **one candidate node**. That number is a pure
+  function of the rows, so the boundary is derivable in one pass. After pairing the rendered count
+  may be **lower** — a result that pairs into its call becomes a patch and stops being its own node
+  — and that is expected, not a defect: the window is "at least 500 candidates", never "exactly 500
+  rendered cards".
 
   **Pairing runs after the trim, over retained rows only** — the order matters and §7.5 states the
   consequence. Normalizing before trimming would let a `tool_result` pair into a call node that the
@@ -1178,6 +1219,13 @@ stream's normalize state. There are exactly two outcomes for a `tool_result`:
   `orphan_result` node is emitted **in file position** — never dropped — carrying its own
   `resultAnchor` (D19) so its payload is still expandable.
 
+**The window boundary is counted before pairing (D21).** §6.3 chooses which rows the window keeps
+using the **pre-pairing** node count — every node the normalizer would emit per row, with a
+`tool_result` block counting as one candidate. Pairing then runs over the retained rows and may
+reduce the rendered count, because a result that finds its call becomes a patch rather than a node.
+Both statements are true at once and neither is a bug: the boundary is about rows and candidates,
+the rendered list is about cards.
+
 **Sequencing, stated once here and once in §6.3, because getting it backwards silently loses data.**
 Pairing runs **after** the window trim, over retained rows only. Normalizing first would let a
 result pair into a call node that the trim then discards: the result produces no node of its own
@@ -1340,16 +1388,25 @@ Mechanism:
 1. `design/sea-salt/tokens.css` (the theme STATE.md names) is the single stylesheet imported once at
    the app root, before any component style.
 2. **Nothing copies it (D18).** `client/src/styles/index.css` carries
-   `@import "../../../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css";`
-   and Vite resolves that path at build time. A copy step would have needed a filesystem write from
-   `vite.config.ts` — which is exactly what the D16 wall forbids in runtime code, and inventing an
-   exception for it would have weakened the wall to save one line. An `@import` needs no exception:
-   the bundler reads the owner's file directly, so there is one copy of the tokens in the repo and
-   it is the owner's.
+
+   ```css
+   @import "../../../../../../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css";
+   ```
+
+   and Vite resolves that path at build time. **Seven `../`, verified against the worktree** rather
+   than counted by eye: from `plugins/tribe/scripts/viewer/client/src/styles` the hops are `src`,
+   `client`, `viewer`, `scripts`, `tribe`, `plugins`, repo root. An earlier draft wrote four, which
+   would have failed the build with a resolver error and nothing else.
+
+   A copy step would have needed a filesystem write from `vite.config.ts` — exactly what the D16
+   wall forbids in runtime code, and inventing an exception for it would have weakened the wall to
+   save one line. An `@import` needs no exception: the bundler reads the owner's file directly, so
+   there is one copy of the tokens in the repo and it is the owner's.
 3. `client/src/styles/app.css` and every `.tsx` reference tokens only via `var(--…)`. The P1 gate
-   checks that the **imported path** exists, which is the same file the build reads — so the gate
-   and the build cannot disagree. §12.6 bans a
-   literal colour, font, radius or `px` length anywhere under `client/` except `tokens.css` itself.
+   resolves **the exact relative path above, from `client/src/styles/`** — the same string the build
+   reads — so a gate that passes and a build that fails cannot happen. §12.6 bans a literal
+   colour, font, radius or `px` length anywhere under `client/` — with **no exempt file there**,
+   because the owner's `tokens.css` lives outside `client/` and is reached by the import above.
 
 **Dark mode is free and must not be re-implemented.** Each `tokens.css` already declares its dark
 values twice — under `@media (prefers-color-scheme: dark)` and under `[data-theme="dark"]` — so the
@@ -1721,7 +1778,13 @@ Mechanical, so G5 is a test and not a claim. Over every non-test `.ts`/`.tsx` fi
 
 ### 12.1 Read-only and local
 
-127.0.0.1 only, hard-coded (no `--host`). Zero writes anywhere outside `fixtures/`/`e2e/`,
+127.0.0.1 only, hard-coded (no `--host`). **Asserted two ways, because reading the config proves
+only intent**: `serve.security.test.ts` checks that the configured hostname is exactly `127.0.0.1`,
+**and** that a connection to the machine's own non-loopback address on that port is **refused**
+(resolve a LAN/interface address with `os.networkInterfaces()`, attempt a socket, expect
+`ECONNREFUSED`; skip only if the machine has no non-loopback interface, and say so in the output
+rather than passing silently). A server bound to `0.0.0.0` passes the first check and fails the
+second, which is exactly the mistake worth catching. Zero writes anywhere outside `fixtures/`/`e2e/`,
 enforced by §11.4 rule 5. No `git`, no `gh`, no outbound network — the only `fetch` in the tree is
 the runner's own probe, which lives in the runner package.
 
@@ -1734,7 +1797,12 @@ export function containedJoin(root: string, ...segments: string[]): string | nul
 ```
 
 It returns `null` (never throws, never a partial path) when any segment is empty, is `.`/`..`,
-contains `/`, `\`, or a NUL byte, or when the resolved result does not start with `root + sep`.
+contains `/`, `\`, or a NUL byte, or when the **lexically normalised** join — `path.resolve`, pure
+string math, **no filesystem access and no symlink following** — does not start with `root + sep`.
+"Normalised" here means only that `.` and `..` segments are collapsed textually. The *other*
+sense of resolved — `realpath`, which follows symlinks and does touch the disk — belongs to stage 2
+below and is deliberately a different function, `isContainedResolved`. The two stages are named
+apart because conflating them is how a lexical check gets mistaken for a real one.
 The caller turns `null` into a `400`/`404` with a one-line message.
 
 Applied to, exhaustively: `project` (query), `sessionId` (path), `agentId` (path), `name`
@@ -1873,7 +1941,7 @@ Every row is "what the user sees", and no row is a stack trace.
 | port already in use | one stderr line `viewer: port 4321 is already in use`, exit 1 (today: a Bun stack dump, B14) |
 | `dist/index.html` missing | one stderr line + exit 2 (§10.3) |
 | `~/.claude/projects` missing or unreadable | the list renders, empty, with the note `no sessions found under <path>` — never a crash |
-| `~/.tribe` missing entirely | every badge is `null`; nothing else changes (**this is G1's precondition**) |
+| `~/.tribe` missing entirely | every session's `badges` is `[]` (an empty array — never `null`, per §4's wire contract); nothing else changes (**this is G1's precondition**) |
 | `campaign-state.json` malformed / wrong shape | that campaign contributes no badges; other campaigns unaffected (per-campaign fault isolation, carried over) |
 | `run.json` malformed | `runnerAlive: false`, `runId: null` |
 | `sessionId` in a state file is not a valid id | dropped from the index; counted in a `skippedBadges` number on `/api/projects` |
@@ -2045,24 +2113,59 @@ fixture run need no test-only flag.
 
 ```
 <homeA>/
-  .claude/projects/<encoded-cwd-A>/<session-1>.jsonl
-  .claude/projects/<encoded-cwd-A>/<session-1>/subagents/agent-*.jsonl + .meta.json
-  .claude/projects/<encoded-cwd-A>/<session-1>/tool-results/<id>.txt
-  .claude/projects/<encoded-cwd-B>/<session-2>.jsonl
+  .claude/projects/<proj-A>/<session-1>.jsonl          the "every kind" session
+  .claude/projects/<proj-A>/<session-1>/subagents/agent-*.jsonl + .meta.json   (5 sidecars)
+  .claude/projects/<proj-A>/<session-1>/tool-results/<id>.txt                  the spill
+  .claude/projects/<proj-A>/<session-1>/tool-results/escaping.txt   -> outside the root  (symlink)
+  .claude/projects/<proj-A>/<session-1>/tool-results/in-session.txt -> the spill          (symlink)
+  .claude/projects/<proj-A>/<session-1>/subagents/agent-<sib>.jsonl -> <session-2>'s copy (symlink)
+  .claude/projects/<proj-A>/<session-4>.jsonl          the >2,000-node session
+  .claude/projects/<proj-A>/<session-4>.rotated        the same-size replacement (not served)
+  .claude/projects/<proj-B>/<session-2>.jsonl          a second project
+  .claude/projects/<proj-C>/<session-3>.jsonl          a THIRD project, mtime 90 days old
   (no .tribe — this absence IS G1's precondition)
 
 <homeB>/ = <homeA>/ plus
   .tribe/<repoKeyA>/campaigns/<slug>/campaign-state.json
-  .tribe/<repoKeyB>/campaigns/<slug>/campaign-state.json
+  .tribe/<repoKeyB>/campaigns/<slug>/campaign-state.json     same slug, same session id
 ```
 
-Paths below are written without the `<home>/.claude/projects/` prefix for readability; the prefix is
-always there.
+**The full inventory — every shape, the file that holds it, and what consumes it.** Task 1 builds
+all of it and its own test asserts all of it, before any implementation task exists. A shape a later
+task needs but the fixture's test does not pin is a shape that can silently disappear.
 
-`homeA` writes:
+| Shape | Where | Consumed by |
+| --- | --- | --- |
+| One row of **every `type`** in §7.1 and one block of every row in §7.2 | `<session-1>.jsonl` | G1 layer 1 (kind coverage) |
+| String prompt **and** array prompt | `<session-1>.jsonl` | G1 layer 2 (the B2 case) |
+| `tool_use` pending / paired ok / paired error | `<session-1>.jsonl` | G1 layer 2, task 9 |
+| A `tool_result` whose call is **before the window** | `<session-1>.jsonl` | `orphan_result`, task 9, task 24 |
+| Empty **and** non-empty `thinking` | `<session-1>.jsonl` | G1 layer 2 (absence asserted) |
+| base64 `image` block | `<session-1>.jsonl` | G1 image proof, task 25 |
+| `isCompactSummary` row | `<session-1>.jsonl` | compaction `divider` |
+| `<persisted-output>` marker + its file | `<session-1>.jsonl`, `tool-results/<id>.txt` | §7.6, task 18 spill route |
+| An invented `type` | `<session-1>.jsonl` | `raw` card, §7.1 bucket 4 |
+| One malformed (unparsable) line | `<session-1>.jsonl` | `unreadable` node, §13 |
+| **Three symlinks**: escaping / in-session / sibling-session sidecar | `tool-results/`, `subagents/` | D14, tasks 4, 15, 30 |
+| Depth-2 subagent tree + missing-parent orphan + self-cycle | `subagents/` (5 sidecars) | §5.5, tasks 11, 25 |
+| **A four-block row positioned to straddle the 500-node boundary** | `<session-4>.jsonl` | D20 whole-row trim, task 18 |
+| **`<session-4>`: 2,400 rows / 2,600 pre-pairing nodes** — over the 2,000-node client cap and over the 500-node window | `<session-4>.jsonl` | §6.3 window, §6.5 eviction, tasks 18, 24, 31 |
+| **Rotation pair**: a same-size, different-content replacement | `<session-4>.rotated` | D20/§6.1 inode reset, tasks 5, 19, 31 |
+| **A third project, newest session 90 days old** | `<proj-C>/<session-3>.jsonl` | D10 window, the "show 1 older projects" link, task 17, task 23, G1 |
+| Two campaigns, **same slug, two repo keys, same session id** | `homeB/.tribe/...` | §9 identity, G3, tasks 12, 16, 32 |
 
-`e2e/dom-kinds.e2e.test.ts` spawns the real `serve.ts` with `HOME` pointed at that tree and **no
-`~/.tribe` inside it** (G1's precondition), opens a real Chromium page at `/s/<session-1>`, and
+`<session-4>`'s counts are exact and load-bearing: **2,400 rows producing 2,600 pre-pairing nodes**
+(D21's unit). That is above the 2,000-node client cap, so tail eviction and the "N new below" pill
+are reachable; above the 500-node window, so the backward scan overshoots and the whole-row trim is
+exercised; and the four-block row sits where the 500-node boundary falls, so the trim is forced
+*through* a multi-block row — the case an exact-node trim would silently lose blocks on.
+
+Three projects, not two: D10 hides projects whose newest session is older than 30 days, so a
+two-project fixture cannot produce the "show N older projects" link at all. `<proj-C>` is the
+hidden one.
+
+`e2e/dom-kinds.e2e.test.ts` spawns the real `serve.ts` with `HOME=<homeA>` — which has **no
+`.tribe` inside it**, G1's precondition — opens a real Chromium page at `/s/<session-1>`, and
 asserts **in the DOM**, in two layers:
 
 **Layer 1 — kind coverage, driven by a runtime witness.** For every key of `RENDER_NODE_KINDS`
@@ -2093,15 +2196,29 @@ prompt) is completely broken. So the DOM is asserted for each shape by its own m
 | `<persisted-output>` marker | `[data-kind="tool"]` with a spill link, and `/api/spill` not called before expand |
 | an invented `type` | `[data-kind="raw"]`, collapsed, showing the row type |
 
-- the subagent tab tree renders and clicking a tab navigates and renders that agent's nodes;
-- clicking a subagent tab navigates to `/s/<id>/a/<agentId>` and renders that agent's nodes;
-- the sidebar shows two projects and a `show 1 older projects` link; `?all=1` shows three (D10);
-- the empty-project, empty-root and no-`.claude` shapes each render the "no sessions found" note,
-  not an error page and not a blank pane.
+**Layer 3 — "lists every session", asserted as a set, not a sample.** G1's first clause is that the
+viewer *lists every session on the machine*, and a test that finds "at least one row" does not prove
+it. So: collect the rendered `SessionRow` ids from the DOM and assert the set is **exactly equal**
+to the set of session ids `fixtures/build.ts` wrote, with these two passes:
+
+1. Default view — the set equals every session in the projects inside D10's 30-day window
+   (`<proj-A>`'s two sessions and `<proj-B>`'s one), and `<proj-C>`'s session is **absent**.
+2. After clicking **"show 1 older projects"** (or loading `?all=1`) — the set equals **every**
+   session the fixture built, `<proj-C>`'s included.
+
+Set equality in both directions is the point: a missing id is under-listing, an extra id is a row
+the fixture never created, and only comparing the whole set catches both.
+
+Plus:
+
+- the subagent tab tree renders, and clicking a tab navigates to `/s/<id>/a/<agentId>` and renders
+  that agent's nodes;
+- the empty-project, empty-root and no-`.claude` shapes — each its own directory, not a variant of
+  `homeA` — each render the "no sessions found" note, not an error page and not a blank pane.
 
 **The zero-write proof is a hash, not an inspection (D16/G4).** Before the suite runs, take a
-recursive digest of the whole fixture tree — every path, size and content hash under `<tmp>` — and
-of the `<tmp>/.tribe` fixture where one exists. Run every DOM suite. Take the digest again and
+recursive digest of the whole fixture HOME — every path, size and content hash under it, including
+`.tribe/` when the suite uses `homeB`. Run every DOM suite. Take the digest again and
 assert it is **byte-identical**. A structural allowlist proves no write call is reachable in the
 source; this proves no write happened in a real run, which is the claim G4 actually makes. The two
 are complementary and both are required.
@@ -2160,10 +2277,12 @@ Then, in the same run:
 - **The patch case of §6.4**: write a `tool_use` row, wait for its card, then write the matching
   `tool_result` row in a later tick; assert the card's DOM element gains its result **and** that
   `document.querySelectorAll('[data-row-id]').length` is unchanged.
-- **Resume**: kill the page's connection mid-write, reconnect, and assert every row appears exactly
-  once — 
+- **Reconnect**: kill the page's connection mid-write, reconnect, and assert every row appears
+  exactly once — the store clears on the new `generation` and re-applies the snapshot (§6.2), so a
+  duplicate card here means the generation rule is not being honoured.
 - **Rotation**: replace the transcript with a **same-size** file of different content and assert the
-  view resets and re-renders 
+  view clears and re-renders **the tail window** (§6.1) — this is B12, rotation re-emitting the
+  whole file, in its user-visible form.
 
 Screenshots `after-live-following.png`, `after-live-scrolled.png`, `after-resume.png` accompany the
 numbers.
