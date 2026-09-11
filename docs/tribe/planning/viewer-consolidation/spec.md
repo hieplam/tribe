@@ -100,6 +100,21 @@ Three further rulings arrived with review round 2 and **supersede** the earlier 
 - **D14 — one containment root.** *"Containment root for all transcript reads is the resolved
   `~/.claude/projects` directory, not the session directory. Symlinks that resolve inside that root
   are accepted; anything resolving outside is refused."*
+- **D15 — every node kind has a size bound.** *"Text-bearing nodes (prompt, assistant text,
+  thinking, raw card) whose encoded size exceeds 64 KiB are elided the same way tool payloads are,
+  with `expandable` and `/api/block?at=&i=` for the full body. Therefore no single node can exceed
+  the frame cap and `batchFrames` has no 'emit oversized alone' branch."*
+- **D16 — the zero-write wall is an allowlist, not a denylist.** *"`structure.test.ts` permits only
+  these world-touching imports in adapters (`node:fs` readFile / open with read flags / stat / lstat
+  / readdir / realpath / read; `Bun.file` read; `Bun.serve`) and fails on any other `node:fs`,
+  `fs/promises`, `Bun.write`, `child_process` or `node:net` import or member."*
+
+D15 and D16 share a shape worth naming, because it is the same lesson twice: **an enumerated list
+of bad things is only as good as the enumerator's imagination.** A denylist of write calls misses
+`Bun.write`, `createWriteStream`, `copyFile`, `truncate` and a write-mode `open`; a frame cap that
+bounds *some* node kinds leaves the others able to blow it. Both are replaced by a rule that is
+total by construction: an allowlist of what is permitted, and a size bound on every kind rather than
+on the kinds we happened to think of.
 
 D12 is the larger change and it simplifies rather than complicates: a wire that cannot resume cannot
 resume *wrongly*. Everything the old byte cursor was trying to protect — a partial UTF-8 sequence, a
@@ -126,7 +141,7 @@ unit boundary. Layer-local tests still exist and are still required — they are
 | G1 | `~/.tribe` absent; list + render every kind from a fixture tree built from nothing | `e2e/dom-kinds.e2e.test.ts` — headless Chromium against the real server, driven by the runtime `RENDER_NODE_KINDS` witness (§4) so the kind list cannot silently drift from the model, **plus one DOM assertion per distinguishable input shape** (§16.2): kind-coverage alone is not enough, because a string prompt and an array prompt are both `k:"prompt"` and a pending, an ok and an error tool are all `k:"tool"` | `core/normalize.coverage.test.ts` (one case per row of §7), `e2e/real-transcript.e2e.test.ts` | §7, §16.2 |
 | G2 | Appended line rendered within 1 s; follows tail at bottom, stops when scrolled up | `e2e/live-tail.e2e.test.ts` — a **controlled writer** appends a row and records its own `performance.now()`; the browser reports when that row's `[data-row-id]` first exists; worst sample ≤ 1000 ms. Follow proved on `scrollTop`: it advances on append while at bottom and is byte-identical before/after append while scrolled up | `adapters/poller.adapter.test.ts`, `client/src/useEventStream.test.ts` | §6, §16.3 |
 | G3 | Badge from campaign state; click filters; runner prints root URL + one session URL per card | `e2e/campaign-badge.e2e.test.ts` — the real runner on Haiku 4.5; both stdout lines captured verbatim; the badge asserted in the DOM; the filter proved by **clicking the badge element** and asserting the resulting session-row count and the URL. Its fixture carries **two campaigns sharing one slug under two repo keys** — the collision that exists on this machine today (§9) | `core/badge.test.ts`, `runner/core/viewer-launch.test.ts` | §9, §10, §16.4 |
-| G4 | Read-only, 127.0.0.1, zero writes, every path contained, fail-closed refusals, `Host` checked | `core/paths.containment.test.ts` (lexical **and** resolved-symlink containment), `adapters/readonly.test.ts` (no write-family call reachable; narrow catches distinguish a parse error from a filesystem error), `serve.security.test.ts` (`Host`/`Origin`, the refusal matrix), `deletion-guard.test.ts` rule 5 | `structure.test.ts` (§12.6) | §12, §13 |
+| G4 | Read-only, 127.0.0.1, zero writes, every path contained, fail-closed refusals, `Host` checked | `core/paths.containment.test.ts` (lexical **and** resolved-symlink containment), `adapters/readonly.test.ts` (the D16 allowlist holds; narrow catches distinguish a parse error from a filesystem error), the fixture-tree **before/after hash** in `e2e/dom-kinds.e2e.test.ts` (no write actually happened), `serve.security.test.ts` (`Host`/`Origin`, the refusal matrix), `deletion-guard.test.ts` rule 5 | `structure.test.ts` (§12.6) | §12, §13 |
 | G5 | Status page, `/live`, scan adapter, session-tail reader, `--tribe-root` gone; no `runs/*/logs/` read | `deletion-guard.test.ts` (grep guard over the package) + `git diff --stat` in the PR body | — | §11 |
 | G6 | `install.sh` builds the client; runner spawn serves the built output; `bun test` green both packages; c3-215 updated; D9 applied | `e2e/served-build.e2e.test.ts` — rebuild into the **real** `dist/`, hash it, start the server, fetch `/` and every asset it references and assert the hashes match, then restore the prior `dist/` (§16.5 — the server serves its fixed `dist/`, so a proof that needs it to serve somewhere else is not a proof of anything it does); plus `test-install-viewer-build.sh` | `bun run check` in both packages, `bunx @c3x/cli@11.6.3 check`, ADR + change units | §10.3, §10.4, §11.3, §15 |
 
@@ -367,10 +382,16 @@ export interface RowAnchor {
   ts: string | null;      // the row's timestamp, verbatim; NEVER used for ordering
 }
 
+/** D15: every text-bearing node carries the same two fields, so NO node kind can exceed the
+ * 64 KiB ceiling. `elided` means `body` holds a truncated prefix; `expandable` means the full
+ * payload is fetchable at `/api/block?at=<at>&i=<blockIndex>`. A 2 MiB assistant row therefore
+ * becomes one small node plus an on-demand fetch, exactly like an oversized tool result. */
+export interface Sized { elided: boolean; expandable: boolean }
+
 export type RenderNode = RowAnchor & (
-  | { k: 'prompt';    body: MdToken[]; chips: Chip[] }
-  | { k: 'assistant'; body: MdToken[]; model: string | null }
-  | { k: 'thinking';  body: MdToken[] }
+  | ({ k: 'prompt';    body: MdToken[]; chips: Chip[] } & Sized)
+  | ({ k: 'assistant'; body: MdToken[]; model: string | null } & Sized)
+  | ({ k: 'thinking';  body: MdToken[] } & Sized)
   | { k: 'tool';      name: string; input: unknown; inputElided: boolean;
                       state: 'pending'|'ok'|'error'; result: ToolResult | null;
                       toolUseId: string | null; agentId: string | null }
@@ -379,8 +400,8 @@ export type RenderNode = RowAnchor & (
   | { k: 'attachment';label: string; detail: string | null; expandable: boolean }
   | { k: 'chip';      label: string; detail: string | null; href: string | null }
   | { k: 'divider';   label: string }
-  | { k: 'error';     status: number | null; body: MdToken[] }
-  | { k: 'raw';       rowType: string; json: string; bytes: number }
+  | ({ k: 'error';    status: number | null; body: MdToken[] } & Sized)
+  | ({ k: 'raw';      rowType: string; json: string; bytes: number } & Sized)
   | { k: 'unreadable'; count: number }
 );
 
@@ -399,10 +420,12 @@ after a reconnect gets the **same** id. `uuid` is deliberately *not* the identit
 `attachment` rows and every `last-prompt`/`ai-title` row carry no uuid at all, and one row can
 produce several nodes.
 
-`RowAnchor.at` is the byte offset the `/api/rows` back-fill addresses by. **It is not the SSE
-cursor** — that is `ackOffset` (§6.2), which is always a newline boundary. `RowAnchor.ts` is
-carried for display only: **nothing ever sorts by it** (899 measured inversions).
+`RowAnchor.at` is the byte offset the `/api/rows` back-fill addresses by, and half of the
+`/api/block` address. **There is no SSE cursor at all** (D12): frame `id:` is a per-stream sequence
+number and the server ignores `Last-Event-ID`. `RowAnchor.ts` is carried for display only:
+**nothing ever sorts by it** (906 measured inversions).
 
+```ts
 /** The runtime witness for `RenderNode["k"]`. TypeScript types are erased, so a test cannot
  * iterate the union — it iterates THIS, and the `Record<RenderNode["k"], true>` annotation makes
  * the compiler reject the file the moment a kind is added to the union without being added here.
@@ -431,6 +454,18 @@ export interface FileObservation {
   birthtimeMs: number;
 }
 ```
+
+**The 64 KiB ceiling applies to every kind (D15).** Before a node is emitted, its encoded size is
+measured; past 64 KiB its text is truncated to a prefix, `elided` is set, and `expandable` is set so
+the client can fetch the rest. This holds for a prompt, an assistant message, a thinking block, a
+raw card, an error body, a tool input, a tool result, an image and an attachment alike — there is no
+kind without a bound. Two consequences fall out, and both are contracts elsewhere in this document:
+no single node can exceed the 1 MiB frame cap, so `batchFrames` (§6.2) needs no "emit an oversized
+node alone" branch; and `/api/block` is the one mechanism that serves every full payload.
+
+Measured relevance: the largest transcript on this machine averages ≈19 KB per row and its largest
+rows are base64 images, so 64 KiB is comfortably above the ordinary case and bites only where it
+should.
 
 **Every expandable node addresses its payload the same way, and `attachment` is no exception.**
 `GET /api/block?session=&agent=&at=&i=` takes the node's own `RowAnchor.at` (the row's byte offset)
@@ -642,7 +677,7 @@ that decorates it. Switching tabs navigates to `/s/<id>/a/<agent>`, which closes
 
 | `event:` | `data` | Emitted |
 | --- | --- | --- |
-| `hello` | `{"session":SessionSummary,"agents":[Agent],"badges":[Badge],"from":n,"to":n,"truncatedBeforeNodes":n}` | once, on connect |
+| `hello` | `{"session":SessionSummary,"agents":[Agent],"badges":[Badge],"from":n,"to":n,"truncatedBefore":bool}` | once, on connect (§6.3) |
 | `rows` | `{"nodes":[RenderNode],"from":n,"to":n}` | the initial window, then on every growth tick. Append-only: every node in a `rows` frame is new |
 | `patch` | `{"patches":[Patch]}` | a later-arriving fact about a node already sent (§6.4) |
 | `meta` | `{"agents":[Agent],"badges":[Badge],"live":bool}` | whenever the agent set, the badges, or liveness changes — including a **new sidecar appearing mid-stream** |
@@ -676,11 +711,16 @@ The one behaviour a reader might expect and will not get: a client that was scro
 history and loses its connection returns at the **tail**, not where it was. That is stated here
 rather than discovered, and it is the honest cost of the simpler wire.
 
-**Frame size is bounded at the frame, not just the node.** A tick may read up to 4 MiB, and many
-sub-64-KiB nodes can serialize past 1 MiB even when no single node is large. So the poller **batches
-`rows` into as many frames as it takes**, each encoded frame ≤ 1 MiB, emitted in order, each with
-its own `id:`. Node-level elision (§7) and frame-level batching are different bounds and both are
-required; the initial window and a catch-up tick are exactly the cases where the second one bites.
+**Frame size is bounded at the frame as well as the node, and the two bounds compose.** D15 caps
+every node at 64 KiB, so no node can alone exceed the frame cap — but a tick may read 4 MiB, and
+many sub-64-KiB nodes can still serialize past 1 MiB together. So the poller **batches `rows` into
+as many frames as it takes**, each encoded frame ≤ 1 MiB, emitted in order, each with its own `id:`.
+
+Because of D15, `batchFrames` is total and has **no "emit an oversized node alone" branch**: such a
+node cannot exist. The earlier draft carried that branch, and it was an outright contradiction —
+the same paragraph promised every frame stayed under the cap and then blessed one that did not. The
+fix is at the node, not the frame: bound every kind, and the frame bound becomes satisfiable by
+simple accumulation.
 
 Poll interval: **250 ms**. G2's budget is 1 s end-to-end; 250 ms leaves room for parse and transport
 at one `stat` per tick per stream. Per-tick read is capped at **4 MiB**; the remainder arrives next
@@ -729,10 +769,34 @@ The client holds **one contiguous window of the file**, `[first, last]` in byte 
 sparse set of ranges. That single sentence is what makes back-fill, eviction and dedupe consistent
 with each other.
 
-- **On connect**, the window is the **last 500 nodes** (§4's vocabulary: nodes, not rows — a 500-node
-  window may be fewer than 500 rows when rows carry several blocks, or more when rows produce none).
-  `hello` carries `truncatedBeforeNodes`, an estimate of how many nodes precede the window, and
-  `from`/`to`, the window's byte bounds.
+- **On connect**, the window is the **last 500 nodes** (§4's vocabulary: nodes, not rows — a
+  500-node window may span fewer than 500 rows when rows carry several blocks, or more when rows
+  produce none).
+
+  Finding where a 500-**node** window starts, with no index and without parsing the whole file, is
+  the one non-obvious algorithm here, so it is stated exactly:
+
+  ```
+  anchor   := EOF
+  nodes    := 0
+  step     := 256 KiB
+  while nodes < 500 and anchor > 0:
+      lo     := max(0, anchor - step)
+      read bytes [lo, anchor)
+      drop the leading partial row unless lo == 0      # core/window.ts
+      parse the complete rows in that slice
+      nodes  += the node count those rows produce      # core/normalize.ts, counted only
+      anchor := offset of the FIRST complete row in the slice
+  windowStart      := anchor
+  truncatedBefore  := anchor > 0                       # true iff BOF was not reached
+  ```
+
+  Reading backwards in 256 KiB steps costs one or two reads for a typical session (≈19 KB per row
+  measured, so 256 KiB holds ≈13 rows of the largest file and far more of an ordinary one) and
+  terminates at BOF for a short one. The window's **first row offset is the anchor**, which is what
+  makes `from` a real row boundary and the back-fill below contiguous with it. `truncatedBefore` is
+  a boolean, not an estimate: it is true exactly when the scan stopped before the beginning of the
+  file. `hello` carries it together with `from`/`to`, the window's byte bounds.
 - **"Load earlier"** calls `GET /api/rows?session=…&before=<first>&limit=500`, a ranged read
   backwards from a known byte offset — no index, no store. The returned nodes are **prepended**, and
   `first` moves backwards. Order is preserved because the new range is contiguous with the old one.
@@ -782,7 +846,8 @@ a bound — the oracle is open-world.
 | --- | --- | --- |
 | tail carry (raw bytes) | 1 MiB | emit one `unreadable` node, drop the carry, resync at the next `0x0A` |
 | per-tick read | 4 MiB | the remainder arrives next tick |
-| one encoded SSE frame | 1 MiB | the tick's nodes are split across several `rows` frames (§6.2) |
+| one node, any kind | 64 KiB encoded | its text is truncated to a prefix; `elided` and `expandable` are set; the full body is at `/api/block` (D15) |
+| one encoded SSE frame | 1 MiB | the tick's nodes are split across several `rows` frames; no single node can exceed the cap, so batching is total (§6.2) |
 | pending tool map (`core/pair.ts`) | 512 entries | evict the oldest; its eventual result renders as an `orphan_result` — a visible outcome rather than unbounded growth |
 | server-side normalize state | the pending map plus a seq counter | nothing else is retained; nodes are **not** buffered server-side |
 | client window | 2,000 nodes | evict from the **tail** and turn following off (§6.3); scrolling to the bottom reloads the tail window |
@@ -798,8 +863,9 @@ restated as numbers.
 ## 7. The normalizer — measured coverage table
 
 This section is the contract for `core/normalize.ts` and the checklist for its audit. Every count
-is from the 2026-09-11 corpus scan (§0); `parent` and `sub` columns are separated where the
-difference matters.
+is from the single 2026-09-12 corpus scan (§0); `parent` and `sub` columns are separated where the
+difference matters. Every number is from the **single 2026-09-12 scan** of §0 — the same scan, not a
+later one, which is what lets these counts be compared with each other.
 
 ### 7.1 Top-level row types
 
@@ -1014,10 +1080,18 @@ value** — §12.6 enforces it mechanically, and §8.2's table is the complete v
 The card's fence: *"No design tokens invented by the implementer: the client consumes the owner's
 design system (P1). Until P1 is delivered, the spec names tokens; the build does not start."*
 
-**P1's candidates now exist** at `docs/tribe/planning/viewer-consolidation/design/` — three themes
-(`matcha/`, `coffee/`, `sea-salt/`) that share **one schema**; only the values differ. The owner
-picks one theme; nothing else about the client changes. What remains open is the *choice*, not the
-interface, which is why this section can now name the real tokens.
+**P1's candidates exist** at `docs/tribe/planning/viewer-consolidation/design/` — three themes
+(`matcha/`, `coffee/`, `sea-salt/`) that share **one schema**; only the values differ. What remains
+open is the *choice*, not the interface, which is why this section can name the real tokens without
+naming a theme.
+
+**This spec deliberately does not name the theme.** The chosen theme is **whatever the owner records
+in STATE.md as P1**, and the build gate checks two things mechanically before any task is
+dispatched: that STATE.md names a theme, and that
+`docs/tribe/planning/viewer-consolidation/design/<that-theme>/tokens.css` exists. Naming one here
+would let a stale document overrule a later owner decision, which is exactly the authority inversion
+the P1 gate exists to prevent. Everything below is true of all three candidates, so nothing in this
+spec changes when the choice lands.
 
 **There is no alias layer, and the implementer invents nothing.** The token names below are copied
 from `design/matcha/tokens.css` and are identical in all three candidates. Every component style
@@ -1047,10 +1121,10 @@ invented `--space-1…6` and `--radius-1…3`; those names exist nowhere and are
 
 Mechanism:
 
-1. The owner names the theme. Its `tokens.css` is the single stylesheet imported once at the app
-   root, before any component style.
-2. `vite.config.ts` copies `design/<chosen-theme>/tokens.css` to `client/src/styles/tokens.css` as
-   a pre-build step; the copy is git-ignored and the owner's file stays the source of truth.
+1. The owner records the theme in STATE.md. Its `tokens.css` is the single stylesheet imported once
+   at the app root, before any component style.
+2. `vite.config.ts` copies `design/<the STATE.md theme>/tokens.css` to `client/src/styles/tokens.css`
+   as a pre-build step; the copy is git-ignored and the owner's file stays the source of truth.
 3. `client/src/styles/app.css` and every `.tsx` reference tokens only via `var(--…)`. §12.6 bans a
    literal colour, font, radius or `px` length anywhere under `client/` except `tokens.css` itself.
 
@@ -1059,13 +1133,14 @@ values twice — under `@media (prefers-color-scheme: dark)` and under `[data-th
 client follows the OS with no application code. The client sets `data-theme` only if it later
 offers a manual override, which this card does not.
 
-**`design/<theme>/preview.html` is the reference implementation of both screens.** Its class names
+**The chosen theme's `preview.html` is the reference implementation of both screens.** Its class names
 (`.item`, `.badge`, `.tool`, `.tab`, `.thinking`, `.pill`) map one-to-one onto the components in
 §8.1, so a hunter building `SessionRow` or `ToolCard` has a rendered target to match rather than a
 description to interpret.
 
-**The gate: no phase starts before the owner names the theme** — see §17 R1 and plan.md's Global
-Constraints. This is the card's "the build does not start", read at its word.
+**The gate: no phase starts before STATE.md names the theme and that theme's `tokens.css` exists** —
+see §17 R1 and plan.md's Global Constraints. This is the card's "the build does not start", read at
+its word, and it is checkable without judgment.
 
 ### 8.3 Follow-the-tail (G2)
 
@@ -1102,6 +1177,12 @@ window contract work together:
   below expressible without a merge algorithm.
 - Every rendered element carries `data-row-id` and `data-kind`; the list carries
   `data-scroll="rows"`. These are the addresses §16's DOM proofs assert against.
+- **The sequence watermark is per connection and is cleared on every `EventSource` `open`.** Frame
+  `id:` restarts at 1 on each connection (§6.2), so a watermark carried across a reconnect would
+  make the new stream's `hello` (id 1) look already-processed and silently discard the whole window.
+  Clearing on `open` is what makes "ignore an id I have already seen" safe; the *node*-level dedupe
+  below is what makes the resulting overlap invisible. The two are different mechanisms and both are
+  required.
 - A node arriving in `rows` whose id is **already present is ignored**, never appended. This is what
   makes D12's reconnect-as-fresh-snapshot invisible to the user: the overlap between the old window
   and the new one is dropped silently instead of duplicating every visible card.
@@ -1196,8 +1277,13 @@ becomes a path.
 **Containment — structural, not a filter.** This is what closes finding B3 of
 `tribe-viewer-research.md` (a session id read out of a state file being used as a path):
 
-- `repoKey`, `slug`, `runId` come from `readdir` — they are real directory entries, never strings
-  from a file. No traversal is expressible.
+- `repoKey`, `slug`, `runId` come from `readdir` — they are real directory entries, so no traversal
+  is *spellable* in them. **That is not sufficient on its own:** a directory entry cannot contain
+  `..`, but it can be a **symlink** pointing anywhere. So the same two-stage containment §12.2
+  applies under `~/.claude/projects` applies here, with `realpath(~/.tribe)` as the root: each
+  `repoKey`, `slug` and `runId` directory is resolved and proven inside the tribe root **before**
+  `campaign-state.json` or `run.json` is opened. A symlinked campaign directory escaping the root is
+  refused and counted, exactly like an escaping project directory.
 - `sessionId` **is** a string from a file, and it is used **only as a `Map` key**, never joined
   into a path. The badge index is looked up *by* the session ids the §5.1 scan already found on
   disk. A `sessionId` of `../../../etc/passwd` in a state file therefore indexes nothing and opens
@@ -1397,8 +1483,7 @@ Mechanical, so G5 is a test and not a claim. Over every non-test `.ts`/`.tsx` fi
    `/live`, `/api/processes`, `app.css`;
 3. the deleted paths in §11.1 do not exist;
 4. `adapters/campaign.adapter.ts` is the **only** file whose source contains `.tribe`;
-5. the whole package contains no `writeFile`, `appendFile`, `mkdir`, `rm`, `rename`, `unlink`,
-   `spawn`, `exec` outside `fixtures/` and `e2e/` (G4's zero-writes claim, mechanised).
+5. the zero-write wall of §12.6 — an **allowlist** (D16), not the old denylist of eight call names.
 
 ---
 
@@ -1506,7 +1591,25 @@ Added:
    `data-scroll="rows"`. These are the addresses §16.0's DOM proofs assert against, so they are
    part of the contract, not test scaffolding — a component that stops emitting one silently
    disarms a goal's proof.
-7. No `catch` in `adapters/**` or `core/**` is bare: every `catch` either names the error classes it
+7. **The zero-write wall is an allowlist (D16), and this is the rule G4 actually rests on.** An
+   enumerated denylist of write calls is only as good as its author's memory: the previous revision
+   listed `writeFile`, `appendFile`, `mkdir`, `rm`, `rename`, `unlink`, `spawn`, `exec` — and left
+   `Bun.write`, `createWriteStream`, `copyFile`, `truncate`, a write-mode `open` and
+   `fs/promises` entirely open. Inverted, the rule is total:
+
+   **Permitted, in `adapters/**` only:** from `node:fs` — `readFileSync`, `openSync` (read flags
+   only), `readSync`, `closeSync`, `statSync`, `lstatSync`, `readdirSync`, `realpathSync`;
+   `Bun.file(...)` read methods; `Bun.serve` (in `serve.ts`).
+
+   **Refused anywhere in the package** (outside `fixtures/` and `e2e/`): any other `node:fs` member,
+   any `fs/promises` import, `Bun.write`, `node:child_process`, `node:net`, `node:http`,
+   `node:https`. The test resolves imports with Bun's own transpiler (as the current wall already
+   does) and additionally scans member expressions, so `fs.writeFileSync` reached through a
+   namespace import is caught as well as a named one.
+
+   A new legitimate read primitive is added by extending the allowlist in one place, deliberately —
+   which is the point: growth is a decision someone makes, not an omission nobody notices.
+8. No `catch` in `adapters/**` or `core/**` is bare: every `catch` either names the error classes it
    handles or immediately re-throws anything it does not recognise. `fail-closed-edges` obligation 1
    — and the distinction that matters here is **a malformed file (`SyntaxError` from `JSON.parse`)
    versus an unreadable one (`OSError`/`ENOENT`/`EACCES`)**: the first is a tolerated data shape
@@ -1570,15 +1673,15 @@ project directories.
 | --- | --- | --- | --- |
 | `GET /api/projects`, cold | ≤ 2.0 s over 181 sessions | head 64 KiB + tail 256 KiB per session, never a whole file | `perf.test.ts` against the real corpus, opt-in |
 | `GET /api/projects`, warm | ≤ 150 ms | size+mtime-keyed LRU (500) | same |
-| open a 13 MB session, first rows frame | ≤ 1.0 s | last-500-row window; ranged read backwards, no full parse | `perf.test.ts` |
-| back-fill 500 more rows | ≤ 400 ms | ranged read from a known byte offset | `perf.test.ts` |
+| open a 13 MB session, first `rows` frame | ≤ 1.0 s | the **500-node** window of §6.3 — backwards 256 KiB steps, no full parse | `perf.test.ts` |
+| back-fill 500 more **nodes** | ≤ 400 ms | ranged read from a known byte offset | `perf.test.ts` |
 | append -> browser | ≤ 1 s (G2) | 250 ms poll + ranged read of the delta only | `e2e/live-tail.e2e.test.ts` |
 | 8 concurrent streams, RSS | ≤ 300 MB | per-stream state is bounded by §6.5's eviction table in full — carry ≤ 1 MiB, pending tool map ≤ 512, no server-side row buffer; no materialised transcript (D7) | `perf.test.ts` (`process.memoryUsage().rss` after 8 streams on the 13 MB file, and again after 10 minutes of appends) |
 | single SSE frame | ≤ 1 MiB | blocks over 64 KiB and images are elided to `/api/block` | `core/normalize.test.ts` |
 | per-tick read | ≤ 4 MiB | the tick cap in §6.2 | `poller.adapter.test.ts` |
 
 The "no materialised transcript" line is the D7 property restated as a number: nothing this
-package holds is proportional to total corpus size; everything is proportional to *window* size
+package holds is proportional to total corpus size; everything is proportional to *window* size (in nodes)
 times *open streams*.
 
 ---
@@ -1661,6 +1764,11 @@ them.
 
 Reproducible today with no new campaign run, because real campaign homes already exist:
 
+The three finding ids below are from `references/tribe-viewer-research.md`, the audit of the
+pre-consolidation viewer: **B1** is "tool results already on disk at connect time are dropped",
+**B2** is "array-form user messages are dropped, so every runner prompt is invisible", and **B25**
+is "the status page is unbounded — 387 KB for 17 campaigns".
+
 1. `bun plugins/tribe/scripts/viewer/serve.ts --port 4398`, screenshot `GET /` → the status page
    (`before-status-page.png`; the 387 KB, 17-campaign page of B25).
 2. Screenshot `GET /live?repo=-Users-hip-repo-tribe&slug=<an existing finished campaign>` →
@@ -1677,22 +1785,40 @@ Reproducible today with no new campaign run, because real campaign homes already
 directory**, from nothing — `fixtures-mirror-reality.md` obligation 2, and plan task **1 runs it
 before any implementation task exists**.
 
+**The fixture root is a fake `HOME`, and every path below is relative to it.** `fixtures/build.ts`
+allocates a fresh directory with `mkdtemp` (never a fixed `/tmp` path — a shared, unowned path makes
+concurrent runs race and invites a destructive `rm -rf`), and builds **both** trees inside it:
+
+```
+<tmp>/                       <- this is HOME for the server under test
+  .claude/projects/<encoded-cwd-A>/<session-1>.jsonl
+  .claude/projects/<encoded-cwd-A>/<session-1>/subagents/agent-*.jsonl + .meta.json
+  .claude/projects/<encoded-cwd-A>/<session-1>/tool-results/<id>.txt
+  .claude/projects/<encoded-cwd-B>/<session-2>.jsonl
+  .tribe/...                 <- only for the campaign e2e; absent for G1 (§16.2's precondition)
+```
+
+The server is started with `HOME=<tmp>` and nothing else — §5 resolves both roots from `HOME`
+(§12.3), which is exactly what makes a fixture run possible with no test-only flag. Paths are
+written below without the `<tmp>/.claude/projects/` prefix for readability; the prefix is always
+there.
+
 It writes:
 
-- `projects/<encoded-cwd-A>/<session-1>.jsonl` — one row of every type in §7.1 and one block of
+- `<encoded-cwd-A>/<session-1>.jsonl` — one row of every type in §7.1 and one block of
   every type in §7.2, authored from the measured corpus: string prompt, array prompt, assistant
   text, non-empty thinking, empty thinking, `tool_use` + matching `tool_result` (string,
   `array[text]`, `array[image]`, `array[tool_reference]`, `is_error`), a `tool_result` whose call is
   outside the window (the orphan), a base64 `image` block, `isCompactSummary`, every `system`
   subtype, a `<persisted-output>` marker, a `<command-name>` chip, an `apiErrorStatus` row, an
   invented `type: "not-a-real-row-type"` (the raw card), and one malformed line.
-- `projects/<encoded-cwd-A>/<session-1>/subagents/agent-*.jsonl` + `.meta.json` — a depth-2 tree,
+- `<encoded-cwd-A>/<session-1>/subagents/agent-*.jsonl` + `.meta.json` — a depth-2 tree,
   one sidecar with no `parentAgentId`, one naming a missing agent (the orphan-tree case), one
   self-referential cycle (F36).
 - `projects/<encoded-cwd-A>/<session-1>/tool-results/<id>.txt` — the spill the marker points at,
   plus **a symlink beside it pointing at `/etc/passwd`** (the containment case of §12.2) and one
   legitimate symlink resolving back inside the session directory.
-- `projects/<encoded-cwd-B>/<session-2>.jsonl` — a second project, so the list has two.
+- `<encoded-cwd-B>/<session-2>.jsonl` — a second project, so the list has two.
 - **A third project whose newest session is 90 days old** — D10's window case (§5.6).
 - **A transcript of more than 2,000 nodes** — the window/eviction case of §6.3, which four real
   transcripts on this machine already exceed.
@@ -1726,7 +1852,7 @@ prompt) is completely broken. So the DOM is asserted for each shape by its own m
 | `tool_result` whose call precedes the window | `[data-kind="orphan_result"]` exists |
 | empty `thinking` block | **no** `[data-kind="thinking"]` for that row — the absence is asserted |
 | non-empty `thinking` block | one collapsed thinking card |
-| base64 `image` block | `[data-kind="image"]`, and no image bytes fetched before expand |
+| base64 `image` block | `[data-kind="image"]`; on expand an `<img>` exists whose `src` is a `data:` URL of the **expected byte length**, and the page issued **no network request** for the bytes (assert via the browser's request log). G1 says the image renders, so the proof is a displayed image, not a node that claims one |
 | `isCompactSummary` row | `[data-kind="divider"]` with the compaction label |
 | `<persisted-output>` marker | `[data-kind="tool"]` with a spill link, and `/api/spill` not called before expand |
 | an invented `type` | `[data-kind="raw"]`, collapsed, showing the row type |
@@ -1736,6 +1862,13 @@ prompt) is completely broken. So the DOM is asserted for each shape by its own m
 - the sidebar shows two projects and a `show 1 older projects` link; `?all=1` shows three (D10);
 - the empty-project, empty-root and no-`.claude` shapes each render the "no sessions found" note,
   not an error page and not a blank pane.
+
+**The zero-write proof is a hash, not an inspection (D16/G4).** Before the suite runs, take a
+recursive digest of the whole fixture tree — every path, size and content hash under `<tmp>` — and
+of the `<tmp>/.tribe` fixture where one exists. Run every DOM suite. Take the digest again and
+assert it is **byte-identical**. A structural allowlist proves no write call is reachable in the
+source; this proves no write happened in a real run, which is the claim G4 actually makes. The two
+are complementary and both are required.
 
 `e2e/url-refusals.e2e.test.ts` drives the same server over HTTP with the shapes a caller controls
 (`fixtures-mirror-reality` obligation 1 — here the caller's input is the URL, not a path): a valid

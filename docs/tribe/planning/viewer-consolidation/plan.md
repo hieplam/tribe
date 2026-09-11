@@ -57,6 +57,14 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
 - **D14** — "Containment root for all transcript reads is the resolved `~/.claude/projects`
   directory, not the session directory. Symlinks that resolve inside that root are accepted;
   anything resolving outside is refused."
+- **D15** — "Text-bearing nodes (prompt, assistant text, thinking, raw card) whose encoded size
+  exceeds 64 KiB are elided the same way tool payloads are, with `expandable` and
+  `/api/block?at=&i=` for the full body. Therefore no single node can exceed the frame cap and
+  `batchFrames` has no 'emit oversized alone' branch."
+- **D16** — "`structure.test.ts` permits only these world-touching imports in adapters (`node:fs`
+  readFile / open with read flags / stat / lstat / readdir / realpath / read; `Bun.file` read;
+  `Bun.serve`) and fails on any other `node:fs`, `fs/promises`, `Bun.write`, `child_process` or
+  `node:net` import or member."
 
 **There is no `Last-Event-ID` handling anywhere in this plan.** If a task brief or a test name
 mentions resuming by byte offset, it predates D12 and is wrong.
@@ -79,7 +87,12 @@ REFUTED in advance: (a) any finding that the viewer should also read the runner 
 beyond campaign-state.json and run.json (D6/D8); (b) any finding that a Kanna behaviour is missing
 when the transcript on disk does not carry the data (L9 stream-only events); (c) any finding that
 colours or fonts are unspecified — tokens are the owner's (P1); (d) any defect inherited verbatim
-from the current viewer that the plan schedules for deletion.
+from the current viewer that the plan schedules for deletion; **(e) any finding that the `/healthz`
+v2 identity change is a breaking change — it is deliberate (spec §10.4, R9): a pre-consolidation
+viewer does not reload its route table, so it must be unrecognisable rather than reusable, and the
+runner degrades to one clear stderr line; (f) any finding that the DOM e2e suites should skip when
+no Chromium resolves — they fail by design (spec §16.0, R8), because a user-visible goal must never
+go green because its browser was missing.**
 
 ### Governing constraints, quoted
 
@@ -179,16 +192,20 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
 
       ```sh
       cd plugins/tribe/scripts/viewer
-      rm -rf /tmp/vc-fixture && mkdir -p /tmp/vc-fixture
-      bun -e 'import {buildFixtureHome} from "./fixtures/build.ts"; buildFixtureHome("/tmp/vc-fixture")'
-      find /tmp/vc-fixture -type f | sort
+      FIX="$(mktemp -d)"
+      bun -e 'import {buildFixtureHome} from "./fixtures/build.ts"; buildFixtureHome(process.argv[1])' "$FIX"
+      find "$FIX" -type f | sort
+      find "$FIX" -type l -ls
+      rm -rf "$FIX"
       ```
 
-      Expected: a listing containing exactly four `<project>/<session>.jsonl` files, five
-      `<session>/subagents/agent-*.jsonl` with five matching `.meta.json`, one
-      `<session>/tool-results/*.txt`, and exactly three symlinks. No other file. Paste the listing,
-      with `find -type l -ls` shown separately so each link's target is visible, into the task
-      report.
+      `mktemp -d` allocates a fresh, owned directory: a fixed path like `/tmp/vc-fixture` is shared,
+      makes concurrent verification race, and turns a stray `rm -rf` into someone else's data loss.
+
+      Expected: every path under `$FIX/.claude/projects/`; exactly four
+      `<project>/<session>.jsonl` files; five `<session>/subagents/agent-*.jsonl` with five matching
+      `.meta.json`; one real `<session>/tool-results/*.txt`; and exactly three symlinks with the
+      targets named in step 1. No other file. Paste both listings into the task report.
 - [ ] **Step 4: Run the suite.**
 
       ```sh
@@ -451,7 +468,7 @@ exactly today's bug, B1/B2).
 - [ ] **Step 1: Write the failing test** `V/core/normalize.test.ts`, one case per row of spec §7.2:
       `message.content` as a bare string (user and assistant); array `text` blocks on a user row
       (B2 — every runner prompt); assistant `text`; `thinking` non-empty; `thinking` empty (asserts
-      **no node**, with the measured 8,411-of-17,802 rationale in a comment); `tool_use`;
+      **no node**, with the measured 8,411-of-17,873 rationale in a comment); `tool_use`;
       `tool_result` in each of its four measured content shapes plus `is_error`; a base64 `image`
       block on a user row. Assert `RowAnchor` is populated (`uuid`, `i`, `at`, `ts`) on every node
       and that node order equals input order. Expected on first run: module missing.
@@ -516,6 +533,14 @@ Model: **Sonnet**.
       same id; a result with `is_error`; a `Task` call whose id matches a sidecar `toolUseId`
       (asserts `agentId` is set); a tool input over 64 KiB (asserts `inputElided: true` and no
       payload in the node); a result over 64 KiB (same).
+
+      **Then D15, which is what makes the frame budget satisfiable:** every *text-bearing* kind
+      gets the same treatment. A **2 MiB assistant text row** produces **one node under 64 KiB**
+      with `elided: true` and `expandable: true`, and its full body is reachable at
+      `/api/block?at=&i=`. Same for an oversized prompt, an oversized thinking block, an oversized
+      error body and a `raw` card over the JSON cap. Assert the encoded size of the emitted node,
+      not just the flag — the flag without the truncation is the bug. After this task **no node of
+      any kind can exceed 64 KiB**, which is the precondition task 13's batching relies on.
 
       Then the **cross-tick** cases, which are the live half of B1 (spec §6.4) and the reason this
       module carries state:
@@ -685,8 +710,14 @@ Model: **Sonnet**.
       Add the batching helper: `batchFrames(nodes, maxBytes)` splits a tick's nodes into as many
       `rows` frames as needed so **no encoded frame exceeds 1 MiB** (spec §6.2). Cases: many small
       nodes summing past the cap split into several frames, each under it, with every node present
-      exactly once and order preserved; a single node that alone exceeds the cap is emitted in its
-      own frame rather than dropped or split.
+      exactly once and order preserved; a single node near the cap sits alone in its frame.
+
+      **There is no "oversized node" branch, and adding one would be a defect.** D15 (task 9) bounds
+      every node at 64 KiB, so a node larger than the frame cap cannot exist. An earlier draft asked
+      for both "every frame stays under 1 MiB" and "an oversized node is emitted alone", which is a
+      contradiction, not a policy. Assert the invariant instead: for **any** input this function
+      accepts, every emitted frame is under the cap — property-tested over randomly sized node
+      lists, never a single happy path.
 
       Expected: module missing.
 - [ ] **Step 2: Implement** `V/core/sse.ts`. Pure.
@@ -716,10 +747,31 @@ Model: **Sonnet**.
       spec §12.6 that are checkable today (the client rules land in task 22): `process.argv`
       appears only in `serve.ts`; `.tribe` appears only in `adapters/campaign.adapter.ts` (assert
       the rule now, with the adapter not yet existing, so it fails loudly until task 16); the
-      package contains no write-family filesystem call outside `fixtures/` and `e2e/`; `core/**`
-      value-imports no `.adapter` module; the raw-source `process.env` ban now also covers
-      `client/`. Expected: the `.tribe` rule and the write-family rule both fail against the
-      current tree (the old `scan.adapter.ts` is still present).
+      `core/**` value-imports no `.adapter` module; the raw-source `process.env` ban now also covers
+      `client/`.
+
+      **The zero-write wall becomes an ALLOWLIST (D16), replacing the denylist of call names.** A
+      denylist is only as good as its author's memory: the previous shape listed `writeFile`,
+      `appendFile`, `mkdir`, `rm`, `rename`, `unlink`, `spawn`, `exec` — and left `Bun.write`,
+      `createWriteStream`, `copyFile`, `truncate`, a write-mode `open` and all of `fs/promises` wide
+      open. Inverted, the rule is total. **Permitted, in `adapters/**` only:** from `node:fs` —
+      `readFileSync`, `openSync` (read flags only), `readSync`, `closeSync`, `statSync`, `lstatSync`,
+      `readdirSync`, `realpathSync`; `Bun.file` read methods; `Bun.serve` (in `serve.ts`).
+      **Refused anywhere else in the package** (outside `fixtures/` and `e2e/`): any other `node:fs`
+      member, any `fs/promises` import, `Bun.write`, `node:child_process`, `node:net`, `node:http`,
+      `node:https`. Resolve imports with Bun's transpiler as the existing wall does, **and** scan
+      member expressions, so `fs.writeFileSync` reached through a namespace import is caught as well
+      as a named import.
+
+      **Prove the wall bites**: add a throwaway file under `adapters/` that calls `Bun.write`,
+      assert the rule goes red, then delete it. A wall never seen to fail is not known to work.
+
+      Also add: **no bare `catch` under `core/**` or `adapters/**`** (`fail-closed-edges`
+      obligation 1) — every `catch` names the error classes it handles or re-throws what it does
+      not recognise.
+
+      Expected: the `.tribe` rule and the allowlist rule both fail against the current tree (the old
+      `scan.adapter.ts` is still present).
 - [ ] **Step 2: Make them pass** by removing what phase 1 has superseded: delete the empty
       `V/core/live/` tree and any now-orphaned import. The `.tribe` rule stays failing only if a
       deleted file survives — if it does, delete it.
@@ -736,9 +788,12 @@ Model: **Sonnet**.
 - [ ] **Step 5: Commit**
 
 Audit lens (Sol, contract): run `bun test structure.test.ts` and read each rule's implementation.
-A rule whose matcher can be satisfied by a comment, or that scans a transpiled import list when it
-should scan raw source (or the reverse), is a Should-fix — the existing file's doc comments explain
-which direction each rule must fail in; that reasoning is the contract.
+Then **try to defeat the allowlist**: write `import * as fs from 'node:fs'; fs.writeFileSync(...)`,
+a `fs/promises` import, a `Bun.write`, and an `openSync(path, 'w')`, and confirm each one goes red.
+Any that slips through means the wall is still a denylist wearing an allowlist's name, and G4 rests
+on it. A rule whose matcher can be satisfied by a comment, or that scans a transpiled import list
+when it should scan raw source (or the reverse), is a Should-fix — the existing file's doc comments
+explain which direction each rule must fail in; that reasoning is the contract.
 
 ---
 
@@ -767,8 +822,10 @@ Model: **Sonnet**.
       an adapter that decodes is what made the old `ackOffset` formula unsound.
 
       In `readonly.test.ts` — G4's proof, so it asserts the properties, not the implementation:
-      1. the adapter module's exported surface contains **no** write-family function, and its source
-         names none of `writeFile`, `appendFile`, `mkdir`, `rm`, `rename`, `unlink`, `chmod`;
+      1. the adapter module's exported surface contains **no** write-capable function, and its
+         source satisfies task 14's D16 **allowlist** — only the permitted read primitives appear,
+         and none of `Bun.write`, `createWriteStream`, `copyFile`, `truncate`, a write-mode
+         `openSync`, or any `fs/promises` import;
       2. **narrow catches are distinguishable** (`fail-closed-edges` obligation 1): a file whose
          content is malformed JSON yields the "malformed" outcome (counted, `SyntaxError`-derived)
          while a file that cannot be read (`EACCES`, via `chmod 000` in a temp dir, and `ENOENT`)
@@ -818,6 +875,14 @@ Model: **Sonnet**.
       `selectCampaigns` chooses which directories are admitted; this adapter's test asserts only
       that it *reads exactly what the selection named and nothing else* — hand it a selection of two
       out of five fixture campaigns and assert three were never opened.
+
+      **Resolved containment applies here too, with `realpath(~/.tribe)` as the root** (spec §9).
+      A `readdir` entry cannot spell `..`, but it **can be a symlink** pointing anywhere, and that
+      is the same class the project-directory check already closes on the transcript side. Assert:
+      a fixture `~/.tribe/<repoKey>` that is a symlink to a directory outside the tribe root is
+      refused and counted **before** `campaign-state.json` is opened; the same for a symlinked
+      `campaigns/<slug>` and a symlinked `runs/<runId>`; and an ordinary non-symlinked campaign is
+      still read (the positive case, so the check is not merely refusing everything).
 
       Cache policy is **not** the adapter's decision (`pure-core.md`, spec §5.3): write
       `V/core/cache.test.ts` for the pure `decideCache(key, existing, nowMs)` — a hit inside the
@@ -885,24 +950,45 @@ the cache key includes both size and mtime — a size-only key silently serves a
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** `/api/rows` returns the last N rows by default and a
-      window ending at a supplied byte offset when `before` is given; `more` is false at the file
-      head; a `before` past EOF or negative is refused with 400. `/api/block` returns one elided
-      block by uuid and index, 404s on an unknown uuid, and never returns more than the cap.
+- [ ] **Step 1: Write the failing test.**
+
+      **`/api/rows` counts NODES, never rows** (spec §4's vocabulary: a row is a transcript line, a
+      node is a rendered unit, and one row can yield several nodes or none). It returns the **last
+      500 nodes** by default, found by spec §6.3's backwards-stepping algorithm — read backwards
+      from EOF in 256 KiB steps, drop the leading partial row unless at BOF, parse complete rows,
+      accumulate the node count, stop at ≥500 nodes or BOF. Assert on a fixture row carrying four
+      blocks that a 500-node window spans **fewer than 500 rows**: that is the one assertion that
+      distinguishes a correct implementation from a row-counting one. `from` is the first row's byte
+      offset; `truncatedBefore` is **true iff BOF was not reached**; `before` past EOF or negative is
+      refused with 400; a `before` window is contiguous with the one it precedes.
+
+      **`/api/block` is addressed by `at` + `i`, never by uuid.** `at` is the row's byte offset and
+      `i` the block index — together exactly `RowAnchor.id` (spec §4). Uuid addressing is impossible
+      here: 14,032 measured `attachment` rows carry none, and neither do `last-prompt`, `ai-title`
+      or `custom-title` rows. Assert: a valid `at`+`i` returns the full payload; an `at` that is not
+      a row boundary 404s; an `i` past the row's block count 404s; the response never exceeds the
+      cap; and **an attachment row with no uuid expands successfully**, which is the case that
+      proves the addressing choice.
+
       `/api/spill` returns the fixture's spill file, refuses `../etc/passwd`, refuses a name with a
       slash, refuses a name failing the charset, and caps the read at 2 MiB. Expected: routes 404.
-- [ ] **Step 2: Implement** per spec §3.2 and §7.6, routing every path through `containedJoin`.
+- [ ] **Step 2: Implement** per spec §3.2, §6.3 and §7.6, routing every path through
+      `containedJoin` and the resolved check of D14.
 - [ ] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test serve.reads.test.ts
       ```
-      Expected: all pass, including all four spill refusals.
+
+      Expected: all pass, including the four spill refusals, the fewer-than-500-rows node assertion,
+      and the uuid-less attachment expansion.
 - [ ] **Step 4: Commit**
 
 Audit lens (Sol, contract): attempt the traversal yourself, with at least these encodings: `..%2f`,
-`%2e%2e/`, a NUL byte, a UTF-8 overlong `..`, and an absolute path. Any that reads a file outside
-the session's own `tool-results/` directory is a Critical finding.
+`%2e%2e/`, a NUL byte, a UTF-8 overlong `..`, and an absolute path. Any that reads a file outside the
+**resolved `~/.claude/projects` root** (D14 — that is the root, not the session directory) is a
+Critical finding. Then grep the implementation for `uuid`: `/api/block` must not accept or look one
+up, because the client never sends one and 14,032 real attachment rows do not have one.
 
 ### Task 19: The poller and the SSE stream
 
@@ -1172,6 +1258,13 @@ getting it wrong is easy and silent.
       card because the store dedupes by id. The hook **never sets or reads `Last-Event-ID`** — the
       browser may send one, and the server ignores it; assert the hook's source does not mention it.
 
+      **The sequence watermark is cleared on every `EventSource` `open`** — assert it directly, with
+      the sequence that breaks without it: process frames with ids 1..5, force a reconnect, deliver
+      a fresh `hello` with **id 1**, and assert it is processed rather than discarded as
+      already-seen. Frame ids restart at 1 per connection (spec §6.2), so a watermark carried across
+      a reconnect silently swallows the entire new window — the page would go blank and stay blank,
+      with no error anywhere.
+
       `session.test.tsx`: one rendering case per `RenderNode` kind in spec §4; every rendered row
       carries `data-kind` and `data-row-id`, a `tool` card also carries
       `data-state="pending|ok|error"`, and the list carries `data-scroll="rows"` (spec §12.6 — these
@@ -1420,8 +1513,10 @@ Model: **Sonnet**.
       headless Chromium via `e2e/browser.ts`, not API-shape assertions — G1, G4 and G6 are claims
       about what a person sees, so that is where they are observed.
 
-      `dom-kinds.e2e.test.ts`: serve with `HOME` pointed at the task-1 tree and **no `~/.tribe`
-      inside it** (G1's precondition); open `/s/<session-1>` in a page. Two layers:
+      `dom-kinds.e2e.test.ts`: build the task-1 fixture into a fresh `mkdtemp` directory and start
+      the real server with **`HOME=<that directory>`** — the fixture root *is* a fake HOME, holding
+      `.claude/projects/...` and, for G1, **no `.tribe` at all** (that absence is G1's precondition).
+      Open `/s/<session-1>` in a page. Two layers:
 
       **Layer 1 — kind coverage, driven by the runtime witness.** Iterate
       `Object.keys(RENDER_NODE_KINDS)` (task 2) and assert
@@ -1435,7 +1530,9 @@ Model: **Sonnet**.
       defect that hid every runner prompt) is broken. One case each, per spec §16.2's table: string
       prompt; **array prompt**; `tool` pending (`[data-state="pending"]`); `tool` ok with its result
       text; `tool` error (`[data-state="error"]`); `orphan_result`; **empty thinking asserted
-      absent**; non-empty thinking present; `image` with no bytes fetched before expand; compaction
+      absent**; non-empty thinking present; **`image` displayed**: on expand an `<img>` exists whose `src` is a `data:` URL of the expected
+      byte length, and the browser's request log shows **no network fetch** for those bytes — G1
+      says the image renders, so a node that merely claims one is not the proof; compaction
       `divider`; spill link with `/api/spill` not called before expand; unknown row type as a
       collapsed `raw` card.
 
@@ -1444,10 +1541,17 @@ Model: **Sonnet**.
       rest (D10); assert each of the three empty shapes renders the "no sessions found" note rather
       than an error or a blank pane.
 
+      **The zero-write proof is a hash (D16/G4), not an inspection.** Take a recursive digest of the
+      whole fixture HOME — every path, size and content hash under it — before the DOM suites run,
+      run them, digest again, and assert the two are **byte-identical**. Task 14's allowlist proves
+      no write call is *reachable in the source*; this proves none *happened in a real run*, which is
+      the claim G4 makes. Both are required; neither implies the other.
+
       `url-refusals.e2e.test.ts`: the URL matrix of spec §16.2 over HTTP — a valid id, `..`, a
       percent-encoded `/`, a double-encoded `..%2f`, a NUL byte, an id from the other project, an
-      absent id — plus the **three symlink shapes** of D14: the one escaping the projects root
-      refused, the **sibling-session** one served, the broken one refused.
+      absent id — plus the **three symlinks task 1 built**: `escaping.txt` refused, `in-session.txt`
+      served, and the **sibling-session sidecar** served (D14's root is the projects directory, so a
+      link to a sibling session is inside it).
 
       `served-build.e2e.test.ts` (G6, spec §16.5). The server serves its **fixed** `dist/` and gains
       **no `--dist` flag** — an overridable asset root is a security surface for a read-only viewer,
@@ -1600,8 +1704,14 @@ Model: **Sonnet**.
       process group by the pid the test holds, and the viewer child by the pid the test holds. It
       never kills "whatever holds port 4399": that may be an unrelated process, and terminating one
       is outside this card's authority (the old harness did exactly that and it is being removed,
-      not carried over). Delete the throwaway repo; deliberately keep the campaign home as
-      evidence.
+      not carried over).
+
+      **Teardown also removes both synthetic campaign homes it created under `~/.tribe`**, in a
+      `finally`, by the exact paths it recorded when creating them — never a glob, never a pattern.
+      An earlier draft kept them "as evidence"; that is persistent mutation of the owner's real
+      state, and the card reserves writes outside the repo to the owner. The evidence lives under
+      `docs/tribe/planning/viewer-consolidation/evidence/`: the captured stdout lines, the assertion
+      output and the screenshots. Delete the throwaway repo too.
 - [ ] **Step 3: Run.**
 
       ```sh
@@ -1638,7 +1748,32 @@ Model: **Sonnet**.
       bash plugins/tribe/scripts/tests/test-install-viewer-build.sh
       bash plugins/tribe/scripts/tests/test-install-hook.sh
       bunx @c3x/cli@11.6.3 check </dev/null
+      bash plugins/tribe/scripts/pre-gate.sh <base-sha>..HEAD
+      bun plugins/tribe/scripts/gaps/gap-gate.ts --repo . --home "$(bash plugins/tribe/scripts/tribe-home.sh .)" --card viewer-consolidation --base <base-sha> --head HEAD
+      python3 - <<'FENCE'
+      import re,sys
+      F=re.compile(r'^(\s*)(`{3,}|~{3,})(.*)$')
+      for path in ('docs/tribe/planning/viewer-consolidation/spec.md',
+                   'docs/tribe/planning/viewer-consolidation/plan.md'):
+          ch=None; n=0
+          for l in open(path).read().split('\n'):
+              m=F.match(l)
+              if ch is None:
+                  if m: ch,n=m.group(2)[0],len(m.group(2))
+              elif m and m.group(2)[0]==ch and len(m.group(2))>=n and m.group(3).strip()=='':
+                  ch=None
+          print(path, 'FENCES OK' if ch is None else 'UNCLOSED FENCE'); assert ch is None
+      FENCE
       ```
+
+      Two of these are easy to skip and both are mandatory. **`pre-gate.sh` and `gap-gate.ts` are
+      named in spec §16 as part of what "CI green" means here** — this repo has no GitHub Actions,
+      so the gate set *is* the CI, and a final task that runs everything except the two tribe gates
+      would let the card reach `SHIPPED` without the `## Harness gaps` section its PR body requires.
+      **The fence-parity check** is the third: revision 3 of this spec shipped with one unclosed
+      code fence, which silently swallowed four whole sections into a code block and reduced three
+      Mermaid diagrams to one. Nothing else in the gate set can see that — `tsc`, `bun test` and
+      `c3x` are all blind to Markdown — and a blind reader lost half the document to it.
 
       Note the viewer's `bun test` now includes the DOM suites of task 30 (they are **not** gated
       behind an environment variable — only the two Haiku suites are), so a missing browser fails
