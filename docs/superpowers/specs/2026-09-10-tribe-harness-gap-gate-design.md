@@ -191,7 +191,9 @@ compared against the id, so a correctly gated, merged PR was refused as not ship
   the campaign brief says so and never asks for the runner id.
 - Runner point 6 (`gapGateStamped`) passes when `stamp.card` equals the runner's card id **or**
   equals a `Tribe-Card:` trailer value on the commits the merged PR brought in (the second-parent
-  side of the merge commit, `git log <mergeSha>^1..<mergeSha>`). Ancestry of `base`/`head` is
+  side of the merge commit, `git log <mergeSha>^1..<mergeSha>`). That range also includes the
+  merge commit itself; this is deliberate and inert, because a `gh pr merge --merge` commit
+  carries no `Tribe-Card:` trailer (ruling R8, 2026-09-11). Ancestry of `base`/`head` is
   checked as before. A stamp naming neither is still a failure.
 - `verify-shipped.sh --card` takes the slug, unchanged.
 

@@ -13,7 +13,9 @@ Four obligations, each earned from a real defect:
    raise — `json.JSONDecodeError`, `UnicodeDecodeError`, `re.error`, `OSError` — and convert
    each to a typed refusal. Never `except Exception`, and never let a traceback escape into a
    git hook or a CLI: a traceback is an unhandled case, and to the user it is a crash, not a
-   verdict.
+   verdict. The same obligation covers argument parsing: a CLI flag whose value is missing must
+   refuse with a message, never silently consume the next argv token as its value (campaign
+   gap-gate-2026-09-10, PR #128: `--card --base <sha>` read `--base` as the card name).
 2. **Isolate every subprocess the tool spawns.** A tool that shells out to `git` must neutralise
    the host's configuration — `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM` set to `os.devnull` —
    so an unusual-but-legal host setting (`commit.gpgsign=true` with no usable key, a global
