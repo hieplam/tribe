@@ -17,6 +17,9 @@ in the current code** whose reasoning must survive a rewrite.
 | B3 | state-file path traversal | §9, §12.2 |
 | B4 | stream frozen to one card | §9 |
 | B7 | never auto-scrolls | §8.3 |
+| B9 | empty thinking renders empty cards | §7.2 |
+| B12 | rotation re-emits the whole file | §6.1 |
+| B13 | per-connection state grows forever | §6.5 |
 | B10 | system rows dropped | §7.1, §7.4 |
 | B16 | no Host check | §12.5 |
 | B25 | status page unbounded | §16.1 |
@@ -150,10 +153,34 @@ Three further rulings arrived with review round 2 and **supersede** the earlier 
   thinking, raw card) whose encoded size exceeds 64 KiB are elided the same way tool payloads are,
   with `expandable` and `/api/block?at=&i=` for the full body. Therefore no single node can exceed
   the frame cap and `batchFrames` has no 'emit oversized alone' branch."*
+- **D18 — the scope of the D16 wall, and how tokens reach the build.** *"The allowlist applies to
+  `core/**`, `adapters/**`, `serve.ts` and `client/src/**` — runtime code. `tools/**` (measurement
+  scripts, never imported by runtime code; `structure.test.ts` asserts no runtime import of
+  `tools/`) and `fixtures/**`, `e2e/**` are outside the wall. Token delivery: no fs copy step; Vite
+  imports `../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css` by path from
+  `client/src/styles/index.css` (`@import`), so the build reads it and nothing copies it."*
+- **D19 — a tool node carries two anchors.** *"`call: {at,i}` (the `tool_use` block) and
+  `result: {at,i} | null` (the `tool_result` block in its later row, set by pairing). `/api/block`
+  stays `at`+`i`. The client expands the call payload with `call` and the result payload with
+  `result`. Orphan results carry only `result`. 'One address per payload' stands; a tool card simply
+  has two payloads."*
+- **D20 — window boundaries are whole rows.** *"The backward read trims from the front by whole rows
+  only, stopping at the largest prefix removal that still leaves ≥500 nodes; the window may
+  therefore exceed 500 by at most one row's nodes. `from` = the first retained row's offset (so
+  back-fill with `before=from` never loses blocks). Pairing runs AFTER trimming, on retained rows
+  only: a result whose call is outside the window renders as `orphan_result` with label 'call is
+  above the window'; loading earlier and re-pairing replaces it with the paired card."*
 - **D16 — the zero-write wall is an allowlist, not a denylist.** *"`structure.test.ts` permits only
   these world-touching imports in adapters (`node:fs` readFile / open with read flags / stat / lstat
   / readdir / realpath / read; `Bun.file` read; `Bun.serve`) and fails on any other `node:fs`,
   `fs/promises`, `Bun.write`, `child_process` or `node:net` import or member."*
+
+D18, D19 and D20 are each a correction of the same over-reach: a rule stated more absolutely than
+the world allows. "Only adapters touch the filesystem" forgot that a measurement script and a build
+config are not runtime code. "One address per node" forgot that a tool card is two payloads in two
+different rows. "Exactly 500 nodes" forgot that a row is atomic and a window that splits one loses
+the blocks it cut. In each case the fix is to name the real unit — runtime code, a payload, a row —
+rather than to weaken the rule.
 
 D15 and D16 share a shape worth naming, because it is the same lesson twice: **an enumerated list
 of bad things is only as good as the enumerator's imagination.** A denylist of write calls misses
@@ -312,8 +339,8 @@ plugins/tribe/scripts/viewer/
     poller.adapter.ts     the only clock owner: one poll loop per SSE stream
   client/
     src/main.tsx  src/App.tsx  src/routes.ts  src/api.ts  src/useEventStream.ts  src/rowStore.ts
+    src/styles/index.css    @imports the owner's design/sea-salt/tokens.css by path (D18)
     src/components/…        (§8)
-    src/styles/tokens.css   COPIED from the owner's chosen theme at build time (P1, §8.2)
     src/styles/app.css      layout/typography only — zero literal colours (§12)
   dist/                   built by Vite; git-ignored; absence is a fail-closed startup error
   fixtures/build.ts       builds a whole ~/.claude/projects tree FROM NOTHING (§16.2)
@@ -335,6 +362,7 @@ built asset returns the SPA shell so the client router can own the address bar.
 | `GET /p/<encodedProjectDir>` | `index.html` | one project; `encodedProjectDir` is the on-disk directory name |
 | `GET /s/<sessionId>` | `index.html` | one session; project resolved by scanning (§5.2) |
 | `GET /s/<sessionId>/a/<agentId>` | `index.html` | one subagent tab |
+| `GET /index.html` | `index.html` | the same bytes as `GET /` — named because §16.5 hashes it against the built file |
 | `GET /assets/<name>` | the built file | fixed allowlist read from `dist/` at boot (§12.4) |
 | `GET /healthz` | `{"ok":true,"viewer":"tribe-viewer","v":2}` | **deliberately NOT the old body** — see §10.4, stale-viewer reuse |
 | `GET /api/projects?all=1` | `{"projects":[Project],"olderCount":n,"skippedBadges":n}` | §5.1, §5.6; without `all=1`, `projects` is the D10 window and `olderCount` is the remainder |
@@ -344,7 +372,21 @@ built asset returns the SPA shell so the client router can own the address bar.
 | `GET /api/block?session=&agent=&at=&i=` | `{"block":…}` | one elided payload, addressed by `RowAnchor.id` (§4): an image, a 64 KiB+ tool input/result, a `raw` card's JSON, an expandable `attachment` |
 | `GET /api/spill?session=&name=` | `text/plain` | a `<persisted-output>` file, contained (§7.4) |
 | `GET /events?session=&agent=` | `text/event-stream` | §6 |
-| anything else | `404` with a one-line body | never a stack trace |
+| anything else | see the one rule below | never a stack trace |
+
+**The one rule for a path not in the table above**, because two rules for the same request is a
+defect and an earlier draft had two:
+
+> A path that is **client-routed** — `/`, `/index.html`, or anything under `/p/` or `/s/` — returns
+> the index shell with `200`, because the React router owns those addresses and the server cannot
+> know which of them is meaningful. **Everything else returns `404` with a JSON body**
+> `{"error":"not found","path":"<path>"}`.
+
+So `/s/does-not-exist` returns the shell and the client renders "no session with that id"
+(`/api/session/<id>` is what 404s), while `/nonsense`, `/api/nonsense` and `/assets/nonsense` all
+return JSON 404s. The split is by **prefix, not by existence** — the server never probes the
+filesystem to decide a status code, which is also what keeps the routing layer free of the traversal
+surface §12.2 exists to close.
 
 Every `sessionId` / `agentId` / `project` value above is validated and contained **before any path
 is joined** (§12.2). `GET /live`, `GET /`-as-status-page, `GET /app.js`, `GET /app.css` and
@@ -435,6 +477,10 @@ export type MdToken =
  * properties of the bytes on disk, so the same node re-derived on a later tick, on a back-fill, or
  * after a reconnect gets the SAME id. There is no line index anywhere in this model: a line index
  * would change the moment the window moved. */
+/** The two numbers that address any payload. `RowAnchor` is this plus identity and display fields;
+ * a tool node carries a second one for its result half (D19). */
+export interface Anchor { at: number; i: number }
+
 export interface RowAnchor {
   id: string;             // `${at}:${i}` — the two fields below, joined
   at: number;             // byte offset of the ROW's first byte
@@ -460,8 +506,15 @@ export type RenderNode = RowAnchor & Sized & (
   | { k: 'thinking';      body: MdToken[] }
   | { k: 'tool';          name: string; input: unknown; state: 'pending'|'ok'|'error';
                           result: ToolResult | null; toolUseId: string | null;
-                          agentId: string | null }
-  | { k: 'orphan_result'; toolUseId: string; result: ToolResult }
+                          agentId: string | null;
+                          /** D19: a tool card is TWO payloads in two different rows. `call` is the
+                           * `tool_use` block (always `= {at, i}` of this node); `result` is the
+                           * `tool_result` block in its LATER row, filled by pairing, null while
+                           * pending. Each is expanded with its own `/api/block?at=&i=`. */
+                          call: Anchor; resultAnchor: Anchor | null }
+  | { k: 'orphan_result'; toolUseId: string; result: ToolResult;
+                          /** only the result half exists here, by definition */
+                          resultAnchor: Anchor }
   | { k: 'image';         mediaType: string; bytes: number }
   | { k: 'attachment';    label: string; detail: string | null }
   | { k: 'chip';          label: string; detail: string | null; href: string | null }
@@ -471,10 +524,10 @@ export type RenderNode = RowAnchor & Sized & (
   | { k: 'unreadable';    count: number }
 );
 
-/** A tool call's result, once it has one. `elided` here mirrors the node's own field for the
- * result half specifically — a call can have a small input and a 2 MiB result, and the client
- * needs to know which half it is being offered an expansion of. The expansion address is the
- * node's own `at`+`i`, never a separate one. */
+/** A tool call's result, once it has one. `elided` here is the RESULT half's own flag — a call can
+ * have a small input and a 2 MiB result, and the two halves are elided independently. The result's
+ * expansion address is the node's `resultAnchor`, never its `call` (D19): the result physically
+ * lives in a later row, so one address could not reach both. */
 export type ToolResult =
   | { r: 'text';   body: MdToken[]; isError: boolean; elided: boolean }
   | { r: 'spill';  name: string; note: string; previewBody: MdToken[] } // <persisted-output>
@@ -880,25 +933,42 @@ with each other.
       parse the complete rows in that slice
       nodes  += the node count those rows produce      # core/normalize.ts, counted only
       anchor := offset of the FIRST complete row in the slice
-  # the loop reads whole 256 KiB slices, so it usually OVERSHOOTS 500 nodes. Trim it:
-  nodes    := the accumulated node list, in file order
-  keep     := the LAST 500 of them                     # trim from the FRONT
-  anchor   := the row offset of the FIRST node in `keep`
-  truncatedBefore := anchor > 0                        # true iff any row precedes the anchor
+  # the loop reads whole 256 KiB slices, so it usually OVERSHOOTS. Trim by WHOLE ROWS (D20):
+  rows     := the accumulated rows, in file order
+  # drop the largest prefix of whole rows that still leaves >= 500 nodes
+  while nodeCount(rows[1:]) >= 500:
+      rows := rows[1:]
+  anchor          := offset of the FIRST retained row
+  truncatedBefore := anchor > 0
+  # pairing runs HERE, after the trim, over `rows` only
+  nodes    := normalize(rows)
   ```
 
-  **The trim is the step that makes "500 nodes" exact.** The loop reads whole 256 KiB slices and a
-  slice can push the count well past 500 — the largest rows measured are ≈19 KB, so one slice can
-  add a dozen rows and many more nodes. Stopping at "the first slice that reached 500" would make
-  the window size depend on where slice boundaries happened to fall. So the accumulated nodes are
-  trimmed **from the front** to exactly the last 500, and **the anchor is then set to the first
-  retained node's row offset** — not to the first row of the last slice read.
+  **The trim is by whole rows, and "exactly 500 nodes" is deliberately not the contract (D20).** The
+  loop reads whole 256 KiB slices and overshoots; trimming to *precisely* 500 nodes would cut
+  through the middle of a row, and that loses data irrecoverably. Consider a four-block row where
+  the 500-node boundary falls at block `i=2`: an exact trim keeps blocks 2 and 3 and records `from`
+  as that row's byte offset — so "load earlier" with `before=from` reads rows *before* it and blocks
+  0 and 1 can never be reached by any request. They would be silently gone.
 
-  `truncatedBefore` follows from the trimmed anchor, not from the scan: it is true iff **any row
-  precedes the anchor**, which covers both "the scan stopped early" and "the scan reached BOF but
-  the trim discarded rows". Reading backwards costs one or two slices for a typical session and
-  terminates at BOF for a short one. `hello` carries `truncatedBefore` with `from`/`to`, the
-  window's byte bounds; `from` is a real row boundary because the anchor is one.
+  So the trim removes **the largest prefix of whole rows that still leaves ≥500 nodes**, and the
+  window may exceed 500 by at most one row's worth of nodes. A row is the atomic unit because a row
+  is what a byte offset can name; a block is not addressable as a window boundary, only as a payload
+  (§4).
+
+  `from` is the **first retained row's** offset, which makes `before=from` exactly the boundary of
+  what the client does not have — back-fill is lossless by construction rather than by luck.
+  `truncatedBefore` is true iff any row precedes the anchor, covering both "the scan stopped early"
+  and "the scan reached BOF but the trim discarded rows". Reading backwards costs one or two slices
+  for a typical session and terminates at BOF for a short one.
+
+  **Pairing runs after the trim, over retained rows only** — the order matters and §7.5 states the
+  consequence. Normalizing before trimming would let a `tool_result` pair into a call node that the
+  trim then discards, leaving no node at all for the result: the result would produce nothing,
+  because it was consumed by a patch to a node that no longer exists. That is the pre-consolidation
+  viewer's B1 (tool results dropped) reintroduced through the back door. Pairing after the trim
+  cannot do that: a result whose call is outside the window has nothing to pair with and emits an
+  `orphan_result`.
 - **"Load earlier"** calls `GET /api/rows?session=…&before=<first>&limit=500`, a ranged read
   backwards from a known byte offset — no index, no store. The returned nodes are **prepended**, and
   `first` moves backwards. Order is preserved because the new range is contiguous with the old one.
@@ -1105,7 +1175,21 @@ stream's normalize state. There are exactly two outcomes for a `tool_result`:
   already-sent node in place. These are the same decision expressed at two different times, which
   is why the pending map must survive a tick and why its lifetime is bounded (§6.5: 512 entries).
 - **Its id is not in the map** (the call is before the window, or its entry was evicted). An
-  `orphan_result` node is emitted **in file position** — never dropped.
+  `orphan_result` node is emitted **in file position** — never dropped — carrying its own
+  `resultAnchor` (D19) so its payload is still expandable.
+
+**Sequencing, stated once here and once in §6.3, because getting it backwards silently loses data.**
+Pairing runs **after** the window trim, over retained rows only. Normalizing first would let a
+result pair into a call node that the trim then discards: the result produces no node of its own
+(it became a patch) and the node it patched is gone, so the result vanishes — which is exactly the
+B1 defect (tool results dropped) coming back through a different door. Pairing after the trim cannot
+do that, because a result whose call is not in the window has nothing to pair with.
+
+The orphan therefore has a specific, honest label: **"call is above the window"**. It is not an
+error state and the client does not present it as one. Loading earlier brings the call's row into
+the window, re-pairing runs over the enlarged row set, and the orphan is **replaced by the paired
+card** in place — the user sees the card complete itself, which is the truthful account of what
+happened.
 Measured: **0 orphan results and 1 unmatched call** across 33,721 calls in the whole corpus, so the
 orphan path is rare in *history* — but it is the normal path for a window that starts mid-session,
 which is exactly why it must be tested rather than trusted (fixture case `tool_result before its
@@ -1255,10 +1339,16 @@ Mechanism:
 
 1. `design/sea-salt/tokens.css` (the theme STATE.md names) is the single stylesheet imported once at
    the app root, before any component style.
-2. `vite.config.ts` copies it to `client/src/styles/tokens.css` as a pre-build step; the copy is
-   git-ignored and the owner's file stays the source of truth. The copy reads the theme name from
-   the gate's own source of truth, so a future D-number change needs no code edit.
-3. `client/src/styles/app.css` and every `.tsx` reference tokens only via `var(--…)`. §12.6 bans a
+2. **Nothing copies it (D18).** `client/src/styles/index.css` carries
+   `@import "../../../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css";`
+   and Vite resolves that path at build time. A copy step would have needed a filesystem write from
+   `vite.config.ts` — which is exactly what the D16 wall forbids in runtime code, and inventing an
+   exception for it would have weakened the wall to save one line. An `@import` needs no exception:
+   the bundler reads the owner's file directly, so there is one copy of the tokens in the repo and
+   it is the owner's.
+3. `client/src/styles/app.css` and every `.tsx` reference tokens only via `var(--…)`. The P1 gate
+   checks that the **imported path** exists, which is the same file the build reads — so the gate
+   and the build cannot disagree. §12.6 bans a
    literal colour, font, radius or `px` length anywhere under `client/` except `tokens.css` itself.
 
 **Dark mode is free and must not be re-implemented.** Each `tokens.css` already declares its dark
@@ -1723,38 +1813,45 @@ Added:
 2. No file in `client/**` contains `dangerouslySetInnerHTML`.
 3. No file in `client/**` (`.css`, `.tsx`, `.ts`) contains a literal colour (`#rgb`, `#rrggbb`,
    `rgb(`, `rgba(`, `hsl(`, `oklch(`), a `font-family` value, or a bare `px` length outside
-   `var(--…)` usage — except `client/src/styles/tokens.css`, which is the owner's file. This is
-   the scope fence's "no design tokens invented by the implementer" made mechanical.
+   `var(--…)` usage. **There is no exempt file under `client/`**: D18 delivers tokens by `@import`
+   from `design/sea-salt/tokens.css`, so the owner's file — the only place literals legitimately
+   live — sits outside `client/` entirely, and the rule needs no carve-out. Every `var(--name)` the
+   client references must be defined in that imported file. This is the scope fence's "no design
+   tokens invented by the implementer" made mechanical.
 4. `adapters/campaign.adapter.ts` is the only file naming `.tribe` (also §11.4).
 5. `process.argv` appears only in `serve.ts`.
 6. Every rendered row element carries `data-kind` and `data-row-id`, and the row list carries
    `data-scroll="rows"`. These are the addresses §16.0's DOM proofs assert against, so they are
    part of the contract, not test scaffolding — a component that stops emitting one silently
    disarms a goal's proof.
-7. **The zero-write wall is an allowlist (D16), and this is the rule G4 actually rests on.** An
-   enumerated denylist of write calls is only as good as its author's memory: the previous revision
-   listed `writeFile`, `appendFile`, `mkdir`, `rm`, `rename`, `unlink`, `spawn`, `exec` — and left
-   `Bun.write`, `createWriteStream`, `copyFile`, `truncate`, a write-mode `open` and
-   `fs/promises` entirely open. Inverted, the rule is total:
+7. **The zero-write wall is an allowlist (D16), scoped to runtime code (D18).** This is the rule G4
+   rests on, and it has three parts. Each answers a different question; read them in order.
 
-   **Permitted in `adapters/**`:** from `node:fs` — `readFileSync`, `openSync` (read flags only),
-   `readSync`, `closeSync`, `statSync`, `lstatSync`, `readdirSync`, `realpathSync`; and
-   `Bun.file(...)` read methods.
+   **(7a) What the wall covers.** Runtime code, and only runtime code: `core/**`, `adapters/**`,
+   `serve.ts`, `client/src/**`. Outside it: `tools/**` (one-off measurement scripts, never shipped
+   in a request path) and `fixtures/**`, `e2e/**` (test scaffolding, which must write or it could
+   not build a fixture). The wall governs what the **shipped viewer** can do, not what a developer
+   can run. To stop that scope becoming a loophole, one extra rule: **no file under the wall may
+   import from `tools/`** — a measurement script the server could reach at runtime would be inside
+   the wall in every sense that matters.
 
-   **One named exception, in `serve.ts` only: `Bun.serve`.** It is the single place the process
-   binds a socket, and `serve.ts` is the composition root — not an adapter — so "adapters only"
-   would be the wrong home for it. Stating the exception as its own rule rather than a parenthesis
-   is deliberate: an allowlist with an unexplained aside in it invites the next reader to add a
-   second one.
+   **(7b) What is permitted inside it.** From `node:fs`, in `adapters/**` only: `readFileSync`,
+   `openSync` (read flags only), `readSync`, `closeSync`, `statSync`, `lstatSync`, `readdirSync`,
+   `realpathSync`. Plus `Bun.file(...)` read methods. Plus **one named exception: `Bun.serve`, in
+   `serve.ts` only** — the single place the process binds a socket, and `serve.ts` is the
+   composition root, not an adapter, so "adapters only" would be the wrong home for it.
 
-   **Refused anywhere in the package** (outside `fixtures/` and `e2e/`): any other `node:fs` member,
-   any `fs/promises` import, `Bun.write`, `node:child_process`, `node:net`, `node:http`,
-   `node:https`. The test resolves imports with Bun's own transpiler (as the current wall already
-   does) and additionally scans member expressions, so `fs.writeFileSync` reached through a
-   namespace import is caught as well as a named one.
+   **(7c) What is refused inside it.** Everything else: any other `node:fs` member, any
+   `fs/promises` import, `Bun.write`, `node:child_process`, `node:net`, `node:http`, `node:https`.
+   Imports are resolved with Bun's own transpiler (as the current wall already does) **and** member
+   expressions are scanned, so `fs.writeFileSync` reached through a namespace import is caught as
+   well as a named one.
 
-   A new legitimate read primitive is added by extending the allowlist in one place, deliberately —
-   which is the point: growth is a decision someone makes, not an omission nobody notices.
+   Why an allowlist at all: a denylist is only as good as its author's memory. An earlier revision
+   listed eight write calls and left `Bun.write`, `createWriteStream`, `copyFile`, `truncate`, a
+   write-mode `open` and all of `fs/promises` open. Inverted, the rule is total — and a new
+   legitimate read primitive is added by extending (7b) deliberately, so growth is a decision
+   someone makes rather than an omission nobody notices.
 8. No `catch` in `adapters/**` or `core/**` is bare: every `catch` either names the error classes it
    handles or immediately re-throws anything it does not recognise. `fail-closed-edges` obligation 1
    — and the distinction that matters here is **a malformed file (`SyntaxError` from `JSON.parse`)
@@ -1790,6 +1887,7 @@ Every row is "what the user sees", and no row is a stack trace.
 | `/api/block` names an `at`/`i` that does not resolve to a block | `404`, the card keeps its elided placeholder |
 | 9th concurrent SSE stream | `503 too many live streams` |
 | `Host`/`Origin` mismatch | `403` |
+| a path is not in the route table | the index shell for `/`, `/index.html`, `/p/*` and `/s/*` (client-routed); JSON `404` for everything else (§3.2) |
 | `process.kill(pid, 0)` throws `EPERM` | `runnerAlive: true` (alive, not ours) |
 | the spill/preview path escapes its root **lexically** | refused by `containedJoin`; never opened |
 | the path is lexically fine but **resolves** outside `~/.claude/projects` (a symlink) | refused by `isContainedResolved`; never opened (D14) |
@@ -1797,7 +1895,7 @@ Every row is "what the user sees", and no row is a stack trace.
 | a project directory is a symlink pointing outside the root | refused during discovery, before any file in it is opened |
 | `JSON.parse` throws `SyntaxError` on a state file | that campaign contributes no badges; counted, never confused with an unreadable file |
 | a state file is unreadable (`EACCES`, `ENOENT`) | degrades to `null` and is reported as absent, never as malformed |
-| the file's inode changed since the last tick | `reset` with reason `rotated`, re-stream from byte 0 (§6.1) |
+| the file's inode changed since the last tick | `reset` with reason `rotated`, then the **normal tail window** — never byte 0 (§6.1) |
 | the browser sends `Last-Event-ID` on reconnect | **ignored** by the server (D12); the client gets a fresh snapshot and dedupes by row id |
 | a tick's nodes would serialize past 1 MiB in one frame | split across several `rows` frames, each under the cap (§6.2) |
 | the client window reaches 2,000 nodes while reading history | the tail is evicted and following switches off (§6.3) |
@@ -1931,45 +2029,37 @@ is "the status page is unbounded — 387 KB for 17 campaigns".
 directory**, from nothing — `fixtures-mirror-reality.md` obligation 2, and plan task **1 runs it
 before any implementation task exists**.
 
-**The fixture root is a fake `HOME`, and every path below is relative to it.** `fixtures/build.ts`
-allocates a fresh directory with `mkdtemp` (never a fixed `/tmp` path — a shared, unowned path makes
-concurrent runs race and invites a destructive `rm -rf`), and builds **both** trees inside it:
+**`fixtures/build.ts` builds exactly TWO fake HOMEs, and every test names which one it uses.** One
+directory cannot both hold a populated `.claude/projects` and have no `.claude` at all, so the
+variants are enumerated rather than described:
+
+| Name | Contains | Used by |
+| --- | --- | --- |
+| **`homeA`** | a populated `.claude/projects` (everything listed below) and **no `.tribe` at all** | G1, G2, G4 — the DOM, live-tail, refusal and write-hash suites |
+| **`homeB`** | everything in `homeA`, **plus** `.tribe/` with the two same-slug campaigns of §16.4 | G3 — the campaign-badge suite |
+
+Both come from `mkdtemp` (never a fixed `/tmp` path — a shared, unowned path makes concurrent runs
+race and invites a destructive `rm -rf`), and the server under test is started with `HOME=<that
+directory>` and nothing else. §5 resolves both roots from `HOME` (§12.3), which is what makes a
+fixture run need no test-only flag.
 
 ```
-<tmp>/                       <- this is HOME for the server under test
+<homeA>/
   .claude/projects/<encoded-cwd-A>/<session-1>.jsonl
   .claude/projects/<encoded-cwd-A>/<session-1>/subagents/agent-*.jsonl + .meta.json
   .claude/projects/<encoded-cwd-A>/<session-1>/tool-results/<id>.txt
   .claude/projects/<encoded-cwd-B>/<session-2>.jsonl
-  .tribe/...                 <- only for the campaign e2e; absent for G1 (§16.2's precondition)
+  (no .tribe — this absence IS G1's precondition)
+
+<homeB>/ = <homeA>/ plus
+  .tribe/<repoKeyA>/campaigns/<slug>/campaign-state.json
+  .tribe/<repoKeyB>/campaigns/<slug>/campaign-state.json
 ```
 
-The server is started with `HOME=<tmp>` and nothing else — §5 resolves both roots from `HOME`
-(§12.3), which is exactly what makes a fixture run possible with no test-only flag. Paths are
-written below without the `<tmp>/.claude/projects/` prefix for readability; the prefix is always
-there.
+Paths below are written without the `<home>/.claude/projects/` prefix for readability; the prefix is
+always there.
 
-It writes:
-
-- `<encoded-cwd-A>/<session-1>.jsonl` — one row of every type in §7.1 and one block of
-  every type in §7.2, authored from the measured corpus: string prompt, array prompt, assistant
-  text, non-empty thinking, empty thinking, `tool_use` + matching `tool_result` (string,
-  `array[text]`, `array[image]`, `array[tool_reference]`, `is_error`), a `tool_result` whose call is
-  outside the window (the orphan), a base64 `image` block, `isCompactSummary`, every `system`
-  subtype, a `<persisted-output>` marker, a `<command-name>` chip, an `apiErrorStatus` row, an
-  invented `type: "not-a-real-row-type"` (the raw card), and one malformed line.
-- `<encoded-cwd-A>/<session-1>/subagents/agent-*.jsonl` + `.meta.json` — a depth-2 tree,
-  one sidecar with no `parentAgentId`, one naming a missing agent (the orphan-tree case), one
-  self-referential cycle (F36).
-- `projects/<encoded-cwd-A>/<session-1>/tool-results/<id>.txt` — the spill the marker points at,
-  plus **a symlink beside it pointing at `/etc/passwd`** (the containment case of §12.2) and one
-  legitimate symlink resolving back inside the session directory.
-- `<encoded-cwd-B>/<session-2>.jsonl` — a second project, so the list has two.
-- **A third project whose newest session is 90 days old** — D10's window case (§5.6).
-- **A transcript of more than 2,000 nodes** — the window/eviction case of §6.3, which four real
-  transcripts on this machine already exceed.
-- **The three empty shapes**: a project directory with no sessions, an empty `projects/` directory,
-  and a `HOME` with no `.claude` at all.
+`homeA` writes:
 
 `e2e/dom-kinds.e2e.test.ts` spawns the real `serve.ts` with `HOME` pointed at that tree and **no
 `~/.tribe` inside it** (G1's precondition), opens a real Chromium page at `/s/<session-1>`, and
@@ -1998,7 +2088,7 @@ prompt) is completely broken. So the DOM is asserted for each shape by its own m
 | `tool_result` whose call precedes the window | `[data-kind="orphan_result"]` exists |
 | empty `thinking` block | **no** `[data-kind="thinking"]` for that row — the absence is asserted |
 | non-empty `thinking` block | one collapsed thinking card |
-| base64 `image` block | `[data-kind="image"]`; on expand an `<img>` exists whose `src` is a `data:` URL of the **expected byte length**, and the page issued **no network request** for the bytes (assert via the browser's request log). G1 says the image renders, so the proof is a displayed image, not a node that claims one |
+| base64 `image` block | Two phases, both asserted from the browser's request log. **Before expand:** the node renders and the page has issued **zero** requests for its bytes. **On expand:** exactly **one** request, `GET /api/block?at=&i=`, and then an `<img>` exists whose `src` is a `data:` URL of the **expected byte length**. G1 says the image renders, so the proof is a displayed image — and "no network request" alone would have been wrong, since the bytes have to come from somewhere |
 | `isCompactSummary` row | `[data-kind="divider"]` with the compaction label |
 | `<persisted-output>` marker | `[data-kind="tool"]` with a spill link, and `/api/spill` not called before expand |
 | an invented `type` | `[data-kind="raw"]`, collapsed, showing the row type |
@@ -2017,10 +2107,25 @@ source; this proves no write happened in a real run, which is the claim G4 actua
 are complementary and both are required.
 
 `e2e/url-refusals.e2e.test.ts` drives the same server over HTTP with the shapes a caller controls
-(`fixtures-mirror-reality` obligation 1 — here the caller's input is the URL, not a path): a valid
-id, `..`, a percent-encoded `/`, a double-encoded `..%2f`, a NUL byte, an id from the other
-project, an absent id, and both symlinks in `tool-results/` (the escaping one refused, the
-legitimate one served).
+(`fixtures-mirror-reality` obligation 1 — here the caller's input is the URL, not a path). Each case
+names its expected outcome, because "a refusal matrix" with unstated outcomes is not a test:
+
+| URL shape | Expected |
+| --- | --- |
+| a valid session id | `200`, renders |
+| **an id belonging to the OTHER project** | **`200`, renders** — §5.2 resolves a session id globally, with no project in the URL, so this is correct behaviour and not a refusal. It is in the matrix precisely because a reader might expect a 404 |
+| an absent id | the index shell (client-routed, §3.2); `/api/session/<id>` returns `404` |
+| `..` as the id | `400` from the route parser, no path joined |
+| a percent-encoded `/` | `400` |
+| a double-encoded `..%2f` | `400` |
+| a NUL byte | `400` |
+| `/api/spill?name=escaping.txt` | `403`/`400` refusal — resolves outside the projects root |
+| `/api/spill?name=in-session.txt` | `200` — resolves inside the session |
+| the sibling-session sidecar | `200` — resolves inside the **projects** root, which D14 makes the boundary |
+
+There is no `/p/<project>/s/<id>` route (§3.2 has `/p/<dir>` and `/s/<id>` as siblings, never
+nested), so there is no "wrong project for this session" case to test — the global lookup is the
+design, and the row above records it as intended rather than tolerated.
 
 `e2e/real-transcript.e2e.test.ts` runs the same DOM assertions read-only against the **largest real
 transcript on the machine** (13 MB) and one real session with subagents, and records §14's numbers
@@ -2056,9 +2161,9 @@ Then, in the same run:
   `tool_result` row in a later tick; assert the card's DOM element gains its result **and** that
   `document.querySelectorAll('[data-row-id]').length` is unchanged.
 - **Resume**: kill the page's connection mid-write, reconnect, and assert every row appears exactly
-  once — the direct DOM form of blocker 4.
+  once — 
 - **Rotation**: replace the transcript with a **same-size** file of different content and assert the
-  view resets and re-renders (blocker 5's user-visible form).
+  view resets and re-renders 
 
 Screenshots `after-live-following.png`, `after-live-scrolled.png`, `after-resume.png` accompany the
 numbers.
@@ -2075,9 +2180,12 @@ machine's git config), and assert `git remote -v` is **empty**. No remote is del
 can then never open a real pull request, and the run's purpose is the viewer, not the card's
 outcome.
 
-**2. The fake HOME and the two campaign homes.** As in §16.2 the fixture root is a fake `HOME`. Two
-campaign homes are written under it, sharing one slug across two repo keys — the collision that
-exists on this machine today (§9):
+**2. The fake HOME and the two campaign homes.** This is `homeB` of §16.2: the populated
+`.claude/projects` tree **plus** a `.tribe/`. Both campaign homes are written under that fake HOME —
+**the owner's real `~/.tribe` is never written, never read and never touched by this test**, and the
+runner is invoked with `HOME=<homeB>` precisely so it cannot be. Neither home is "the real one":
+both are synthetic, sharing one slug across two repo keys — the collision that exists on this
+machine today (§9):
 
 ```
 <tmp>/.tribe/<repoKeyA>/campaigns/<slug>/campaign-state.json

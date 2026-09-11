@@ -68,6 +68,22 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
   `Bun.serve`) and fails on any other `node:fs`, `fs/promises`, `Bun.write`, `child_process` or
   `node:net` import or member."
 
+- **D18** — "The allowlist applies to `core/**`, `adapters/**`, `serve.ts` and `client/src/**`
+  (runtime code). `tools/**` (measurement scripts, never imported by runtime code;
+  `structure.test.ts` asserts no runtime import of `tools/`) and `fixtures/**`, `e2e/**` are outside
+  the wall. Token delivery: no fs copy step; Vite imports
+  `../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css` by path from
+  `client/src/styles/index.css` (`@import`), so the build reads it and nothing copies it."
+- **D19** — "A tool node carries two anchors: `call: {at,i}` (the `tool_use` block) and
+  `result: {at,i} | null` (the `tool_result` block in its later row, set by pairing). `/api/block`
+  stays `at`+`i`. The client expands the call payload with `call` and the result payload with
+  `result`. Orphan results carry only `result`."
+- **D20** — "Window boundaries are whole rows. The backward read trims from the front by whole rows
+  only, stopping at the largest prefix removal that still leaves ≥500 nodes; the window may
+  therefore exceed 500 by at most one row's nodes. `from` = the first retained row's offset. Pairing
+  runs AFTER trimming, on retained rows only: a result whose call is outside the window renders as
+  `orphan_result` with label 'call is above the window'."
+
 **There is no `Last-Event-ID` handling anywhere in this plan.** If a task brief or a test name
 mentions resuming by byte offset, it predates D12 and is wrong.
 
@@ -177,15 +193,33 @@ built from nothing **before** the server that reads it is designed into existenc
 
 Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
 
-- [ ] **Step 1: Write the failing test** `V/fixtures/build.test.ts`. It calls
-      `buildFixtureHome(mkdtempSync(...))` and asserts, over the returned tree: two project
-      directories exist; session 1's `.jsonl` contains at least one row for **every** `type` listed
-      in spec §7.1 and one block for every row of spec §7.2; a `subagents/` directory holds five
-      sidecars forming the depth-2 tree, the missing-parent orphan and the self-cycle of spec
-      §16.2; a `tool-results/` file exists whose name the `persisted-output` marker in session 1
-      points at; and the three empty shapes (`buildEmptyProject`, `buildEmptyProjectsRoot`,
-      `buildHomeWithoutClaude`) each produce exactly the directory layout they name and nothing
-      else. Expected on first run: `error: Cannot find module './build.ts'`.
+- [ ] **Step 1: Write the failing test** `V/fixtures/build.test.ts`.
+
+      **The builder produces exactly TWO fake HOMEs** (spec §16.2), because one directory cannot
+      both hold a populated `.claude/projects` and have no `.claude`:
+      - `buildHomeA(mkdtempSync(...))` → `.claude/projects/...` and **no `.tribe`** — G1, G2, G4;
+      - `buildHomeB(mkdtempSync(...))` → everything in A **plus** `.tribe/` with the two same-slug
+        campaigns of spec §16.4 — G3.
+
+      Plus three standalone empties, each its own directory and **not** a variant of A:
+      `buildEmptyProject()`, `buildEmptyProjectsRoot()`, `buildHomeWithoutClaude()`. Every one comes
+      from `mkdtemp`, never a fixed path.
+
+      Assert over `homeA`: two project directories; session 1's `.jsonl` contains at least one row
+      for **every** `type` in spec §7.1 and one block for every row of spec §7.2; a `subagents/`
+      directory holds five sidecars forming the depth-2 tree, the missing-parent orphan and the
+      self-cycle; a `tool-results/` file exists whose name the `persisted-output` marker points at.
+
+      **Assert all three symlinks by name** — each exists, each is a symlink
+      (`lstatSync(...).isSymbolicLink()`), and each `realpathSync` resolves to the stated target:
+      `escaping.txt` **outside** the projects root, `in-session.txt` inside the same session, and the
+      **sibling-session sidecar** inside `<session-2>`. A fixture whose own test does not pin these
+      three cannot support tasks 4, 15 and 30, which all assert behaviour against them.
+
+      Assert `homeB` adds exactly the two `campaign-state.json` files and nothing else. Assert each
+      empty shape produces exactly the layout it names and nothing else.
+
+      Expected on first run: `error: Cannot find module './build.ts'`.
 - [ ] **Step 2: Implement** `V/fixtures/build.ts`. Pure data plus one `mkdirSync`/`writeFileSync`
       edge; it takes the destination directory as an argument and constructs nothing it was not
       given (`pure-core.md`). Every row it writes is copied in shape from the real corpus — spec
@@ -197,7 +231,7 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       ```sh
       cd plugins/tribe/scripts/viewer
       FIX="$(mktemp -d)"
-      bun -e 'import {buildFixtureHome} from "./fixtures/build.ts"; buildFixtureHome(process.argv[1])' "$FIX"
+      bun -e 'import {buildHomeA} from "./fixtures/build.ts"; buildHomeA(process.argv[1])' "$FIX"
       find "$FIX" -type f | sort
       find "$FIX" -type l -ls
       rm -rf "$FIX"
@@ -539,6 +573,15 @@ Model: **Sonnet**.
       `expandable: true`, and no full payload in the node); a result over 64 KiB (same, with the
       `ToolResult`'s own `elided` set so the client knows which half it is expanding).
 
+      **D19 — a tool node carries TWO anchors, and this is the case a single address cannot serve.**
+      `call` is the `tool_use` block's `{at,i}` (always this node's own); `resultAnchor` is the
+      `tool_result` block's `{at,i}` in its **later row**, filled by pairing and `null` while
+      pending. Assert: a paired node's `resultAnchor.at` is **greater than** its `call.at` (the
+      result is physically a later row — verified on the real corpus, where every `tool_use` is on
+      an assistant row and every `tool_result` on a following user row); both halves elided at once
+      yields two distinct addresses; an `orphan_result` carries `resultAnchor` and no `call`. One
+      address for a two-payload card would make one of the two unreachable.
+
       **Then D15, which is what makes the frame budget satisfiable:** every *text-bearing* kind
       gets the same treatment. A **2 MiB assistant text row** produces **one node under 64 KiB**
       with `elided: true` and `expandable: true`, and its full body is reachable at
@@ -580,7 +623,7 @@ bytes were chunked is a Critical finding: it silently breaks patching and dedupe
 ### Task 10: Title, liveness, and the bounded read window
 
 - Create: `V/core/title.ts`, `V/core/title.test.ts`, `V/core/liveness.ts`, `V/core/liveness.test.ts`
-- Create: `V/tools/title-window.ts` (a read-only corpus measurement — **`tools/`, never `core/`**: it reads every file under `~/.claude/projects`, and the purity wall forbids that under `core/**`. It is a one-off measurement, not a request path)
+- Create: `V/tools/title-window.ts` (a read-only corpus measurement. **`tools/` is outside the D16 wall by D18** — it is not runtime code, is never imported by runtime code, and `structure.test.ts` asserts that last point. Putting it under `core/` or `adapters/` would either break the purity wall or force an exception into the allowlist; putting it in `tools/` needs neither)
 
 Model: **Sonnet**.
 
@@ -757,7 +800,17 @@ Model: **Sonnet**.
       `core/**` value-imports no `.adapter` module; the raw-source `process.env` ban now also covers
       `client/`.
 
-      **The zero-write wall becomes an ALLOWLIST (D16), replacing the denylist of call names.** A
+      **The zero-write wall becomes an ALLOWLIST (D16), scoped to runtime code (D18).**
+
+      **Scope first**, because an allowlist applied to the wrong set of files blocks work it was
+      never meant to govern: the wall covers `core/**`, `adapters/**`, `serve.ts` and
+      `client/src/**`. **Outside it:** `tools/**` (measurement scripts — task 10's corpus reader
+      lives there precisely so it needs no exception) and `fixtures/**`, `e2e/**` (scaffolding that
+      must write, or it could not build a fixture). Add the rule that stops the scope becoming a
+      loophole: **no file under the wall may import from `tools/`**, asserted the same mechanical
+      way as the rest.
+
+      Then the allowlist itself, replacing the denylist of call names. A
       denylist is only as good as its author's memory: the previous shape listed `writeFile`,
       `appendFile`, `mkdir`, `rm`, `rename`, `unlink`, `spawn`, `exec` — and left `Bun.write`,
       `createWriteStream`, `copyFile`, `truncate`, a write-mode `open` and all of `fs/promises` wide
@@ -771,7 +824,8 @@ Model: **Sonnet**.
       as a named import.
 
       **Prove the wall bites**: add a throwaway file under `adapters/` that calls `Bun.write`,
-      assert the rule goes red, then delete it. A wall never seen to fail is not known to work.
+      assert the rule goes red, then delete it. Do the same for a runtime file importing from
+      `tools/`. A wall never seen to fail is not known to work.
 
       Also add: **no bare `catch` under `core/**` or `adapters/**`** (`fail-closed-edges`
       obligation 1) — every `catch` names the error classes it handles or re-throws what it does
@@ -963,19 +1017,29 @@ Model: **Sonnet**.
       node is a rendered unit, and one row can yield several nodes or none). It returns the **last
       500 nodes** by default, found by spec §6.3's backwards-stepping algorithm — read backwards
       from EOF in 256 KiB steps, drop the leading partial row unless at BOF, parse complete rows,
-      accumulate the node count, stop at ≥500 nodes or BOF, then **trim from the FRONT to exactly
-      500 nodes and set the anchor to the first retained node's row offset** — the loop reads whole
-      slices and normally overshoots, so without the trim the window size would depend on where
-      slice boundaries fell. `truncatedBefore` is true iff **any row precedes the anchor**. Assert
-      an overshooting case returns exactly 500 nodes with the anchor on the first retained node's
-      row. Assert on a fixture row carrying four blocks that a 500-node window spans **fewer than
-      500 rows**: that is the one assertion that
+      accumulate the node count, stop at ≥500 nodes or BOF, then trim.
+
+      **The trim is by WHOLE ROWS (D20), and "exactly 500 nodes" is deliberately NOT the contract.**
+      Drop the largest prefix of whole rows that still leaves ≥500 nodes; the window may exceed 500
+      by at most one row's nodes. `from` is the **first retained row's** offset.
+
+      Assert the case that makes this load-bearing, because an exact-500 trim passes every other
+      test and loses data here: on a **four-block row straddling the boundary**, an exact trim would
+      keep blocks 2 and 3 and record `from` as that row's offset — so `before=from` reads rows
+      *before* it and blocks 0 and 1 become unreachable by any request, permanently. Assert instead
+      that the whole row is retained, that `from` is its offset, and that a `before=from` back-fill
+      returns the rows immediately preceding it with **no block missing at the seam**.
+
+      `truncatedBefore` is true iff **any row precedes the anchor**. Also assert on a fixture row
+      carrying four blocks that a 500-node window spans **fewer than 500 rows**: that is the one assertion that
       distinguishes a correct implementation from a row-counting one. `from` is the first row's byte
       offset; `truncatedBefore` is **true iff BOF was not reached**; `before` past EOF or negative is
       refused with 400; a `before` window is contiguous with the one it precedes.
 
       **`/api/block` is addressed by `at` + `i`, never by uuid.** `at` is the row's byte offset and
-      `i` the block index — together exactly `RowAnchor.id` (spec §4). Uuid addressing is impossible
+      `i` the block index (spec §4). A tool card sends its `call` anchor to expand the input and its
+      `resultAnchor` to expand the result (D19) — the route itself is unchanged and takes no `part`
+      parameter; the client simply has two addresses for a two-payload card. Uuid addressing is impossible
       here: 14,032 measured `attachment` rows carry none, and neither do `last-prompt`, `ai-title`
       or `custom-title` rows. Assert: a valid `at`+`i` returns the full payload; an `at` that is not
       a row boundary 404s; an `i` past the row's block count 404s; the response never exceeds the
@@ -1031,7 +1095,7 @@ here is invisible until a live campaign — which is precisely how B4 and B12 su
       - a delta larger than the 4 MiB tick cap is delivered across two ticks with no byte lost or
         duplicated; `ping` fires at 15 s;
       - **every frame's `id:` is the next per-stream sequence number** (D12), incrementing across
-        frame types, never an offset;
+        frame types, never an offset, and `hello` carries a fresh `generation`;
       - **a tick whose nodes exceed 1 MiB encoded is split into several `rows` frames**, each under
         the cap, every node present exactly once and in order — drive it with a 4 MiB tick of many
         small nodes, which is the realistic catch-up shape.
@@ -1152,26 +1216,30 @@ file, there is no alias layer, and no component may introduce a name the file do
   `V/client/src/main.tsx`, `V/client/src/App.tsx`, `V/client/src/routes.ts`,
   `V/client/src/styles/app.css`
 - Modify: `V/package.json` (react, react-dom, vite, the plugin, the type packages,
-  **`playwright-core` pinned at 1.63.0**, the build script), `V/.gitignore` (add `dist/` and
-  `client/src/styles/tokens.css`)
+  **`playwright-core` pinned at 1.63.0**, the build script), `V/.gitignore` (add `dist/`)
 - Modify: `V/structure.test.ts` (the three client rules of spec §12.6)
 - Delete: `V/client/app.js`, `V/client/app.css`, `V/client/app.test.ts`
 
 Model: **Sonnet**.
 
 - [ ] **Step 1: Write the failing test.** Extend `structure.test.ts`: no file under `client/`
-      contains `dangerouslySetInnerHTML`; no file under `client/` other than
-      `client/src/styles/tokens.css` contains a literal colour (`#rgb`, `#rrggbb`, `rgb(`, `rgba(`,
+      contains `dangerouslySetInnerHTML`; **no file under `client/` at all** contains a literal
+      colour (there is no `tokens.css` under `client/` to exempt — D18 delivers tokens by `@import`
+      from the owner's file, so the only exempt file is `design/sea-salt/tokens.css` itself, which
+      is outside `client/`) (`#rgb`, `#rrggbb`, `rgb(`, `rgba(`,
       `hsl(`, `oklch(`), a `font-family` value, or a bare `px` length; `client/src/**` value-imports
       nothing from `core/` or `adapters/` (type-only imports are permitted and must still pass).
       Add `V/client/src/routes.test.ts` asserting the four URL shapes of spec §3.2 parse and
       round-trip through `pushState`. Expected: the client rules fail against the old `app.css`,
       which is full of literals.
-- [ ] **Step 2: Implement** the scaffold. `vite.config.ts` copies
-      **`docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css`** (STATE.md D17) to
-      `client/src/styles/tokens.css` as a pre-build step — verbatim, no edits; `matcha/` and
-      `coffee/` are never imported and sets `build.outDir` to `../dist` with
-      `base: '/assets/'`. Pin react and react-dom at 19.2.x and vite at its current major; add
+- [ ] **Step 2: Implement** the scaffold. **Tokens arrive by `@import`, not by a copy step (D18).**
+      `client/src/styles/index.css` carries
+      `@import "../../../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css";`
+      (STATE.md D17) and Vite resolves it at build time. Do **not** add a copy step to
+      `vite.config.ts`: that would need a filesystem write from runtime-adjacent build code, which
+      the D16 wall forbids, and inventing an exception for it would weaken the wall to save a line.
+      `matcha/` and `coffee/` are never imported. `vite.config.ts` sets `build.outDir` to `../dist`
+      with `base: '/assets/'`. Pin react and react-dom at 19.2.x and vite at its current major; add
       `playwright-core@1.63.0` as a devDependency (spec §16.0 — **vendored in the package, never
       read from `/tmp/pwshot`**, which is scratch and is cleared); commit `bun.lock`.
 
@@ -1194,8 +1262,10 @@ Model: **Sonnet**.
 Audit lens (Sol, contract): run the build from a clean `node_modules` and confirm `dist/` is
 produced and git-ignored. Then grep the built bundle for any hex colour outside the token block — a
 literal reaching `dist/` from a source file the wall does not cover means the wall has a hole. Then
-diff `client/src/styles/tokens.css` against `design/sea-salt/tokens.css`: it must be **byte-
-identical**, and no file may import from `design/matcha/` or `design/coffee/`. Finally check every
+confirm there is **no copy** of `tokens.css` under `client/` at all — the `@import` means the
+owner's file is the only copy in the repo — and that no file imports from `design/matcha/` or
+`design/coffee/`. Then confirm the built bundle actually contains the sea-salt values, which is what
+proves the import resolved rather than silently failing. Finally check every
 `var(--name)` the client uses is defined in that file, with the candidates' own names
 (`--space-12`, `--radius-8`, `--surface-raised`, `--size-14`), not an invented scale.
 
@@ -1277,7 +1347,12 @@ getting it wrong is easy and silent.
         generation B carrying nodes with the **same ids**, and assert the store ends holding B's
         nodes — a merge here would silently keep stale content from a file that may have rotated;
       - **the window is always one contiguous range** — assert it as an invariant after every
-        operation above, not just at the end.
+        operation above, not just at the end;
+      - **back-fill re-pairs an orphan into a complete card (D20)**: hold a window whose first node
+        is an `orphan_result` labelled "call is above the window", load earlier so the call's row
+        enters the window, and assert the orphan is **replaced in place** by a paired `tool` card —
+        not that a second card appears beside it. This is the user-visible half of "pairing runs
+        after trimming".
 
       `useEventStream.test.ts` against a fake `EventSource`: `hello` then `rows` populates; a second
       `rows` frame appends; a `patch` frame routes to the store's patch path; `meta` updates the
@@ -1335,7 +1410,12 @@ Model: **Sonnet**.
       indentation; selecting a tab navigates to `/s/<id>/a/<agentId>` and opens a new stream; a
       `Task` tool card whose node carries an `agentId` links to that tab; `ImageCard` fetches
       `/api/block?at=<RowAnchor.at>&i=<RowAnchor.i>` only on expand — **addressed by the node's own
-      `at`+`i`, never a uuid** (an `attachment` row has no `message.content`, so its `i` is 0) (spec §4: 14,032 measured `attachment` rows carry no uuid, which
+      `at`+`i`, never a uuid** (an `attachment` row has no `message.content`, so its `i` is 0).
+      **A `ToolCard` has two expansions and two addresses (D19)**: the input expands with `call`,
+      the result with `resultAnchor`; assert each fetch carries the right one, and that a pending
+      card offers no result expansion because `resultAnchor` is null. An `OrphanResultCard` expands
+      with its `resultAnchor` and renders the label **"call is above the window"** — not an error
+      style, because it is not an error: loading earlier re-pairs it into a complete card (spec §4: 14,032 measured `attachment` rows carry no uuid, which
       is why one addressing scheme covers every expandable node); `ToolCard` with a spill result
       fetches `/api/spill` only on expand and shows the preview before that; consecutive
       `attachment` nodes collapse into one strip whose entries expand the same way, and an
@@ -1542,9 +1622,10 @@ Model: **Sonnet**.
       headless Chromium via `e2e/browser.ts`, not API-shape assertions — G1, G4 and G6 are claims
       about what a person sees, so that is where they are observed.
 
-      `dom-kinds.e2e.test.ts`: build the task-1 fixture into a fresh `mkdtemp` directory and start
-      the real server with **`HOME=<that directory>`** — the fixture root *is* a fake HOME, holding
-      `.claude/projects/...` and, for G1, **no `.tribe` at all** (that absence is G1's precondition).
+      `dom-kinds.e2e.test.ts`: build **`homeA`** (task 1 — populated `.claude/projects`, **no
+      `.tribe` at all**, which is G1's precondition) into a fresh `mkdtemp` directory and start the
+      real server with `HOME=<that directory>`. The three empty shapes are **separate** directories
+      from their own builders, not variants of `homeA`, and each is served and asserted on its own.
       Open `/s/<session-1>` in a page. Two layers:
 
       **Layer 1 — kind coverage, driven by the runtime witness.** Iterate
@@ -1578,7 +1659,11 @@ Model: **Sonnet**.
 
       `url-refusals.e2e.test.ts`: the URL matrix of spec §16.2 over HTTP — a valid id, `..`, a
       percent-encoded `/`, a double-encoded `..%2f`, a NUL byte, an id from the other project, an
-      absent id — plus the **three symlinks task 1 built**: `escaping.txt` refused, `in-session.txt`
+      absent id — **each with the expected outcome named** (spec §16.2's table), including the two a
+      reader might get wrong: **an id belonging to the OTHER project renders `200`**, because §5.2
+      resolves session ids globally with no project in the URL, and **an absent id returns the index
+      shell**, not a 404, because `/s/*` is client-routed (§3.2) while `/api/session/<id>` is what
+      404s. Plus the **three symlinks task 1 built**: `escaping.txt` refused, `in-session.txt`
       served, and the **sibling-session sidecar** served (D14's root is the projects directory, so a
       link to a sibling session is inside it).
 
@@ -1709,17 +1794,22 @@ rebuilding pairing from the file.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** per spec §16.4: a throwaway `git init` repo with no
-      remote, a campaign home under the real tribe root, one staged card whose spec and plan force
-      a `hunter` dispatch, validated with `--dry-run` first, then the real runner on
-      `--viewer-port 4399`. Assertions per spec §16.4:
-      **Spec §16.4 states this harness in full** — the throwaway repo, the fake `HOME`, both campaign
-      home layouts, the card whose plan forces one `Task`-tool subagent dispatch, the exact runner
-      invocation, every assertion and the teardown. Build it from that section; nothing here is
-      "carried over" from a harness the reader cannot see.
+- [ ] **Step 1: Write the failing test.** **Spec §16.4 states this harness in full** — the throwaway
+      repo, the fake `HOME`, both campaign-home layouts, the card whose plan forces one `Task`-tool
+      subagent dispatch, the exact runner invocation, every assertion and the teardown. Build it from
+      that section; nothing here is "carried over" from a harness the reader cannot see.
 
-      The fixture authors **two** campaign homes: the real one, and a second with the **same slug
-      under a different repo key** listing the same session id — the collision that exists on this
+      **Both campaign homes live under the fake HOME's `.tribe/` (`homeB` from task 1). This test
+      never writes to the owner's real `~/.tribe`, and the runner is invoked with `HOME=<homeB>`
+      precisely so it cannot.** Neither home is "the real one" — both are synthetic, one under
+      `<repoKeyA>` and one under `<repoKeyB>` sharing a slug.
+
+      In outline: a throwaway `git init` repo with no remote; one staged card whose spec and plan
+      force a `hunter` dispatch; a `--dry-run` validation pass first; then the real runner on
+      `--viewer-port 4399`. Assertions per spec §16.4:
+
+      The fixture authors **two** campaign homes under `homeB`, both synthetic: one under
+      `<repoKeyA>` and a second with the **same slug under `<repoKeyB>`** listing the same session id — the collision that exists on this
       machine today (2 slugs and 6 session ids are shared across two repo keys, spec §9).
 
       - both stdout lines captured **verbatim**;
