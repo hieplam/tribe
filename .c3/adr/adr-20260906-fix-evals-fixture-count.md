@@ -1,6 +1,6 @@
 ---
 id: adr-20260906-fix-evals-fixture-count
-c3-seal: c3791cc2883a34cdfaabc337a31e5f4def60a87c9781b4916a61705e842cae7e
+c3-seal: 0202ad5778a2525bd0b74ac564073f20073e986f4d4a49e1356b0d438c17a952
 title: fix-evals-fixture-count
 type: adr
 goal: 'Finish the `ref-evals-fixture` restatement that `adr-20260906-repo-split-tribe-only` left incomplete. That unit rewrote the ref''s Why block to stop crediting a departed plugin for the fixture shape, but left its Goal — both the sealed frontmatter and the rendered `## Goal` section — still saying "four plugins ship eval cases". After the repo split exactly two fixtures remain, both owned by `tribe`: `plugins/tribe/evals/evals.json` and `plugins/tribe/skills/mammoth-hunt/evals/evals.json`. The ref must state the number it is actually justified by.'
@@ -40,4 +40,4 @@ Keep the rest of the Goal sentence — the shared-format rationale and the cross
 | c3x change apply adr-20260906-fix-evals-fixture-count | applies atomically, one patch, no drift |
 | c3x check | ok: true |
 | grep -c 'four plugins ship eval cases' .c3/refs/ref-evals-fixture.md | 0 |
-| find plugins -path '*/evals/evals.json' | wc -l | 2, both under plugins/tribe |
+| find plugins -path '*/evals/evals.json' | wc -l |

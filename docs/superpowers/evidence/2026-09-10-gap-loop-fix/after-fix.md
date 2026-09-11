@@ -45,3 +45,43 @@ changed files (`src/formatter.ts`, `test/formatter.test.ts`) overlap none of `["
 never executed G-001's fingerprint and minted a new id — the duplicate-mint case CU-2 called "loud and rare"
 made systematic. Fix card: `gap-candidates-paths-scope` (C5): `paths` = fingerprint target arguments ∪ Evidence hit
 paths ∪ Diff-link paths. Oracle re-run required on a fresh fixture after C5 merges.
+
+## Second run, after C5 (tribe at 4ba40b9; fixture master force-reset to the seed)
+
+- Card 1 (PR #3): the Tracker reported **no** candidate this time — it weighed the bare `catch {}` (covered by
+  `fail-closed-edges` obligation 1, correctly not a gap) and the four-way duplication (not a risk category), and
+  did not consider the unchecked cast. Gate ran, stamp `minted=none`, verify passed. No ledger yet. Detection is
+  the loop's remaining LLM judgment and varies run to run (found in 3 of 4 Tracker runs on this fixture so far);
+  the mechanical chain behaved identically in both outcomes.
+- Card 2 (PR #4): the Tracker reported the unchecked-cast candidate; the gate minted `G-001` with the C5 scope:
+
+```
+{"id":"G-001","event":"opened","category":"input-validation","paths":["src/","src/formatter.ts","src/loader.ts","src/parser.ts","src/reader.ts","src/writer.ts"],"fingerprint":"grep -rl \"value as string\" src/","hits_at_detection":5,"first_seen_pr":0}
+```
+
+  committed on the card branch (`f3797b5 Record harness gap G-001 (gap-gate milestone)`) and merged to master.
+- Card 3 (add-validator, seeded 16:2x): the `seen` check. Reconcile executes the stored fingerprint against any
+  changed file under `src/`, so this card must append `{"id":"G-001","event":"seen",…}` whether or not its Tracker
+  reports the candidate again.
+- Card 3 (PR #5, merged 2026-09-11 ~17:0x): **`seen` recorded**. Master ledger:
+
+```
+{"id":"G-001","event":"opened",...,"paths":["src/","src/formatter.ts",...],"fingerprint":"grep -rl \"value as string\" src/","hits_at_detection":5,"first_seen_pr":0}
+{"id":"G-001","event":"seen","pr":0,"hits_now":1}
+```
+
+  committed as `9b06596 Record harness gap G-001 seen (gap-gate milestone)`; PR #5 body stamp
+  `<!-- gap-gate v1 card=C3 base=e65a9c5… head=f791991… minted=none matched=G-001 debt-delta=0 ledger=824bc95… -->`.
+
+## Verdict against the bug brief's oracle (§8)
+
+| Requirement | Result |
+| --- | --- |
+| One real card, real tribe flow, bare fixture, one planted gap → master contains the ledger with an `opened` event | Met (run 1 PR #1: G-001 opened; run 2 PR #4: G-001 opened) |
+| The PR body carries the reconcile output | Met (stamp + section on every PR) |
+| A second card touching the same pattern → `seen` on the same id, not a new G-NNN | Met after C5 (run 2 PR #5: `seen` on G-001); failed before C5 (run 1 PR #2 minted G-002) |
+| Relative `--repo` shape exercised | Met in C1's gate tests (fixtures-mirror-reality) |
+
+Known remaining judgment step: Tracker detection varied (3 of 4 runs on this fixture reported the candidate).
+The mechanical chain was identical in every run; the detection eval harness (spec 2026-08-20) is where recall is
+measured, and `gap-precision.ts` now has real events to score.
