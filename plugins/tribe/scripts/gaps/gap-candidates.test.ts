@@ -40,11 +40,39 @@ describe('parseTrackerReport', () => {
     expect(c.category).toBe('input-validation');
     expect(c.fingerprint).toBe('grep -rn "as string" src/');
     expect(c.hits).toBe(4);
-    expect(c.paths).toEqual(['src/reader.ts', 'src/loader.ts']);
+    expect(c.paths).toContain('src/');            // the fingerprint's target scope
+    expect(c.paths).toContain('src/reader.ts');   // diff link
+    expect(c.paths).toContain('src/loader.ts');   // evidence hit
     expect(c.description).toContain('compile-time type assertion');
     expect(c.round).toBe('final');
     expect(c.sourceFile).toBe('tracker-C1-final.md');
     expect(c.sourceLine).toBe(1);
+  });
+
+  test('paths include the fingerprint target so a later change in scope re-fires it (e2e regression, hieplam/tribe-gap-e2e#2)', () => {
+    const report = [
+      'HG-candidate 1  [input-validation]  diff FOLLOWS an undocumented pattern',
+      '  Pattern:    `JSON.parse(input).value as string` type-asserts with no runtime check.',
+      '  Evidence:   `grep -rn "as string" src/` → 4 hits in 4 files (`src/loader.ts:4`, `src/parser.ts:4`,',
+      '              `src/writer.ts:4`, `src/reader.ts:4`)',
+      '  Diff link:  src/reader.ts:4 repeats it (the diff\'s own new file follows the pattern)',
+      '  Not judged: this is a gap in the rule set, not a violation',
+    ].join('\n');
+    const { candidates } = parseTrackerReport(report, 'tracker-C1-final.md', 'final');
+    expect(candidates[0]!.paths).toEqual(expect.arrayContaining(['src/', 'src/loader.ts', 'src/parser.ts', 'src/writer.ts', 'src/reader.ts']));
+  });
+
+  test('a bare "." grep target is not a path', () => {
+    const report = [
+      'HG-candidate 1  [error-handling]  diff FOLLOWS an undocumented pattern',
+      '  Pattern:    silent catch',
+      '  Evidence:   `grep -rn "catch {}" .` → 3 hits in 3 files (`lib/a.ts:1`, `lib/b.ts:1`, `lib/c.ts:1`)',
+      '  Diff link:  lib/c.ts:1 repeats it',
+      '  Not judged: this is a gap in the rule set, not a violation',
+    ].join('\n');
+    const { candidates } = parseTrackerReport(report, 'tracker-X-final.md', 'final');
+    expect(candidates[0]!.paths).not.toContain('.');
+    expect(candidates[0]!.paths).toEqual(expect.arrayContaining(['lib/a.ts', 'lib/b.ts', 'lib/c.ts']));
   });
 
   test('shape B (bold header, inline Evidence, no Diff link) still parses', () => {

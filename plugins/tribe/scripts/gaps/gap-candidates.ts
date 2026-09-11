@@ -3,6 +3,7 @@
 // hands the text in. Under-parsing a real report shape is a bug; a block that cannot be mapped
 // completely is reported under `unparsed` and never aborts anything (plan Oracle).
 import { anyPathOverlap } from './paths.ts';
+import { tokenize } from './fingerprint.ts';
 
 export interface ParsedCandidate {
   category: string;
@@ -110,6 +111,22 @@ function extractPaths(source: string): string[] {
   return out;
 }
 
+/** The fingerprint's own target arguments — the grep's non-flag, non-pattern tokens (e.g.
+ * `src/`). These are the SCOPE the fingerprint re-fires over, so a later change anywhere inside
+ * them must re-execute it (card C5, spec §2 step 2 amended). Drops argv[0] (the command), every
+ * flag (`-…`), and the first remaining token (the search pattern); a bare `.`/`./` is not a path
+ * and is dropped (the Evidence/Diff-link paths carry the scope). Pure — `tokenize` is the shared
+ * fingerprint splitter, so target tokens come from the same source as the executed argv. */
+export function fingerprintTargets(fingerprint: string): string[] {
+  const nonFlag = tokenize(fingerprint).slice(1).filter((t) => !t.startsWith('-'));
+  const out: string[] = [];
+  for (const t of nonFlag.slice(1)) {          // slice(1) drops the search pattern
+    if (t === '.' || t === './') continue;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+
 /** Parses ONE Tracker report's text. `file`/`round` are carried through onto every candidate so
  * the gate can report where a candidate came from and dedupe by round order. */
 export function parseTrackerReport(text: string, file: string, round: string): ParseResult {
@@ -144,7 +161,14 @@ export function parseTrackerReport(text: string, file: string, round: string): P
     }
 
     const diffLink = fields.get('diff link');
-    const paths = extractPaths(diffLink !== undefined && diffLink.trim().length > 0 ? diffLink : blockText);
+    const hasDiffLink = diffLink !== undefined && diffLink.trim().length > 0;
+    const paths: string[] = [];
+    const addPaths = (candidatePaths: string[]): void => {
+      for (const p of candidatePaths) if (!paths.includes(p)) paths.push(p);
+    };
+    addPaths(fingerprintTargets(fingerprint));            // fingerprint's target scope (the fix)
+    addPaths(extractPaths(evidenceField ?? ''));          // Evidence hit paths
+    addPaths(extractPaths(hasDiffLink ? diffLink! : blockText)); // Diff-link paths, else block body (existing base)
     if (paths.length === 0) {
       unparsed.push({ file, line: start + 1, reason: 'no path in Diff link or block body', excerpt });
       continue;
