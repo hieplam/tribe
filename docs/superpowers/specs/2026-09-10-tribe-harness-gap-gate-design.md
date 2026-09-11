@@ -119,7 +119,11 @@ Steps, in order; every step's result is in the JSON summary:
 2. **Parse.** Extract every `HG-candidate N [category]` block from every report with a pure
    parser (`gap-candidates.ts`), mapping exactly the fields warchief.md step 7 sub-step 1 maps
    by hand today: `Category`→`category`, `Pattern`→`description`, the `Evidence` grep→
-   `fingerprint`, its quoted hit count→`hits`, `Diff link` paths→`paths`. A block the parser
+   `fingerprint`, its quoted hit count→`hits`, and `paths` = the fingerprint's own target
+   arguments (the grep's non-flag, non-pattern tokens, e.g. `src/`) ∪ the `Evidence` hit paths ∪
+   the `Diff link` paths (amendment 2026-09-11, card C5: the first end-to-end run froze only the
+   diff-link file, so the next card's files never overlapped the entry and a duplicate id was
+   minted instead of a `seen`). A block the parser
    cannot map is reported under `unparsed` with the file and line; it never aborts the gate
    (under-parsing is a visible defect, over-strictness would recreate L1). Candidates from
    different rounds with the same category and overlapping paths collapse to one, keeping the
