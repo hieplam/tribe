@@ -230,7 +230,7 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       | an invented `type`; one malformed line | `<session-1>.jsonl` | tasks 8, 30 |
       | depth-2 subagent tree + missing-parent orphan + self-cycle (5 sidecars) | `subagents/` | tasks 11, 25 |
       | **three symlinks**: `escaping.txt`, `in-session.txt`, sibling-session sidecar | `tool-results/`, `subagents/` | tasks 4, 15, 30 |
-      | **`<session-4>`: 2,400 rows / 2,600 pre-pairing nodes** | `<session-4>.jsonl` | tasks 18, 24, 31 |
+      | **`<session-4>`: 2,400 rows / 2,600 pre-pairing candidates / ≥2,300 RENDERED nodes** | `<session-4>.jsonl` | tasks 18, 24, 31 |
       | **a four-block row positioned to straddle the 500-node boundary** | `<session-4>.jsonl` | task 18 (D20) |
       | **rotation pair**: same-size, different content | `<session-4>.rotated` | tasks 5, 19, 31 |
       | **a THIRD project, newest session 90 days old** | `<proj-C>/<session-3>.jsonl` | tasks 17, 23, 30 (D10) |
@@ -240,11 +240,22 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       30 days, so a two-project fixture cannot produce the "show N older projects" link at all and
       task 23's and task 30's assertions would be untestable.
 
-      `<session-4>`'s counts are exact and load-bearing: **2,400 rows producing 2,600 pre-pairing
-      nodes** (D21's unit). Above the 2,000-node client cap, so tail eviction and the pill are
-      reachable; above the 500-node window, so the backward scan overshoots and the whole-row trim
-      runs; and the four-block row sits where the boundary falls, so the trim is forced *through* a
-      multi-block row.
+      **`<session-4>` pins THREE counts and the test asserts all three**: **2,400 rows**,
+      **2,600 pre-pairing candidates** (D21's unit, the window boundary's), and **≥2,300 rendered
+      nodes** (post-pairing — the unit the *client* holds, and the only one the 2,000-node cap is
+      measured in). Assert the third by running the normalizer **and pairing** over the fixture,
+      never by counting rows.
+
+      Pinning only the pre-pairing count is not enough: pairing removes a node per paired
+      `tool_result`, so 2,600 candidates with many tool pairs could render **under** 2,000 and
+      quietly stop exercising eviction, the "N new below" pill and the tail-eviction path — the
+      tests would pass while proving nothing. So build **most rows as plain assistant text with no
+      tool pairs**, leaving the rendered count above the cap by a margin.
+
+      With all three pinned: above the 2,000-node client cap (eviction and the pill are reachable),
+      above the 500-node window (the backward scan overshoots, so the whole-row trim runs), and the
+      four-block row sits where the boundary falls, so the trim is forced *through* a multi-block
+      row.
 
       **Assert all three symlinks by name** — each exists, each is a symlink
       (`lstatSync(...).isSymbolicLink()`), and each `realpathSync` resolves to the stated target:
@@ -479,8 +490,15 @@ Model: **Sonnet**.
          `obs.inode !== state.inode` **even when the new file is the same size or larger**
          (rotation), and does **not** fire when `state.inode` is 0 (a platform with no inode —
          degrade to the truncation trigger alone, never a false reset);
-      4. a carry crossing **1 MiB — the single cap, there is no second one** — emits one
-         `unreadable` node, drops the carry, and resynchronises at the next `0x0A`.
+      4. a carry crossing **1 MiB — the single cap, there is no second one** — enters the
+         **discard state machine** of spec §6.1, which is a flag and not a sentence: set
+         `skipping = true`, remember the oversized row's start offset, drop bytes until the next
+         `0x0A`, emit **exactly one** `raw` node anchored at `{at: rowStart, i: 0}` with
+         `rowType: "oversized"` and the text `row too large (<N> bytes)`, then clear the flag and
+         resume normally. Named test: **a 2 MiB single-line row is skipped, one `raw` "row too
+         large" node is emitted at its offset, and the NEXT row parses normally** — that last clause
+         is the point of the flag. Without it the remainder of the oversized row is fed back into
+         the line splitter and a JSON fragment can masquerade as a record.
 
       Expected on first run: all three modules missing.
 - [ ] **Step 2: Implement** all three. `tail.ts` keeps its current arithmetic exactly —
@@ -570,9 +588,23 @@ the oracle — a row class present in your sample and absent from the output, ot
 Model: **Opus.** Same reason as task 7; this half is where the open-world rule lives.
 
 - [ ] **Step 1: Write the failing tests.** `normalize.coverage.test.ts` is the mechanical proof of
-      spec §7.1: it loads the fixture from task 1, normalizes it, and asserts that the set of
-      `rowType` values consumed equals the set present in the fixture, with **zero** rows
-      unaccounted for. `normalize.test.ts` gains one case per `system` subtype (spec §7.4), the
+      spec §7.1. It loads the task-1 fixture, normalizes it, and partitions **every** input row into
+      exactly one of four outcomes, asserting the partition is **total and disjoint**:
+
+      ```
+      (a) produced >= 1 node
+      (b) folded into another node           (attachment strip, title source)
+      (c) became a Patch on an earlier node  (a paired tool_result)
+      (d) silent by design                   (spec §7.1 bucket 5 — an EXACT set)
+      ```
+
+      The old phrasing ("every row produces a node or is accounted for in a fold") was false the
+      moment a row's only block was an empty `thinking`: that row produces nothing and is not a
+      fold. Assert (d) as the **exact set** bucket 5 lists — an empty `thinking` block; an assistant
+      row whose only block is one; a `tool_result` that pairs; a title-source row with the metadata
+      toggle off — so a fifth silent case cannot be added by accident. Report any unaccounted row
+      **by row type and offset**, never as a bare count: "one row vanished" is a failure you can only
+      stare at. `normalize.test.ts` gains one case per `system` subtype (spec §7.4), the
       `attachment` node with its `attachment.type` label and `rendered` detail, each named
       metadata row type from §7.1, the XML chip extraction of §7.6, the `persisted-output` marker
       (asserting the node keeps only a `basename`, never the absolute path), `apiErrorStatus` rows,
@@ -870,6 +902,13 @@ Model: **Sonnet**.
       const OUTSIDE = ['tools/', 'fixtures/', 'e2e/'];
       ```
 
+      **`process.kill(pid, 0)` is PERMITTED in `adapters/campaign.adapter.ts`** and must be in the
+      allowlist explicitly (spec §12.6 (7b)): signal `0` delivers nothing — the kernel performs only
+      the permission-and-existence check — so it is a liveness probe, not a write and not a signal.
+      §9 needs it for `runnerAlive`. Allowlist it **with its zero argument**, because
+      `process.kill(pid, <anything else>)` really would be a side effect and the wall must tell the
+      two apart. Without this entry the wall makes task 16 unimplementable.
+
       Refused inside `COVERED`: any other `node:fs` member, any `fs/promises` import, `Bun.write`,
       `node:child_process`, `node:net`, `node:http`, `node:https`. Nothing under `OUTSIDE` is
       scanned at all — and the rule that keeps that honest is the separate one below: **no file
@@ -997,8 +1036,14 @@ Model: **Sonnet**.
       is the same class the project-directory check already closes on the transcript side. Assert:
       a fixture `~/.tribe/<repoKey>` that is a symlink to a directory outside the tribe root is
       refused and counted **before** `campaign-state.json` is opened; the same for a symlinked
-      `campaigns/<slug>` and a symlinked `runs/<runId>`; and an ordinary non-symlinked campaign is
-      still read (the positive case, so the check is not merely refusing everything).
+      `campaigns/<slug>` and a symlinked `runs/<runId>`.
+
+      **The two FILES are contained too, not just the directories above them** (spec §9): a fixed
+      layout says where a file *should* be, not what it *is*. Assert a **`campaign-state.json` that
+      is itself a symlink** pointing outside the tribe root is refused — no badge, counted in
+      `skippedBadges`, one stderr line naming the path, and **not a crash** — and the same for a
+      symlinked `run.json`. Plus the positive case: an ordinary non-symlinked campaign is still
+      read, so the check is not merely refusing everything.
 
       Cache policy is **not** the adapter's decision (`pure-core.md`, spec §5.3): write
       `V/core/cache.test.ts` for the pure `decideCache(key, existing, nowMs)` — a hit inside the
@@ -1033,7 +1078,8 @@ Model: **Sonnet**.
 - [ ] **Step 1: Write the failing test.** `core/scan.test.ts` (pure: takes already-read directory
       listings and stats, returns the index) covers ordering, the
       `size+mtime+inode` cache key, the duplicate-session-id-across-projects case of spec §5.2
-      (`ambiguous: true`), and **`partitionProjects` (D10, spec §5.6)**: a project whose newest
+      (`ambiguous: true` — the field is on `SessionSummary`, spec §4, so it reaches `/api/sessions`,
+      `/api/session/<id>` and `hello` alike), and **`partitionProjects` (D10, spec §5.6)**: a project whose newest
       session is 29 days old is `recent`, one at 31 days is `older`, the boundary is evaluated
       against a supplied `nowMs` (never `Date.now()` inside core), and **sessions are never
       partitioned — only projects**.
@@ -1093,11 +1139,17 @@ Model: **Sonnet**.
       that the whole row is retained, that `from` is its offset, and that a `before=from` back-fill
       returns the rows immediately preceding it with **no block missing at the seam**.
 
-      `truncatedBefore` is true iff **any row precedes the anchor**. Also assert on a fixture row
-      carrying four blocks that a 500-node window spans **fewer than 500 rows**: that is the one assertion that
-      distinguishes a correct implementation from a row-counting one. `from` is the first row's byte
-      offset; `truncatedBefore` is **true iff BOF was not reached**; `before` past EOF or negative is
-      refused with 400; a `before` window is contiguous with the one it precedes.
+      **`truncatedBefore` has exactly ONE definition, the spec's: true iff ANY ROW PRECEDES THE
+      RETAINED ANCHOR.** Not "BOF was not reached" — those differ in the case that actually happens:
+      the backward scan reaches the beginning of the file **and** the whole-row trim then discards a
+      prefix, so BOF *was* reached and rows *do* precede the anchor. `truncatedBefore` is **true**
+      there, and a "BOF not reached" reading would say false and hide a "load earlier" affordance the
+      user needs. Assert that exact case.
+
+      `from` is the first **retained row's** byte offset. Also assert on a fixture row carrying four
+      blocks that a 500-node window spans **fewer than 500 rows** — the one assertion that
+      distinguishes a correct implementation from a row-counting one. A `before` past EOF or negative
+      is refused with 400; a `before` window is contiguous with the one it precedes.
 
       **`/api/block` is addressed by `at` + `i`, never by uuid.** `at` is the row's byte offset and
       `i` the block index (spec §4). A tool card sends its `call` anchor to expand the input and its
@@ -1372,6 +1424,10 @@ Model: **Sonnet**.
       clicking one sets `?campaign=<repoKey>/<slug>`; the filter narrows the
       list and the empty result shows a message, not a blank pane.
 
+      `ambiguous` (spec §4, §5.2): a `SessionSummary` with `ambiguous: true` renders a note beside
+      the title naming how many projects hold that id; with `ambiguous: false` no note appears. The
+      viewer never silently picks one of two same-id sessions and shows nothing.
+
       D10 (spec §5.6): with `olderCount: 3` the sidebar renders a `show 3 older projects` link whose
       href is `?all=1`; with `olderCount: 0` it renders nothing; and **a project's session list is
       never filtered by age** — assert an old project opened directly shows every session it has.
@@ -1439,6 +1495,12 @@ getting it wrong is easy and silent.
         enters the window, and assert the orphan is **replaced in place** by a paired `tool` card —
         not that a second card appears beside it. This is the user-visible half of "pairing runs
         after trimming".
+
+      `useEventStream` assigns its `EventSource` to `window.__viewerEventSource` **in dev builds
+      only** (guarded by `import.meta.env.DEV`), so an e2e test can close the stream
+      deterministically rather than racing a network-level kill (tasks 31, spec §16.3). Assert the
+      handle is **absent** in a production build — a test seam that ships is a test seam that
+      becomes an API.
 
       `useEventStream.test.ts` against a fake `EventSource`: `hello` then `rows` populates; a second
       `rows` frame appends; a `patch` frame routes to the store's patch path; `meta` updates the
@@ -1751,11 +1813,20 @@ Model: **Sonnet**.
       of the three empty shapes — each its own directory, not a variant of `homeA` — renders the "no
       sessions found" note rather than an error or a blank pane.
 
-      **The zero-write proof is a hash (D16/G4), not an inspection.** Take a recursive digest of the
-      whole fixture HOME — every path, size and content hash under it — before the DOM suites run,
-      run them, digest again, and assert the two are **byte-identical**. Task 14's allowlist proves
-      no write call is *reachable in the source*; this proves none *happened in a real run*, which is
-      the claim G4 makes. Both are required; neither implies the other.
+      **The zero-write proof is a hash (D16/G4), not an inspection — and its scope is per suite**,
+      because "hash the whole HOME across every suite" is not satisfiable: E2's writer appends
+      transcript rows and E3's runner writes campaign state, both legitimately. Hash everything the
+      **viewer** must not touch (spec §16.2's table):
+      - **these DOM suites** (`dom-kinds`, `url-refusals`, `served-build`, `real-transcript`) run on
+        `homeA` and nothing in them writes to it → digest **the whole tree**, before and after,
+        byte-identical;
+      - **E2** (task 31) runs on **its own copy of `homeA`** → digest the whole copy **except
+        `<session-live>.jsonl`**, the one file its writer appends to;
+      - **E3** (task 32) runs on `homeB` → digest **`homeB/.claude` only, never `homeB/.tribe`**.
+
+      Task 14's allowlist proves no write call is *reachable in the source*; this proves none
+      *happened in a real run*, over precisely the bytes the viewer is forbidden to touch. Both are
+      required; neither implies the other.
 
       `url-refusals.e2e.test.ts`: the URL matrix of spec §16.2 over HTTP — a valid id, `..`, a
       percent-encoded `/`, a double-encoded `..%2f`, a NUL byte, an id from the other project, an
@@ -1823,7 +1894,12 @@ Model: **Sonnet**.
       the model's clock, it can precede the write by seconds, and using it makes the measurement a
       proxy for the thing G2 actually claims.
 
-      1. Serve a fixture session and open it in Chromium via `e2e/browser.ts`.
+      **E2 runs on its OWN COPY of `homeA`**, not on the shared one (spec §16.2): its writer appends
+      to a transcript, so a shared HOME would make a parallel suite's digest fail on this suite's
+      legitimate writes. Its own zero-write digest covers the whole copy **except
+      `<session-live>.jsonl`**, the single file the controlled writer touches.
+
+      1. Serve a fixture session from that copy and open it in Chromium via `e2e/browser.ts`.
       2. Append one well-formed row, recording `performance.now()` the instant `writeSync` returns,
          together with the `RowAnchor.id` that row will have (`` `${byteOffsetWrittenAt}:0` ``,
          computable before the write).
@@ -1846,7 +1922,10 @@ Model: **Sonnet**.
         `tool_result` in a later tick; the card gains its result **and**
         `document.querySelectorAll('[data-row-id]').length` is unchanged;
       - **reconnect between a row and its patch (D12)**: write a `tool_use` row, wait for the card,
-        drop the connection, write the matching `tool_result`, reconnect — assert the card shows its
+        close the stream deterministically with
+        `page.evaluate(() => window.__viewerEventSource.close())` (the handle `useEventStream`
+        exposes in dev builds — far more reliable than racing a network-level kill), write the
+        matching `tool_result`, let it reconnect — assert the card shows its
         result **exactly once** and no duplicate row exists. This is the case an offset cursor could
         not express, and it is the single most important assertion in this task;
       - **reconnect between a call and its result**: drop the connection after the `tool_use` row
@@ -1933,6 +2012,12 @@ Model: **Sonnet**.
       never kills "whatever holds port 4399": that may be an unrelated process, and terminating one
       is outside this card's authority (the old harness did exactly that and it is being removed,
       not carried over).
+
+      **The zero-write digest for this suite covers `homeB/.claude` ONLY — never `homeB/.tribe`**
+      (spec §16.2). The runner writes campaign state under `.tribe` by design, so digesting it would
+      fail on the runner's own work rather than on a viewer write. Take the digest **after the runner
+      has exited**, then again **after the browser-read interval**, and assert the two are
+      byte-identical: that is precisely the window in which only the viewer is running.
 
       **Teardown removes `homeB` in a `finally`** — the whole fake HOME, by the exact path the test
       recorded when `mkdtemp` created it, never a glob and never a pattern. Both campaign homes live

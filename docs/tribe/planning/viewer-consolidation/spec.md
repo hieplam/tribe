@@ -1,6 +1,6 @@
 # Viewer consolidation — implementation spec (the How)
 
-Card: `~/.tribe/-Users-hip-repo-tribe/cards/viewer-consolidation.md` (Option A, approved 2026-09-11).
+Card: `~/.tribe/-Users-hip-repo-tribe/cards/viewer-consolidation.md` (the approved direction, summarised in §1 below, ruled 2026-09-11).
 State: `~/.tribe/-Users-hip-repo-tribe/viewer-consolidation/STATE.md` (D1–D9, P1, F1/F2).
 References (background, **not required to read this page** — the glossary below makes every id
 here self-contained): `references/` next to this file holds `tribe-viewer-research.md` (B1–B25),
@@ -435,6 +435,12 @@ export interface SessionSummary {
   live: boolean;
   subagentCount: number;
   badges: Badge[];          // usually 0 or 1; 2+ on a real collision (§9)
+  /** True when two project directories hold a session file with THIS id (§5.2 — possible after a
+   * `relocated` row, 44 measured). The server resolves to the newest by mtime and says so; the
+   * client renders a "this id exists in N projects" note beside the title so the user knows which
+   * one they are looking at rather than silently getting one of two. False in every ordinary
+   * case. */
+  ambiguous: boolean;
 }
 
 /** A campaign's claim on one session. **A session can carry more than one badge**: the same
@@ -821,9 +827,36 @@ window that follows, so the two sides agree with no merge step.
 Rotation **while disconnected** needs no mechanism at all: under D12 a reconnecting client is a new
 client and gets a fresh snapshot of whatever file is there now.
 
-**The carry cap is one number: 1 MiB.** A partial line is held until it completes or exceeds 1 MiB,
-at which point the tail emits one `unreadable` node, discards the carry, and resynchronises at the
-next `0x0A`. The real case is a multi-megabyte base64 image row caught mid-write.
+**The carry cap is one number: 1 MiB — and the discard needs a state machine, not a sentence.** A
+partial line is held until it completes or exceeds 1 MiB. Past the cap the tail must *skip the rest
+of that row*, and the only way to do that without treating the remainder as a fresh row is to carry
+a flag:
+
+```
+if not skipping and carry.length > 1 MiB:
+    skipping   := true
+    rowStart   := the offset at which the oversized row began
+    skipped    := carry.length                 # bytes discarded so far
+    carry      := empty                        # drop them; they are unusable
+if skipping:
+    find the next 0x0A in the incoming bytes
+    if none:      skipped += chunk.length; carry := empty; return (still skipping)
+    if found at k: skipped += k + 1
+                  emit ONE `raw` node, anchored at {at: rowStart, i: 0},
+                      rowType "oversized", text "row too large (<skipped> bytes)"
+                  skipping := false
+                  carry    := bytes after k      # a normal partial line again
+```
+
+Two properties this buys, and neither is obvious without the flag: the remainder of the oversized
+row is **never parsed as a row** (so a JSON fragment cannot masquerade as a record), and the user
+**sees that something was skipped, and how big it was**, rather than a silent gap — which is
+§0's under-rendering rule applied to a case where showing the content is impossible. The `raw` node
+is anchored at the row's own start, so it sorts in file position like every other node.
+
+The real case is a multi-megabyte base64 image row caught mid-write. Named test (task 5):
+*a 2 MiB single-line row is skipped, exactly one `raw` "row too large" node is emitted at its
+offset, and the next row parses normally.*
 
 ### 6.2 One stream per open session view
 
@@ -1126,7 +1159,7 @@ later one, which is what lets these counts be compared with each other.
 | `fork-context-ref` | 0 | 2 | `raw`, collapsed | |
 | **anything else** | — | — | `raw`, collapsed | the open-world case; this is the rule, not the exception |
 
-**The rule that makes this maintainable:** four buckets, and nothing outside them.
+**The rule that makes this maintainable:** five buckets, and nothing outside them.
 1. **Message rows** (`assistant`, `user`) render per content block.
 2. **Named metadata rows** render as a one-line `chip` or a `divider`.
 3. **`attachment` rows** render as an `attachment` node, grouped by the client into one collapsed
@@ -1135,12 +1168,39 @@ later one, which is what lets these counts be compared with each other.
    conversation while rendering them as raw cards would bury it differently.
 4. **Everything else** renders as a collapsed `raw` card carrying `rowType` and the row's JSON
    (elided past 64 KiB per D15, expandable via `/api/block`).
+5. **Silent by design** — the closed, exhaustive list of inputs that deliberately produce **no
+   node**. It is a list, not a judgement, and the coverage test asserts the **exact set** so a fifth
+   case cannot be added by accident:
 
-A new Claude Code release that invents a row type therefore falls into bucket 4 and renders as a raw card on day one and
-is never silently dropped. **`core/normalize.ts` has no `continue` that discards a row.** The one
-mechanical guarantee: `normalizeRows(rows).length >= rows.length - <metadata rows folded into
-chips>`; expressed as the test `every input row produces at least one node or is accounted for in
-a fold`, asserted over a fixture containing one row of every type in this table.
+   | Input | Why no node |
+   | --- | --- |
+   | a `thinking` block whose `thinking` is `""` | there is nothing on disk to render — 8,411 of 17,873 measured (§7.2) |
+   | an assistant row whose **only** block is such a `thinking` | the row is not dropped; its blocks all fell in the line above, so the row legitimately yields nothing |
+   | a `tool_result` that **pairs** with a call in the window | it is not lost — it becomes a `Patch` on the call's node (§6.4). A node would be a duplicate |
+   | a row consumed **entirely** as a title source (`ai-title`, `custom-title`, `last-prompt`) when the metadata toggle is off | the content is rendered, as the session title; the toggle shows the row as a `raw` card |
+
+   Nothing else. Any other row that produces no node is a bug, and the test is what says so.
+
+A new Claude Code release that invents a row type therefore falls into bucket 4 and renders as a raw
+card on day one, and is never silently dropped.
+
+**The mechanical guarantee, stated so it is actually true of bucket 5.** The old phrasing — "every
+input row produces at least one node or is accounted for in a fold" — was false the moment a row's
+only block was an empty `thinking`: that row produces nothing and is not a fold. The honest form
+partitions every input row into exactly one of four outcomes, and `normalize.coverage.test.ts`
+asserts the partition is **total and disjoint**:
+
+```
+for every row: exactly one of
+  (a) it produced >= 1 node
+  (b) it was folded into another node        (attachment strip, title source)
+  (c) it became a Patch on an earlier node   (a paired tool_result)
+  (d) it is in bucket 5's silent-by-design set, which is an EXACT list
+```
+
+No row may fall outside all four, and none may satisfy two. The test reports any row that does **by
+row type and byte offset** — a bare count would say "one row vanished" without saying which, which
+is the difference between a failure you can fix and one you can only stare at.
 
 ### 7.2 Content blocks
 
@@ -1304,7 +1364,7 @@ package's value is the parsing, not the framework surface.
 │       │       ├── <SubagentCount>                                 tokens: ink-soft
 │       │       └── <CampaignBadge>     slug · card · status · runner  tokens: badge-bg, badge-ink, warn
 │       └── <SessionView>               route /s/<id>[/a/<agent>]
-│           ├── <SessionHeader>         title, live, badge          tokens: ink, rule, live
+│           ├── <SessionHeader>         title, live, badges, ambiguous note   tokens: ink, rule, live, warn
 │           ├── <AgentTabs>             parent + one tab per Agent  tokens: surface, accent, rule
 │           ├── <RowList>               windowed RenderNode[]
 │           │   ├── <PromptCard>        k=prompt                    tokens: surface, ink, accent
@@ -1345,7 +1405,7 @@ design system (P1). Until P1 is delivered, the spec names tokens; the build does
 (2026-09-12). So:
 
 > **The client's single token source is
-> `docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css`, copied verbatim.**
+> `docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css`, used verbatim — imported, never copied (see the mechanism below).**
 
 `matcha/` and `coffee/` stay in the repo as the rejected candidates — the record of what was
 considered — and are **never imported**. Verified 2026-09-12: `sea-salt/tokens.css` defines all 38
@@ -1571,6 +1631,13 @@ becomes a path.
   `repoKey`, `slug` and `runId` directory is resolved and proven inside the tribe root **before**
   `campaign-state.json` or `run.json` is opened. A symlinked campaign directory escaping the root is
   refused and counted, exactly like an escaping project directory.
+- **The two files are contained too, not just the directories above them.** `campaign-state.json`
+  and `run.json` are each `realpath`-resolved and proven inside `realpath(~/.tribe)` **before they
+  are opened** — a fixed layout says where a file *should* be, not what it *is*, and either of them
+  can be a symlink pointing anywhere. An escaping one is refused: that campaign contributes **no
+  badge**, the count goes into `skippedBadges`, and one line goes to stderr naming the path. It is
+  not a crash and not a silent skip. Named test (task 16): a `campaign-state.json` symlinked to a
+  file outside the tribe root, and the same for a `run.json`.
 - `sessionId` **is** a string from a file, and it is used **only as a `Map` key**, never joined
   into a path. The badge index is looked up *by* the session ids the §5.1 scan already found on
   disk. A `sessionId` of `../../../etc/passwd` in a state file therefore indexes nothing and opens
@@ -1903,11 +1970,16 @@ Added:
    import from `tools/`** — a measurement script the server could reach at runtime would be inside
    the wall in every sense that matters.
 
-   **(7b) What is permitted inside it.** From `node:fs`, in `adapters/**` only: `readFileSync`,
-   `openSync` (read flags only), `readSync`, `closeSync`, `statSync`, `lstatSync`, `readdirSync`,
-   `realpathSync`. Plus `Bun.file(...)` read methods. Plus **one named exception: `Bun.serve`, in
-   `serve.ts` only** — the single place the process binds a socket, and `serve.ts` is the
-   composition root, not an adapter, so "adapters only" would be the wrong home for it.
+   **(7b) What is permitted inside it**, as a table, because an allowlist that is a prose sentence
+   is an allowlist nobody can check against:
+
+   | Operation | Where | Why it is permitted |
+   | --- | --- | --- |
+   | `readFileSync`, `openSync` (**read flags only**), `readSync`, `closeSync` | `adapters/**` | the bounded reads every transcript and sidecar needs |
+   | `statSync`, `lstatSync`, `readdirSync`, `realpathSync` | `adapters/**` | size/mtime/inode, directory walks, and the resolved-containment check of §12.2 |
+   | `Bun.file(...)` read methods | `adapters/**` | the same reads through Bun's own API |
+   | **`process.kill(pid, 0)`** | `adapters/campaign.adapter.ts` | **a liveness probe, not a write and not a signal.** Signal `0` delivers nothing: the kernel only performs the permission-and-existence check and returns. §9 needs it for `runnerAlive`, and the alternative — a time-based staleness guess — is wrong in both directions. It is named here with its zero argument because `process.kill(pid, <anything else>)` really would be a side effect, and the wall must be able to tell the two apart |
+   | `Bun.serve` | **`serve.ts` only** | the single place the process binds a socket; `serve.ts` is the composition root, not an adapter, so "adapters only" would be the wrong home for it |
 
    **(7c) What is refused inside it.** Everything else: any other `node:fs` member, any
    `fs/promises` import, `Bun.write`, `node:child_process`, `node:net`, `node:http`, `node:https`.
@@ -2053,7 +2125,7 @@ browser**. A screenshot proves a picture was produced; it cannot prove a kind wa
 viewport did not move, or that the bytes served are the bytes just built. So every one of those
 proofs drives a real browser and asserts on the DOM.
 
-- **`playwright-core` is vendored as a devDependency of the viewer package** (version 1.63.0, the
+- **`playwright-core` is a pinned devDependency of the viewer package** (an ordinary dependency entry, not source copied into the repo) (version 1.63.0, the
   version already present on this machine), pinned in `bun.lock`. It is **not** read from
   `/tmp/pwshot` — a test that depends on a scratch directory is not reproducible, and `/tmp` is
   cleared.
@@ -2149,16 +2221,31 @@ task needs but the fixture's test does not pin is a shape that can silently disa
 | **Three symlinks**: escaping / in-session / sibling-session sidecar | `tool-results/`, `subagents/` | D14, tasks 4, 15, 30 |
 | Depth-2 subagent tree + missing-parent orphan + self-cycle | `subagents/` (5 sidecars) | §5.5, tasks 11, 25 |
 | **A four-block row positioned to straddle the 500-node boundary** | `<session-4>.jsonl` | D20 whole-row trim, task 18 |
-| **`<session-4>`: 2,400 rows / 2,600 pre-pairing nodes** — over the 2,000-node client cap and over the 500-node window | `<session-4>.jsonl` | §6.3 window, §6.5 eviction, tasks 18, 24, 31 |
+| **`<session-4>`: 2,400 rows / 2,600 pre-pairing candidates / ≥2,300 RENDERED nodes** | `<session-4>.jsonl` | §6.3 window, §6.5 eviction, tasks 18, 24, 31 |
 | **Rotation pair**: a same-size, different-content replacement | `<session-4>.rotated` | D20/§6.1 inode reset, tasks 5, 19, 31 |
 | **A third project, newest session 90 days old** | `<proj-C>/<session-3>.jsonl` | D10 window, the "show 1 older projects" link, task 17, task 23, G1 |
 | Two campaigns, **same slug, two repo keys, same session id** | `homeB/.tribe/...` | §9 identity, G3, tasks 12, 16, 32 |
 
-`<session-4>`'s counts are exact and load-bearing: **2,400 rows producing 2,600 pre-pairing nodes**
-(D21's unit). That is above the 2,000-node client cap, so tail eviction and the "N new below" pill
-are reachable; above the 500-node window, so the backward scan overshoots and the whole-row trim is
-exercised; and the four-block row sits where the 500-node boundary falls, so the trim is forced
-*through* a multi-block row — the case an exact-node trim would silently lose blocks on.
+**`<session-4>` pins BOTH counts, and the second one is the load-bearing addition:**
+
+| Count | Value | Why it must be pinned |
+| --- | --- | --- |
+| rows | **2,400** | the unit the window trims by (D20) |
+| **pre-pairing** candidate nodes | **2,600** | the unit the window boundary counts (D21) |
+| **post-pairing rendered** nodes | **≥ 2,300** | the unit the *client* holds, and therefore the only one the 2,000-node cap is measured in |
+
+Pinning only the pre-pairing count is not enough: pairing removes a node per paired `tool_result`,
+so a fixture with 2,600 candidates but many tool pairs could render **under** 2,000 and quietly stop
+exercising eviction, the "N new below" pill and the tail-eviction path — the tests would pass while
+proving nothing. The fixture therefore makes **most rows plain assistant text with no tool pairs**,
+so few candidates are consumed by pairing and the rendered count stays above the cap by a margin.
+
+With all three pinned: above the 2,000-node client cap (eviction and the pill are reachable), above
+the 500-node window (the backward scan overshoots, so the whole-row trim runs), and the four-block
+row sits where the 500-node boundary falls, so the trim is forced *through* a multi-block row — the
+case an exact-node trim would silently lose blocks on. `fixtures/build.test.ts` asserts **all three**
+numbers, the rendered one by running the normalizer **and pairing** over the fixture rather than by
+counting rows.
 
 Three projects, not two: D10 hides projects whose newest session is older than 30 days, so a
 two-project fixture cannot produce the "show N older projects" link at all. `<proj-C>` is the
@@ -2216,12 +2303,27 @@ Plus:
 - the empty-project, empty-root and no-`.claude` shapes — each its own directory, not a variant of
   `homeA` — each render the "no sessions found" note, not an error page and not a blank pane.
 
-**The zero-write proof is a hash, not an inspection (D16/G4).** Before the suite runs, take a
-recursive digest of the whole fixture HOME — every path, size and content hash under it, including
-`.tribe/` when the suite uses `homeB`. Run every DOM suite. Take the digest again and
-assert it is **byte-identical**. A structural allowlist proves no write call is reachable in the
-source; this proves no write happened in a real run, which is the claim G4 actually makes. The two
-are complementary and both are required.
+**The zero-write proof is a hash, not an inspection (D16/G4) — and its scope is exact, because
+"hash the whole HOME across every suite" is not satisfiable.** Two suites legitimately write into
+their fixture: E2's controlled writer appends transcript rows, and E3 runs a real campaign that
+writes campaign state. A blanket digest would fail on the test's own fixture-making rather than on a
+viewer write, and a proof expected to fail teaches nobody anything.
+
+So the digest is scoped per suite, and the rule each time is "hash everything the **viewer** must not
+touch":
+
+| Suite | HOME | Digest covers | Taken |
+| --- | --- | --- | --- |
+| `dom-kinds`, `url-refusals`, `served-build`, `real-transcript` | `homeA` | **the whole tree** — nothing in these suites writes to it | before the suite and after it; byte-identical |
+| `live-tail` (E2) | **its own copy of `homeA`** | the whole copy **except `<session-live>.jsonl`**, the single file its writer appends to | before the first append and after the last; byte-identical outside that file |
+| `campaign-badge` (E3) | `homeB` | **`homeB/.claude` only — never `homeB/.tribe`**, which the runner writes by design | after the runner has exited, and again after the browser-read interval; byte-identical |
+
+E2 works on a **copy** rather than sharing `homeA`, so a parallel run can never see another suite's
+appends. It is the simpler of the two options and it is the one chosen here.
+
+A structural allowlist (§12.6) proves no write call is *reachable in the source*; this proves no
+write *happened in a real run*, over precisely the bytes the viewer is forbidden to touch. Both are
+required and neither implies the other.
 
 `e2e/url-refusals.e2e.test.ts` drives the same server over HTTP with the shapes a caller controls
 (`fixtures-mirror-reality` obligation 1 — here the caller's input is the URL, not a path). Each case
@@ -2277,8 +2379,11 @@ Then, in the same run:
 - **The patch case of §6.4**: write a `tool_use` row, wait for its card, then write the matching
   `tool_result` row in a later tick; assert the card's DOM element gains its result **and** that
   `document.querySelectorAll('[data-row-id]').length` is unchanged.
-- **Reconnect**: kill the page's connection mid-write, reconnect, and assert every row appears
-  exactly once — the store clears on the new `generation` and re-applies the snapshot (§6.2), so a
+- **Reconnect**: kill the page's connection mid-write — the mechanism is
+  `page.evaluate(() => window.__viewerEventSource.close())`, the client's own `EventSource` handle,
+  which `useEventStream` assigns to `window.__viewerEventSource` **in dev builds only** so a test
+  can close it deterministically instead of racing a network-level kill — then let it reconnect and
+  assert every row appears exactly once — the store clears on the new `generation` and re-applies the snapshot (§6.2), so a
   duplicate card here means the generation rule is not being honoured.
 - **Rotation**: replace the transcript with a **same-size** file of different content and assert the
   view clears and re-renders **the tail window** (§6.1) — this is B12, rotation re-emitting the
@@ -2435,6 +2540,6 @@ link is opened and verified before the PR is reported green.
   we read `cwd` from inside the rows instead (§5.1), and fall back to the raw directory name.
 - **Per-project hide/pin as a stored preference** — D10 settled the noise problem with a *stateless*
   30-day default plus `?all=1` (§5.6), which needs no persistence and so keeps D7 intact. A real
-  preference (hide this project forever, pin that one) is follow-up **F3**.
+  preference (hide this project forever, pin that one) is STATE.md follow-up **F3**.
 - **A manual light/dark toggle.** The tokens already carry both modes and follow the OS (§8.2); a
   toggle is one `data-theme` assignment and a control, and this card does not ask for it.
