@@ -176,10 +176,36 @@ Three further rulings arrived with review round 2 and **supersede** the earlier 
   is the pre-pairing node count: every row's nodes are counted as the normalizer emits them before
   pairing, and a `tool_result` block counts as one candidate node. The boundary is therefore
   derivable before pairing; after pairing the rendered node count may be lower."*
+- **D22 — fixture proofs are phased.** *"Task 1 asserts only what a fixture builder can know
+  without production code: row counts, block counts, the three symlinks, the spill file, project
+  mtimes, session-4 = 2,400 rows / 2,600 candidate blocks. The ≥2,300 RENDERED count is asserted in
+  Task 9 (pairing) by a `fixtures/session4.rendered.test.ts` that runs the real normalizer + pairer
+  over the fixture; Tasks 24/31 depend on Task 9, not Task 1. No duplicated pairing logic
+  anywhere."*
+- **D23 — row classification is by PRECEDENCE, exactly one outcome per row**, in this order:
+  *"(1) unparsable → `unreadable`/`oversized` raw node; (2) title-source and other folded rows →
+  folded (no node); (3) `tool_result` whose call is in pairing state → Patch; (4) rows that emit
+  nodes; (5) silent by design (empty thinking, and nothing else unless listed). 'Total and disjoint'
+  means: the coverage test classifies every fixture row by this precedence and asserts the outcome;
+  bucket 5's exact set excludes anything caught earlier."*
+- **D24 — the backward snapshot grows its slice across an oversized row.** *"The slice doubles
+  (512 KiB, 1 MiB, … up to the 8 MiB row cap) until it contains a newline or reaches BOF; a row
+  exceeding the cap is represented by the same `raw oversized` node as §6.1 and skipped as one
+  row."*
+- **D25 — the two client hooks ship in production.** *"`__viewerEventSource` and
+  `__viewerReconnect()` ship in the production build. They are read-only and harmless (they close
+  and reopen the client's own stream; they touch nothing else), so there is no dev/prod split to
+  prove."*
 - **D16 — the zero-write wall is an allowlist, not a denylist.** *"`structure.test.ts` permits only
   these world-touching imports in adapters (`node:fs` readFile / open with read flags / stat / lstat
   / readdir / realpath / read; `Bun.file` read; `Bun.serve`) and fails on any other `node:fs`,
   `fs/promises`, `Bun.write`, `child_process` or `node:net` import or member."*
+
+D22–D25 are corrections of a different kind from D18–D20: not over-reach but **over-claiming**. A
+proof scheduled where its dependencies do not yet exist, a partition called disjoint whose buckets
+overlap, a backward reader that assumed rows are smaller than its step, and a dev/prod split
+invented to guard two harmless functions — each promised more than the design could deliver, and the
+fix in every case is to promise exactly what is true.
 
 D18, D19 and D20 are each a correction of the same over-reach: a rule stated more absolutely than
 the world allows. "Only adapters touch the filesystem" forgot that a measurement script and a build
@@ -373,12 +399,25 @@ built asset returns the SPA shell so the client router can own the address bar.
 | `GET /healthz` | `{"ok":true,"viewer":"tribe-viewer","v":2}` | **deliberately NOT the old body** — see §10.4, stale-viewer reuse |
 | `GET /api/projects?all=1` | `{"projects":[Project],"olderCount":n,"skippedBadges":n}` | §5.1, §5.6; without `all=1`, `projects` is the D10 window and `olderCount` is the remainder |
 | `GET /api/sessions?project=<dir>` | `{"project":Project,"sessions":[SessionSummary]}` | §5.1 |
-| `GET /api/session/<sessionId>` | `{"session":SessionSummary,"subagents":[Agent],"badges":[Badge]}` | metadata only. **Rows never come from here** — they arrive on `/events` or `/api/rows`; E1 asserts rows in the DOM, never from this route |
-| `GET /api/rows?session=&agent=&before=&limit=` | `{"nodes":[RenderNode],"from":n,"to":n,"more":bool}` | back-fill on scroll-up; returns **nodes**, and `from`/`to` are byte offsets (§6.3) |
+| `GET /api/session/<sessionId>` | `{"session":SessionSummary,"subagents":[Agent],"badges":[Badge]}` — `session.projects` names every project dir holding this id (§5.2) | metadata only. **Rows never come from here** — they arrive on `/events` or `/api/rows`; E1 asserts rows in the DOM, never from this route |
+| `GET /api/rows?session=&agent=&before=&limit=` | `{"nodes":[RenderNode],"from":n,"to":n,"truncatedBefore":bool}` | see the paragraph below the table — `limit` counts **pre-pairing candidate nodes**, `before` is a **row byte offset**, and omitting `before` returns the tail window |
 | `GET /api/block?session=&agent=&at=&i=` | `{"block":…}` | one elided payload, addressed by `RowAnchor.id` (§4): an image, a 64 KiB+ tool input/result, a `raw` card's JSON, an expandable `attachment` |
 | `GET /api/spill?session=&name=` | `text/plain` | a `<persisted-output>` file, contained (§7.4) |
 | `GET /events?session=&agent=` | `text/event-stream` | §6 |
 | anything else | see the one rule below | never a stack trace |
+
+**`GET /api/rows` in full, because "back-fill on scroll-up" is not a contract.**
+
+| Parameter | Meaning |
+| --- | --- |
+| `before` | a **row byte offset** — the client passes the `from` it currently holds, so the response is exactly the window immediately preceding it. **Omitted ⇒ the tail window**: the same backward algorithm `hello` runs (§6.3), which is what the "N new below" pill and the scroll-to-bottom reload call |
+| `limit` | how many **pre-pairing candidate nodes** to gather (D21's unit — the same one the window boundary counts, so client and server never mean different things by "500"). **Default 500, maximum 2,000**; a larger value is clamped to 2,000, not refused, because the cap exists to bound the response rather than to police the caller |
+
+The response carries `from` (the first retained row's byte offset — pass it back as the next
+`before`), `to` (the window's end), and `truncatedBefore` (true iff any row precedes `from`, which
+is what tells the client whether to keep offering "load earlier"). Whole-row trimming (D20) and
+after-trim pairing (D23 rung 3) apply here exactly as they do to `hello` — one algorithm, two entry
+points.
 
 **The one rule for a path not in the table above**, because two rules for the same request is a
 defect and an earlier draft had two:
@@ -435,12 +474,13 @@ export interface SessionSummary {
   live: boolean;
   subagentCount: number;
   badges: Badge[];          // usually 0 or 1; 2+ on a real collision (§9)
-  /** True when two project directories hold a session file with THIS id (§5.2 — possible after a
-   * `relocated` row, 44 measured). The server resolves to the newest by mtime and says so; the
-   * client renders a "this id exists in N projects" note beside the title so the user knows which
-   * one they are looking at rather than silently getting one of two. False in every ordinary
-   * case. */
-  ambiguous: boolean;
+  /** EVERY encoded project directory that holds a session file with this id (§5.2 — more than one
+   * is possible after a `relocated` row, 44 measured). **Length 1 is the ordinary, unambiguous
+   * case**; the server resolves to the newest by mtime and reports the full list, so the client can
+   * render "found in N projects" with the real number and name them. A boolean could not: the
+   * client is required to show a count, and hard-coding "2" for today's measured case or saying
+   * "multiple" would both be guesses about an open world. */
+  projects: string[];
 }
 
 /** A campaign's claim on one session. **A session can carry more than one badge**: the same
@@ -493,6 +533,20 @@ export type MdToken =
  * a tool node carries a second one for its result half (D19). */
 export interface Anchor { at: number; i: number }
 
+/** An inline marker lifted OUT of a prompt's text rather than left as XML in the markdown (§7.6).
+ * The four kinds are exactly the tag families measured on this machine; anything else stays plain
+ * text. `anchor` is the containing row's own `at`+`i`, so a chip expands through the same
+ * `/api/block` address as any other payload. */
+export interface Chip {
+  kind: 'slash-command'      // <command-name> + <command-message> + <command-args>, 107 measured
+      | 'system-reminder'    // <system-reminder>, 26 measured
+      | 'local-command'      // <local-command-stdout>, 71 measured
+      | 'ide-context';       // <ide_opened_file>, <ide_selection>, 2 measured
+  label: string;             // the command, or the reminder's first line
+  detail: string | null;     // args, stdout, or the file name; null when the label is the whole of it
+  anchor: Anchor;
+}
+
 export interface RowAnchor {
   id: string;             // `${at}:${i}` — the two fields below, joined
   at: number;             // byte offset of the ROW's first byte
@@ -532,7 +586,12 @@ export type RenderNode = RowAnchor & Sized & (
   | { k: 'chip';          label: string; detail: string | null; href: string | null }
   | { k: 'divider';       label: string }
   | { k: 'error';         status: number | null; body: MdToken[] }
-  | { k: 'raw';           rowType: string; json: string; bytes: number }
+  | { k: 'raw';           rowType: string; json: string; bytes: number;
+                          /** The human label for a row that has no JSON to show: `oversized`
+                           * carries "row too large (N bytes)" (§6.1), `unreadable` carries the
+                           * skip count. **null for an ordinary raw card**, whose content is
+                           * `json`. Without this field §6.1's text had nowhere to live. */
+                          text: string | null }
   | { k: 'unreadable';    count: number }
 );
 
@@ -655,7 +714,12 @@ joined**: the server asks the scan index for a session with that id and uses the
 scan itself produced from `readdir`. A miss is a `404` with the message
 `no session <id> under ~/.claude/projects`, never a path probe. Two sessions with the same id in
 two project dirs (possible after a `relocated` row — 44 measured) resolve to the newest by mtime,
-and the response carries `ambiguous: true` so the client can say so.
+and the response carries **`projects: string[]`** — every encoded project directory holding that id.
+The field is on `SessionSummary` (§4), so it rides on `/api/sessions`, `/api/session/<id>` and
+`hello` alike. **`projects.length === 1` is the ordinary case and the client shows nothing**; at 2 or
+more it renders "found in N projects" beside the title (§8.1's `<SessionHeader>`) with the real
+count rather than a guess, so the user knows which of them they are looking at. It never silently
+picks one of two and says nothing.
 
 ### 5.3 Title and `cwd` — bounded reads, never a whole file
 
@@ -988,10 +1052,20 @@ with each other.
   ```
   anchor   := EOF
   nodes    := 0
-  step     := 256 KiB
   while nodes < 500 and anchor > 0:
-      lo     := max(0, anchor - step)
-      read bytes [lo, anchor)
+      step := 256 KiB
+      loop:                                            # D24: GROW until a row boundary is found
+          lo := max(0, anchor - step)
+          read bytes [lo, anchor)
+          if the slice contains a 0x0A, or lo == 0: break
+          if step >= 8 MiB: break                      # the row cap; handled below
+          step := step * 2                             # 512 KiB, 1 MiB, 2 MiB, 4 MiB, 8 MiB
+      if no 0x0A was found and step reached 8 MiB:
+          # a single row larger than the cap: represent it the way §6.1 does and move past it
+          emit one `raw` node, rowType "oversized", anchored at max(0, anchor - step)
+          nodes  += 1
+          anchor := max(0, anchor - step)
+          continue
       drop the leading partial row unless lo == 0      # core/window.ts
       parse the complete rows in that slice
       nodes  += the node count those rows produce      # core/normalize.ts, counted only
@@ -1026,6 +1100,20 @@ with each other.
   `truncatedBefore` is true iff any row precedes the anchor, covering both "the scan stopped early"
   and "the scan reached BOF but the trim discarded rows". Reading backwards costs one or two slices
   for a typical session and terminates at BOF for a short one.
+
+  **The slice grows because a fixed step cannot cross an oversized row (D24).** A 256 KiB slice
+  landing wholly inside a 2 MiB row contains no `0x0A` at all: there is no "first complete row", so
+  the anchor cannot advance and the loop makes no progress — it hangs, or an implementer invents a
+  rule of their own. Doubling the step until the slice contains a newline or reaches BOF fixes the
+  normal case; a row larger than the **8 MiB** cap is represented by **the same `raw oversized` node
+  §6.1 emits on the forward path**, counted as one node and skipped as one row. Forward tail and
+  backward snapshot therefore agree on what an oversized row looks like — which matters because a
+  user can reach the same row by scrolling (snapshot) or by waiting (tail), and must see the same
+  card either way.
+
+  Named test (task 18): `<session-4>` already carries a **2 MiB row in its middle**; assert the
+  snapshot window across it is correct — the growth loop finds the boundary, the window contains the
+  rows on both sides, and the anchor lands on a real row start.
 
   **The count is the PRE-PAIRING node count (D21).** Pairing runs after the trim, so a count that
   depended on pairing would be circular — the boundary would depend on the pairing, which depends on
@@ -1168,39 +1256,55 @@ later one, which is what lets these counts be compared with each other.
    conversation while rendering them as raw cards would bury it differently.
 4. **Everything else** renders as a collapsed `raw` card carrying `rowType` and the row's JSON
    (elided past 64 KiB per D15, expandable via `/api/block`).
-5. **Silent by design** — the closed, exhaustive list of inputs that deliberately produce **no
-   node**. It is a list, not a judgement, and the coverage test asserts the **exact set** so a fifth
-   case cannot be added by accident:
+5. **Silent by design** — the last rung of D23's precedence ladder below, and therefore a *short*
+   list: it holds only what rungs 1–4 did not already claim.
 
    | Input | Why no node |
    | --- | --- |
    | a `thinking` block whose `thinking` is `""` | there is nothing on disk to render — 8,411 of 17,873 measured (§7.2) |
-   | an assistant row whose **only** block is such a `thinking` | the row is not dropped; its blocks all fell in the line above, so the row legitimately yields nothing |
-   | a `tool_result` that **pairs** with a call in the window | it is not lost — it becomes a `Patch` on the call's node (§6.4). A node would be a duplicate |
-   | a row consumed **entirely** as a title source (`ai-title`, `custom-title`, `last-prompt`) when the metadata toggle is off | the content is rendered, as the session title; the toggle shows the row as a `raw` card |
+   | an assistant row whose **only** block is such a `thinking` | the row is not dropped; every one of its blocks fell in the line above, so the row legitimately yields nothing |
 
-   Nothing else. Any other row that produces no node is a bug, and the test is what says so.
+   That is the whole set. Two cases an earlier draft listed here have moved to their proper rungs: a
+   paired `tool_result` is **rung 3** (it becomes a `Patch`, which is an outcome, not a silence), and
+   a title-source row is **rung 2** (it is folded into the session title). Listing them here as well
+   is what made the old "disjoint" claim unprovable. Any row that produces no node and is not in this
+   table is a bug, and the coverage test is what says so.
 
 A new Claude Code release that invents a row type therefore falls into bucket 4 and renders as a raw
 card on day one, and is never silently dropped.
 
-**The mechanical guarantee, stated so it is actually true of bucket 5.** The old phrasing — "every
-input row produces at least one node or is accounted for in a fold" — was false the moment a row's
-only block was an empty `thinking`: that row produces nothing and is not a fold. The honest form
-partitions every input row into exactly one of four outcomes, and `normalize.coverage.test.ts`
-asserts the partition is **total and disjoint**:
+**The mechanical guarantee: a PRECEDENCE LADDER, not a partition of independent buckets (D23).**
+
+Two earlier attempts were both wrong, and for opposite reasons. "Every row produces a node or is a
+fold" was **false**: a row whose only block is an empty `thinking` produces nothing and is not a
+fold. Calling the four outcomes "total and disjoint" was **also** false, and in a way that is worth
+naming because it is the subtler mistake: a paired `tool_result` is *both* "became a Patch" and
+"silent by design"; a title-source row is *both* "folded" and "silent". The buckets genuinely
+overlap, so no test could ever enforce disjointness over them.
+
+The honest shape is **ordered first-match**. Every row is classified by walking this ladder and
+stopping at the first rung that applies — which makes "exactly one outcome" true by construction
+rather than by assertion:
 
 ```
-for every row: exactly one of
-  (a) it produced >= 1 node
-  (b) it was folded into another node        (attachment strip, title source)
-  (c) it became a Patch on an earlier node   (a paired tool_result)
-  (d) it is in bucket 5's silent-by-design set, which is an EXACT list
+for each row, the FIRST of these that applies is its outcome:
+  1. unparsable, or too large to hold   -> `unreadable` / `raw oversized` node   (§6.1, §13)
+  2. a title-source or otherwise folded row  -> folded, no node of its own
+  3. a `tool_result` whose call is in pairing state -> becomes a Patch on that call
+  4. it emits one or more nodes
+  5. silent by design                   -> the exact set below, and nothing else
 ```
 
-No row may fall outside all four, and none may satisfy two. The test reports any row that does **by
-row type and byte offset** — a bare count would say "one row vanished" without saying which, which
-is the difference between a failure you can fix and one you can only stare at.
+Rung 5's set is therefore **what is left after rungs 1–4 have taken their rows**, which is what
+makes it small and checkable: an empty `thinking` block, and an assistant row whose only block is
+one. A paired `tool_result` never reaches rung 5 — rung 3 claimed it. A title-source row never
+reaches it — rung 2 did. Nothing else belongs there unless this list is extended deliberately.
+
+`normalize.coverage.test.ts` walks the ladder over every fixture row, records the rung each row
+stopped at, and asserts the recorded outcome matches the expected one **per row**. It reports a
+mismatch by **row type and byte offset** — a bare count would say "one row was classified wrong"
+without saying which, which is the difference between a failure you can fix and one you can only
+stare at.
 
 ### 7.2 Content blocks
 
@@ -1314,8 +1418,13 @@ A `tool_use` whose `name` is `Task` and whose `id` matches a sidecar's `toolUseI
 
 - **XML chips.** Slash commands and reminders arrive as text: `<command-name>` 107,
   `<command-message>` 105, `<command-args>` 99, `<local-command-stdout>` 71, `<system-reminder>` 26,
-  `<ide_opened_file>` 2. `core/normalize.ts` extracts these into `chip` nodes (label = the
-  command, detail = args/stdout) rather than dumping the XML into markdown. Parsing is a bounded
+  `<ide_opened_file>` 2. `core/normalize.ts` lifts these out of the text as **`Chip` values**
+  (§4) carried on the prompt node's `chips` array rather than dumped into the markdown. The four
+  kinds are exactly these tag families: `slash-command` (`<command-name>` with its
+  `<command-message>` and `<command-args>`), `system-reminder`, `local-command`
+  (`<local-command-stdout>`) and `ide-context` (`<ide_opened_file>`, `<ide_selection>`). `label` is
+  the command or the reminder's first line; `detail` is the args, stdout or file name, `null` when
+  the label is the whole of it. Any other tag stays plain text. Parsing is a bounded
   regex over the *first* 4 KiB of the text, and an unbalanced or unrecognised tag degrades to
   plain text — never a throw.
 - **`<persisted-output>` spills.** 100 measured occurrences. The marker carries an **absolute**
@@ -1364,7 +1473,7 @@ package's value is the parsing, not the framework surface.
 │       │       ├── <SubagentCount>                                 tokens: ink-soft
 │       │       └── <CampaignBadge>     slug · card · status · runner  tokens: badge-bg, badge-ink, warn
 │       └── <SessionView>               route /s/<id>[/a/<agent>]
-│           ├── <SessionHeader>         title, live, badges, ambiguous note   tokens: ink, rule, live, warn
+│           ├── <SessionHeader>         title, live, badges, "found in N projects"  tokens: ink, rule, live, warn
 │           ├── <AgentTabs>             parent + one tab per Agent  tokens: surface, accent, rule
 │           ├── <RowList>               windowed RenderNode[]
 │           │   ├── <PromptCard>        k=prompt                    tokens: surface, ink, accent
@@ -1520,19 +1629,23 @@ window contract work together:
   `data-scroll="rows"`. These are the addresses §16's DOM proofs assert against.
 - **Reconnection is the client's own job, and there are exactly two triggers.** (1) The browser
   fires `error` on the `EventSource` when the connection drops — the client's handler reopens the
-  stream after the `retry:` interval. That is the production path and it needs no help. (2) An
+  stream after the `retry:` interval. That is the ordinary path and it needs no help. (2) An
   **explicitly closed** stream fires no `error` — `close()` is a deliberate act, so the browser
-  never retries it. For that case `useEventStream` exposes, **in dev builds only**
-  (`import.meta.env.DEV`), two members on `window`:
+  never retries it. For that case `useEventStream` exposes two members on `window`:
 
   ```ts
   window.__viewerEventSource : EventSource   // the live handle — close() it to simulate a drop
   window.__viewerReconnect() : void          // open a NEW stream, exactly as the error path would
   ```
 
-  Both are absent from a production build, and §12.6 asserts that: a test seam that ships is a test
-  seam that becomes an API. They exist so an e2e test can drop and restore a connection
-  *deterministically* rather than racing a network-level kill (§16.3).
+  **Both ship in the production build (D25), and that is deliberate.** An earlier draft made them
+  dev-only and then asked E2 to call them through a server that serves the *built* client — a proof
+  that could not run. The dev/prod split was guarding nothing worth guarding: both members are
+  **read-only with respect to everything except the client's own stream** — one is a handle whose
+  `close()` ends a connection the page already owns, the other opens a replacement. Neither reads
+  data, writes anything, or reaches the server except by the same `GET /events` the client makes
+  anyway. A caller in the browser console can already close a connection by navigating away.
+  §12.1 states why they are permitted.
 
 - **The sequence watermark is per connection and is cleared on every `EventSource` `open`.** Frame
   `id:` restarts at 1 on each connection (§6.2), so a watermark carried across a reconnect would
@@ -1880,6 +1993,13 @@ Enforced **structurally** by §12.6's allowlist, over exactly that runtime file 
 **observationally** by §16.2's per-suite digests, which cover every byte the viewer must not touch
 *while it is serving* (`homeA` whole; E2's own copy minus the file its writer appends to;
 `homeB/.claude` only, because `homeB/.tribe` is the runner's to write).
+
+**The two client hooks (`window.__viewerEventSource`, `window.__viewerReconnect()`, §8.4) ship and
+are allowed** (D25): each acts only on the page's own `EventSource` — closing a connection the
+client already owns, or opening the replacement it would have opened itself on `error`. They read no
+data, write nothing, and reach the server only by the `GET /events` the client issues anyway, so
+they widen neither the read-only surface nor the network surface. Making them dev-only would have
+bought no safety and would have made G2's reconnect proof unrunnable against the built client.
 
 No `git`, no `gh`, no outbound network — the only `fetch` in the tree is the runner's own probe,
 which lives in the runner package.

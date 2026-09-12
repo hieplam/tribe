@@ -93,6 +93,23 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
   one candidate node. The boundary is therefore derivable before pairing; after pairing the rendered
   node count may be lower."
 
+- **D22** — "Task 1 asserts only what a fixture builder can know without production code: row
+  counts, block counts, the three symlinks, the spill file, project mtimes, session-4 = 2,400 rows /
+  2,600 candidate blocks. The ≥2,300 RENDERED count is asserted in Task 9 (pairing) by a
+  `fixtures/session4.rendered.test.ts` that runs the real normalizer + pairer over the fixture;
+  Tasks 24/31 depend on Task 9, not Task 1. No duplicated pairing logic anywhere."
+- **D23** — "(1) unparsable → `unreadable`/`oversized` raw node; (2) title-source and other folded
+  rows → folded (no node); (3) `tool_result` whose call is in pairing state → Patch; (4) rows that
+  emit nodes; (5) silent by design (empty thinking, and nothing else unless listed). 'Total and
+  disjoint' means: the coverage test classifies every fixture row by this precedence and asserts the
+  outcome; bucket 5's exact set excludes anything caught earlier."
+- **D24** — "The slice doubles (512 KiB, 1 MiB, … up to the 8 MiB row cap) until it contains a
+  newline or reaches BOF; a row exceeding the cap is represented by the same `raw oversized` node as
+  §6.1 and skipped as one row."
+- **D25** — "`__viewerEventSource` and `__viewerReconnect()` ship in the production build. They are
+  read-only and harmless (they close and reopen the client's own stream; they touch nothing else),
+  so there is no dev/prod split to prove."
+
 **There is no `Last-Event-ID` handling anywhere in this plan.** If a task brief or a test name
 mentions resuming by byte offset, it predates D12 and is wrong.
 
@@ -234,8 +251,9 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       | an invented `type`; one malformed line | `<session-1>.jsonl` | tasks 8, 30 |
       | depth-2 subagent tree + missing-parent orphan + self-cycle (5 sidecars) | `subagents/` | tasks 11, 25 |
       | **three symlinks**: `escaping.txt`, `in-session.txt`, sibling-session sidecar | `tool-results/`, `subagents/` | tasks 4, 15, 30 |
-      | **`<session-4>`: 2,400 rows / 2,600 pre-pairing candidates / ≥2,300 RENDERED nodes** | `<session-4>.jsonl` | tasks 18, 24, 31 |
+      | **`<session-4>`: 2,400 rows / 2,600 candidate blocks** (this task) **/ ≥2,300 RENDERED nodes** (task 9, D22) | `<session-4>.jsonl` | tasks 9, 18, 24, 31 |
       | **a four-block row positioned to straddle the 500-node boundary** | `<session-4>.jsonl` | task 18 (D20) |
+      | **a 2 MiB single-line row in the MIDDLE of `<session-4>`** | `<session-4>.jsonl` | task 5 (forward discard), task 18 (D24 backward growth) |
       | **rotation pair**: same-size, different content | `<session-4>.rotated` | tasks 5, 19, 31 |
       | **a THIRD project, newest session 90 days old** | `<proj-C>/<session-3>.jsonl` | tasks 17, 23, 30 (D10) |
       | two campaigns, same slug, two repo keys, same session id | `homeB/.tribe/...` | tasks 12, 16, 32 |
@@ -244,11 +262,18 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       30 days, so a two-project fixture cannot produce the "show N older projects" link at all and
       task 23's and task 30's assertions would be untestable.
 
-      **`<session-4>` pins THREE counts and the test asserts all three**: **2,400 rows**,
-      **2,600 pre-pairing candidates** (D21's unit, the window boundary's), and **≥2,300 rendered
-      nodes** (post-pairing — the unit the *client* holds, and the only one the 2,000-node cap is
-      measured in). Assert the third by running the normalizer **and pairing** over the fixture,
-      never by counting rows.
+      **`<session-4>` pins THREE counts, but this task asserts only the first two (D22).** They are
+      **2,400 rows** and **2,600 pre-pairing candidate blocks** — both countable by the builder
+      itself, from the bytes it just wrote, with no production module in the room. The third,
+      **≥2,300 rendered nodes** (post-pairing — the unit the *client* holds, and the only one the
+      2,000-node cap is measured in), is asserted in **task 9** by
+      `fixtures/session4.rendered.test.ts`, which runs the **real** `core/normalize.ts` and
+      `core/pair.ts` over this fixture.
+
+      That split is the point: `core/normalize.ts` and `core/pair.ts` do not exist until tasks 7–9,
+      so a rendered-count assertion here could only run by **duplicating pairing logic in the
+      fixture test** — a second implementation whose agreement with the first proves nothing. Tasks
+      24 and 31 therefore depend on **task 9** for that number, not on this task.
 
       Pinning only the pre-pairing count is not enough: pairing removes a node per paired
       `tool_result`, so 2,600 candidates with many tool pairs could render **under** 2,000 and
@@ -339,7 +364,11 @@ Model: **Sonnet**.
       Expected on first run: `Cannot find module './routes.ts'`.
 - [ ] **Step 2: Implement** `V/core/routes.ts` and `V/core/model.ts` (spec §4, verbatim — the
       `RenderNode` union is the contract three later tasks compile against). `model.ts` is
-      types-only **except** `RENDER_NODE_KINDS`, the one runtime value it exports. Routes are pure
+      types-only **except** `RENDER_NODE_KINDS`, the one runtime value it exports. It must also
+      carry `interface Chip` (spec §4 — the four kinds `slash-command`, `system-reminder`,
+      `local-command`, `ide-context`, matching §7.6's measured tag families) and the `raw` node's
+      **`text: string | null`**, which is where §6.1's `row too large (N bytes)` label lives; without
+      that field the oversized-row contract has no home and §6.1 contradicts §4. Routes are pure
       string math: `new URL(...)`, pattern matching, no path joins.
 - [ ] **Step 3: Run.**
 
@@ -594,23 +623,29 @@ the oracle — a row class present in your sample and absent from the output, ot
 Model: **Opus.** Same reason as task 7; this half is where the open-world rule lives.
 
 - [ ] **Step 1: Write the failing tests.** `normalize.coverage.test.ts` is the mechanical proof of
-      spec §7.1. It loads the task-1 fixture, normalizes it, and partitions **every** input row into
-      exactly one of four outcomes, asserting the partition is **total and disjoint**:
+      spec §7.1. It loads the task-1 fixture and classifies **every** row by walking D23's
+      **precedence ladder**, stopping at the first rung that applies:
 
       ```
-      (a) produced >= 1 node
-      (b) folded into another node           (attachment strip, title source)
-      (c) became a Patch on an earlier node  (a paired tool_result)
-      (d) silent by design                   (spec §7.1 bucket 5 — an EXACT set)
+      for each row, the FIRST of these that applies is its outcome:
+        1. unparsable, or too large to hold   -> `unreadable` / `raw oversized` node
+        2. a title-source or otherwise folded row  -> folded, no node of its own
+        3. a `tool_result` whose call is in pairing state -> becomes a Patch on that call
+        4. it emits one or more nodes
+        5. silent by design                   -> empty thinking, and nothing else
       ```
 
-      The old phrasing ("every row produces a node or is accounted for in a fold") was false the
-      moment a row's only block was an empty `thinking`: that row produces nothing and is not a
-      fold. Assert (d) as the **exact set** bucket 5 lists — an empty `thinking` block; an assistant
-      row whose only block is one; a `tool_result` that pairs; a title-source row with the metadata
-      toggle off — so a fifth silent case cannot be added by accident. Report any unaccounted row
-      **by row type and offset**, never as a bare count: "one row vanished" is a failure you can only
-      stare at. `normalize.test.ts` gains one case per `system` subtype (spec §7.4), the
+      **Ordered first-match, not a set of independent buckets** — that is what makes "exactly one
+      outcome" true by construction. Two earlier drafts were both wrong: "every row produces a node
+      or is accounted for in a fold" was *false* (a row whose only block is an empty `thinking` does
+      neither), and calling four buckets "total and disjoint" was *also* false, because a paired
+      `tool_result` sat in both "became a Patch" and "silent by design", and a title-source row in
+      both "folded" and "silent". No test can enforce disjointness over overlapping buckets.
+
+      Assert **the rung each row stops at**, per row, against the expected outcome. Rung 5's set is
+      therefore only what rungs 1–4 did not claim: an empty `thinking` block, and an assistant row
+      whose only block is one. Report a mismatch **by row type and byte offset**, never as a bare
+      count: "one row was classified wrong" is a failure you can only stare at. `normalize.test.ts` gains one case per `system` subtype (spec §7.4), the
       `attachment` node with its `attachment.type` label and `rendered` detail, each named
       metadata row type from §7.1, the XML chip extraction of §7.6, the `persisted-output` marker
       (asserting the node keeps only a `basename`, never the absolute path), `apiErrorStatus` rows,
@@ -635,7 +670,7 @@ seed of a traversal (B3's class).
 
 ### Task 9: Tool pairing, orphans, and elision
 
-- Create: `V/core/pair.ts`, `V/core/pair.test.ts`
+- Create: `V/core/pair.ts`, `V/core/pair.test.ts`, `V/fixtures/session4.rendered.test.ts`
 - Modify: `V/core/normalize.ts` (call into `pair.ts`)
 
 Model: **Sonnet**.
@@ -647,6 +682,14 @@ Model: **Sonnet**.
       (asserts `agentId` is set); a tool input over 64 KiB (asserts the node's `elided: true`,
       `expandable: true`, and no full payload in the node); a result over 64 KiB (same, with the
       `ToolResult`'s own `elided` set so the client knows which half it is expanding).
+
+      **D22 — this task owns the rendered-count proof, because this is where pairing first exists.**
+      Write `V/fixtures/session4.rendered.test.ts`: run the **real** `core/normalize.ts` and
+      `core/pair.ts` over task 1's `<session-4>` fixture and assert the post-pairing rendered node
+      count is **≥ 2,300** — above the 2,000-node client cap, which is what makes tasks 24 and 31's
+      eviction, "N new below" and tail-eviction assertions reachable at all. **Never reimplement
+      pairing in a fixture test**: a second implementation agreeing with the first proves only that
+      they were written by the same reader.
 
       **D21 — the normalizer exposes a pre-pairing node count.** Task 18's window boundary needs
       "how many nodes would this row emit" **before** pairing runs, so expose it as a pure function
@@ -662,6 +705,12 @@ Model: **Sonnet**.
       an assistant row and every `tool_result` on a following user row); both halves elided at once
       yields two distinct addresses; an `orphan_result` carries `resultAnchor` and no `call`. One
       address for a two-payload card would make one of the two unreachable.
+
+      **The `raw` node's `text` field (spec §4)** is non-null exactly for the two label-only cases —
+      `rowType: "oversized"` carrying `row too large (N bytes)`, and `unreadable` carrying the skip
+      count — and **null for an ordinary raw card**, whose content is `json`. Assert both
+      polarities; a `text` set on an ordinary raw card means the renderer will show a label instead
+      of the row.
 
       **Then D15, which is what makes the frame budget satisfiable:** every *text-bearing* kind
       gets the same treatment. A **2 MiB assistant text row** produces **one node under 64 KiB**
@@ -1084,8 +1133,9 @@ Model: **Sonnet**.
 - [ ] **Step 1: Write the failing test.** `core/scan.test.ts` (pure: takes already-read directory
       listings and stats, returns the index) covers ordering, the
       `size+mtime+inode` cache key, the duplicate-session-id-across-projects case of spec §5.2
-      (`ambiguous: true` — the field is on `SessionSummary`, spec §4, so it reaches `/api/sessions`,
-      `/api/session/<id>` and `hello` alike), and **`partitionProjects` (D10, spec §5.6)**: a project whose newest
+      (**`projects: string[]`** — every encoded project dir holding that id, on `SessionSummary`
+      (spec §4), so it reaches `/api/sessions`, `/api/session/<id>` and `hello` alike;
+      `projects.length === 1` is the ordinary case), and **`partitionProjects` (D10, spec §5.6)**: a project whose newest
       session is 29 days old is `recent`, one at 31 days is `older`, the boundary is evaluated
       against a supplied `nowMs` (never `Date.now()` inside core), and **sessions are never
       partitioned — only projects**.
@@ -1120,8 +1170,18 @@ Model: **Sonnet**.
 
 - [ ] **Step 1: Write the failing test.**
 
-      **`/api/rows` counts NODES, never rows** (spec §4's vocabulary: a row is a transcript line, a
-      node is a rendered unit, and one row can yield several nodes or none). It returns the **last
+      **`/api/rows`'s full contract (spec §3.2), because "back-fill on scroll-up" is not one.**
+      `limit` counts **pre-pairing candidate nodes** (D21's unit — the same one the window boundary
+      counts, so client and server never mean different things by "500"); **default 500, maximum
+      2,000**, and a larger value is **clamped**, not refused. `before` is a **row byte offset** —
+      the client passes back the `from` it holds. **Omitting `before` returns the tail window**, by
+      the same backward algorithm `hello` runs, which is what the "N new below" pill and the
+      scroll-to-bottom reload call. The response carries `from`, `to` and `truncatedBefore`. Assert
+      each: the clamp, the omitted-`before` tail path, and `from` round-tripping as the next
+      `before` with no row lost at the seam.
+
+      **It counts NODES, never rows** (spec §4's vocabulary: a row is a transcript line, a node is a
+      rendered unit, and one row can yield several nodes or none). It returns the **last
       500 nodes** by default, found by spec §6.3's backwards-stepping algorithm — read backwards
       from EOF in 256 KiB steps, drop the leading partial row unless at BOF, parse complete rows,
       accumulate the node count, stop at ≥500 nodes or BOF, then trim.
@@ -1133,6 +1193,18 @@ Model: **Sonnet**.
       pairing, the **rendered** node count of a window may be **lower** than 500, since a result
       that finds its call becomes a patch rather than a node. The contract is "at least 500
       candidates", never "exactly 500 cards".
+
+      **The backward slice GROWS across an oversized row (D24).** A fixed 256 KiB step landing
+      wholly inside a 2 MiB row contains no `0x0A` at all: there is no "first complete row", the
+      anchor cannot advance, and the loop makes no progress — it hangs, or the implementer invents a
+      rule of their own. So the slice doubles (512 KiB, 1 MiB, … up to the **8 MiB** row cap) until
+      it contains a newline or reaches BOF; a row past the cap is emitted as **the same `raw
+      oversized` node §6.1 produces on the forward path**, counted as one node and skipped as one
+      row. Forward tail and backward snapshot must agree on what an oversized row looks like,
+      because a user reaches the same row by scrolling or by waiting and must see the same card.
+      **Named test**: task 1's `<session-4>` carries a **2 MiB row in its middle**; assert the
+      snapshot window across it is correct — the growth loop finds the boundary, the window holds
+      the rows on both sides, and the anchor lands on a real row start.
 
       **The trim is by WHOLE ROWS (D20), and "exactly 500 nodes" is deliberately NOT the contract.**
       Drop the largest prefix of whole rows that still leaves ≥500 nodes; the window may exceed 500
@@ -1193,8 +1265,10 @@ up, because the client never sends one and 14,032 real attachment rows do not ha
 - Modify: `V/serve.ts` (route `/events`)
 - Create: `V/serve.events.test.ts`
 
-Model: **Opus.** Resume-by-offset, reset-on-truncate and the tick caps interact, and a subtle error
-here is invisible until a live campaign — which is precisely how B4 and B12 survived 804 tests.
+Model: **Opus.** The tail transition, reset-on-rotate, frame batching and the tick caps interact,
+and a subtle error here is invisible until a live campaign — which is precisely how B4 and B12
+survived 804 tests. (**There is no resume to get wrong**: D12 removed byte-offset resume entirely,
+and a reconnect is a fresh snapshot.)
 
 - [ ] **Step 1: Write the failing test.** `poller.adapter.test.ts` with an injected clock. The
       adapter **observes and emits; it decides nothing** — every branch under test is a call into
@@ -1430,9 +1504,12 @@ Model: **Sonnet**.
       clicking one sets `?campaign=<repoKey>/<slug>`; the filter narrows the
       list and the empty result shows a message, not a blank pane.
 
-      `ambiguous` (spec §4, §5.2): a `SessionSummary` with `ambiguous: true` renders a note beside
-      the title naming how many projects hold that id; with `ambiguous: false` no note appears. The
-      viewer never silently picks one of two same-id sessions and shows nothing.
+      **`projects: string[]`** (spec §4, §5.2): with `projects.length >= 2` the header renders
+      **"found in N projects"** using the real length; with `projects.length === 1` — the ordinary
+      case — nothing is rendered. A boolean could not carry this: the client must show a **count**,
+      and hard-coding "2" for today's measured case, or saying "multiple", would both be guesses
+      about an open world. The viewer never silently picks one of two same-id sessions and says
+      nothing.
 
       D10 (spec §5.6): with `olderCount: 3` the sidebar renders a `show 3 older projects` link whose
       href is `?all=1`; with `olderCount: 0` it renders nothing; and **a project's session list is
@@ -1502,21 +1579,28 @@ getting it wrong is easy and silent.
         not that a second card appears beside it. This is the user-visible half of "pairing runs
         after trimming".
 
-      **Reconnection has exactly two triggers, and the test seam exists because one of them cannot
-      be provoked from outside** (spec §8.4): the browser fires `error` when a connection drops and
-      the client reopens after the `retry:` interval — the production path — but an **explicitly
-      closed** stream fires no `error`, because `close()` is deliberate and the browser never
-      retries it. So `useEventStream` exposes, **in dev builds only**
-      (`import.meta.env.DEV`), two members:
+      **Reconnection has exactly two triggers, and the second needs an entry point** (spec §8.4):
+      the browser fires `error` when a connection drops and the client reopens after the `retry:`
+      interval — the ordinary path — but an **explicitly closed** stream fires no `error`, because
+      `close()` is deliberate and the browser never retries it. So `useEventStream` exposes two
+      members on `window`:
 
       ```ts
       window.__viewerEventSource : EventSource   // the live handle — close() to simulate a drop
       window.__viewerReconnect() : void          // open a NEW stream, by the error path's own route
       ```
 
-      Assert both: that the `error` handler reopens a dropped stream unaided, that
-      `__viewerReconnect()` opens a new one after an explicit `close()`, and that **both members are
-      absent from a production build** — a test seam that ships is a test seam that becomes an API.
+      **Both SHIP in the production build (D25) — do not gate them on `import.meta.env.DEV`.** An
+      earlier draft did, and it made task 31's reconnect proof unrunnable: that suite serves the
+      fixture through the real fixed-`dist/` server, so a dev-only hook simply is not there to call.
+      The split was guarding nothing: each member acts **only on the page's own `EventSource`** —
+      closing a connection the client already owns, or opening the replacement it would have opened
+      itself on `error`. Neither reads data, writes anything, or reaches the server except by the
+      same `GET /events` the client issues anyway.
+
+      Assert both behaviours: the `error` handler reopens a dropped stream unaided, and
+      `__viewerReconnect()` opens a new one after an explicit `close()`. Assert they are **present
+      in a production build**, since task 31 depends on that.
 
       `useEventStream.test.ts` against a fake `EventSource`: `hello` then `rows` populates; a second
       `rows` frame appends; a `patch` frame routes to the store's patch path; `meta` updates the
@@ -1533,7 +1617,9 @@ getting it wrong is easy and silent.
       a reconnect silently swallows the entire new window — the page would go blank and stay blank,
       with no error anywhere.
 
-      `session.test.tsx`: one rendering case per `RenderNode` kind in spec §4; every rendered row
+      `session.test.tsx`: one rendering case per `RenderNode` kind in spec §4; a prompt carrying
+      `chips: Chip[]` renders one element per chip with its `kind` as a data attribute (the four
+      kinds of §4/§7.6), and a chip with `detail: null` renders no detail line; every rendered row
       carries `data-kind` and `data-row-id`, a `tool` card also carries
       `data-state="pending|ok|error"`, and the list carries `data-scroll="rows"` (spec §12.6 — these
       are the addresses the DOM e2e proofs use, so they are contract, not scaffolding); a `tool`
