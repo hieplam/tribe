@@ -1221,7 +1221,7 @@ explain which direction each rule must fail in; that reasoning is the contract.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** In `fs.adapter.test.ts`, against the task-1 fixture:
+- [x] **Step 1: Write the failing test.** In `fs.adapter.test.ts`, against the task-1 fixture:
       `statOrNull` on a missing file returns null and on a real file returns a **`FileObservation`
       including `inode`** (spec §4 — task 5's rotation trigger is dead without it);
       `listDirOrEmpty` on a missing directory returns `[]`; `readRange` returns exactly the
@@ -1252,17 +1252,17 @@ Model: **Sonnet**.
          Claude Code writes on this machine.
 
       Expected: both modules missing.
-- [ ] **Step 2: Implement.** Carry over the existing adapter's primitives verbatim where they
+- [x] **Step 2: Implement.** Carry over the existing adapter's primitives verbatim where they
       apply (`readRange` returning raw `Uint8Array` so a multi-byte character split across ticks is
       the caller's problem to solve with a streaming decoder — keep that doc comment, it is F44),
       and add `readHead`, `readTail`, `readTextCapped`.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test adapters/fs.adapter.test.ts
       ```
       Expected: all pass.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): confirm by reading that every function is read-only, and that the
 adapter makes no line-boundary, cache or reset decision — those belong to `core/window.ts`,
