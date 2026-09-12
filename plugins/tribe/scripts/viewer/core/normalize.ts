@@ -590,8 +590,13 @@ function truncateUtf8(text: string, maxBytes: number): string {
  * The raw-text length is checked FIRST (cheap: `TextEncoder` over the string alone) before ever
  * calling `build` with the full text, so a multi-megabyte row (spec's 2 MiB / 8 MiB / 9 MiB
  * session-4 fixtures) never pays for tokenizing text that is certain to be truncated anyway.
+ *
+ * Exported so `core/pair.ts` shrinks an over-cap completed tool node's result body through the SAME
+ * byte-budget algorithm — halving the BYTE budget over the TEXT then re-tokenizing — rather than
+ * hand-rolling a second, surrogate-unsafe truncator (the defect that halved the already-tokenized
+ * body ARRAY length, collapsing a single-token result to `[]`).
  */
-function elideToFit<T>(text: string, build: (t: string, elided: boolean) => T, cap: number = NODE_CAP): T {
+export function elideToFit<T>(text: string, build: (t: string, elided: boolean) => T, cap: number = NODE_CAP): T {
   if (utf8Bytes(text) <= cap) {
     const full = build(text, false);
     if (utf8Bytes(JSON.stringify(full)) <= cap) return full;

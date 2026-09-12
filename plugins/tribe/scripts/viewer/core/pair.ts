@@ -26,8 +26,9 @@
  * Single forward pass, one bounded map, no backward scan, no second pass (spec §7.5, plan Task 9
  * step 2).
  */
-import type { Anchor, Patch, RenderNode } from './model.ts';
-import { NODE_CAP, utf8Bytes } from './normalize.ts';
+import type { Anchor, MdToken, Patch, RenderNode } from './model.ts';
+import { elideToFit, NODE_CAP, utf8Bytes } from './normalize.ts';
+import { tokenizeMarkdown } from './markdown.ts';
 
 /** spec §6.5 — the pending tool map's bound. Past it, the OLDEST entry is evicted; its eventual
  * result renders as an `orphan_result` rather than growing the map without limit. */
@@ -204,17 +205,57 @@ function fitCompletedTool(node: Extract<RenderNode, { k: 'tool' }>): RenderNode 
   let fitted: Extract<RenderNode, { k: 'tool' }> = { ...node, input: null, elided: true, expandable: true };
   if (utf8Bytes(JSON.stringify(fitted)) <= NODE_CAP) return fitted;
 
-  // 2. The result body alone still overflows: shrink its token prefix until the WHOLE node fits.
+  // 2. The result body alone still overflows: truncate it to a NON-EMPTY prefix until the WHOLE node
+  // fits. The reduction runs over the result's TEXT (reconstructed from its tokens), re-truncated by
+  // a halving BYTE budget and re-tokenized through the SAME `elideToFit` the normalizer uses — never
+  // by halving the already-tokenized body ARRAY length, which collapsed a single-token result
+  // (a one-line JSON dump, a base64 blob, one long build line → exactly ONE token) to `[]` via
+  // `Math.floor(1/2) === 0`, erasing content that a shorter prefix would have kept.
   // (Non-text results never reach here: images/refs are bounded counts, and a `spill`'s preview is
   // already bounded to `PREVIEW_CAP` at its source in `parseSpill`, so the whole node fits once the
   // input is dropped in step 1 above.)
   if (fitted.result !== null && fitted.result.r === 'text') {
     const textResult = fitted.result; // narrowed to the `text` variant; kept as the reduction base.
-    let body = textResult.body;
-    while (body.length > 0 && utf8Bytes(JSON.stringify(fitted)) > NODE_CAP) {
-      body = body.slice(0, Math.floor(body.length / 2));
-      fitted = { ...fitted, result: { ...textResult, body, elided: true } };
-    }
+    const base = fitted;
+    const sourceText = tokensToText(textResult.body);
+    fitted = elideToFit(
+      sourceText,
+      (t, elided): Extract<RenderNode, { k: 'tool' }> => ({
+        ...base,
+        result: { ...textResult, body: tokenizeMarkdown(t), elided: elided || textResult.elided },
+      }),
+      NODE_CAP,
+    );
   }
   return fitted;
+}
+
+/** Reconstructs the plain-text content of a tokenized result body, so `fitCompletedTool` can
+ * re-truncate it through the SAME byte-budget algorithm (`elideToFit`/`truncateUtf8`) the normalizer
+ * uses — not a second, surrogate-unsafe truncator. Markdown markup (fences, emphasis, list/heading
+ * markers) is not reproduced; the shrunk body is a fetch-to-expand PREVIEW — the full result stays
+ * addressable at the node's `resultAnchor` — so its leading text content is what matters here, not
+ * its markdown structure. Pure and total over the `MdToken` union. */
+function tokensToText(tokens: MdToken[]): string {
+  let out = '';
+  for (const tok of tokens) {
+    switch (tok.t) {
+      case 'text':
+      case 'code':
+      case 'inline-code':
+        out += tok.v;
+        break;
+      case 'br':
+        out += '\n';
+        break;
+      case 'strong':
+      case 'em':
+      case 'link':
+      case 'heading':
+      case 'li':
+        out += tokensToText(tok.c);
+        break;
+    }
+  }
+  return out;
 }

@@ -268,6 +268,35 @@ describe('pair — D15/D19: the WHOLE completed tool node is capped, even when N
   });
 });
 
+describe('pair — D15/D19: a ONE-TOKEN result is truncated to a non-empty prefix, never erased (F: step-2 array-halving collapsed a single-token body to [])', () => {
+  const enc = (s: string): number => new TextEncoder().encode(s).length;
+
+  test('a ~65 KB single unbroken-line result shrinks to a NON-EMPTY prefix ≤ 64 KiB (was erased to result.body:[])', () => {
+    // A single unbroken line (no newline, no markdown) tokenizes to EXACTLY ONE `text` token, so
+    // `body.length === 1`. The old step 2 halved the token ARRAY length: `Math.floor(1/2) === 0` →
+    // `body.slice(0, 0) === []` → the ENTIRE result was erased. The line is sized so the orphan
+    // fits standalone (body is the full token, not pre-elided) yet the PAIRED node — even after the
+    // trivial `{command:'ls'}` input is dropped in step 1 — is still just over NODE_CAP, so step 2
+    // MUST run. It must truncate the body text to a FITTING, NON-EMPTY prefix, not empty it.
+    const singleLine = 'x'.repeat(65250); // reproduced probe: orphan fits whole; paired is ~few B over.
+    const { patches } = normalizeAndPair([
+      toolUseRow(0, 'toolu_oneline', 'Bash', { command: 'ls' }),
+      toolResultRow(100, 'toolu_oneline', singleLine),
+    ]);
+    const patch = patches[0]!;
+    if (patch.op !== 'result' || patch.node.k !== 'tool') throw new Error('unreachable');
+    // The WHOLE node fits (D15/D19), as for every other over-cap completed tool node.
+    expect(enc(JSON.stringify(patch.node))).toBeLessThanOrEqual(64 * 1024);
+    const result = patch.node.result;
+    if (result === null || result.r !== 'text') throw new Error('unreachable');
+    // The regression: a TRUNCATED PREFIX survives — never the `[]` the array-halving produced.
+    expect(result.body.length).toBeGreaterThan(0);
+    expect(result.elided).toBe(true);
+    expect(patch.node.elided).toBe(true);
+    expect(patch.node.expandable).toBe(true);
+  });
+});
+
 describe('pair — D19: two anchors, call and resultAnchor', () => {
   test('a paired node’s resultAnchor.at is greater than its call.at (the result is a later row)', () => {
     const { patches } = normalizeAndPair([
