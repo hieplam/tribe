@@ -624,7 +624,7 @@ Critical finding.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing tests.** For `records.ts`: carry over the existing cases, then
+- [x] **Step 1: Write the failing tests.** For `records.ts`: carry over the existing cases, then
       add one per new field the widened reader must keep (`subtype`, `content`, `attachment`,
       `isMeta`, `isCompactSummary`, `apiErrorStatus`, `isApiErrorMessage`, `agentId`, `parentUuid`)
       plus `raw`, the verbatim line, which the `raw` card needs. Add: a line that is a JSON array,
@@ -697,13 +697,13 @@ Model: **Sonnet**.
          is over the cap and yields exactly one `raw oversized` node. Assert all three.
 
       Expected on first run: all three modules missing.
-- [ ] **Step 2: Implement** all three. `tail.ts` keeps its current arithmetic exactly —
+- [x] **Step 2: Implement** all three. `tail.ts` keeps its current arithmetic exactly —
       `offset = base.offset + consumedBytes`, never `fileSize`, never `chunk.length` — and gains
       `ackOffset`, the inode trigger and the one carry cap, over raw bytes per D13. It takes a
       `FileObservation` (spec §4), not a bare size. Keep the existing doc comments; they encode why
       (F56), and add one naming D13 so a later refactor does not reintroduce a decoded-string
       signature.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/records.test.ts core/tail.test.ts core/window.test.ts
@@ -712,7 +712,7 @@ Model: **Sonnet**.
       Expected: all pass — including the seeded-state case, the three tail cases, and
       `core/window.test.ts`'s complete-line selection (this task creates `core/window.ts`, so its
       test runs here, not only in task 18).
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the tail state machine over a real 13 MB transcript in byte-ranged
 chunks of varying sizes — including boundaries that split a multi-byte character and that split a
