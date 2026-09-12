@@ -1,0 +1,22 @@
+LOCATION: §2 G1, “RENDER_NODE_KINDS witness (§4)”
+WHAT BROKE: The term is used before its definition, requiring a jump ahead to understand the proof.
+SEVERITY: NIT
+
+LOCATION: §3.2, “GET /api/rows?session=&agent=&before=&limit=”
+WHAT BROKE: The contract never states what `limit` counts or what happens when `before` is omitted, though later reload behaviour depends on both.
+SEVERITY: BLOCK
+
+LOCATION: §4, “chips: Chip[]”
+WHAT BROKE: `Chip` is used in the shared wire contract but is never defined, so its required shape is unknowable.
+SEVERITY: BLOCK
+
+LOCATION: §6.1, “emit ONE `raw` node … text ‘row too large’”
+WHAT BROKE: The specified `raw` node type has `json` and `bytes` fields but no `text` field, leaving the oversized-row payload contract contradictory.
+SEVERITY: BLOCK
+
+LOCATION: §6.3, “Finding where a 500-node window starts”
+WHAT BROKE: This is the hardest passage: the dense pseudocode plus the repeated pre-pairing versus post-pairing qualifications takes multiple readings, though its intended algorithm is ultimately understandable.
+SEVERITY: NIT
+
+READER: FAIL 3 BLOCK
+terra exit=0

@@ -1,0 +1,58 @@
+LOCATION: §1, “every ruling D1–D9 below is quoted”
+WHAT BROKE: D3–D5 and D8 are not quoted on the page, so I cannot assess later claims that rely on them.
+SEVERITY: BLOCK
+
+LOCATION: §5.1, “any of its sessions’ head reads”
+WHAT BROKE: “head read” is used before §5.3 defines what it reads and what it can establish.
+SEVERITY: NIT
+
+LOCATION: §6.1, “blocker-4’s fix” / “blocker-5’s fix”
+WHAT BROKE: These labels have no meaning on this page, so I had to ignore them and infer the intended fixes from the surrounding text.
+SEVERITY: NIT
+
+LOCATION: §6.1, “offset” versus “ackOffset”
+WHAT BROKE: This is the hardest passage: it is understandable, but the dense state-and-byte-boundary explanation required a second read.
+SEVERITY: NIT
+
+LOCATION: §6.3, “last 500 rows”
+WHAT BROKE: “Rows” can mean transcript lines or rendered nodes elsewhere in the spec, so I cannot tell what is counted, what `truncatedBefore` counts, or exactly what back-fill returns.
+SEVERITY: BLOCK
+
+LOCATION: §7.2, `tool_result` count “33,579”
+WHAT BROKE: This conflicts with §0’s “33,584” tool results without explaining the five-row difference.
+SEVERITY: BLOCK
+
+LOCATION: §7.3, “expanding shows each one’s JSON”
+WHAT BROKE: The `attachment` wire type contains no JSON or block reference, while `/api/block` requires a UUID that attachments may not have, so I cannot see how expansion is implemented.
+SEVERITY: BLOCK
+
+LOCATION: §8.2, “named by their value” / “`--radius-8` is 10 px”
+WHAT BROKE: The stated naming rule conflicts with the example, making the token explanation read self-contradictorily.
+SEVERITY: NIT
+
+LOCATION: §8.3, “`scrollHeight - scrollTop`”
+WHAT BROKE: The follow-tail equation is split into two list items, leaving a malformed sentence that must be reconstructed by the reader.
+SEVERITY: NIT
+
+LOCATION: §8.4, “Rows are held in insertion order”
+WHAT BROKE: The spec never says how older `/api/rows` back-fill results are inserted ahead of the current window rather than appended after it.
+SEVERITY: BLOCK
+
+LOCATION: §9, “The only two files read under `~/.tribe`”
+WHAT BROKE: The following algorithm reads those files repeatedly across campaigns and runs, so “two files” appears to mean two file types but does not say so.
+SEVERITY: NIT
+
+LOCATION: §16.0, “The Warchief captures every artifact”
+WHAT BROKE: “Warchief” and “hunter” are responsibilities not introduced on this page, so this ownership rule is opaque to a first-time reader.
+SEVERITY: NIT
+
+LOCATION: §16.5, “build into a temporary `outDir`, hash … start the server”
+WHAT BROKE: The server is specified to serve its fixed `dist/` directory, but no mechanism tells it to serve the temporary output, so this proof cannot be followed as written.
+SEVERITY: BLOCK
+
+LOCATION: §17 R3, “`serve.ts` still runs on a machine that never built”
+WHAT BROKE: This reads against §10.3, which says the server exits when `dist/index.html` is absent; the distinction between dependency-free startup and intentional refusal is not stated.
+SEVERITY: NIT
+
+READER: FAIL 6 BLOCK
+terra exit=0

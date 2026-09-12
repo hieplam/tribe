@@ -1,0 +1,249 @@
+<section class="with-margin">
+  <div>
+    <span class="kicker">Day one</span>
+    <p>The tribe viewer is a small web page that shows what the campaign runner is doing while it
+    works unattended. You never install it and never open it on purpose: the runner starts it for
+    you and prints a link. You have asked to replace it with one server that can show any transcript
+    on this machine, the way you would open any file. Before deciding how, this page walks through
+    what happens today when you follow that link, using real screens and real files from this
+    machine, and ends with the one question that replacement needs you to answer.</p>
+    <p>Two words first. A <em>campaign</em> is a batch of roadmap cards the runner works through
+    one after another without you. A <em>transcript</em> is the log file Claude Code writes for
+    every session it runs, one JSON line per message, tool call and tool result. Everything the
+    viewer shows comes from transcripts.</p>
+  </div>
+  <aside class="margin-note">The runner is <code>plugins/tribe/scripts/runner/run.ts</code>.
+  The viewer is <code>plugins/tribe/scripts/viewer/serve.ts</code>. Neither is installed
+  anywhere; both run from the repo checkout.</aside>
+</section>
+
+<h2>Step 1. You start a campaign, and a link appears</h2>
+
+<p>You type one command. The runner takes over from there.</p>
+
+<pre><code>bun plugins/tribe/scripts/runner/run.ts \
+  --repo /Users/hip/repo/tribe \
+  --model claude-opus-5 \
+  --home ~/.tribe/-Users-hip-repo-tribe/campaigns/gap-gate-2026-09-10</code></pre>
+
+<p>Within a second, before the first card's session even starts, one line lands on your terminal:</p>
+
+<pre><code>campaign viewer: http://127.0.0.1:4321/live?repo=-Users-hip-repo-tribe&amp;slug=gap-gate-2026-09-10 (read-only)</code></pre>
+
+<p>That link is the only visual view the runner has. There is no flag to turn it on. The two odd values in it,
+<code>repo=-Users-hip-repo-tribe</code> and <code>slug=gap-gate-2026-09-10</code>, are the
+folder names of the campaign under <code>~/.tribe</code>: the repo path with every slash turned
+into a dash, and the campaign name. The viewer needs both to find the campaign's bookkeeping.</p>
+
+<h2>Step 2. Two folders on disk, written by two different programs</h2>
+
+<p>To understand every screen that follows, hold these two trees in mind. They are written by
+different programs and the viewer reads both.</p>
+
+<section class="spread">
+  <div>
+    <h3>~/.tribe — the runner's bookkeeping</h3>
+    <pre><code>~/.tribe/-Users-hip-repo-tribe/campaigns/gap-gate-2026-09-10/
+  campaign-state.json     which cards exist, their status,
+                          and the session id of each card
+  runs/2026-09-11T.../run.json
+                          pid, start time, repo path,
+                          path to campaign-state.json
+  runs/2026-09-11T.../logs/C5-&lt;session&gt;.log
+                          the runner's own raw copy of the
+                          stream it received from that session
+  escalations/*.md        questions the runner parked
+  reports/*.md            reports the worker agents wrote
+  answers.md              your answers to escalations</code></pre>
+    <p>The runner writes this. It says <em>which</em> session belongs to <em>which</em> card, and
+    it keeps a raw debugging copy of each session's stream under <code>logs/</code>. That copy is
+    not what the viewer renders as a transcript; the transcript comes from the right-hand tree.</p>
+  </div>
+  <div>
+    <h3>~/.claude/projects — Claude Code's transcripts</h3>
+    <pre><code>~/.claude/projects/-Users-hip-repo-tribe/
+  d7d21837-fe2e-4894-9c12-404d90663680.jsonl
+                          card C5's session, 987 KB
+  d7d21837-fe2e-4894-9c12-404d90663680/subagents/
+    agent-a8881491d073e04ad.jsonl
+    agent-a8881491d073e04ad.meta.json
+                          one pair per subagent the
+                          session spawned (6 for C5)
+  5f01ddc5-....jsonl      the session you are in now
+  (and every other session you ever ran here)</code></pre>
+    <p>Claude Code writes this, for every session, whether the runner started it or you typed
+    <code>claude</code> in a terminal. The runner never touches this folder.</p>
+  </div>
+</section>
+
+<h2>Step 3. What happens between the link and the screen</h2>
+
+<p>The diagram follows one campaign start from your terminal to your browser. Read the boxed region
+as a fork: the runner either finds a viewer already listening on port 4321 or starts a new one.</p>
+
+<figure class="diagram">
+<div class="mermaid">sequenceDiagram
+    participant You
+    participant Runner
+    participant Viewer as Viewer (port 4321)
+    participant Tribe as ~/.tribe
+    participant Claude as ~/.claude/projects
+    participant Browser
+    You->>Runner: bun run.ts --repo --model --home
+    Runner->>Viewer: GET /healthz (is a viewer already here?)
+    alt a viewer answers
+        Viewer-->>Runner: yes, reuse it
+    else nobody answers
+        Runner->>Viewer: spawn "bun serve.ts --port 4321" (detached, never stopped)
+    end
+    Runner-->>You: prints the /live link
+    Runner->>Tribe: write run.json, campaign-state.json
+    Runner->>Claude: start card C5's Claude Code session (it writes the transcript)
+    You->>Browser: open the link
+    Browser->>Viewer: GET /live?repo=...&amp;slug=...
+    Viewer-->>Browser: empty page shell + app.js
+    Browser->>Viewer: GET /events (open a stream)
+    Viewer->>Tribe: read run.json, then campaign-state.json, pick the running card, take its session id
+    Viewer->>Claude: read that session's .jsonl and its subagents/ folder
+    Viewer-->>Browser: send everything so far, then new lines every 400 ms
+</div>
+<figcaption>The viewer only learns <em>which</em> transcript to show from ~/.tribe. Every line it
+renders comes from ~/.claude/projects. The runner only checks that a viewer is up and prints the
+link; it never hands the viewer any transcript content.</figcaption>
+</figure>
+
+<h2>Screen 1. The status page: everything under ~/.tribe, one box per campaign</h2>
+
+<p>Open <code>http://127.0.0.1:4321/</code> with nothing after the slash and you get the status
+page. It lists every campaign folder it can find under <code>~/.tribe</code>, on every refresh,
+newest first. This is what it shows on this machine right now.</p>
+
+<figure>
+<img src="walkthrough/status-page.png" alt="Screenshot of the status page: a heading, then a campaign box with a red CRASHED badge, a home path, a 'watch live' link, a one-row cards table, and a wide box of raw JSON log lines." style="width:100%; border:1px solid var(--rule, #d8c9aa);">
+<figcaption>The first box on the status page today. It is a leftover end-to-end test campaign from
+2026-09-03, shown as CRASHED because its recorded process id no longer exists.</figcaption>
+</figure>
+
+<p>Each campaign box has six parts, top to bottom:</p>
+
+<dl class="pairs">
+  <dt>Badge</dt><dd>One of four states. RUNNING if the pid recorded in run.json is alive. CRASHED if
+  the run never finished and the pid is dead. EXITED, with its exit code, if the run finished.
+  NEVER_RUN if the campaign folder has no run.json at all.</dd>
+  <dt>Home path</dt><dd>The campaign folder under ~/.tribe that everything in the box was read from.</dd>
+  <dt>watch live</dt><dd>The same <code>/live</code> link the runner printed, so you can jump to
+  Screen 2 for that campaign.</dd>
+  <dt>Cards table</dt><dd>Card id, status, PR number, last update, and what it is blocked on. Read
+  straight from campaign-state.json.</dd>
+  <dt>Escalations and reports</dt><dd>Every parked question's full text inline, and the list of
+  worker report files. Not visible in the screenshot because this campaign had none.</dd>
+  <dt>Session tail</dt><dd>The last 40 lines of the runner's raw debugging copy of the newest
+  session's stream, the <code>logs/</code> file from Step 2. As the screenshot shows, those lines
+  are raw stream JSON such as
+  <code>{"type":"system","subtype":"thinking_tokens",...}</code>. They are not readable as a
+  conversation.</dd>
+</dl>
+
+<p>The page has no filter and no limit. On this machine it renders 17 campaigns, most of them
+throwaway test runs under temporary folders, into one 387 KB page, and it rebuilds all of that on
+every refresh.</p>
+
+<h2>Screen 2. The live page: one card's session and its subagents</h2>
+
+<p>Follow the printed link and you get the live page for that campaign. Here it is for the
+gap-gate campaign, which finished earlier today.</p>
+
+<figure>
+<img src="walkthrough/live-page.png" alt="Screenshot of the live page: heading '-Users-hip-repo-tribe / gap-gate-2026-09-10', a left column listing C5 and six indented subagent names, and a right column of transcript cards: collapsed THINKING rows, assistant sentences, and Read tool calls showing a JSON file_path." style="width:100%; border:1px solid var(--rule, #d8c9aa);">
+<figcaption>Left: the process list, one session and its six subagents. Right: the session's
+transcript, oldest first. Every box on the right is one line from the .jsonl file.</figcaption>
+</figure>
+
+<p>The left column is the process list. The top entry, C5, is the card's own Claude Code session.
+The six indented entries are the subagents that session spawned, named from the description in
+each subagent's <code>.meta.json</code> file. Clicking one switches the right column to that
+subagent's transcript.</p>
+
+<p>The right column is the transcript. Each box is one message: a collapsed THINKING row, a
+sentence the assistant wrote, or a tool call with its input as raw JSON. New lines are appended
+within about half a second of Claude writing them.</p>
+
+<div class="callout">
+  <span class="kicker">What is missing from that screenshot</span>
+  <p>Three things a first-time reader would expect are not there. A code audit run on 2026-09-11
+  (its notes sit next to this page as <code>tribe-viewer-research.md</code>) confirmed each is a
+  bug rather than a choice. The prompt the runner sent to start the card is not shown at all,
+  because prompts arrive as a list of text blocks and the page only handles plain strings. Every
+  tool call shows its input but never its output. The cause is a two-step slip: the server reads
+  the results from the file, then builds the first batch for the browser without them, and
+  nothing later fills the gap. And every THINKING row is empty,
+  because the sessions the runner starts write thinking blocks with no text in them.</p>
+</div>
+
+<h2>Screen 3. The blank page</h2>
+
+<p>This is what you get if you open the link in the first half minute of a run, before the card
+has a session id, or if the campaign name in the link is wrong.</p>
+
+<figure>
+<img src="walkthrough/live-page-unresolved.png" alt="Screenshot of a live page with the heading 'nope / nope', the read-only disclaimer, a back link, and two empty bordered boxes." style="width:100%; border:1px solid var(--rule, #d8c9aa);">
+<figcaption>The shell always loads. The stream behind it answers "campaign not found", the page
+swallows that error, and the two boxes stay empty forever. Nothing tells you to reload.</figcaption>
+</figure>
+
+<h2>What a first-timer cannot do today</h2>
+
+<p>All of these follow from one fact: the only address the viewer understands is a campaign, and it
+turns that campaign into a session id by reading ~/.tribe.</p>
+
+<ul>
+  <li>You cannot open the viewer for a session you ran yourself with <code>claude</code>. It has no
+  campaign, so there is no link that reaches it, even though its transcript sits in the same folder
+  as C5's.</li>
+  <li>You cannot see the other cards of a campaign. The gap-gate campaign ran cards C1 through C5;
+  the live page shows only the one that was running (or the last one) when you opened it, and
+  offers no way to pick another.</li>
+  <li>You cannot follow the runner from card to card. When C5 ends and C6 starts, an open page
+  keeps tailing C5. Only a reload moves on.</li>
+  <li>You cannot start the viewer by hand and expect it to be useful. <code>bun serve.ts</code> does
+  run alone, but with no campaign under ~/.tribe it shows "no campaigns recorded yet" and there is
+  nothing else to click.</li>
+</ul>
+
+<h2>The question for the redesign</h2>
+
+<p>The agreed direction is one server over <code>~/.claude/projects</code>, listing every session
+on disk, with a React client (a browser user-interface library; you chose it so the viewer can
+grow). The model for that list is Kanna, a separate open-source web UI for
+Claude Code that shows every session folder on disk in a sidebar, whether or not it started them. In that world a campaign card's session is simply
+one session among many. The open question is what happens to the facts that today live only on
+Screen 1: which campaign a session belongs to, which card, whether the runner is alive, and
+whether a card is parked on a question. Three shapes are possible.</p>
+
+<div class="grid">
+  <article class="card">
+    <span class="kicker">Option A</span>
+    <h3>Decorate sessions</h3>
+    <p>One screen. A session whose id matches a campaign card wears a small badge: campaign name,
+    card id, card status, runner alive or dead. Escalation texts and log tails are dropped; you
+    read those files directly.</p>
+    <span class="tag">one surface</span>
+  </article>
+  <article class="card">
+    <span class="kicker">Option B</span>
+    <h3>Keep a campaign page</h3>
+    <p>Two screens. A campaign index (badge, cards table, one link per card to its session) rebuilt
+    in React next to the session browser. Escalation texts and log tails are still dropped.</p>
+    <span class="tag">two surfaces</span>
+  </article>
+  <article class="card">
+    <span class="kicker">Option C</span>
+    <h3>Forget campaigns</h3>
+    <p>The viewer never reads ~/.tribe. The runner prints a session link per card and that is the
+    only bridge. Runner liveness and escalations are checked from files by hand.</p>
+    <span class="tag">smallest</span>
+  </article>
+</div>
+
+<p>Option A is the recommendation: it keeps the one fact you actually use, the card-to-session
+mapping, without a second screen to maintain.</p>

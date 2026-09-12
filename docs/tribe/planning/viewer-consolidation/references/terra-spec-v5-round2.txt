@@ -1,0 +1,54 @@
+LOCATION: Opening “References: … read …”
+WHAT BROKE: This asks the reader to leave the page even though the page later says its glossary makes the identifiers followable without leaving it.
+SEVERITY: NIT
+
+LOCATION: §1, “D18 — the scope of the D16 wall”
+WHAT BROKE: D16 is used to explain D18 before D16 itself is introduced, so the first pass has to hold an undefined term.
+SEVERITY: NIT
+
+LOCATION: §1, “D18, D19 and D20 are each a correction…”
+WHAT BROKE: This was the hardest passage: I understood it after rereading, but its three abstract rule corrections arrive before the concrete implementation sections that make them easy to retain.
+SEVERITY: NIT
+
+LOCATION: §4, “the client can fetch the rest at the node’s own at+i”
+WHAT BROKE: This conflicts with D19’s later rule that an elided tool result must be fetched through `resultAnchor`, so I cannot tell which anchor an implementation must send for a tool result.
+SEVERITY: BLOCK
+
+LOCATION: §5.4, “held in the same bounded map”
+WHAT BROKE: It is unclear whether this means the summary cache described in §5.3 or a separate previous-scan map, which makes the retained state hard to picture.
+SEVERITY: NIT
+
+LOCATION: §6.1, “it is where the next tick’s read begins after a reset”
+WHAT BROKE: The page defines `offset` as including raw carry but does not state how a subsequent read combines that carry with bytes read from `ackOffset`, so I cannot derive how duplication or loss is avoided.
+SEVERITY: BLOCK
+
+LOCATION: §6.3, `nodes += the node count those rows produce` followed by “pairing runs HERE, after the trim”
+WHAT BROKE: The window boundary depends on whether a `tool_result` is paired or becomes an orphan node, but pairing is deferred until after the boundary is chosen, so the specified 500-node count is not derivable.
+SEVERITY: BLOCK
+
+LOCATION: §12.2, `containedJoin(root, ...segments)` “when the resolved result does not start…”
+WHAT BROKE: “Resolved” is used here for a pure joining primitive and later for `realpath` containment, making it hard to tell which resolution this function itself performs.
+SEVERITY: NIT
+
+LOCATION: §13, “~/.tribe missing entirely — every badge is null”
+WHAT BROKE: The wire contract declares `badges` as `Badge[]`, so “null” leaves the actual API value ambiguous.
+SEVERITY: NIT
+
+LOCATION: §16.2, “homeA writes:”
+WHAT BROKE: This reads like the start of the fixture’s concrete contents, but it immediately jumps to test assertions instead.
+SEVERITY: NIT
+
+LOCATION: §16.2, fixture tree showing two projects versus “two projects and a show 1 older projects link”
+WHAT BROKE: The stated fixture tree contains two project directories, while the asserted sidebar behaviour requires three, so the required fixture cannot be constructed from this page.
+SEVERITY: BLOCK
+
+LOCATION: §16.3, “Resume: kill the page’s connection mid-write, reconnect, and assert every row appears exactly once —”
+WHAT BROKE: The dangling dash makes this test case read unfinished.
+SEVERITY: NIT
+
+LOCATION: §17 R4, “L2: system rows vanished…”
+WHAT BROKE: L2 is not introduced in the page’s short-code glossary, unlike the other L identifiers.
+SEVERITY: NIT
+
+READER: FAIL 4 BLOCK
+terra exit=0

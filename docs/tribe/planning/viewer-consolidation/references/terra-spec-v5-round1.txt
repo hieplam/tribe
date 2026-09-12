@@ -1,0 +1,42 @@
+LOCATION: §3.2 Routes — “everything else … returns the SPA shell” / “anything else 404”
+WHAT BROKE: These rules assign different responses to an unlisted browser path, so I cannot tell which routing behavior to build or test.
+SEVERITY: BLOCK
+
+LOCATION: §4 — “The expansion address is the node’s own `at`+`i`, never a separate one.”
+WHAT BROKE: A paired tool result lives in a later row, but this address points to the earlier `tool_use` block, so the spec never explains how `/api/block` can retrieve an elided result.
+SEVERITY: BLOCK
+
+LOCATION: §7.2 — “nothing else — B9”
+WHAT BROKE: `B9` is used without appearing in the page’s short-code glossary, although the surrounding explanation makes the intended behavior understandable.
+SEVERITY: NIT
+
+LOCATION: §12.6 — “The zero-write wall is an allowlist”
+WHAT BROKE: This was the hardest passage to read because its dense nested exceptions, source-scan rules, and a stray continuation at “8.” required repeated rereading to establish the actual policy.
+SEVERITY: NIT
+
+LOCATION: §13 — “the file’s inode changed since the last tick”
+WHAT BROKE: This says to re-stream from byte 0, contradicting §6.1’s explicit rule to send only the normal tail window after rotation.
+SEVERITY: BLOCK
+
+LOCATION: §16.2 — “The three empty shapes”
+WHAT BROKE: One fixture HOME cannot simultaneously contain the populated `.claude/projects` tree described above and have no `.claude`, so the required fixture variants are not defined.
+SEVERITY: BLOCK
+
+LOCATION: §16.2 — base64 image DOM assertion
+WHAT BROKE: The image is said to fetch bytes on expand, yet the assertion requires that the page issue no network request for those bytes, leaving the allowed `/api/block` request undefined.
+SEVERITY: BLOCK
+
+LOCATION: §16.2 — “an id from the other project”
+WHAT BROKE: The test’s expected outcome is unstated and conflicts with §5.2’s global session-id lookup, which deliberately resolves a session without a project in the URL.
+SEVERITY: BLOCK
+
+LOCATION: §16.3 — “the direct DOM form of blocker 4” / “blocker 5’s user-visible form”
+WHAT BROKE: Neither blocker number is introduced on this page, though the surrounding reconnect and rotation tests can still be understood.
+SEVERITY: NIT
+
+LOCATION: §16.5 — “hash(GET /index.html)”
+WHAT BROKE: The route table defines `GET /` as the index shell but does not define `GET /index.html`, so this served-build assertion has no settled expected response.
+SEVERITY: BLOCK
+
+READER: FAIL 7 BLOCK
+terra exit=0

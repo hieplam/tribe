@@ -1,0 +1,42 @@
+LOCATION: Immediately after `export interface FileObservation` in §4  
+WHAT BROKE: An unclosed code block makes §§5–8.1 render as literal Markdown/escaped HTML, so their headings, tables, and diagrams are not readable as intended.  
+SEVERITY: BLOCK
+
+LOCATION: §6.3, `the last 500 nodes worth of bytes`  
+WHAT BROKE: I cannot determine how the server finds the starting byte offset for a 500-node window without an index, because nodes are only known after parsing rows and a row can yield zero or multiple nodes.  
+SEVERITY: BLOCK
+
+LOCATION: §7, `Every count is from the 2026-09-11 corpus scan (§0)`  
+WHAT BROKE: This conflicts with §0’s stated 2026-09-12 single scan, so I had to reread to determine which measurement date governs the table.  
+SEVERITY: NIT
+
+LOCATION: Immediately after the §8.1 component tree  
+WHAT BROKE: Another unclosed code block makes §§8.2–8.4 appear as literal Markdown rather than structured sections.  
+SEVERITY: BLOCK
+
+LOCATION: §8.2, `The owner picks one theme`  
+WHAT BROKE: The required theme is not named on this page, so I cannot tell which token file and visual reference the build is approved to copy.  
+SEVERITY: BLOCK
+
+LOCATION: §9, after the badge-scan pseudocode  
+WHAT BROKE: The surrounding code block causes the badge rules and Mermaid diagram to render as escaped source instead of readable specification content.  
+SEVERITY: BLOCK
+
+LOCATION: §14, `last-500-row window`  
+WHAT BROKE: This conflicts with the repeatedly defined 500-node window, and I cannot tell which limit the performance proof must implement.  
+SEVERITY: BLOCK
+
+LOCATION: §16.1, `B25`, `B2`, and `B1`  
+WHAT BROKE: These finding identifiers are used without being defined on the page, so I cannot follow what evidence the before-captures are meant to establish beyond the short parenthetical descriptions.  
+SEVERITY: NIT
+
+LOCATION: §16.2, fixture paths beginning `projects/<encoded-cwd-A>`  
+WHAT BROKE: The fixture is described as a `~/.claude/projects` tree but is then launched with `HOME` pointed at “that tree,” leaving the required `<HOME>/.claude/projects` layout ambiguous.  
+SEVERITY: BLOCK
+
+LOCATION: §6.1, the D13 explanation of `offset`, `ackOffset`, carry bytes, and decoder state  
+WHAT BROKE: I could follow it, but this is the hardest passage because the explanation introduces several interacting byte-boundary rules before the state transition is shown concretely.  
+SEVERITY: NIT
+
+READER: FAIL 7 BLOCK
+terra exit=0

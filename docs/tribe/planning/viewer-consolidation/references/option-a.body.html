@@ -1,0 +1,293 @@
+<section class="with-margin">
+  <div>
+    <span class="kicker">The proposal</span>
+    <p>Option A is one web page over the folder where Claude Code keeps its transcripts,
+    <code>~/.claude/projects</code>. The viewer lists every session found there, renders any of
+    them, and follows the ones still being written. It reads one other place, <code>~/.tribe</code>,
+    for a single purpose described next.</p>
+    <p>Three words. The <em>runner</em> is the program that works through a <em>campaign</em>, a
+    batch of tasks called <em>cards</em>, without you. For each card it starts one Claude Code
+    session and writes that session's id into the campaign's state file,
+    <code>campaign-state.json</code>, under <code>~/.tribe</code>. That file is how a session
+    "belongs" to a card: its id is listed there. Next to it, <code>run.json</code> records the
+    runner's process id and start time, which is how anyone can tell whether the runner is alive.</p>
+    <p>Campaigns do not get their own screen in Option A. Instead, a session whose id appears in a
+    campaign state file wears a small badge saying which campaign, which card, and whether the
+    runner is alive. Those two small files are the only things the viewer reads from
+    <code>~/.tribe</code>.</p>
+    <p>Two decisions already made shape everything below. First, the viewer reads the Claude
+    transcript and nothing else for content. The runner also writes its own copy of each session's
+    stream to a log file; the viewer never opens that log. The log is kept only because the
+    <em>watchdog</em>, a separate helper that restarts a campaign after the API quota pause ends,
+    reads from it the exact time the quota resets, a value the transcript does not carry. Second,
+    there is no second copy of any transcript anywhere; everything is parsed from Claude Code's file
+    on each request.</p>
+  </div>
+  <aside class="margin-note">"Transcript" here always means the file Claude Code writes:
+  <code>~/.claude/projects/&lt;encoded cwd&gt;/&lt;session id&gt;.jsonl</code>, plus the
+  <code>&lt;session id&gt;/subagents/</code> folder next to it.</aside>
+</section>
+
+<h2>Where the bytes come from</h2>
+
+<p>Three writers, one reader. Claude Code writes every transcript, whether the session was started
+by you in a terminal, by the runner for a card, or by a session spawning a subagent. The runner
+writes a small state file naming which session belongs to which card, and a large log the viewer
+ignores. The viewer reads transcripts for content and the state file for badges, and serves one
+page.</p>
+
+<figure class="diagram">
+<div class="mermaid">flowchart LR
+    subgraph writers["Writers"]
+        T["Claude Code<br/>(your terminal)"]
+        R["Runner<br/>(one session per card)"]
+        S["Any session<br/>spawning subagents"]
+    end
+    subgraph disk["On disk"]
+        P[("~/.claude/projects<br/>&lt;session&gt;.jsonl<br/>&lt;session&gt;/subagents/agent-*.jsonl + .meta.json")]
+        C[("~/.tribe/.../campaign-state.json<br/>card id, status, session id")]
+        L[("~/.tribe/.../runs/.../logs/*.log<br/>raw SDK stream copy")]
+    end
+    V["Viewer<br/>bun serve.ts --port 4321"]
+    W["Watchdog"]
+    B["Browser"]
+    T --> P
+    R --> P
+    S --> P
+    R --> C
+    R --> L
+    P -- "content: every message,<br/>tool call, result, subagent" --> V
+    C -- "badge only:<br/>session id → campaign, card" --> V
+    L -. "never read by the viewer" .-> V
+    L --> W
+    V -- "one page, live over SSE" --> B
+</div>
+<figcaption>Solid arrows are data that actually flows. The dotted arrow is the read that stops: today's
+status page tails the runner log; in Option A nothing in the viewer opens it.</figcaption>
+</figure>
+
+<h2>Screen 1. The session list</h2>
+
+<p>Open <code>http://127.0.0.1:4321/</code> at any time, with or without a campaign running. The
+left column lists projects, one per folder under <code>~/.claude/projects</code>, labelled by the
+real working directory read from inside the transcripts rather than the mangled folder name. Under
+each project, sessions sort newest first. A green dot means the file grew in the last ten minutes.
+A badge marks sessions that a campaign state file claims.</p>
+
+<pre><code>┌─ Projects ─────────────────────┬─ /Users/hip/repo/tribe ── 41 sessions ─────────────────────┐
+│ ● /Users/hip/repo/tribe    41  │                                                             │
+│   /Users/hip/repo/kanna    12  │ ● Viewer consolidation: research and spec      2 min ago   │
+│   /Users/hip/repo/memo      3  │   5f01ddc5 · 13 MB · 4 subagents                            │
+│   /Users/hip/repo/wiki-…    9  │                                                             │
+│                                │ ○ Implement C5 gap-candidates paths             7 h ago     │
+│ Filter: [ gap-gate-2026-09-10 ]│   d7d21837 · 987 KB · 6 subagents                           │
+│                                │   ▣ gap-gate-2026-09-10 · C5 · shipped · runner exited      │
+│                                │                                                             │
+│                                │ ○ Fix C4 fingerprint scope                      9 h ago     │
+│                                │   02c01a76 · 822 KB · 5 subagents                           │
+│                                │   ▣ gap-gate-2026-09-10 · C4 · shipped · runner exited      │
+│                                │                                                             │
+│                                │ ○ set-model-fable                               1 d ago     │
+│                                │   ab8cb8e6 · 1.4 MB                                         │
+└────────────────────────────────┴─────────────────────────────────────────────────────────────┘
+
+  ●  live: the transcript grew within the last 10 minutes        ▣  campaign badge
+  ○  finished or idle                                             title: Claude Code's own
+                                                                  ai-title / custom-title row
+</code></pre>
+
+<p>Nothing on this screen needs a database. The title is the title row Claude Code already writes
+into the transcript. The size and age come from the file. The subagent count is the number of
+files in the session's subagents folder. The badge comes from the campaign state files: on each
+list request the viewer opens every <code>~/.tribe/&lt;repo&gt;/campaigns/&lt;name&gt;/campaign-state.json</code>
+(a fixed layout the runner guarantees), collects the session ids in each, and checks the matching
+<code>run.json</code> process id. Clicking a badge fills the filter box, so the list narrows to that campaign's sessions, newest
+first, which is how you follow a running campaign from card to card.</p>
+
+<h2>Screen 2. One session</h2>
+
+<p>Click a session and the right side becomes its transcript. Subagents appear as a tree under the
+parent, each with its own tab. The tree comes from the sidecar files: next to every subagent
+transcript Claude Code writes a small <code>.meta.json</code> naming the subagent's description,
+its parent, and the id of the Task tool call that spawned it. The transcript shows every message
+type the file contains, including the prompt that started the session and every tool result,
+which today's page drops.</p>
+
+<pre><code>┌─ Implement C5 gap-candidates paths ── ● live ── ▣ gap-gate-2026-09-10 · C5 · running ──────────┐
+│ Tabs:  [ Session ]  [ hunter: Implement C5 ]  [ hunter: Fix audit ]  [ tracker ]  [ scout ]    │
+├──────────────────────────────────────────────────────────────────────────────────────────────┤
+│  YOU  ·  05:19:31                                                                            │
+│  Executor Brief for card C5 …                                    (the prompt, rendered)      │
+│                                                                                              │
+│  CLAUDE  ·  05:19:32                                                                         │
+│  I'll start by reading the plan and spec to understand what C5 requires.                     │
+│                                                                                              │
+│  ▸ Read  docs/superpowers/plans/2026-09-11-gap-candidates-paths-scope.md      ✓ 212 lines    │
+│  ▸ Read  docs/superpowers/specs/2026-09-10-tribe-harness-gap-gate-design.md   ✓ 640 lines    │
+│  ▾ Bash  bun test plugins/tribe/scripts/gaps                                  ✓ 0.9 s        │
+│      37 pass, 0 fail                                                                         │
+│                                                                                              │
+│  ▸ Task  hunter · Implement C5 gap-candidates paths        running · opens the tab above    │
+│                                                                                              │
+│  ▸ thinking  (2 lines)                                                                       │
+│  CLAUDE  ·  05:23:37                                                                         │
+│  Now let me read the source files C5 touches.                                                │
+│                                                                              ⇣ follow live   │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+
+  ▸ / ▾  collapsed / expanded tool call, with its result attached
+  ⇣      the page follows the tail while you stay at the bottom, and stops when you scroll up
+</code></pre>
+
+<p>Each tool call carries its result because the viewer pairs the tool-use block with the
+tool-result block on the fly, by id, in memory. Empty thinking blocks are not shown. The Task tool call's id, written in that sidecar, is what links the call in the parent transcript to
+the subagent tab it spawned. When a tool result was too large and Claude Code spilled it to a side file, the
+row says so and loads the file only when expanded.</p>
+
+<h2>A campaign run, start to finish</h2>
+
+<p>This is the flow from your terminal to your browser, the same one the earlier walkthrough page
+drew for today's viewer, redrawn for Option A. The runner still
+does all its usual work; what it does <em>for the viewer</em> shrinks to two extra lines of output:
+the viewer address at start, and one session address per card. The viewer needs neither to work;
+they are conveniences.</p>
+
+<figure class="diagram">
+<div class="mermaid">sequenceDiagram
+    participant You
+    participant Runner
+    participant Viewer as Viewer (port 4321)
+    participant State as campaign-state.json
+    participant Claude as ~/.claude/projects
+    participant Browser
+    You->>Runner: bun run.ts --repo --model --home
+    Runner->>Viewer: GET /healthz
+    alt a viewer answers
+        Viewer-->>Runner: reuse
+    else nobody answers
+        Runner->>Viewer: spawn (serves the built client)
+    end
+    Runner-->>You: viewer: http://127.0.0.1:4321/?campaign=gap-gate-2026-09-10
+    loop each card
+        Runner->>Claude: start the card's session (Claude Code writes the transcript)
+        Runner->>State: write card.sessionId, status running
+        Runner-->>You: card C5: http://127.0.0.1:4321/s/d7d21837-...
+        Browser->>Viewer: GET / (filtered to the campaign)
+        Viewer->>Claude: list sessions, read titles and mtimes
+        Viewer->>State: map session ids to cards
+        Viewer-->>Browser: C5 appears at the top, live dot, badge "C5 · running"
+        Browser->>Viewer: open /s/d7d21837 (SSE stream)
+        Viewer->>Claude: tail the transcript and its subagents folder
+        Viewer-->>Browser: every line so far, then new lines within 500 ms
+        Runner->>State: status shipped
+        Viewer-->>Browser: badge flips to "C5 · shipped"
+    end
+</div>
+<figcaption>When C5 ends and C6 starts, C6 simply appears at the top of the filtered list with a
+live dot. There is no page bound to "the running card" that has to be reloaded.</figcaption>
+</figure>
+
+<h2>What changes, side by side</h2>
+
+<table>
+  <thead><tr><th>Concern</th><th>Today</th><th>Option A</th></tr></thead>
+  <tbody>
+    <tr><td>How you address a transcript</td><td>Campaign name and repo folder in the URL; the viewer looks up the session id in campaign state</td><td>The session id itself, or pick it from the list</td></tr>
+    <tr><td>Sessions you can open</td><td>One card's session per campaign, chosen at the moment you open the page</td><td>Every session on the machine, campaign or not</td></tr>
+    <tr><td>Following a campaign</td><td>One page pinned to whichever card was running at the moment you opened it</td><td>The list, filtered to the campaign; the newest live session is the current card</td></tr>
+    <tr><td>What the viewer reads under ~/.tribe</td><td>run.json, campaign-state.json, escalation files, report lists, and a 40-line tail of the runner log</td><td>campaign-state.json for badges and run.json for "runner alive". Nothing else</td></tr>
+    <tr><td>Runner log</td><td>Written by the runner, read by the watchdog and by the status page</td><td>Written by the runner, read by the watchdog only</td></tr>
+    <tr><td>Escalations, reports, log tail</td><td>Inlined on the status page</td><td>Not in the viewer. Read the files directly, which is how the campaign-driving skill already handles them</td></tr>
+    <tr><td>Prompt, tool results, subagent tree</td><td>Prompt dropped, results dropped, tree from sidecars</td><td>Prompt and results from the transcript; tree from the sidecar files next to it</td></tr>
+    <tr><td>Client</td><td>One hand-written script, no build</td><td>React and Vite, built once by the repo's install script, served as static files</td></tr>
+    <tr><td>Persistence</td><td>None</td><td>None. A preferences file only if hiding or renaming sessions is ever added</td></tr>
+  </tbody>
+  <caption>The runner log row is the one you asked about: it stays on disk for the watchdog, but the viewer stops reading it.</caption>
+</table>
+
+<div class="callout">
+  <span class="kicker">What gets deleted</span>
+  <p>The status page and everything behind it, roughly 770 lines of server code (the scanner,
+  the campaign renderer, the run-record reader) plus their tests: the code that
+  today walks ~/.tribe reading five kinds of file (run records, state, escalations, report lists,
+  the runner log tail) is replaced by one small function that reads only campaign-state.json and
+  run.json for the badge. Also deleted: the <code>/live</code> route and its campaign-to-session
+  lookup, and the runner's <code>--tribe-root</code> plumbing for the viewer. What survives as
+  logic, rewritten into the new client and server: the code that reads only the newly appended
+  bytes of a growing file and holds back an incomplete last line; the code that turns message
+  text into safe HTML; the folder-name encoding; and the subagent sidecar reader.</p>
+</div>
+
+<h2>The watchdog, and why the runner log stays</h2>
+
+<p>A campaign runs for hours with nobody watching, and the API quota can reject a request at any
+point. When that happens the card's session ends and the runner exits with the code that means
+"session incomplete". Without help the campaign stops there until a person notices. The gap-gate
+campaign was rejected ten times in one night; one of its sessions was relaunched twice.</p>
+
+<p>The <em>watchdog</em> is the mechanical answer. It is a subcommand of the runner that sits
+beside it, wakes every 30 seconds, reads a few files, and picks one action. It never talks to a
+session and never spends a token. From now on "watchdog" is the one name for this kind of thing:
+the process that watches a heartbeat and resumes work when the heartbeat stops. The heartbeat is
+the signal; the watchdog is the watcher. For the runner, the heartbeat is the runner log growing:
+a new line every few seconds while a session is working.</p>
+
+<p>Four files are involved. <code>run.json</code> is the runner's own record of one run: its
+process id, start time, and, when the run ends, its exit code. The runner's exit codes carry the
+meaning: 0 is done, 2 means a card is parked on a question for you, 3 means a session ended
+before its card finished (quota, overload, or crash), 4 and 5 are errors that need a person. The
+runner log is the heartbeat file above. A <code>STOP</code> file in the campaign home is how you
+ask everything to stand down. And the watchdog's own <code>status.json</code> is where it writes
+its current state and the reason for any exit.</p>
+
+<figure class="diagram">
+<div class="mermaid">flowchart TD
+    T["Tick, every 30 s"] --> Z{"STOP file<br/>in the campaign home?"}
+    Z -- yes --> D0["exit: done (stop requested)"]
+    Z -- no --> B{"runner process alive?<br/>(pid from run.json)"}
+    B -- yes --> ST{"runner log unchanged<br/>for 30 min?"}
+    ST -- yes --> H["exit: needs human (stalled)"]
+    ST -- no --> W["keep watching that runner"]
+    B -- "no run.json at all" --> L["launch the runner"]
+    B -- "no: exited" --> E{"recorded exit code"}
+    E -- "0" --> D["exit: done"]
+    E -- "2, 4 or 5" --> N["exit: needs human<br/>(escalations pending / error /<br/>rulings unratified)"]
+    E -- "3: session incomplete" --> Q{"last log lines say<br/>quota rejected?"}
+    Q -- "yes, with reset time" --> S["sleep until reset time,<br/>then relaunch<br/>(at most 6 times)"]
+    Q -- no --> O{"last log lines say<br/>server overloaded (5xx)?"}
+    O -- yes --> K["back off 30, 60, 120, 240, 480 s,<br/>then relaunch (at most 5 times)"]
+    O -- no --> R["plain crash: relaunch<br/>(at most once)"]
+</div>
+<figcaption>One tick of the watchdog, top to bottom: was a stop requested, is the runner alive,
+and if it has exited, what its exit code says. Only exit code 3, "session incomplete", leads to
+the quota, overload and crash branches. Every wait is capped so it can never loop forever; when a
+cap is hit it exits with "needs human" and writes the reason to its status file.</figcaption>
+</figure>
+
+<p>Three of those decisions depend on the runner log: the stall check uses its modification time,
+the quota and overload checks read its last lines. Two of the three could use the Claude
+transcript instead: "unchanged for 30 minutes" works just as well on the transcript's
+modification time, and a quota rejection also appears in the transcript as an assistant row
+flagged as an API error. The third cannot. The
+exact reset time, a timestamp the watchdog sleeps until, exists only in the stream's rate-limit
+event. The transcript carries the human sentence "resets 6:20am (Asia/Saigon)" and nothing
+structured. That one field is the whole reason the log is still written.</p>
+
+<div class="callout">
+  <span class="kicker">Follow-up, not part of Option A</span>
+  <p>The runner is the process that receives the rate-limit event, so it could write the reset
+  time into run.json when it exits, the file the watchdog already reads. The watchdog would then
+  read run.json plus the transcript's modification time, and the log would become an opt-in debug
+  flag instead of 1.8 MB of duplicated bytes per card. That is a runner and watchdog change,
+  sequenced after the viewer ships so the two do not collide.</p>
+</div>
+
+<h2>Two things Option A does not do</h2>
+
+<ul>
+  <li>It does not retire the runner log. The section above explains why: the watchdog still
+  needs the reset time. The follow-up that moves that field into run.json is listed there.</li>
+  <li>It does not show anything that only exists in the live stream and never reaches disk:
+  per-turn cost and duration, background-task notices. That is a property of the transcript format,
+  and no viewer that reads files can recover it.</li>
+</ul>

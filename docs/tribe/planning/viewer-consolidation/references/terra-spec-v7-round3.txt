@@ -1,0 +1,54 @@
+LOCATION: “Option A, approved 2026-09-11”
+WHAT BROKE: “Option A” is used before the page explains what it is.
+SEVERITY: NIT
+
+LOCATION: “RowAnchor.ts is carried for display only”
+WHAT BROKE: The interface defines `ts`, not `RowAnchor.ts`, so this reads like a mistaken file/type reference.
+SEVERITY: NIT
+
+LOCATION: §5.2, “the response carries `ambiguous: true`”
+WHAT BROKE: The stated `SessionSummary` and `/api/session` response contracts contain no `ambiguous` field, so I cannot tell where this required value belongs.
+SEVERITY: BLOCK
+
+LOCATION: §6.1, “discards the carry, and resynchronises at the next `0x0A`”
+WHAT BROKE: The tail algorithm never specifies state or steps for discarding bytes until that newline, so it is unclear how it avoids treating the remainder of the oversized row as a valid row.
+SEVERITY: BLOCK
+
+LOCATION: §6.3, “Finding where a 500-node window starts”
+WHAT BROKE: This was the hardest passage: the backward-scan, pre-pairing count, row trim, and later pairing are all understandable, but the dense pseudocode takes repeated reading to establish their order.
+SEVERITY: NIT
+
+LOCATION: §7.1, “every input row produces at least one node or is accounted for in a fold”
+WHAT BROKE: This conflicts with §7.2’s permitted assistant row containing only empty `thinking`, which produces no node and is not described as a fold.
+SEVERITY: BLOCK
+
+LOCATION: §8.2, “tokens.css, copied verbatim” / “Nothing copies it”
+WHAT BROKE: These adjacent statements appear to prescribe both copying the stylesheet and importing it without a copy.
+SEVERITY: NIT
+
+LOCATION: §9, “each `repoKey`, `slug` and `runId` directory is resolved”
+WHAT BROKE: The spec does not say whether `campaign-state.json` and `run.json` themselves are realpath-contained, so I cannot determine the required behaviour if either fixed-layout file is a symlink escaping `~/.tribe`.
+SEVERITY: BLOCK
+
+LOCATION: §12.6, “What is permitted inside it”
+WHAT BROKE: The allowlist permits filesystem reads and `Bun.serve`, but §9 requires `process.kill(pid, 0)`, leaving it unclear whether that runtime operation passes the structural wall.
+SEVERITY: BLOCK
+
+LOCATION: §16.0, “`playwright-core` is vendored as a devDependency”
+WHAT BROKE: “Vendored” normally means source copied into the repository, while the surrounding text describes an ordinary pinned dependency.
+SEVERITY: NIT
+
+LOCATION: §16.2, “Run every DOM suite” and assert the fixture HOME hash is unchanged
+WHAT BROKE: This cannot include E2 and E3 as specified, because E2 appends transcript rows and E3 runs a campaign that writes into the fake HOME.
+SEVERITY: BLOCK
+
+LOCATION: §16.3, “kill the page’s connection mid-write”
+WHAT BROKE: The intended connection-control mechanism is not stated, so this test step is too vague to reproduce from the page alone.
+SEVERITY: NIT
+
+LOCATION: §17, “follow-up F1” / “follow-up F3”
+WHAT BROKE: These identifiers are not introduced or defined on the page before they are used here.
+SEVERITY: NIT
+
+READER: FAIL 6 BLOCK
+terra exit=0
