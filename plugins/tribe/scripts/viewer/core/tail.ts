@@ -116,9 +116,14 @@ export function advanceTail(state: TailState, chunk: Uint8Array, obs: FileObserv
     : state;
 
   const combined = concatBytes(base.carry, chunk);
-  // combined[0] sits at this absolute file offset — always true for a non-skipping base, because
-  // `offset == ackOffset + carry.length` (§6.1's invariant) holds for every non-skipping state.
-  const absBase = base.ackOffset;
+  // combined[0] sits at this absolute file offset. `base.offset - base.carry.length` is the one
+  // formula correct in BOTH regimes: for a non-skipping base it equals `base.ackOffset` (that is
+  // §6.1's invariant `offset == ackOffset + carry.length`), and for a SKIPPING base — where the
+  // carry is forced empty (see finalCarry) while `offset` races ahead of the pinned `ackOffset` —
+  // it equals `base.offset`, the true position of the new chunk's first byte. Using `base.ackOffset`
+  // here silently anchored the terminating-newline of a chunk-spanning oversized row to a stale
+  // offset, corrupting `ackOffset` (and every byte anchor after it) once the discard flag cleared.
+  const absBase = base.offset - base.carry.length;
 
   const lines: string[] = [];
   const oversized: RenderNode[] = [];

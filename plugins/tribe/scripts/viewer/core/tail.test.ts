@@ -345,7 +345,50 @@ test('D26: after the discard flag clears, the VERY NEXT row parses normally — 
     // JSON, not a fragment of the discarded row's tail.
     expect(lines[0]).toContain(SESSION_4_MARKERS.exactCap);
     expect(() => JSON.parse(lines[0] as string)).not.toThrow();
+
+    // §6.1 invariant (plan Task 5 step 1 item 0): `offset == ackOffset + carry.length` must
+    // survive the MULTI-TICK 9 MiB discard → normal transition, or every subsequent byte anchor
+    // (and the stable row IDs D26/D30 rest on) is displaced.
+    expect(state.offset).toBe(state.ackOffset + state.carry.length);
   } finally {
     rmSync(dest, { recursive: true, force: true });
   }
+});
+
+// 5. §6.1 offset invariant across the skipping→normal transition (Phase-1 audit, Sol probe).
+//    An oversized row that SPANS a chunk boundary must not corrupt `offset == ackOffset +
+//    carry.length` when the discard flag clears: `ackOffset` has to land at the ABSOLUTE newline
+//    after ALL skipped bytes, not at the new chunk's local index.
+test('§6.1: an oversized row spanning a chunk boundary keeps offset == ackOffset + carry.length, and the following row parses exactly once', () => {
+  // Sol probe: ROW_CAP+1 non-newline bytes enter the discard machine with no terminator yet, then
+  // "z\n{}\n" — the "z\n" completes the oversized row; "{}\n" is the following complete row.
+  const first = new Uint8Array(ROW_CAP + 1).fill(0x61); // 'a' — contains no 0x0A
+  const t1 = advanceTail(initialTailState(), first, obs(ROW_CAP + 1, 1));
+  expect(t1.state.skipping).toBe(true); // entered the discard machine
+  expect(t1.oversized).toEqual([]); // no terminator seen yet, so nothing emitted
+  expect(t1.state.offset).toBe(ROW_CAP + 1);
+
+  const second = enc.encode('z\n{}\n');
+  const t2 = advanceTail(t1.state, second, obs(ROW_CAP + 6, 1));
+
+  // The discard machine cleared this tick: exactly one oversized `raw` node, anchored at byte 0
+  // (the true start of the oversized row, from tick one — not the local start of this chunk).
+  expect(t2.state.skipping).toBe(false);
+  expect(t2.oversized).toHaveLength(1);
+  const node = t2.oversized[0] as Extract<RenderNode, { k: 'raw' }>;
+  expect(node.rowType).toBe('oversized');
+  expect(node.at).toBe(0);
+
+  // The row AFTER the oversized one parses exactly once — never a fragment, never twice.
+  expect(t2.lines).toEqual(['{}']);
+  expect(() => JSON.parse(t2.lines[0] as string)).not.toThrow();
+
+  // The invariant, true through the skipping→normal transition (the exact defect Sol probed:
+  // observed `offset=8388614, ackOffset=5` on the buggy machine).
+  expect(t2.state.offset).toBe(t2.state.ackOffset + t2.state.carry.length);
+  // `ackOffset` is the ABSOLUTE position one past the newline that ended the following row:
+  // [0, ROW_CAP+1) discarded head + 'z' + '\n' + '{' + '}' + '\n'  =  ROW_CAP + 6.
+  expect(t2.state.ackOffset).toBe(ROW_CAP + 6);
+  expect(t2.state.offset).toBe(ROW_CAP + 6);
+  expect(t2.state.carry.length).toBe(0);
 });
