@@ -955,15 +955,15 @@ bytes were chunked is a Critical finding: it silently breaks patching and dedupe
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** `title.test.ts`: the five-step fallback of spec §5.3 in
+- [x] **Step 1: Write the failing test.** `title.test.ts`: the five-step fallback of spec §5.3 in
       order, each step tested in isolation and in combination; a file with several `ai-title` rows
       (last wins); a file with none of them (falls through to the session id); a tail window whose
       first line is partial (asserts the partial line is dropped, not parsed). `liveness.test.ts`:
       grew-but-old-mtime is live; not-grown-and-mtime-within-10-min is live; neither is not live;
       the first-scan case where no previous size is known. Expected: modules missing.
-- [ ] **Step 2: Implement** both. Both are pure: they take already-read head and tail line arrays,
+- [x] **Step 2: Implement** both. Both are pure: they take already-read head and tail line arrays,
       a size, an mtime and a `nowIso`; they never stat anything.
-- [ ] **Step 3: Measure the window over the whole real corpus** — this is the acceptance gate for
+- [x] **Step 3: Measure the window over the whole real corpus** — this is the acceptance gate for
       spec §5.3's assumption, and it is a measurement, not a test:
 
       ```sh
@@ -975,13 +975,13 @@ Model: **Sonnet**.
       file) and prints `matched/total`. Expected: **at least 180 of 181** files agree. If fewer,
       raise the tail window and re-run until the threshold is met, then record the final constant
       in the task report and in spec §5.3.
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/title.test.ts core/liveness.test.ts
       ```
       Expected: all pass.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): re-run the measurement yourself and report the number. A title rule
 that is right 90% of the time is a user-visible defect on a list page, and the only way to know is
