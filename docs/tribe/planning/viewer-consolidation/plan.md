@@ -11,6 +11,37 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
 
 ## Global Constraints
 
+### The tail contract — what the owner approved (spec §6.0)
+
+Read this before any task. Everything else in this plan is *how*; this is *what*, and it is the page
+the owner reviewed and approved (D11). If a task's wording ever disagrees with it, the task is wrong.
+
+- Every row in **file order**, never timestamp order.
+- A row appended to the file appears in the browser **within 1 second**.
+- **Tool calls are shown with their results** — including a result that arrives later, and one whose
+  call is further back than the screen holds.
+- It survives a **dropped connection**, a **rotated or truncated file**, a **half-written last row**,
+  and rows of **any size**.
+- It **never writes anything**, and never reads outside the projects root.
+
+**The oracle**: the transcripts on this machine decide correctness — 127,085 rows measured. **A row
+on disk that the viewer silently drops is a bug; a row it does not understand and shows as a raw
+JSON card is working as designed.**
+
+| What the owner would try | What must happen | Task / test |
+| --- | --- | --- |
+| Leave a session open while it writes | new row **within 1 s** | 31 — `live-tail.e2e`, 40 samples, writer's clock |
+| Scroll up while it writes | **stops following**; the view does not move | 31 — `scrollTop` unchanged across an append |
+| Drop the connection, let it return | every row **exactly once** | 31 — reconnect, generation differs, no duplicate ids |
+| Rotate or truncate the file | the **new** file, no duplicated history | 19, 31 — reset, then the tail window |
+| Open a session cut mid-row | **no error card**; renders when the newline arrives | 18, 19 — the `<session-cut>` fixture |
+| A 9 MiB row | **one** "row too large" card, neighbours intact | 5, 18 — both readers, one cap |
+| A late or above-window tool result | the card **completes itself** | 9, 24, 31 |
+| Look for a session you know exists | **every** session listed | 30 — set equality against the fixture |
+| Worry it wrote something | fixture tree **byte-identical** | 30 — recursive digest |
+
+**D12–D32 are the delegated implementation rulings; the owner reviews the page above, not those.**
+
 - **Implementer: dispatch each implementation/fix task to the `hunter` subagent — never a generic
   implementer.**
 - **Purity: core logic stays deterministic and side-effect-free; every outside-world dependency
@@ -132,19 +163,32 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
   read-only and harmless (they close and reopen the client's own stream; they touch nothing else),
   so there is no dev/prod split to prove."
 
-- **D29** — "Spec audits on an Opus subagent with the same skinner brief; blind reads on a Sonnet
-  subagent with the same blind-reader brief." (The roles are unchanged; only the models are.)
+- **D29 (revised by the owner)** — "reviewer default gpt5.6 sol. If it out of usage, fallback to
+  opus 5. Why this? Because i want different model with different context to review to avoid bias.
+  Same model in same vendor still have some chance to be bias as they trained from same source. So
+  best is totally different model from different vendor like claude and gpt." Blind-reader page
+  reviews run on **GPT-5.6 Luna** (`codex exec -m gpt-5.6-luna`), falling back to **Claude Sonnet**.
+  Supersedes D4 for both review roles.
 - **D30** — "Snapshot of a file not ending in '\n': trailing bytes after the last newline are the
   tail carry, never a row; `to` = after the last newline; forward tail seeded with ackOffset := to,
   carry := [to, eof), offset := eof (invariant offset == ackOffset + carry.length holds from tick
   one)."
+- **D32** — "(a) The viewer's projects root is `$CLAUDE_CONFIG_DIR/projects` when that variable is
+  set, else `~/.claude/projects`; `serve.ts` resolves it once at start and prints it; containment
+  root follows it. (b) Fixture suites set `CLAUDE_CONFIG_DIR=<tmp>/cfg` instead of faking HOME for
+  `.claude`; `.tribe` for E3 still comes from a fake HOME. (c) The two real-Haiku suites run against
+  the REAL config dir, because a fresh sandbox is 'Not logged in' and credentials are never copied;
+  their assertions are scoped to the session or campaign the test itself created, and the digest
+  assertions apply to the fixture suites only." (Verified 2026-09-12: a run with the variable set
+  wrote `<dir>/projects/<encoded-cwd>/<id>.jsonl` and nothing under the real `~/.claude`, and
+  printed `Not logged in`.)
 - **D31** — "`core/window.ts` exports `findWindow(readBack: (end, len) => Uint8Array, eof, limit)`;
   the adapter supplies only `readBack`; `serve.ts` composes. Unit test with an in-memory `readBack`
   over the fixture bytes; the HTTP test stays as the integration proof. One implementation for both
   entry points."
 
-(**D11 is reserved for the owner's spec approval** — the numbering below skips it deliberately, not
-by oversight.)
+- **D11** — **the owner approved the spec**: *"Okay approve"* (2026-09-12). The build starts from
+  revision 17; the rulings below are delegated implementation detail.
 
 **There is no `Last-Event-ID` handling anywhere in this plan.** If a task brief or a test name
 mentions resuming by byte offset, it predates D12 and is wrong.
@@ -248,9 +292,12 @@ types, or how four interacting state machines behave under a disconnect — not 
 
 Everything else is mechanical against a precise brief and runs on Sonnet. **The review roles are
 named by role, not by model** — the **skinner** (the audit lens) and the **blind reader**. D4 named
-GPT-5.6 Sol and Terra; **D29 supersedes it while the Codex quota is out**, putting an Opus subagent
-on the skinner brief and a Sonnet subagent on the blind-reader brief. Every `Audit lens (skinner, …)`
-header below is addressed to the role, so a future model change costs no edit.
+GPT-5.6 Sol and Terra; **D29 supersedes it**: the skinner runs on **GPT-5.6 Sol, falling back to
+Opus 5**, and the blind reader on **GPT-5.6 Luna, falling back to Claude Sonnet**. The owner's reason
+is the point — *"totally different model from different vendor"*, because an author and a reviewer
+trained on the same corpus share blind spots and their agreement measures less than it appears to.
+Every `Audit lens (skinner, …)` header below is addressed to the **role**, so a model change costs no
+edit.
 
 ---
 
@@ -273,9 +320,15 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
 
       **The builder produces exactly TWO fake HOMEs** (spec §16.2), because one directory cannot
       both hold a populated `.claude/projects` and have no `.claude`:
-      - `buildHomeA(mkdtempSync(...))` → `.claude/projects/...` and **no `.tribe`** — G1, G2, G4;
+      - `buildHomeA(mkdtempSync(...))` → **`cfg/projects/...`** and **no `.tribe`** — G1, G2, G4;
       - `buildHomeB(mkdtempSync(...))` → everything in A **plus** `.tribe/` with the two same-slug
         campaigns of spec §16.4 — G3.
+
+      **The `.claude` side is `cfg/`, pointed at with `CLAUDE_CONFIG_DIR` (D32b), not a faked
+      `HOME`.** Suites start the server with `CLAUDE_CONFIG_DIR=<root>/cfg`, which is the mechanism
+      Claude Code itself honours — so a fixture run exercises the **production** resolution path of
+      spec §5 rather than a test-only impersonation. `HOME` is still faked for `homeB`'s `.tribe`,
+      because `~/.tribe` has no environment override in this card.
 
       Plus three standalone empties, each its own directory and **not** a variant of A:
       `buildEmptyProject()`, `buildEmptyProjectsRoot()`, `buildHomeWithoutClaude()`. Every one comes
@@ -377,7 +430,7 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       `mktemp -d` allocates a fresh, owned directory: a fixed path like `/tmp/vc-fixture` is shared,
       makes concurrent verification race, and turns a stray `rm -rf` into someone else's data loss.
 
-      Expected: every path under `$FIX/.claude/projects/`; **exactly six
+      Expected: every path under `$FIX/cfg/projects/`; **exactly six
       `<project>/<session>.jsonl` files — `<session-1>`, `<session-live>`, `<session-cut>`,
       `<session-4>`, `<session-2>`, `<session-3>` — and no other**; five
       `<session>/subagents/agent-*.jsonl` with five matching `.meta.json`; one real
@@ -515,8 +568,12 @@ Model: **Sonnet**.
       throw, never a partial path.
 
       Then write `V/core/paths.containment.test.ts` for the **resolved** stage that lexical
-      containment cannot cover. **The root is the resolved `~/.claude/projects` directory (D14), not
-      the session directory** — that is decided by the oracle: the one real symlink on this machine
+      containment cannot cover. **The root is the resolved projects directory (D14) — and which
+      directory that IS follows D32**: `$CLAUDE_CONFIG_DIR/projects` when set, else
+      `~/.claude/projects`. The containment root and the scan root are always the same value; two
+      roots that could disagree is a containment hole with a configuration switch attached, so take
+      the root as a **parameter** here rather than deriving it inside the function. It is **not**
+      the session directory — that is decided by the oracle: the one real symlink on this machine
       is a sidecar pointing at the same agent file under a **sibling session**, and a session-rooted
       check would refuse a row Claude Code itself wrote, which is under-rendering. Cases:
       - **accept** a target resolving to a sibling session inside the projects root (the real shape);
@@ -1177,8 +1234,9 @@ Model: **Sonnet**.
          while a file that cannot be read (`EACCES`, via `chmod 000` in a temp dir, and `ENOENT`)
          yields the "absent" outcome — asserted as two **different** results, because a single
          `catch {}` swallowing both makes a permissions bug look like an empty campaign forever;
-      3. the three symlink shapes of D14, judged against the resolved **`~/.claude/projects`** root
-         (never the session directory): the one resolving outside the root is refused, the one
+      3. the three symlink shapes of D14, judged against **the resolved projects root** — the one
+         `serve.ts` computed from `CLAUDE_CONFIG_DIR` or `HOME` (D32), passed in, never re-derived —
+         and never the session directory: the one resolving outside the root is refused, the one
          resolving to a **sibling session inside** the root is served, and the broken one is refused
          without a read. A session-rooted check would refuse the sibling case, which is a real shape
          Claude Code writes on this machine.
@@ -1534,6 +1592,20 @@ Model: **Sonnet**.
       exit code, never a stack trace. Plus: a `Host` header of `evil.example.com` gets 403; a
       mismatched `Origin` gets 403; `127.0.0.1:PORT` and `localhost:PORT` are accepted; the CSP and
       `nosniff` headers are present on the shell; `/assets/<unknown>` is 404.
+
+      **The projects root is resolved from `CLAUDE_CONFIG_DIR` (D32a)**, once at boot, and
+      **printed on the startup line**: `$CLAUDE_CONFIG_DIR/projects` when the variable is set and
+      non-empty, else `~/.claude/projects`. Claude Code honours the same variable — verified on this
+      machine, where a run with it set wrote its transcript under `<that dir>/projects/…` and nothing
+      under `~/.claude` — so a viewer that ignored it would show a user who sets it an **empty list**
+      and be wrong about it. Assert: set → that root; unset → `~/.claude/projects`; **empty string →
+      treated as unset**; and the resolved root appears in the startup output.
+
+      **A bad value is a typed refusal at start, never a silent fall back**: `CLAUDE_CONFIG_DIR`
+      pointing at a path that does not exist, is not a directory, or cannot be read → one stderr line
+      `viewer: CLAUDE_CONFIG_DIR=<path> is not a readable directory`, exit 2. Falling back to
+      `~/.claude` would hand a user who deliberately sandboxed their config **someone else's
+      sessions**, which is worse than an error.
 
       **Loopback is asserted two ways, because reading the config only proves intent** (spec §12.1):
       the configured hostname is exactly `127.0.0.1`, **and** a socket to the machine's own
@@ -2119,9 +2191,11 @@ Model: **Sonnet**.
       headless Chromium via `e2e/browser.ts`, not API-shape assertions — G1, G4 and G6 are claims
       about what a person sees, so that is where they are observed.
 
-      `dom-kinds.e2e.test.ts`: build **`homeA`** (task 1 — populated `.claude/projects`, **no
-      `.tribe` at all**, which is G1's precondition) into a fresh `mkdtemp` directory and start the
-      real server with `HOME=<that directory>`. The three empty shapes are **separate** directories
+      `dom-kinds.e2e.test.ts`: build **`homeA`** (task 1 — populated `cfg/projects`, **no `.tribe`
+      at all**, which is G1's precondition) into a fresh `mkdtemp` directory and start the real
+      server with **`CLAUDE_CONFIG_DIR=<that directory>/cfg`** and `HOME=<that directory>` (D32b) —
+      the same variable Claude Code honours, so this exercises the production root resolution of
+      spec §5, not a test-only path. The three empty shapes are **separate** directories
       from their own builders, not variants of `homeA`, and each is served and asserted on its own.
       Open `/s/<session-1>` in a page. Two layers:
 
@@ -2174,7 +2248,9 @@ Model: **Sonnet**.
         byte-identical;
       - **E2** (task 31) runs on **its own copy of `homeA`** → digest the whole copy **except
         `<session-live>.jsonl`**, the one file its writer appends to;
-      - **E3** (task 32) runs on `homeB` → digest **`homeB/.claude` only, never `homeB/.tribe`**.
+      - **E3** (task 32) runs against the **real** config dir for `.claude` and `HOME=<homeB>` for
+        `.tribe` (D32c) → **no digest**; assertions are scoped to the campaign and session the test
+        created.
 
       Task 14's allowlist proves no write call is *reachable in the source*; this proves none
       *happened in a real run*, over precisely the bytes the viewer is forbidden to touch. Both are
@@ -2247,8 +2323,13 @@ Model: **Sonnet**.
       proxy for the thing G2 actually claims.
 
       **E2 runs on its OWN COPY of `homeA`**, not on the shared one (spec §16.2): its writer appends
-      to a transcript, so a shared HOME would make a parallel suite's digest fail on this suite's
-      legitimate writes. Its own zero-write digest covers the whole copy **except
+      to a transcript, so a shared root would make a parallel suite's digest fail on this suite's
+      legitimate writes. The copy is pointed at with `CLAUDE_CONFIG_DIR=<copy>/cfg`.
+
+      **The real-Haiku half runs against the REAL config dir (D32c)** — a fresh `CLAUDE_CONFIG_DIR`
+      sandbox is *Not logged in* (observed on this machine) and this card does not copy credentials
+      into one. That half takes **no digest** and scopes every assertion to **the session id the test
+      created**; the fixture half above is where the zero-write claim is proved. Its own zero-write digest covers the whole copy **except
       `<session-live>.jsonl`**, the single file the controlled writer touches.
 
       1. Serve a fixture session from that copy and open it in Chromium via `e2e/browser.ts`.
@@ -2337,7 +2418,10 @@ Model: **Sonnet**.
 
       **Both campaign homes live under the fake HOME's `.tribe/` (`homeB` from task 1). This test
       never writes to the owner's real `~/.tribe`, and the runner is invoked with `HOME=<homeB>`
-      precisely so it cannot.** Neither home is "the real one" — both are synthetic, one under
+      precisely so it cannot.** Its **`.claude` side is the REAL config dir (D32c)**: a fresh
+      `CLAUDE_CONFIG_DIR` sandbox is *Not logged in*, so the runner's real Haiku session must write
+      where its credentials are. Assert against **the session id the runner created**, never the
+      whole tree, and take **no digest** of the owner's config dir. Neither home is "the real one" — both are synthetic, one under
       `<repoKeyA>` and one under `<repoKeyB>` sharing a slug.
 
       In outline: a throwaway `git init` repo with no remote; one staged card whose spec and plan
@@ -2386,11 +2470,10 @@ Model: **Sonnet**.
       is outside this card's authority (the old harness did exactly that and it is being removed,
       not carried over).
 
-      **The zero-write digest for this suite covers `homeB/.claude` ONLY — never `homeB/.tribe`**
-      (spec §16.2). The runner writes campaign state under `.tribe` by design, so digesting it would
-      fail on the runner's own work rather than on a viewer write. Take the digest **after the runner
-      has exited**, then again **after the browser-read interval**, and assert the two are
-      byte-identical: that is precisely the window in which only the viewer is running.
+      **This suite takes NO digest (D32c)** — its `.claude` side is the owner's real config dir,
+      which this card may not hash, and its `.tribe` side is written by the runner by design. The
+      zero-write claim is proved by the fixture suites (task 30); here the assertions are scoped to
+      **the campaign and session the test itself created**, by id.
 
       **Teardown removes `homeB` in a `finally`** — the whole fake HOME, by the exact path the test
       recorded when `mkdtemp` created it, never a glob and never a pattern. Both campaign homes live
