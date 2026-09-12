@@ -655,3 +655,81 @@ describe('normalize — <persisted-output> spill markers (spec §7.6, fail-close
     expect(JSON.stringify(node)).not.toContain('passwd');
   });
 });
+
+const enc = (s: string): number => new TextEncoder().encode(s).length;
+
+describe('normalize — D15: the 64 KiB cap holds for the WHOLE emitted node, not just its inner payload', () => {
+  test('a boundary tool_result whose inner ToolResult fits but whose complete orphan_result node would exceed 64 KiB is elided so the EMITTED node is ≤ 64 KiB', () => {
+    // 65,400 bytes of text: the inner `ToolResult` JSON-encodes to ~65,472 B — UNDER the 65,536 B
+    // cap, so an inner-only fit check leaves it unelided — while the COMPLETE `orphan_result` node,
+    // with `id`, anchors, `toolUseId` and `resultAnchor` added around it, encodes to ~65,667 B, OVER
+    // the cap. D15 (spec §7) requires NO emitted node to exceed 65,536 B; sizing only the inner
+    // payload is the defect this guards (Sol: one live instance, orphan_result 65,555 B).
+    const nodes = normalize([
+      userBlocks(100, [{ type: 'tool_result', tool_use_id: 'toolu_x', content: 'a'.repeat(65400) }]),
+    ]);
+    const node = only(nodes);
+    expect(node.k).toBe('orphan_result');
+    if (node.k !== 'orphan_result') throw new Error('unreachable');
+    // The load-bearing invariant: the WHOLE node, as it is emitted onto the wire, fits the cap.
+    expect(enc(JSON.stringify(node))).toBeLessThanOrEqual(64 * 1024);
+    // Having been truncated to fit, it must be marked so the client fetches the full body (§7 / D15).
+    expect(node.elided).toBe(true);
+    expect(node.expandable).toBe(true);
+    if (node.result.r !== 'text') throw new Error('unreachable');
+    expect(node.result.elided).toBe(true);
+  });
+
+  test('a tool_result already under the cap is NOT elided and stays whole (the elision only triggers at the boundary)', () => {
+    const nodes = normalize([
+      userBlocks(110, [{ type: 'tool_result', tool_use_id: 'toolu_y', content: 'small output' }]),
+    ]);
+    const node = only(nodes);
+    if (node.k !== 'orphan_result') throw new Error('unreachable');
+    expect(node.elided).toBe(false);
+    if (node.result.r !== 'text') throw new Error('unreachable');
+    expect(node.result.elided).toBe(false);
+    expect(enc(JSON.stringify(node))).toBeLessThanOrEqual(64 * 1024);
+  });
+});
+
+describe('normalize — classification is TOTAL (D23/D28): every unmatched message/block shape renders a VISIBLE fallback; silence is reserved STRICTLY for thinking===""', () => {
+  test('a user row whose message.content is ABSENT renders a visible raw fallback (bucket D), never a silent drop', () => {
+    const node = only(normalize([input(100, { type: 'user', uuid: 'u', timestamp: 't', message: { role: 'user' } })]));
+    expect(node.k).toBe('raw');
+    if (node.k !== 'raw') throw new Error('unreachable');
+    expect(node.rowType).toBe('user');
+  });
+
+  test('an assistant row whose message.content is a NON-array, non-string value renders a visible raw fallback', () => {
+    const node = only(normalize([input(200, { type: 'assistant', message: { role: 'assistant', content: 42 } })]));
+    expect(node.k).toBe('raw');
+    if (node.k !== 'raw') throw new Error('unreachable');
+    expect(node.rowType).toBe('assistant');
+  });
+
+  test('a user row whose `message` field is absent entirely renders a visible raw fallback', () => {
+    const node = only(normalize([input(250, { type: 'user', uuid: 'u', timestamp: 't' })]));
+    expect(node.k).toBe('raw');
+    if (node.k !== 'raw') throw new Error('unreachable');
+    expect(node.rowType).toBe('user');
+  });
+
+  test('a thinking block whose `thinking` value is MISSING (only a signature) renders a visible raw fallback — silence is NOT for missing, only for ""', () => {
+    const node = only(normalize([assistantBlocks(300, [{ type: 'thinking', signature: 'sig-only' }])]));
+    expect(node.k).toBe('raw');
+    if (node.k !== 'raw') throw new Error('unreachable');
+    expect(node.rowType).toBe('block:thinking');
+  });
+
+  test('a thinking block whose `thinking` value is a NON-string renders a visible raw fallback — never silent', () => {
+    const node = only(normalize([assistantBlocks(400, [{ type: 'thinking', thinking: 123, signature: 's' }])]));
+    expect(node.k).toBe('raw');
+    if (node.k !== 'raw') throw new Error('unreachable');
+    expect(node.rowType).toBe('block:thinking');
+  });
+
+  test('the ONE silent block is exactly a thinking block whose `thinking` is "" (spec §7.2 named exception) — the boundary of the contract', () => {
+    expect(normalize([assistantBlocks(500, [{ type: 'thinking', thinking: '', signature: 's' }])])).toEqual([]);
+  });
+});

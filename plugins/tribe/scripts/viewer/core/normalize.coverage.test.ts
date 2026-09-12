@@ -71,7 +71,12 @@ function expectedFor(rec: TranscriptRecord, seenCalls: Set<string>): { kinds: st
     if (typeof content === 'string') {
       return { kinds: [t === 'user' ? 'prompt' : 'assistant'], note: 'bare-string content' };
     }
-    if (!Array.isArray(content)) return { kinds: [], note: 'no content array' };
+    // Classification is TOTAL (D23/D28): a message row whose `message`/`content` is malformed
+    // (absent, or neither a string nor an array) is NOT one of bucket E's silent cases — it renders
+    // a visible `raw` fallback (bucket D). Silence is reserved STRICTLY for a `thinking` block whose
+    // text is "" (asserted at the block rung below). An empty ARRAY is well-formed and yields no
+    // node — the loop runs zero times — which is distinct from the malformed shape here.
+    if (!Array.isArray(content)) return { kinds: ['raw'], note: 'malformed message (absent/non-array content) -> raw fallback (bucket D)' };
     const kinds: string[] = [];
     for (const block of content) {
       if (block === null || typeof block !== 'object') continue;
@@ -81,8 +86,13 @@ function expectedFor(rec: TranscriptRecord, seenCalls: Set<string>): { kinds: st
           kinds.push(t === 'user' ? 'prompt' : 'assistant');
           break;
         case 'thinking':
-          // Block rung: an empty `thinking` is the ONE silent block type (§7.2 named exception).
-          if (typeof b.thinking === 'string' && b.thinking !== '') kinds.push('thinking');
+          // Block rung (D28): the ONLY silent block is a `thinking` whose text is EXACTLY "" (§7.2
+          // named exception). A non-empty string thinking is a `thinking` node; a MISSING or
+          // non-string `thinking` value is malformed and renders a visible `raw` fallback — never
+          // silent. Pinning this is the point: an oracle that dropped non-string thinking (as an
+          // earlier draft did) could not catch the implementation's silent drop.
+          if (b.thinking === '') break;
+          kinds.push(typeof b.thinking === 'string' ? 'thinking' : 'raw');
           break;
         case 'tool_use':
           kinds.push('tool');
@@ -217,6 +227,42 @@ describe('normalize coverage — every fixture row/block classified by the D23/D
     for (const patch of patches) {
       expect(patch.op).toBe('result');
     }
+  });
+
+  test('malformed message/block shapes are classified TOTAL — a visible raw fallback, silence ONLY for thinking==="" (D23/D28, spec §7.1 D/E)', () => {
+    // These shapes are absent from the on-disk fixture (a well-formed corpus carries none), so the
+    // fixture-driven proof above cannot exercise them — "a coverage test that classifies every
+    // fixture row proves nothing about a shape the fixture lacks" (spec §7.1). Feed them straight to
+    // the real `normalize()` and require the SAME independent oracle (`expectedFor`) that classifies
+    // the fixture to AGREE with the implementation, so the total-classification contract is pinned
+    // rather than the buggy silent-drop behavior an earlier oracle draft repeated.
+    const synth = (at: number, row: Record<string, unknown>): { input: RowInput; record: TranscriptRecord } => {
+      const record: TranscriptRecord = { type: row.type as string, raw: JSON.stringify(row) };
+      if ('message' in row) record.message = row.message;
+      return { input: { at, record }, record };
+    };
+
+    const rows: Record<string, unknown>[] = [
+      { type: 'user', message: { role: 'user' } }, // content ABSENT
+      { type: 'assistant', message: { role: 'assistant', content: 42 } }, // content non-array/non-string
+      { type: 'user' }, // message field ABSENT entirely
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', signature: 's' }] } }, // thinking MISSING
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 7 }] } }, // thinking NON-string
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: '' }] } }, // the ONE silent case
+      { type: 'user', message: { role: 'user', content: [] } }, // well-formed empty array — legitimately silent
+    ];
+
+    rows.forEach((row, idx) => {
+      const { input, record } = synth(idx * 1000, row);
+      const actual: string[] = normalize([input]).map((n) => n.k);
+      const expected = expectedFor(record, new Set<string>());
+      expect({ shape: idx, kinds: actual }).toEqual({ shape: idx, kinds: expected.kinds });
+    });
+
+    // Belt-and-braces: the ONLY silent shape among the above is the exactly-"" thinking (and the
+    // well-formed empty array). Every other malformed shape produced a visible node.
+    const visibleCounts = rows.map((row, idx) => normalize([synth(idx * 1000, row).input]).length);
+    expect(visibleCounts).toEqual([1, 1, 1, 1, 1, 0, 0]);
   });
 
   test('D28 mixed row: one row, a tool_result block that PAIRS (a Patch) and a text block that survives as a prompt', () => {

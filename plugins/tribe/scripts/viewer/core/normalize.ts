@@ -117,8 +117,15 @@ function normalizeMessageRow(row: RowInput, out: RenderNode[]): void {
     return;
   }
 
+  // Classification is TOTAL (D23/D28, spec §7.1): a `user`/`assistant` row whose `message` is absent
+  // or not an object is a MALFORMED row shape, not one of the bucket-E silent cases — it renders a
+  // visible `raw` fallback (bucket D), never a silent drop. (Silence is reserved strictly for a
+  // `thinking` block whose text is ""; nothing else may vanish.)
   const message = asRecord(record.message);
-  if (message === null) return;
+  if (message === null) {
+    out.push(rawNode(row));
+    return;
+  }
   const content = message.content;
   const model = typeof message.model === 'string' ? message.model : null;
 
@@ -128,18 +135,27 @@ function normalizeMessageRow(row: RowInput, out: RenderNode[]): void {
     out.push(blockToNode(row, 0, { type: 'text', text: content }, model));
     return;
   }
-  if (!Array.isArray(content)) return;
+  // A `content` that is neither a string nor an array (absent, a number, an object, …) is the same
+  // malformed shape: a visible `raw` fallback (bucket D), never dropped. An EMPTY array is a
+  // well-formed row with zero renderable blocks and legitimately yields nothing (it is handled by
+  // the loop below running zero times, not by this guard).
+  if (!Array.isArray(content)) {
+    out.push(rawNode(row));
+    return;
+  }
 
   // `i` is the block's TRUE index within `message.content` (spec §4 addresses payloads by it), so
-  // the raw array is walked directly — a non-object entry consumes its index WITHOUT emitting.
+  // the raw array is walked directly.
   for (let i = 0; i < content.length; i++) {
     const raw = content[i];
     if (isObject(raw)) {
-      // Named exception (spec §7.2): a `thinking` block whose text is "" carries nothing on disk (it
-      // arrives with a `signature` and nothing else, B9; 8,411 of 17,873 measured). Emitting them
-      // would produce 8,411 empty cards, so this is the ONE block type declined a node — the single
-      // `continue` in this module. Skipping is NOT under-rendering: there is nothing on disk.
-      if (raw.type === 'thinking' && !(typeof raw.thinking === 'string' && raw.thinking !== '')) continue;
+      // The ONE silent block (spec §7.2 named exception / bucket E): a `thinking` block whose
+      // `thinking` is EXACTLY "" carries nothing on disk (it arrives with a `signature` and nothing
+      // else, B9; 8,411 of 17,873 measured). Emitting them would produce 8,411 empty cards, so this
+      // is the single `continue` in this module. A `thinking` block whose value is MISSING or
+      // non-string is NOT this case — it is malformed and falls through to a visible `raw` fallback
+      // (see `blockToNode`), so silence stays reserved strictly for `thinking === ""`.
+      if (raw.type === 'thinking' && raw.thinking === '') continue;
       out.push(blockToNode(row, i, raw, model));
     }
   }
@@ -163,8 +179,11 @@ function blockToNode(row: RowInput, i: number, block: Record<string, unknown>, m
       return elideToFit(text, (t, elided) => ({ ...base, elided, expandable: elided, k: 'assistant' as const, body: tokenizeMarkdown(t), model }));
     }
     case 'thinking': {
-      const thinking = typeof block.thinking === 'string' ? block.thinking : '';
-      return elideToFit(thinking, (t, elided) => ({ ...base, elided, expandable: elided, k: 'thinking' as const, body: tokenizeMarkdown(t) }));
+      // Empty (`thinking === ""`) is filtered by the caller; a MISSING or non-string `thinking`
+      // value is a malformed block, not the silent case, so it renders a visible `raw` fallback
+      // (bucket D) rather than an empty thinking card — classification stays total (D23/D28).
+      if (typeof block.thinking !== 'string') return rawBlockNode(base, block);
+      return elideToFit(block.thinking, (t, elided) => ({ ...base, elided, expandable: elided, k: 'thinking' as const, body: tokenizeMarkdown(t) }));
     }
     case 'tool_use': {
       // Pre-pairing candidate: pending, no result, no result anchor. `core/pair.ts` pairs it and
@@ -188,20 +207,10 @@ function blockToNode(row: RowInput, i: number, block: Record<string, unknown>, m
     case 'tool_result': {
       // No pairing state in this half, so every result is an orphan_result — never dropped (spec
       // §7.5, B1). `core/pair.ts` converts the orphans whose call is in view into completed tool
-      // cards; this half just builds the (already D15-elided) `ToolResult` payload.
+      // cards; this half builds the whole `orphan_result` node, sized to the D15 cap AS A WHOLE.
       const toolUseId = typeof block.tool_use_id === 'string' ? block.tool_use_id : '';
       const isError = block.is_error === true;
-      const result = toToolResult(block.content, isError);
-      const resultElided = result.r === 'text' && result.elided;
-      return {
-        ...base,
-        elided: resultElided,
-        expandable: resultElided,
-        k: 'orphan_result',
-        toolUseId,
-        result,
-        resultAnchor: { at: base.at, i: base.i },
-      };
+      return orphanResultNode(base, block.content, isError, toolUseId);
     }
     case 'image': {
       const source = asRecord(block.source);
@@ -211,13 +220,44 @@ function blockToNode(row: RowInput, i: number, block: Record<string, unknown>, m
       // (spec §7.2), so it is inherently expandable regardless of the 64 KiB elision (task 9).
       return { ...base, elided: false, expandable: true, k: 'image', mediaType, bytes: base64ByteLength(data) };
     }
-    default: {
+    default:
       // An unknown block type (never measured in 127,085 rows) is still on disk, so it is never
       // dropped: it becomes a raw card carrying the block's JSON (open-world rule, spec §7.1).
-      const json = JSON.stringify(block);
-      return elideToFit(json, (t, elided) => ({ ...base, elided, expandable: elided, k: 'raw' as const, rowType: `block:${String(block.type)}`, json: t, bytes: utf8Bytes(json), text: null }));
-    }
+      return rawBlockNode(base, block);
   }
+}
+
+/** Bucket D at the BLOCK level (spec §7.1): a collapsed `raw` card carrying an unmatched or
+ * malformed content block's own JSON verbatim. The single visible fallback for any block shape the
+ * ladder does not otherwise render — so classification stays total (D23/D28), never a silent drop.
+ * `json` is elided past the 64 KiB cap (D15); `bytes` always reports the TRUE total. */
+function rawBlockNode(base: RowAnchor, block: Record<string, unknown>): RenderNode {
+  const json = JSON.stringify(block);
+  return elideToFit(json, (t, elided) => ({ ...base, elided, expandable: elided, k: 'raw' as const, rowType: `block:${String(block.type)}`, json: t, bytes: utf8Bytes(json), text: null }));
+}
+
+/** The COMPLETE `orphan_result` node (spec §7.5), sized to the 64 KiB cap AS A WHOLE (D15). A
+ * text-bearing result is built THROUGH `elideToFit` so the fit check runs over the entire emitted
+ * node — `id`, anchors, `toolUseId`, `resultAnchor` and all — not merely the inner `ToolResult`.
+ * Sizing only the inner payload let a boundary-sized result yield a complete node just over the cap
+ * while marked unelided (the defect this closes). refs/images/spill payloads are bounded (counts,
+ * a basename, a preview) and carry no elidable body, so their node is built directly. */
+function orphanResultNode(base: RowAnchor, content: unknown, isError: boolean, toolUseId: string): RenderNode {
+  const resultAnchor = { at: base.at, i: base.i };
+  const classified = classifyResult(content);
+  if (classified.r !== 'text-payload') {
+    return { ...base, elided: false, expandable: false, k: 'orphan_result', toolUseId, result: classified, resultAnchor };
+  }
+  const { text } = classified;
+  return elideToFit(text, (t, elided) => ({
+    ...base,
+    elided,
+    expandable: elided,
+    k: 'orphan_result' as const,
+    toolUseId,
+    result: { r: 'text' as const, body: tokenizeMarkdown(t), isError, elided },
+    resultAnchor,
+  }));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -373,14 +413,19 @@ function parseCommandChip(content: string): { label: string; detail: string | nu
   return { label: (m[1] ?? '').trim(), detail: args !== '' ? args : null };
 }
 
-/** A `tool_result`'s payload, mapped to its measured `ToolResult` variant (spec §4, §7.5). The
- * measured content shapes: `string`, `array[text]`, `array[tool_reference]`, `array[image]`, plus
- * the `<persisted-output>` spill marker inside a string (§7.6). */
-function toToolResult(content: unknown, isError: boolean): ToolResult {
+/** A `tool_result`'s payload, classified to its measured shape (spec §4, §7.5). The measured
+ * content shapes: `string`, `array[text]`, `array[tool_reference]`, `array[image]`, plus the
+ * `<persisted-output>` spill marker inside a string (§7.6). A text-bearing result is returned as a
+ * raw `text-payload` (NOT yet elided): `orphanResultNode` sizes it into the COMPLETE node under the
+ * D15 cap (sizing the inner `ToolResult` alone let a boundary result overflow the whole node). The
+ * bounded non-text variants (refs/images/spill) are returned as final `ToolResult` values. */
+type ClassifiedResult = ToolResult | { r: 'text-payload'; text: string };
+
+function classifyResult(content: unknown): ClassifiedResult {
   if (typeof content === 'string') {
     const spill = parseSpill(content);
     if (spill !== null) return spill;
-    return elideResultText(content, isError);
+    return { r: 'text-payload', text: content };
   }
   if (Array.isArray(content)) {
     const blocks = content.filter(isObject);
@@ -394,15 +439,9 @@ function toToolResult(content: unknown, isError: boolean): ToolResult {
       .filter((b) => b.type === 'text' && typeof b.text === 'string')
       .map((b) => b.text as string)
       .join('\n');
-    return elideResultText(text, isError);
+    return { r: 'text-payload', text };
   }
-  return elideResultText('', isError);
-}
-
-/** D15: a `ToolResult`'s own text is elided independently of the tool node it may later be paired
- * into — `elided` here is the RESULT half's own flag (spec §4), never the outer node's. */
-function elideResultText(text: string, isError: boolean): ToolResult {
-  return elideToFit(text, (t, elided) => ({ r: 'text' as const, body: tokenizeMarkdown(t), isError, elided }));
+  return { r: 'text-payload', text: '' };
 }
 
 /** A `<persisted-output>` marker (spec §7.6, `fail-closed-edges` obligation 4). The marker carries
