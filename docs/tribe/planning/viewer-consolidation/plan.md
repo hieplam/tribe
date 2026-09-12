@@ -461,7 +461,7 @@ file.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** `V/core/routes.test.ts`, one case per row of spec §3.2's
+- [x] **Step 1: Write the failing test** `V/core/routes.test.ts`, one case per row of spec §3.2's
       route table plus the refusal matrix: a session id containing `..`, a percent-encoded slash, a
       double-encoded `..%2f`, a NUL byte, an empty id, a 500-character id, an unknown `/api` path,
       and an unknown asset name. Every refusal returns a typed route (`bad_request` with a reason,
@@ -478,7 +478,7 @@ Model: **Sonnet**.
       TypeScript union is erased and cannot be iterated).
 
       Expected on first run: `Cannot find module './routes.ts'`.
-- [ ] **Step 2: Implement** `V/core/routes.ts` and `V/core/model.ts` (spec §4, verbatim — the
+- [x] **Step 2: Implement** `V/core/routes.ts` and `V/core/model.ts` (spec §4, verbatim — the
       `RenderNode` union is the contract three later tasks compile against). `model.ts` is
       types-only **except** `RENDER_NODE_KINDS`, the one runtime value it exports. It must also
       carry `interface Chip` (spec §4 — the four kinds `slash-command`, `system-reminder`,
@@ -486,13 +486,23 @@ Model: **Sonnet**.
       **`text: string | null`**, which is where §6.1's `row too large (N bytes)` label lives; without
       that field the oversized-row contract has no home and §6.1 contradicts §4. Routes are pure
       string math: `new URL(...)`, pattern matching, no path joins.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bunx tsc --noEmit && bun test core/routes.test.ts
       ```
       Expected: `tsc` clean, every route case passing.
-- [ ] **Step 4: Commit**
+
+      **Warchief ruling (compile-red migration window, resolves the Task 2 NEEDS_CONTEXT):**
+      package-wide `tsc` cannot be clean until the old runtime is deleted across phases 2–4; the
+      gate is redefined to "every erroring file is in the DOOMED set {`serve.ts`,
+      `adapters/scan.adapter(.ts/.test.ts)`, `adapters/poller.adapter(.ts/.test.ts)`,
+      `e2e/harness(.ts/.test.ts)`, `e2e/live-viewer.e2e.test.ts`, `idle-timeout.integration.test.ts`,
+      `core/live/**`, `core/derive(.ts/.test.ts)`, `core/render(.ts/.test.ts)`}, and no error is in
+      a file created this task" — see the Hunter report for the transcribed evidence. `bun test`
+      gates on this task's own files only (`core/routes.test.ts core/model.test.ts
+      structure.test.ts`), per the KNOWN-RED BASELINE (task 1) carried through phase 1.
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the refusal matrix yourself against the parser. Verify that no
 branch of `routes.ts` returns a value that a later caller could join into a path without passing
