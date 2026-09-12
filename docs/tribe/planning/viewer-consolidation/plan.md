@@ -111,9 +111,14 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
   bytes beyond the cap are scanned for `\n` but never retained. If the row's length ≤ cap, parse it;
   if > cap, emit exactly one `raw` node with `rowType:"oversized"` anchored at the row's true start,
   and retain nothing. Repeat until ≥ limit candidates (D21) or BOF."
-- **D27** — "`/api/rows` accepts `orphans=<comma-separated tool_use_ids>` (the orphan results the
-  client currently holds); the response carries `patches: Patch[]` for those whose call lies in the
-  returned range; the client applies them exactly like live patches."
+- **D27 (refined)** — "`/api/rows` accepts `orphans=<comma-separated tool_use_ids>` (the orphan
+  results the client currently holds); the response carries `patches: Patch[]` for those whose call
+  lies in the returned range; the client applies them exactly like live patches. The response's
+  `patches` may carry two ops: `{op:\"result\", id, …}` (the existing live patch shape, attaches a
+  result to a held tool node) and `{op:\"remove\", id}` (deletes a held `orphan_result` node whose
+  call has now arrived in the back-filled range). The paired tool card is created in the back-filled
+  range at the CALL's anchor, so the identity rule — a node's id is its own anchor — is never
+  violated; the orphan simply disappears."
 - **D28** — "Classification is per BLOCK for `user`/`assistant` rows and per ROW for all other row
   types. Row-level rungs (1 unparsable/oversized, 2 folded, 5 silent) apply to the row; within a
   message row, each content block gets exactly one outcome: `tool_result` → pairable (Patch if its
@@ -928,6 +933,11 @@ Model: **Sonnet**.
       existing `serializeFrameData` cases and add the two Unicode line separators, which the
       current code leaves unhandled).
 
+      **The `Patch` union has two ops (D27)** and both must round-trip: `{op:"result", id, node}`
+      and `{op:"remove", id}`. Assert the encoder emits each, and that a decoder given one never
+      confuses it for the other — `remove` carries **no** `node`, so a consumer that reads `node`
+      unconditionally is the bug this shape exists to prevent.
+
       **There is no `parseLastEventId`, and no test for one.** D12: the server ignores
       `Last-Event-ID` entirely. Assert that absence the only way it can be asserted — the module
       exports no such function and its source does not contain the string `Last-Event-ID` — so a
@@ -1230,10 +1240,19 @@ Model: **Sonnet**.
       card.** The orphan sits in the range the client *already holds*; back-fill returns the range
       *before* it, so re-pairing over the returned range alone can never reach it. So the request
       carries `orphans=<comma-separated tool_use_ids>` and the response carries
-      `patches: Patch[]` — one for each supplied id whose **`tool_use` lies in the returned range**,
-      addressed to the orphan's own `RowAnchor.id`. Assert: an id whose call is in range yields a
-      patch; an id whose call is still further back yields none and stays an orphan; an absent or
-      empty `orphans` yields `patches: []`; an id the client never held is ignored rather than
+      `patches: Patch[]`. For each supplied id whose **`tool_use` lies in the returned range**, the
+      server does **two** things: the paired `tool` card is built **in the returned range at the
+      CALL's anchor** and arrives in `nodes` like any other back-filled node, **and** a
+      **`{op:"remove", id: <the orphan's RowAnchor.id>}`** patch tells the client to delete the
+      orphan it holds.
+
+      **It is `remove`, never `result`** (D27): a node's id **is its own anchor**, an `orphan_result`
+      is anchored at the *result's* row and a `tool` card at the *call's* row, which is earlier.
+      Replacing one with the other would give a node an id that is not its own anchor and falsify the
+      identity rule that dedupe, patching, `data-row-id` and `/api/block` all rest on. Assert: an id
+      whose call is in range yields a `remove` patch **and** a tool node at the call's anchor in
+      `nodes`; an id whose call is still further back yields neither and stays an orphan; an absent
+      or empty `orphans` yields `patches: []`; an id the client never held is ignored rather than
       erroring.
 
       **It counts NODES, never rows** (spec §4's vocabulary: a row is a transcript line, a node is a
@@ -1612,8 +1631,10 @@ getting it wrong is easy and silent.
       - **a `rows` node whose id is already present is ignored, not appended** — assert the node
         count is unchanged. This is what makes D12's reconnect-as-fresh-snapshot invisible: the
         overlap between the old window and the new one is dropped rather than duplicating cards;
-      - **a `patch` replaces the node with that id in place**, preserving position, node count
-        unchanged;
+      - **a `patch` carries one of two ops (D27)**: `result` **replaces** the node with that id in
+        place, preserving position, node count unchanged; `remove` **deletes** it and nothing takes
+        its place — the node that supersedes it arrives separately, in `nodes`, at its own anchor.
+        Assert both, and that a `remove` for an id outside the window is dropped silently;
       - a `patch` for an id outside the window is dropped silently, not an error;
       - **back-fill prepends**: nodes from `/api/rows?before=<first>` go on the front, `first` moves
         backwards, order is preserved by concatenation because the range is contiguous;
@@ -1639,9 +1660,11 @@ getting it wrong is easy and silent.
         request, not a hope: "load earlier" **sends `orphans=<tool_use_ids>`** for every
         `orphan_result` currently in the window, and applies the returned `patches` through the
         **same replace-in-place path live patches use** (§6.4), never a second mechanism. Assert:
-        the request carries the ids; a returned patch replaces the orphan **in place** (node count
-        unchanged, position preserved), not a second card beside it; an orphan whose call is still
-        further back survives and is re-sent on the next back-fill.
+        the request carries the ids; the response's **`{op:"remove"}`** patch **deletes** the
+        orphan while the paired `tool` card arrives separately in `nodes` **at the call's anchor**
+        (D27) — assert the orphan is gone, the tool card is present at the earlier position, and no
+        node ended up with an id that is not its own anchor; an orphan whose call is still further
+        back survives and is re-sent on the next back-fill.
 
       **Reconnection has exactly two triggers, and the second needs an entry point** (spec §8.4):
       the browser fires `error` when a connection drops and the client reopens after the `retry:`
@@ -1651,8 +1674,14 @@ getting it wrong is easy and silent.
 
       ```ts
       window.__viewerEventSource : EventSource   // the live handle — close() to simulate a drop
-      window.__viewerReconnect() : void          // open a NEW stream, by the error path's own route
+      window.__viewerReconnect()  : void         // open a NEW stream, by the error path's own route
+      window.__viewerGeneration   : string       // the CURRENT generation, updated on every `hello`
       ```
+
+      The third exists because a test cannot otherwise observe that a reconnect completed:
+      `generation` arrives inside a `hello`, which the page consumes and does not keep, so tasks 31
+      and spec §16.3 would be left waiting on a timer or a node count — both of which race a late
+      frame from the old stream.
 
       **Both SHIP in the production build (D25) — do not gate them on `import.meta.env.DEV`.** An
       earlier draft did, and it made task 31's reconnect proof unrunnable: that suite serves the
@@ -2113,9 +2142,12 @@ Model: **Sonnet**.
         `EventSource` never retries itself (spec §16.3): write a `tool_use` row and wait for the
         card; `page.evaluate(() => window.__viewerEventSource.close())` to drop the stream
         deterministically; write the matching `tool_result`;
-        `page.evaluate(() => window.__viewerReconnect())` to open a new one; then **wait for a
-        `hello` whose `generation` differs** from the one held before the close — waiting on
-        anything else races a late frame from the old stream. Assert the card shows its
+        `page.evaluate(() => window.__viewerReconnect())` to open a new one; then **poll
+        `window.__viewerGeneration` until it differs** from the value read **before** the close
+        (`const g0 = await page.evaluate(() => window.__viewerGeneration)`). The generation arrives
+        inside a `hello`, which the page consumes and does not keep, so that handle is the only way
+        a browser test can observe the reconnect completing — waiting on a timer or a node count
+        races a late frame from the old stream. Assert the card shows its
         result **exactly once** and no duplicate row exists. This is the case an offset cursor could
         not express, and it is the single most important assertion in this task;
       - **reconnect between a call and its result**: drop the connection after the `tool_use` row
@@ -2178,7 +2210,23 @@ Model: **Sonnet**.
       `--viewer-port 4399`. Assertions per spec §16.4:
 
       The fixture authors **two** campaign homes under `homeB`, both synthetic: one under
-      `<repoKeyA>` and a second with the **same slug under `<repoKeyB>`** listing the same session id — the collision that exists on this
+      `<repoKeyA>` and a second with the **same slug under `<repoKeyB>`**.
+
+      **How B comes to list the same session id — a numbered step, not an assumption** (spec §16.4).
+      The runner is invoked against **campaign A only**, so only A ever receives an id from it:
+      1. start the runner against A;
+      2. **poll `<homeB>/.tribe/<repoKeyA>/campaigns/<slug>/campaign-state.json` until
+         `cards.C1.sessionId` is non-null** — the runner writes it on the first `system/init`
+         message, crash-safely and before anything else (`onSessionStart`), so that is the earliest
+         the id exists anywhere;
+      3. **copy that exact id into `<homeB>/.tribe/<repoKeyB>/campaigns/<slug>/campaign-state.json`**
+         at `cards.C1.sessionId` — one write by the test, to its own fixture;
+      4. only then assert the two badges.
+
+      Copying the **real** id is what makes the collision real rather than synthetic: both files name
+      a session that genuinely exists on disk, which is the shape measured on this machine (spec §9:
+      6 session ids appear under two repo keys). Fabricating an id in B would test the badge renderer
+      against a session the scan cannot find, and prove nothing. Both files then list the same id — the collision that exists on this
       machine today (2 slugs and 6 session ids are shared across two repo keys, spec §9).
 
       - both stdout lines captured **verbatim**;

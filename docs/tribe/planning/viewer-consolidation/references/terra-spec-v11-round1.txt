@@ -1,0 +1,38 @@
+LOCATION: §4 — “RowAnchor.ts is carried for display only”
+WHAT BROKE: The declared field is `ts`, so `RowAnchor.ts` reads like a filename rather than the field being discussed.
+SEVERITY: NIT
+
+LOCATION: §6.2 — “dedupe by stable row id … makes the overlap invisible”
+WHAT BROKE: This conflicts with the preceding rule to clear the store whenever the new generation arrives, leaving no old-window overlap to deduplicate.
+SEVERITY: NIT
+
+LOCATION: §6.3 — “Finding where a 500-node window starts”
+WHAT BROKE: This was the hardest passage: the algorithm is split between malformed Markdown fences and a later code block, so I had to reconstruct its control flow.
+SEVERITY: NIT
+
+LOCATION: §7.5 — “it emits a Patch addressed to the orphan's own RowAnchor.id”
+WHAT BROKE: I cannot determine how replacing a later `orphan_result` by a `tool` node preserves the model's identity rule, because a tool node's own anchor must be the earlier call's anchor.
+SEVERITY: BLOCK
+
+LOCATION: §8.2 — “Mechanism”
+WHAT BROKE: Item 3 falls outside the numbered list after the CSS snippet, making the implementation steps read as a broken continuation.
+SEVERITY: NIT
+
+LOCATION: §11.4 — “3b. every path in §11.1b”
+WHAT BROKE: The rule numbering jumps from 3 to 3b and then back to 4, which is understandable but makes the guard's rule references rough.
+SEVERITY: NIT
+
+LOCATION: §14 — “carry ≤ 1 MiB”
+WHAT BROKE: This contradicts the repeated `ROW_CAP = 8 MiB` limit for tail carry, so I cannot tell which memory bound the implementation must meet.
+SEVERITY: BLOCK
+
+LOCATION: §16.3 — “Wait for a hello whose generation differs”
+WHAT BROKE: The page exposes only an `EventSource` handle and reconnect function, not either generation value or an event record, so I cannot follow how this browser test observes that condition.
+SEVERITY: BLOCK
+
+LOCATION: §16.4 — “Both list the same session id once the runner has assigned it”
+WHAT BROKE: The runner is invoked against campaign home A only, but the page never says how campaign home B is updated with that newly assigned session id before the two-badge assertion.
+SEVERITY: BLOCK
+
+READER: FAIL 4 BLOCK
+terra exit=0

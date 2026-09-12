@@ -197,10 +197,15 @@ Three further rulings arrived with review round 2 and **supersede** the earlier 
   retained. If the row's length ≤ cap, parse it; if > cap, emit exactly one `raw` node with
   `rowType: "oversized"` anchored at the row's true start, and retain nothing. Repeat until ≥ limit
   candidates (D21) or BOF."*
-- **D27 — back-fill re-pairing is a wire operation, not a hope.** *"`/api/rows` accepts
-  `orphans=<comma-separated tool_use_ids>` (the orphan results the client currently holds); the
-  response carries `patches: Patch[]` for those whose call lies in the returned range; the client
-  applies them exactly like live patches."*
+- **D27 (refined) — back-fill re-pairing is a wire operation, and the patch has two ops.**
+  *"`/api/rows` accepts `orphans=<comma-separated tool_use_ids>` (the orphan results the client
+  currently holds); the response carries `patches: Patch[]` for those whose call lies in the
+  returned range; the client applies them exactly like live patches. The response's `patches` may
+  carry two ops: `{op:"result", id, …}` (the existing live patch shape, attaches a result to a held
+  tool node) and `{op:"remove", id}` (deletes a held `orphan_result` node whose call has now arrived
+  in the back-filled range). The paired tool card is created in the back-filled range at the CALL's
+  anchor, so the identity rule — a node's id is its own anchor — is never violated; the orphan simply
+  disappears."*
 - **D28 — classification is per BLOCK for `user`/`assistant` rows and per ROW for every other row
   type.** *"Row-level rungs (1 unparsable/oversized, 2 folded, 5 silent) apply to the row; within a
   message row, each content block gets exactly one outcome: `tool_result` → pairable (Patch if its
@@ -639,7 +644,7 @@ exceptions — which is why it is also the only address `/api/block` accepts.
 
 `RowAnchor.at` is the byte offset the `/api/rows` back-fill addresses by, and half of the
 `/api/block` address. **There is no SSE cursor at all** (D12): frame `id:` is a per-stream sequence
-number and the server ignores `Last-Event-ID`. `RowAnchor.ts` is carried for display only:
+number and the server ignores `Last-Event-ID`. The row's `ts` field is carried for display only:
 **nothing ever sorts by it** (906 measured inversions).
 
 ```ts
@@ -654,13 +659,22 @@ export const RENDER_NODE_KINDS: Record<RenderNode["k"], true> = {
   raw: true, unreadable: true,
 };
 
-/** A later-arriving fact about a node the client has already rendered — today, exactly one case:
- * a `tool_result` whose `tool_use` was emitted on an earlier tick (§7.5). The client replaces the
- * node with this `id` and re-renders it in place; it never appends. */
-export interface Patch {
-  id: string;                 // RowAnchor.id of the node being replaced
-  node: RenderNode;           // the complete replacement node, not a delta
-}
+/** A later-arriving fact about a node the client has already rendered. Two ops (D27), because the
+ * live case and the back-fill case are genuinely different operations:
+ *
+ *   `result` — the live case (§6.4): a `tool_result` whose `tool_use` was emitted on an earlier
+ *              tick. The held `tool` node at `id` is REPLACED in place, keeping its position.
+ *
+ *   `remove` — the back-fill case (§7.5): the client holds an `orphan_result`, and the call it
+ *              belongs to has just arrived in the back-filled range. The paired `tool` card is
+ *              built **in that range, at the CALL's anchor** — where it belongs in file order — and
+ *              the orphan is simply DELETED. It is not "replaced": a node's id IS its own anchor
+ *              (§4), so turning an orphan (anchored at the result) into a tool card (anchored at
+ *              the call) by replacement would give a node an id that is not its own anchor and
+ *              break the identity rule every other mechanism rests on. */
+export type Patch =
+  | { op: 'result'; id: string; node: RenderNode }   // replace the node at `id`, in place
+  | { op: 'remove'; id: string };                    // delete the node at `id`; nothing replaces it
 
 /** What a stat must report for the tail transition to be correct (§6.1). `inode` is what makes
  * rotation detectable when the replacement file is the same size or larger — size alone cannot. */
@@ -1237,8 +1251,10 @@ An append-only wire cannot express that. So:
 1. `core/pair.ts` keeps a **pending map** `tool_use_id -> RowAnchor.id`, carried in the stream's
    normalize state across ticks.
 2. When a later tick produces a `tool_result` whose id is in that map, the normalizer emits **no new
-   node**. It emits a `Patch` (§4) whose `id` is the already-sent node's `RowAnchor.id` and whose
-   `node` is the complete replacement `tool` node with `state: "ok" | "error"` and its `result`.
+   node**. It emits a **`{op: "result"}`** `Patch` (§4) whose `id` is the already-sent node's
+   `RowAnchor.id` and whose `node` is the complete replacement `tool` node with
+   `state: "ok" | "error"` and its `result`. The live path only ever uses this op; `remove` belongs
+   to back-fill (§7.5).
 3. The poller sends those in a `patch` frame, after the tick's `rows` frame (order matters: a patch
    may target a node emitted in the same tick).
 4. The client (§8.4) keys its window by `RowAnchor.id`. A `patch` **replaces in place**; a `rows`
@@ -1480,11 +1496,19 @@ what it is holding:
 
 1. "Load earlier" sends `orphans=<tool_use_ids>` — the ids of the `orphan_result` nodes currently in
    its window (§8.4 keeps that list; it is short by construction, bounded by the window).
-2. The server pairs as usual over the returned range, and additionally: for each supplied id whose
-   **`tool_use` lies in that range**, it emits a `Patch` addressed to the orphan's own
-   `RowAnchor.id`.
-3. Those arrive in `patches` and the client applies them **exactly like live patches** (§6.4) —
-   same replace-in-place path, no second mechanism.
+2. The server pairs as usual over the returned range. The call is in that range, so the **paired
+   `tool` card is built there, at the CALL's anchor** — its natural place in file order — and
+   arrives in `nodes` like any other back-filled node.
+3. For each supplied id whose call it just paired, the server additionally emits
+   **`{op: "remove", id: <the orphan's RowAnchor.id>}`** in `patches`. The client deletes that node.
+
+**Why `remove` and not `result`.** A node's id **is its own anchor** (§4), and that identity rule is
+what every other mechanism rests on — dedupe, patching, `data-row-id`, `/api/block`. An
+`orphan_result` is anchored at the **result's** row; a `tool` card is anchored at the **call's** row,
+which is earlier. Replacing the orphan with the tool card would hand a node an id that is not its own
+anchor, and the rule would be false from then on. So the card is *created* where it belongs and the
+orphan is *deleted*. From the user's side it looks identical — the orphan disappears as the paired
+card scrolls into view above it — but the model stays consistent.
 
 The user sees the card complete itself as the history scrolls in, which is the truthful account of
 what happened. An id whose call is *still* further back stays an orphan and is re-sent on the next
@@ -1659,7 +1683,8 @@ Mechanism:
    wall forbids in runtime code, and inventing an exception for it would have weakened the wall to
    save one line. An `@import` needs no exception: the bundler reads the owner's file directly, so
    there is one copy of the tokens in the repo and it is the owner's.
-3. `client/src/styles/app.css` and every `.tsx` reference tokens only via `var(--…)`. The P1 gate
+3. **Consuming them:** `client/src/styles/app.css` and every `.tsx` reference tokens only via
+   `var(--…)`. The P1 gate
    resolves **the exact relative path above, from `client/src/styles/`** — the same string the build
    reads — so a gate that passes and a build that fails cannot happen. §12.6 bans a literal
    colour, font, radius or `px` length anywhere under `client/` — with **no exempt file there**,
@@ -1723,8 +1748,15 @@ window contract work together:
 
   ```ts
   window.__viewerEventSource : EventSource   // the live handle — close() it to simulate a drop
-  window.__viewerReconnect() : void          // open a NEW stream, exactly as the error path would
+  window.__viewerReconnect()  : void         // open a NEW stream, exactly as the error path would
+  window.__viewerGeneration   : string       // the CURRENT generation, updated on every `hello`
   ```
+
+  The third member exists because a test cannot otherwise observe the one signal that says a
+  reconnect completed: **`generation`** arrives inside a `hello` frame, which the page consumes and
+  does not keep. Without it §16.3's reconnect test can only wait on a timer or on a node count, and
+  both race a late frame from the old stream. Like the other two it is read-only and harmless — a
+  string the client already holds.
 
   **Both ship in the production build (D25), and that is deliberate.** An earlier draft made them
   dev-only and then asked E2 to call them through a server that serves the *built* client — a proof
@@ -1744,8 +1776,10 @@ window contract work together:
 - A node arriving in `rows` whose id is **already present is ignored**, never appended. This is what
   makes D12's reconnect-as-fresh-snapshot invisible to the user: the overlap between the old window
   and the new one is dropped silently instead of duplicating every visible card.
-- A `patch` **replaces** the node with that id in place, preserving position. A patch naming an id
-  outside the window is dropped silently — not an error.
+- A `patch` carries one of **two ops** (§4). **`result`** replaces the node with that id in place,
+  preserving position. **`remove`** deletes it, and nothing takes its place — the node that
+  supersedes it arrived separately, in `nodes`, at its own anchor (§7.5). A patch of either op
+  naming an id outside the window is dropped silently, not an error.
 - **Back-fill prepends.** `GET /api/rows?before=<first>` returns the nodes immediately preceding the
   window; they go on the front and `first` moves backwards. The result is still one contiguous
   range, which is why no ordering logic is needed beyond concatenation.
@@ -2025,8 +2059,9 @@ the old file survived.
 | --- | --- | --- |
 | `core/model.ts` | 69-line status-page model | the file **exports `RENDER_NODE_KINDS`** (§4's runtime witness), which the old one could not have |
 
-So `deletion-guard.test.ts` has **two** rules, not one: rule 3 asserts every §11.1 path is **absent**,
-and **rule 3b** asserts every §11.1b path is **present and carries its content marker**. A replaced
+So `deletion-guard.test.ts` has **two** rules for this, not one: rule 3 asserts every §11.1 path is
+**absent**,
+and **rule 4** asserts every §11.1b path is **present and carries its content marker**. A replaced
 file is proved by what it now contains, never by its absence — the two are different claims and
 conflating them is how a rewrite gets mistaken for a deletion.
 
@@ -2071,11 +2106,11 @@ Mechanical, so G5 is a test and not a claim. Over every non-test `.ts`/`.tsx` fi
 2. none contains the strings `scanTribeRoot`, `sessionTail`, `newestLog`, `--tribe-root`,
    `/live`, `/api/processes`, `app.css`;
 3. every path in §11.1 (**deleted outright**) does not exist;
-3b. every path in §11.1b (**replaced in place**) **does** exist and contains its content marker —
+4. every path in §11.1b (**replaced in place**) **does** exist and contains its content marker —
    `core/model.ts` exports `RENDER_NODE_KINDS`. Rule 3 must not be applied to these: the path
    surviving is the correct outcome, and only the contents tell you which file is there;
-4. `adapters/campaign.adapter.ts` is the **only** file whose source contains `.tribe`;
-5. the zero-write wall of §12.6 — an **allowlist** (D16), not the old denylist of eight call names.
+5. `adapters/campaign.adapter.ts` is the **only** file whose source contains `.tribe`;
+6. the zero-write wall of §12.6 — an **allowlist** (D16), not the old denylist of eight call names.
 
 ---
 
@@ -2318,7 +2353,7 @@ project directories.
 | open a 13 MB session, first `rows` frame | ≤ 1.0 s | the **500-node** window of §6.3 — backwards 256 KiB steps, no full parse | `perf.test.ts` |
 | back-fill 500 more **nodes** | ≤ 400 ms | ranged read from a known byte offset | `perf.test.ts` |
 | append -> browser | ≤ 1 s (G2) | 250 ms poll + ranged read of the delta only | `e2e/live-tail.e2e.test.ts` |
-| 8 concurrent streams, RSS | ≤ 300 MB | per-stream state is bounded by §6.5's eviction table in full — carry ≤ 1 MiB, pending tool map ≤ 512, no server-side row buffer; no materialised transcript (D7) | `perf.test.ts` (`process.memoryUsage().rss` after 8 streams on the 13 MB file, and again after 10 minutes of appends) |
+| 8 concurrent streams, RSS | ≤ 300 MB | per-stream state is bounded by §6.5's eviction table in full — carry ≤ `ROW_CAP` (8 MiB), pending tool map ≤ 512, no server-side row buffer; no materialised transcript (D7) | `perf.test.ts` (`process.memoryUsage().rss` after 8 streams on the 13 MB file, and again after 10 minutes of appends) |
 | single SSE frame | ≤ 1 MiB | blocks over 64 KiB and images are elided to `/api/block` | `core/normalize.test.ts` |
 | per-tick read | ≤ 4 MiB | the tick cap in §6.2 | `poller.adapter.test.ts` |
 
@@ -2658,9 +2693,12 @@ Then, in the same run:
   2. `page.evaluate(() => window.__viewerReconnect())` — the entry point of §8.4 (it **ships**,
      D25) that opens
      a new stream by the same path the production `error` handler uses.
-  3. Wait for a `hello` whose **`generation` differs** from the one held before step 1. That is the
-     signal that this is a genuinely new stream rather than a late frame from the old one; waiting
-     on anything else races.
+  3. Wait until **`window.__viewerGeneration` differs** from the value read **before** step 1. The
+     generation arrives inside a `hello` frame, which the page consumes and does not retain, so the
+     test cannot observe it from the outside — §8.4's third handle is what makes this step
+     expressible. Concretely: `const g0 = await page.evaluate(() => window.__viewerGeneration)`
+     before the close, then poll until it changes. Waiting on a timer or a node count instead races
+     a late frame from the old stream.
   4. Assert **each row id appears exactly once** in the DOM. The store cleared on the changed
      generation and re-applied the snapshot (§6.2), so a duplicate card here means the generation
      rule is not being honoured — which is the whole point of the test.
@@ -2698,9 +2736,25 @@ machine today (§9):
 `<repoKeyA>` is exactly what `plugins/tribe/scripts/tribe-home.sh <target-repo>` prints for the
 throwaway repo; `<repoKeyB>` is any second key (the test writes one directly). Each
 `campaign-state.json` has the shape the runner guarantees:
-`{ v, campaign, sequence: ["C1"], cards: { C1: { status, spec, plan, sessionId, … } } }`. Both list
-the **same** session id once the runner has assigned it, which is what makes the two-badge assertion
-real rather than synthetic.
+`{ v, campaign, sequence: ["C1"], cards: { C1: { status, spec, plan, sessionId, … } } }`.
+
+**How campaign B comes to list the same session id — the step an earlier draft left implicit.** The
+runner is invoked against **campaign A only**, so only A's state file ever receives a session id from
+it. B is the fixture's collision twin and the test fills it in, in this order:
+
+1. Start the runner against A (§16.4 step 4 below).
+2. **Poll `<homeB>/.tribe/<repoKeyA>/campaigns/<slug>/campaign-state.json` until
+   `cards.C1.sessionId` is non-null.** The runner writes it on the first `system/init` message —
+   crash-safely and before anything else, per `onSessionStart` — so this is the earliest moment the
+   id exists anywhere.
+3. **Copy that exact id into `<homeB>/.tribe/<repoKeyB>/campaigns/<slug>/campaign-state.json`'s
+   `cards.C1.sessionId`.** One write, by the test, to its own fixture.
+4. Only then assert the two badges.
+
+That is what makes the collision **real rather than synthetic**: both files name a session that
+genuinely exists on disk, which is exactly the shape measured on this machine (§9: 6 session ids
+appear under two repo keys). Fabricating an id in B would test the badge renderer against a session
+the scan cannot find, and prove nothing.
 
 **3. The card.** One card, `C1`, whose committed spec and plan in the target repo make the executor
 **spawn exactly one subagent through the `Task` tool**, because a subagent transcript is what the
