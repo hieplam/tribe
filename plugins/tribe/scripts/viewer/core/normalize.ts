@@ -15,10 +15,21 @@
  * UNKNOWN row type falls to a `raw` card (spec §7.1 bucket D) — over-rendering an unknown row is by
  * design. The ONLY `continue` in this module is the empty-`thinking` exception (spec §7.2).
  *
- * SCOPE — still no tool pairing (task 9): a `tool_result` block emits its pre-pairing candidate, an
- * `orphan_result` (spec §7.5: a result with no call in pairing state is an orphan, NEVER a drop).
- * No 64 KiB elision yet (D15, task 9); text-bearing nodes are emitted un-elided. Oversized-row
- * handling (D26 rung 1) lives in the byte readers, not here — a parsed row is under the cap.
+ * PAIRING (task 9, `core/pair.ts`): this module still emits the PRE-PAIRING candidates only — a
+ * `tool_use` block always becomes a `tool` node in `state: 'pending'`, and a `tool_result` block
+ * always becomes an `orphan_result` node (spec §7.5: never a drop). `countCandidates()` exposes
+ * this count as a named pure function (D21) — task 18's window boundary needs "how many nodes
+ * would this row emit" BEFORE pairing runs. `core/pair.ts` is the SECOND stage: it resolves each
+ * `orphan_result` candidate against a bounded cross-tick map, turning a paired one into a `Patch`
+ * rather than a node — which is exactly why the post-pairing rendered count can be LOWER. Oversized
+ * -row handling (D26 rung 1) lives in the byte readers, not here — a parsed row is under the cap.
+ *
+ * ELISION (D15, task 9): every text-bearing kind (`prompt`, `assistant`, `thinking`, `error`,
+ * `raw`, a tool's own `input`, and a `ToolResult`'s own text) whose ENCODED size would exceed the
+ * 64 KiB per-node cap is truncated to a prefix (or, for a tool's structured `input`, dropped
+ * entirely) with `elided`/`expandable` set, so no emitted node of any kind can exceed the cap —
+ * the precondition `batchFrames` (spec §6.2/§14) relies on. `elideToFit` is the ONE algorithm used
+ * everywhere this applies, so "no node exceeds 64 KiB" is a single guarantee, not N ad-hoc ones.
  */
 import { tokenizeMarkdown } from './markdown.ts';
 import type { TranscriptRecord } from './records.ts';
@@ -50,6 +61,14 @@ export function normalize(rows: RowInput[]): RenderNode[] {
   const out: RenderNode[] = [];
   for (const row of rows) normalizeRow(row, out);
   return out;
+}
+
+/** D21 — the number of candidate nodes `normalize()` would emit for these rows, counted BEFORE
+ * `core/pair.ts` runs: every node the normalizer emits per row, with a `tool_result` block
+ * counting as one candidate (its outcome — a `Patch` or a surviving `orphan_result` — is decided
+ * later, by pairing). Task 18's window boundary needs this count without pairing having run yet. */
+export function countCandidates(rows: RowInput[]): number {
+  return normalize(rows).length;
 }
 
 /** The ROW-level dispatch (spec §7.1 ladder, D23/D28). No `continue` here: a skipped row is exactly
@@ -84,7 +103,17 @@ function normalizeMessageRow(row: RowInput, out: RenderNode[]): void {
   // An API-error row (isApiErrorMessage / apiErrorStatus) renders as ONE error node carrying the
   // status and the error text (spec §8.1 ErrorCard). Measured shape: assistant row, status 429.
   if (typeof record.apiErrorStatus === 'number') {
-    out.push({ ...anchorOf(row, 0), ...sized(), k: 'error', status: record.apiErrorStatus, body: tokenizeMarkdown(messageText(record)) });
+    const status = record.apiErrorStatus;
+    out.push(
+      elideToFit(messageText(record), (t, elided) => ({
+        ...anchorOf(row, 0),
+        elided,
+        expandable: elided,
+        k: 'error' as const,
+        status,
+        body: tokenizeMarkdown(t),
+      })),
+    );
     return;
   }
 
@@ -129,20 +158,21 @@ function blockToNode(row: RowInput, i: number, block: Record<string, unknown>, m
       if (isUser) {
         // §7.6: lift recognised XML tags OUT of the prompt text into `chips` (never left as markup).
         const { chips, remaining } = extractChips(text, { at: base.at, i });
-        return { ...base, ...sized(), k: 'prompt', body: tokenizeMarkdown(remaining), chips };
+        return elideToFit(remaining, (t, elided) => ({ ...base, elided, expandable: elided, k: 'prompt' as const, body: tokenizeMarkdown(t), chips }));
       }
-      return { ...base, ...sized(), k: 'assistant', body: tokenizeMarkdown(text), model };
+      return elideToFit(text, (t, elided) => ({ ...base, elided, expandable: elided, k: 'assistant' as const, body: tokenizeMarkdown(t), model }));
     }
     case 'thinking': {
       const thinking = typeof block.thinking === 'string' ? block.thinking : '';
-      return { ...base, ...sized(), k: 'thinking', body: tokenizeMarkdown(thinking) };
+      return elideToFit(thinking, (t, elided) => ({ ...base, elided, expandable: elided, k: 'thinking' as const, body: tokenizeMarkdown(t) }));
     }
     case 'tool_use': {
-      // Pre-pairing candidate: pending, no result, no result anchor. Task 9 pairs it and may set
-      // `state`, `result`, `resultAnchor`, `agentId`.
-      return {
+      // Pre-pairing candidate: pending, no result, no result anchor. `core/pair.ts` pairs it and
+      // may set `state`, `result`, `resultAnchor`, `agentId`.
+      const node: RenderNode = {
         ...base,
-        ...sized(),
+        elided: false,
+        expandable: false,
         k: 'tool',
         name: typeof block.name === 'string' ? block.name : 'tool',
         input: 'input' in block ? block.input : undefined,
@@ -153,18 +183,23 @@ function blockToNode(row: RowInput, i: number, block: Record<string, unknown>, m
         call: { at: base.at, i: base.i },
         resultAnchor: null,
       };
+      return elideInput(node);
     }
     case 'tool_result': {
       // No pairing state in this half, so every result is an orphan_result — never dropped (spec
-      // §7.5, B1). Task 9 converts the orphans whose call is in view into completed tool cards.
+      // §7.5, B1). `core/pair.ts` converts the orphans whose call is in view into completed tool
+      // cards; this half just builds the (already D15-elided) `ToolResult` payload.
       const toolUseId = typeof block.tool_use_id === 'string' ? block.tool_use_id : '';
       const isError = block.is_error === true;
+      const result = toToolResult(block.content, isError);
+      const resultElided = result.r === 'text' && result.elided;
       return {
         ...base,
-        ...sized(),
+        elided: resultElided,
+        expandable: resultElided,
         k: 'orphan_result',
         toolUseId,
-        result: toToolResult(block.content, isError),
+        result,
         resultAnchor: { at: base.at, i: base.i },
       };
     }
@@ -176,10 +211,12 @@ function blockToNode(row: RowInput, i: number, block: Record<string, unknown>, m
       // (spec §7.2), so it is inherently expandable regardless of the 64 KiB elision (task 9).
       return { ...base, elided: false, expandable: true, k: 'image', mediaType, bytes: base64ByteLength(data) };
     }
-    default:
+    default: {
       // An unknown block type (never measured in 127,085 rows) is still on disk, so it is never
       // dropped: it becomes a raw card carrying the block's JSON (open-world rule, spec §7.1).
-      return { ...base, ...sized(), k: 'raw', rowType: `block:${String(block.type)}`, json: JSON.stringify(block), bytes: utf8Bytes(JSON.stringify(block)), text: null };
+      const json = JSON.stringify(block);
+      return elideToFit(json, (t, elided) => ({ ...base, elided, expandable: elided, k: 'raw' as const, rowType: `block:${String(block.type)}`, json: t, bytes: utf8Bytes(json), text: null }));
+    }
   }
 }
 
@@ -265,10 +302,11 @@ function dividerNode(row: RowInput, label: string): RenderNode {
 }
 
 /** Bucket D (spec §7.1): a collapsed raw card carrying the row's own JSON verbatim. `text` is the
- * oversized label ONLY (§6.1); a plain raw card has none. */
+ * oversized label ONLY (§6.1); a plain raw card has none. D15: `json` is elided past 64 KiB — the
+ * `bytes` field still reports the TRUE total, even when `json` itself is a truncated prefix. */
 function rawNode(row: RowInput): RenderNode {
   const json = row.record.raw;
-  return { ...anchorOf(row, 0), ...sized(), k: 'raw', rowType: row.record.type, json, bytes: utf8Bytes(json), text: null };
+  return elideToFit(json, (t, elided) => ({ ...anchorOf(row, 0), elided, expandable: elided, k: 'raw' as const, rowType: row.record.type, json: t, bytes: utf8Bytes(json), text: null }));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -342,7 +380,7 @@ function toToolResult(content: unknown, isError: boolean): ToolResult {
   if (typeof content === 'string') {
     const spill = parseSpill(content);
     if (spill !== null) return spill;
-    return { r: 'text', body: tokenizeMarkdown(content), isError, elided: false };
+    return elideResultText(content, isError);
   }
   if (Array.isArray(content)) {
     const blocks = content.filter(isObject);
@@ -356,9 +394,15 @@ function toToolResult(content: unknown, isError: boolean): ToolResult {
       .filter((b) => b.type === 'text' && typeof b.text === 'string')
       .map((b) => b.text as string)
       .join('\n');
-    return { r: 'text', body: tokenizeMarkdown(text), isError, elided: false };
+    return elideResultText(text, isError);
   }
-  return { r: 'text', body: tokenizeMarkdown(''), isError, elided: false };
+  return elideResultText('', isError);
+}
+
+/** D15: a `ToolResult`'s own text is elided independently of the tool node it may later be paired
+ * into — `elided` here is the RESULT half's own flag (spec §4), never the outer node's. */
+function elideResultText(text: string, isError: boolean): ToolResult {
+  return elideToFit(text, (t, elided) => ({ r: 'text' as const, body: tokenizeMarkdown(t), isError, elided }));
 }
 
 /** A `<persisted-output>` marker (spec §7.6, `fail-closed-edges` obligation 4). The marker carries
@@ -428,11 +472,73 @@ function anchorOf(row: RowInput, i: number): RowAnchor {
   };
 }
 
-/** Un-elided, non-expandable — chips, dividers, raw cards, error cards and text-bearing part-1
- * nodes. The 64 KiB elision (D15) is task 9; `image`/`attachment` override `expandable` at their
- * call sites. */
+/** Un-elided, non-expandable — chips, dividers and every kind with no larger payload to elide.
+ * `image`/`attachment` override `expandable` at their call sites; every text-bearing kind computes
+ * its own `Sized` via `elideToFit`/`elideInput` (D15) instead of this default. */
 function sized(): Sized {
   return { elided: false, expandable: false };
+}
+
+// ---------------------------------------------------------------------------------------------
+// D15 — the 64 KiB per-node elision. ONE algorithm, used by every text-bearing kind, so "no node
+// exceeds 64 KiB" is a single guarantee rather than N ad-hoc ones.
+// ---------------------------------------------------------------------------------------------
+
+const NODE_CAP = 64 * 1024;
+
+/** Truncates `text` to at most `maxBytes` of UTF-8, cutting only at a boundary that cannot split a
+ * surrogate pair, so the result is always a valid string. */
+function truncateUtf8(text: string, maxBytes: number): string {
+  if (maxBytes <= 0) return '';
+  if (utf8Bytes(text) <= maxBytes) return text;
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (utf8Bytes(text.slice(0, mid)) <= maxBytes) lo = mid;
+    else hi = mid - 1;
+  }
+  if (lo > 0 && lo < text.length) {
+    const code = text.charCodeAt(lo - 1);
+    if (code >= 0xd800 && code <= 0xdbff) lo -= 1; // never split a surrogate pair
+  }
+  return text.slice(0, lo);
+}
+
+/**
+ * D15: builds a value from `text` via `build(text, elided)`, shrinking `text` until the
+ * JSON-encoded result fits the 64 KiB per-node cap. `build` receives the elision flag itself, so
+ * the caller can set its own `elided`/`expandable` fields from the SAME decision this function
+ * made — there is no separate "now go fix up the flags" step to forget.
+ *
+ * The raw-text length is checked FIRST (cheap: `TextEncoder` over the string alone) before ever
+ * calling `build` with the full text, so a multi-megabyte row (spec's 2 MiB / 8 MiB / 9 MiB
+ * session-4 fixtures) never pays for tokenizing text that is certain to be truncated anyway.
+ */
+function elideToFit<T>(text: string, build: (t: string, elided: boolean) => T): T {
+  if (utf8Bytes(text) <= NODE_CAP) {
+    const full = build(text, false);
+    if (utf8Bytes(JSON.stringify(full)) <= NODE_CAP) return full;
+  }
+  let budget = NODE_CAP;
+  let candidateText = truncateUtf8(text, budget);
+  let value = build(candidateText, true);
+  while (utf8Bytes(JSON.stringify(value)) > NODE_CAP && budget > 1) {
+    budget = Math.floor(budget / 2);
+    candidateText = truncateUtf8(text, budget);
+    value = build(candidateText, true);
+  }
+  return value;
+}
+
+/** D15's tool-specific case: `input` is arbitrary structured JSON, not text with a clean "prefix",
+ * so past the cap it is dropped ENTIRELY to `null` rather than truncated — "no full payload in the
+ * node" is exactly what the task-9 brief requires, and a half-a-JSON-object is not a useful
+ * partial payload anyway. The full input stays reachable at the call's own `/api/block?at=&i=`. */
+function elideInput(node: RenderNode): RenderNode {
+  if (node.k !== 'tool') return node;
+  if (utf8Bytes(JSON.stringify(node)) <= NODE_CAP) return node;
+  return { ...node, input: null, elided: true, expandable: true };
 }
 
 /** Re-parse the verbatim row line. records.ts already parsed it once, so this cannot throw for a

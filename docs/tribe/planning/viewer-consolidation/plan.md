@@ -866,7 +866,7 @@ seed of a traversal (B3's class).
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Cases: a call and result in order; a result whose call is
+- [x] **Step 1: Write the failing test.** Cases: a call and result in order; a result whose call is
       outside the window (asserts an `orphan_result` node **at the result's file position**, never
       a drop — this is B1's other half); a call with no result (stays `pending`); two calls with the
       same id; a result with `is_error`; a `Task` call whose id matches a sidecar `toolUseId`
@@ -930,16 +930,16 @@ Model: **Sonnet**.
         entry was evicted renders as an `orphan_result` rather than growing the map.
 
       Expected on first run: module missing.
-- [ ] **Step 2: Implement** a single forward pass with a bounded `Map<tool_use_id, RowAnchor.id>`
+- [x] **Step 2: Implement** a single forward pass with a bounded `Map<tool_use_id, RowAnchor.id>`
       carried in the normalize state, per spec §7.5 and §6.4. No backward scan, no second pass, and
       no unbounded map.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/pair.test.ts core/normalize
       ```
       Expected: all pass, including the orphan case.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): measure the elision threshold's effect on a real transcript — count how
 many nodes carry `elided: true`, and confirm no node's serialized size exceeds
