@@ -188,10 +188,27 @@ Three further rulings arrived with review round 2 and **supersede** the earlier 
   nodes; (5) silent by design (empty thinking, and nothing else unless listed). 'Total and disjoint'
   means: the coverage test classifies every fixture row by this precedence and asserts the outcome;
   bucket 5's exact set excludes anything caught earlier."*
-- **D24 — the backward snapshot grows its slice across an oversized row.** *"The slice doubles
-  (512 KiB, 1 MiB, … up to the 8 MiB row cap) until it contains a newline or reaches BOF; a row
-  exceeding the cap is represented by the same `raw oversized` node as §6.1 and skipped as one
-  row."*
+- **D26 — one row cap, 8 MiB, for both readers** (this **replaces** the earlier D24 text).
+  *"Rows are `\n`-delimited. The backward snapshot read finds row boundaries by newline search,
+  never by fixed slices: given `anchor` (start of the first held row), the previous row ends at
+  `anchor-1`; its start is one byte after the nearest `\n` strictly before `anchor-1`, or BOF.
+  Search for that `\n` by reading slices ending at `anchor-1` and doubling the slice (256 KiB,
+  512 KiB, …) until the `\n` or BOF is found; bytes beyond the cap are scanned for `\n` but never
+  retained. If the row's length ≤ cap, parse it; if > cap, emit exactly one `raw` node with
+  `rowType: "oversized"` anchored at the row's true start, and retain nothing. Repeat until ≥ limit
+  candidates (D21) or BOF."*
+- **D27 — back-fill re-pairing is a wire operation, not a hope.** *"`/api/rows` accepts
+  `orphans=<comma-separated tool_use_ids>` (the orphan results the client currently holds); the
+  response carries `patches: Patch[]` for those whose call lies in the returned range; the client
+  applies them exactly like live patches."*
+- **D28 — classification is per BLOCK for `user`/`assistant` rows and per ROW for every other row
+  type.** *"Row-level rungs (1 unparsable/oversized, 2 folded, 5 silent) apply to the row; within a
+  message row, each content block gets exactly one outcome: `tool_result` → pairable (Patch if its
+  call is in pairing state, else `orphan_result` node); `text`/`image`/… → node; empty `thinking` →
+  silent. A row with a `tool_result` AND a `text` block therefore yields one Patch and one prompt
+  node. The coverage proof is split: Task 8 classifies every block/row WITHOUT pairing (`tool_result`
+  blocks assert `pairable`); Task 9 extends it with pairing (pairable → Patch or orphan). No pairing
+  logic before Task 9."*
 - **D25 — the two client hooks ship in production.** *"`__viewerEventSource` and
   `__viewerReconnect()` ship in the production build. They are read-only and harmless (they close
   and reopen the client's own stream; they touch nothing else), so there is no dev/prod split to
@@ -201,11 +218,18 @@ Three further rulings arrived with review round 2 and **supersede** the earlier 
   / readdir / realpath / read; `Bun.file` read; `Bun.serve`) and fails on any other `node:fs`,
   `fs/promises`, `Bun.write`, `child_process` or `node:net` import or member."*
 
-D22–D25 are corrections of a different kind from D18–D20: not over-reach but **over-claiming**. A
-proof scheduled where its dependencies do not yet exist, a partition called disjoint whose buckets
-overlap, a backward reader that assumed rows are smaller than its step, and a dev/prod split
-invented to guard two harmless functions — each promised more than the design could deliver, and the
-fix in every case is to promise exactly what is true.
+D22, D23, D25–D28 are corrections of a different kind from D18–D20: not over-reach but
+**over-claiming**. A proof scheduled where its dependencies do not yet exist; a partition called
+disjoint whose buckets overlap; a backward reader that assumed rows are smaller than its step; a
+dev/prod split invented to guard two harmless functions; a re-pairing promised with no wire
+operation to carry it; a per-row classification applied to a format whose unit is the block. Each
+promised more than the design could deliver, and the fix in every case is to promise exactly what is
+true.
+
+**D26 supersedes D24** rather than amending it: D24's doubling slice found *a* newline, which is not
+the same as finding *the row's start*, and it left the forward tail (1 MiB) and the backward reader
+(8 MiB) disagreeing about what "oversized" means. One cap, one definition of a row boundary, both
+readers.
 
 D18, D19 and D20 are each a correction of the same over-reach: a rule stated more absolutely than
 the world allows. "Only adapters touch the filesystem" forgot that a measurement script and a build
@@ -400,7 +424,7 @@ built asset returns the SPA shell so the client router can own the address bar.
 | `GET /api/projects?all=1` | `{"projects":[Project],"olderCount":n,"skippedBadges":n}` | §5.1, §5.6; without `all=1`, `projects` is the D10 window and `olderCount` is the remainder |
 | `GET /api/sessions?project=<dir>` | `{"project":Project,"sessions":[SessionSummary]}` | §5.1 |
 | `GET /api/session/<sessionId>` | `{"session":SessionSummary,"subagents":[Agent],"badges":[Badge]}` — `session.projects` names every project dir holding this id (§5.2) | metadata only. **Rows never come from here** — they arrive on `/events` or `/api/rows`; E1 asserts rows in the DOM, never from this route |
-| `GET /api/rows?session=&agent=&before=&limit=` | `{"nodes":[RenderNode],"from":n,"to":n,"truncatedBefore":bool}` | see the paragraph below the table — `limit` counts **pre-pairing candidate nodes**, `before` is a **row byte offset**, and omitting `before` returns the tail window |
+| `GET /api/rows?session=&agent=&before=&limit=&orphans=` | `{"nodes":[RenderNode],"patches":[Patch],"from":n,"to":n,"truncatedBefore":bool}` | see the paragraph below the table — `limit` counts **pre-pairing candidate nodes**, `before` is a **row byte offset**, and omitting `before` returns the tail window |
 | `GET /api/block?session=&agent=&at=&i=` | `{"block":…}` | one elided payload, addressed by `RowAnchor.id` (§4): an image, a 64 KiB+ tool input/result, a `raw` card's JSON, an expandable `attachment` |
 | `GET /api/spill?session=&name=` | `text/plain` | a `<persisted-output>` file, contained (§7.4) |
 | `GET /events?session=&agent=` | `text/event-stream` | §6 |
@@ -411,11 +435,12 @@ built asset returns the SPA shell so the client router can own the address bar.
 | Parameter | Meaning |
 | --- | --- |
 | `before` | a **row byte offset** — the client passes the `from` it currently holds, so the response is exactly the window immediately preceding it. **Omitted ⇒ the tail window**: the same backward algorithm `hello` runs (§6.3), which is what the "N new below" pill and the scroll-to-bottom reload call |
+| `orphans` | comma-separated `tool_use_id`s — **the orphan results the client currently holds** (D27). For each one whose `tool_use` lies in the returned range, the response carries a `Patch` in `patches`, and the client applies it exactly like a live patch. Omitted or empty ⇒ `patches: []` |
 | `limit` | how many **pre-pairing candidate nodes** to gather (D21's unit — the same one the window boundary counts, so client and server never mean different things by "500"). **Default 500, maximum 2,000**; a larger value is clamped to 2,000, not refused, because the cap exists to bound the response rather than to police the caller |
 
 The response carries `from` (the first retained row's byte offset — pass it back as the next
-`before`), `to` (the window's end), and `truncatedBefore` (true iff any row precedes `from`, which
-is what tells the client whether to keep offering "load earlier"). Whole-row trimming (D20) and
+`before`), `to` (the window's end), `truncatedBefore` (true iff any row precedes `from`, which tells
+the client whether to keep offering "load earlier"), and `patches` (D27, above). Whole-row trimming (D20) and
 after-trim pairing (D23 rung 3) apply here exactly as they do to `hello` — one algorithm, two entry
 points.
 
@@ -587,10 +612,11 @@ export type RenderNode = RowAnchor & Sized & (
   | { k: 'divider';       label: string }
   | { k: 'error';         status: number | null; body: MdToken[] }
   | { k: 'raw';           rowType: string; json: string; bytes: number;
-                          /** The human label for a row that has no JSON to show: `oversized`
-                           * carries "row too large (N bytes)" (§6.1), `unreadable` carries the
-                           * skip count. **null for an ordinary raw card**, whose content is
-                           * `json`. Without this field §6.1's text had nowhere to live. */
+                          /** The human label for `rowType: "oversized"` ONLY — "row too large
+                           * (N bytes)" (§6.1). **null for every other raw card**, whose content is
+                           * `json`. An unparsable row is NOT a raw card at all: it is the separate
+                           * `unreadable` kind below, which carries a count and no text (§13).
+                           * Without this field §6.1's label had nowhere to live. */
                           text: string | null }
   | { k: 'unreadable';    count: number }
 );
@@ -891,13 +917,17 @@ window that follows, so the two sides agree with no merge step.
 Rotation **while disconnected** needs no mechanism at all: under D12 a reconnecting client is a new
 client and gets a fresh snapshot of whatever file is there now.
 
-**The carry cap is one number: 1 MiB — and the discard needs a state machine, not a sentence.** A
-partial line is held until it completes or exceeds 1 MiB. Past the cap the tail must *skip the rest
-of that row*, and the only way to do that without treating the remainder as a fresh row is to carry
-a flag:
+**The row cap is 8 MiB — `ROW_CAP`, the SAME constant the backward reader uses (D26) — and the
+discard needs a state machine, not a sentence.** A partial line is held until it completes or
+exceeds `ROW_CAP`. Past it the tail must *skip the rest of that row*, and the only way to do that
+without treating the remainder as a fresh row is to carry a flag:
+
+(An earlier draft capped the forward tail at 1 MiB while the backward reader used 8 MiB, so the same
+2 MiB row rendered as content when scrolled to and as a skip marker when waited for. One constant,
+both readers, one `raw` node — see §6.3.)
 
 ```
-if not skipping and carry.length > 1 MiB:
+if not skipping and carry.length > ROW_CAP:
     skipping   := true
     rowStart   := the offset at which the oversized row began
     skipped    := carry.length                 # bytes discarded so far
@@ -918,9 +948,12 @@ row is **never parsed as a row** (so a JSON fragment cannot masquerade as a reco
 §0's under-rendering rule applied to a case where showing the content is impossible. The `raw` node
 is anchored at the row's own start, so it sorts in file position like every other node.
 
-The real case is a multi-megabyte base64 image row caught mid-write. Named test (task 5):
-*a 2 MiB single-line row is skipped, exactly one `raw` "row too large" node is emitted at its
-offset, and the next row parses normally.*
+The real case is a multi-megabyte base64 image row caught mid-write — the largest transcript on this
+machine averages ≈19 KB per row and its biggest rows are images, so 8 MiB bites only where it should.
+Named tests (task 5), against the two rows task 1 plants in `<session-4>`: a **2 MiB row** parses
+normally (under the cap — it is *not* oversized, which is the half the old 1 MiB cap got wrong), and
+a **9 MiB row** is skipped with **exactly one** `raw` "row too large" node at its offset, after which
+**the next row parses normally** — that last clause is the point of the flag.
 
 ### 6.2 One stream per open session view
 
@@ -1049,38 +1082,69 @@ with each other.
   Finding where a 500-**node** window starts, with no index and without parsing the whole file, is
   the one non-obvious algorithm here, so it is stated exactly:
 
+  **It walks the file backwards ONE ROW AT A TIME, by newline search (D26)** — never by fixed
+  slices. A slice is a means of finding a newline, not a unit of work, and confusing the two is what
+  broke the earlier draft:
+
   ```
-  anchor   := EOF
-  nodes    := 0
-  while nodes < 500 and anchor > 0:
-      step := 256 KiB
-      loop:                                            # D24: GROW until a row boundary is found
-          lo := max(0, anchor - step)
-          read bytes [lo, anchor)
-          if the slice contains a 0x0A, or lo == 0: break
-          if step >= 8 MiB: break                      # the row cap; handled below
-          step := step * 2                             # 512 KiB, 1 MiB, 2 MiB, 4 MiB, 8 MiB
-      if no 0x0A was found and step reached 8 MiB:
-          # a single row larger than the cap: represent it the way §6.1 does and move past it
-          emit one `raw` node, rowType "oversized", anchored at max(0, anchor - step)
-          nodes  += 1
-          anchor := max(0, anchor - step)
-          continue
-      drop the leading partial row unless lo == 0      # core/window.ts
-      parse the complete rows in that slice
-      nodes  += the node count those rows produce      # core/normalize.ts, counted only
-      anchor := offset of the FIRST complete row in the slice
-  # nodeCount() above and below is the PRE-PAIRING count (D21): what the normalizer emits
-  # per row before pairing runs, with each tool_result block counting as one candidate node.
-  # the loop reads whole 256 KiB slices, so it usually OVERSHOOTS. Trim by WHOLE ROWS (D20):
+  ROW_CAP  := 8 MiB                     # the SAME cap the forward tail uses (§6.1)
+  anchor   := EOF                       # start of the first row we hold; EOF before we hold any
+  rows     := []                        # in file order, newest first while building
+  candidates := 0                       # PRE-PAIRING node count (D21)
+
+  while candidates < limit and anchor > 0:
+      # the previous row ENDS at anchor-1. find where it STARTS.
+      end   := anchor - 1
+      step  := 256 KiB
+      start := unknown
+      loop:
+          lo := max(0, end - step)
+          scan bytes [lo, end) backwards for the nearest '\n'
+          if found at k:            start := k + 1;  break
+          if lo == 0:               start := 0;      break       # BOF: the row starts at byte 0
+          if step >= ROW_CAP:       start := OVERSIZED; break     # no '\n' within the cap
+          step := step * 2                                        # 512 KiB, 1 MiB, 2 MiB, 4 MiB, 8 MiB
+      # NOTE: bytes past the cap are SCANNED for '\n' but never RETAINED — the scan is bounded
+      # work on a bounded buffer, re-read slice by slice; nothing accumulates in memory.
+
+      if start is OVERSIZED:
+          # a row longer than the cap. its true start is unknown and unreachable, so we do not
+          # pretend to know it: keep scanning backwards to the nearest '\n' (or BOF) with the
+          # same doubling, WITHOUT retaining bytes, and that position IS the row's true start.
+          start := scanBackwardForNewlineUnbounded(end)   # returns k+1, or 0 at BOF
+          emit exactly ONE `raw` node: rowType "oversized", text "row too large (<end-start+1> bytes)",
+               anchored at {at: start, i: 0}
+          candidates += 1
+          anchor := start
+          continue                      # retain NOTHING of this row
+
+      row := bytes [start, end)
+      rows.prepend(row)
+      candidates += candidateCount(row)   # D21: what the normalizer WOULD emit, before pairing
+      anchor := start
+  ```
+
+  Two properties follow, and both were missing before. **The anchor is always a real row start**,
+  because it is derived from a newline rather than from a slice boundary — so `from` is always a
+  byte a back-fill can pass back as `before` without losing a row. And **an oversized row is
+  anchored at its true start**, found by continuing the same backward scan past the cap: the cap
+  bounds what is *retained*, not what is *scanned*. The earlier draft anchored it at
+  `anchor - step`, which is wherever the doubling happened to stop — a position with no meaning in
+  the file.
+
+  `candidateCount()` is the **pre-pairing** count (D21): what the normalizer would emit per row
+  before pairing runs, with each `tool_result` block counting as one candidate. The loop yields
+  whole rows, so it usually overshoots `limit`; the trim is therefore by whole rows (D20):
+
+  ```
   rows     := the accumulated rows, in file order
-  # drop the largest prefix of whole rows that still leaves >= 500 nodes
-  while nodeCount(rows[1:]) >= 500:
+  # drop the largest prefix of whole rows that still leaves >= limit candidates
+  while candidateCount(rows[1:]) >= limit:
       rows := rows[1:]
   anchor          := offset of the FIRST retained row
   truncatedBefore := anchor > 0
-  # pairing runs HERE, after the trim, over `rows` only
-  nodes    := normalize(rows)
+  # pairing runs HERE, after the trim, over `rows` only (D23 rung 3, D28)
+  nodes    := normalizeAndPair(rows)
   ```
 
   **The trim is by whole rows, and "exactly 500 nodes" is deliberately not the contract (D20).** The
@@ -1101,19 +1165,17 @@ with each other.
   and "the scan reached BOF but the trim discarded rows". Reading backwards costs one or two slices
   for a typical session and terminates at BOF for a short one.
 
-  **The slice grows because a fixed step cannot cross an oversized row (D24).** A 256 KiB slice
-  landing wholly inside a 2 MiB row contains no `0x0A` at all: there is no "first complete row", so
-  the anchor cannot advance and the loop makes no progress — it hangs, or an implementer invents a
-  rule of their own. Doubling the step until the slice contains a newline or reaches BOF fixes the
-  normal case; a row larger than the **8 MiB** cap is represented by **the same `raw oversized` node
-  §6.1 emits on the forward path**, counted as one node and skipped as one row. Forward tail and
-  backward snapshot therefore agree on what an oversized row looks like — which matters because a
-  user can reach the same row by scrolling (snapshot) or by waiting (tail), and must see the same
-  card either way.
+  **One cap, one row definition, both readers (D26).** The earlier draft had the forward tail treat
+  a row over **1 MiB** as oversized while the backward reader used **8 MiB** — so the same 2 MiB row
+  rendered as content when you scrolled to it and as a skip marker when you waited for it. That is
+  not a rounding difference, it is two different transcripts. **`ROW_CAP` is 8 MiB in both**, §6.1
+  and §6.3 emit **the same `raw` node** for a row past it, and a user reaching that row either way
+  sees the same card.
 
-  Named test (task 18): `<session-4>` already carries a **2 MiB row in its middle**; assert the
-  snapshot window across it is correct — the growth loop finds the boundary, the window contains the
-  rows on both sides, and the anchor lands on a real row start.
+  Named tests (task 5 forward, task 18 backward), both against rows task 1 puts in the middle of
+  `<session-4>`: a **2 MiB row** — under the cap, so both readers parse it and the snapshot window
+  across it is correct — and a **9 MiB row** — over the cap, so both readers emit **exactly one**
+  `raw oversized` node anchored at the row's true start, and the window on either side is intact.
 
   **The count is the PRE-PAIRING node count (D21).** Pairing runs after the trim, so a count that
   depended on pairing would be circular — the boundary would depend on the pairing, which depends on
@@ -1194,7 +1256,7 @@ a bound — the oracle is open-world.
 
 | Structure | Bound | What happens at the bound |
 | --- | --- | --- |
-| tail carry (raw bytes) | 1 MiB | the discard state machine of §6.1: skip to the next `0x0A` and emit **one `raw` node** (`rowType: "oversized"`, text `row too large (N bytes)`) anchored at the oversized row's own offset. **Not an `unreadable` node** — that kind is the unparsable-JSON case (§13), which is a different failure with a different shape |
+| tail carry (raw bytes) | **`ROW_CAP` = 8 MiB**, the same constant §6.3's backward reader uses (D26) | the discard state machine of §6.1: skip to the next `0x0A` and emit **one `raw` node** (`rowType: "oversized"`, text `row too large (N bytes)`) anchored at the oversized row's own offset. **Not an `unreadable` node** — that kind is the unparsable-JSON case (§13), which is a different failure with a different shape |
 | per-tick read | 4 MiB | the remainder arrives next tick |
 | one node, any kind | 64 KiB encoded | its text is truncated to a prefix; `elided` and `expandable` are set; the full body is at `/api/block` (D15) |
 | one encoded SSE frame | 1 MiB | the tick's nodes are split across several `rows` frames; no single node can exceed the cap, so batching is total (§6.2) |
@@ -1273,38 +1335,48 @@ later one, which is what lets these counts be compared with each other.
 A new Claude Code release that invents a row type therefore falls into bucket 4 and renders as a raw
 card on day one, and is never silently dropped.
 
-**The mechanical guarantee: a PRECEDENCE LADDER, not a partition of independent buckets (D23).**
+**The mechanical guarantee: a PRECEDENCE LADDER (D23), applied at the right granularity (D28).**
 
-Two earlier attempts were both wrong, and for opposite reasons. "Every row produces a node or is a
-fold" was **false**: a row whose only block is an empty `thinking` produces nothing and is not a
-fold. Calling the four outcomes "total and disjoint" was **also** false, and in a way that is worth
-naming because it is the subtler mistake: a paired `tool_result` is *both* "became a Patch" and
-"silent by design"; a title-source row is *both* "folded" and "silent". The buckets genuinely
-overlap, so no test could ever enforce disjointness over them.
+Two earlier attempts were wrong in opposite ways. "Every row produces a node or is a fold" was
+**false**: a row whose only block is an empty `thinking` does neither. Calling four outcomes "total
+and disjoint" was **also** false: a paired `tool_result` sat in both "became a Patch" and "silent by
+design", a title-source row in both "folded" and "silent" — overlapping buckets no test could
+enforce.
 
-The honest shape is **ordered first-match**. Every row is classified by walking this ladder and
-stopping at the first rung that applies — which makes "exactly one outcome" true by construction
-rather than by assertion:
+**And both were applied to the wrong unit.** A `user` or `assistant` row is not one thing: it is a
+list of content blocks, and they can have *different* outcomes in the same row. A real example from
+this machine — `subagents/agent-a09522dcffd66dd8a.jsonl` row 33 — carries a `tool_result` **and** a
+`text` block, so it yields **one Patch and one prompt node**. Any per-row rule must call that row
+one thing and is therefore wrong about the other.
+
+So (D28): **row-level rungs for every row; block-level outcomes inside a message row.**
 
 ```
-for each row, the FIRST of these that applies is its outcome:
-  1. unparsable, or too large to hold   -> `unreadable` / `raw oversized` node   (§6.1, §13)
-  2. a title-source or otherwise folded row  -> folded, no node of its own
-  3. a `tool_result` whose call is in pairing state -> becomes a Patch on that call
-  4. it emits one or more nodes
-  5. silent by design                   -> the exact set below, and nothing else
+ROW level — for EVERY row, first match wins:
+  1. unparsable, or longer than ROW_CAP   -> `unreadable` / `raw oversized` node
+  2. a title-source or otherwise folded row -> folded, no node of its own
+  -- if the row is `user` or `assistant`, descend to BLOCK level --
+  5. silent by design                     -> only if every block came out silent
+
+BLOCK level — inside a `user`/`assistant` row, for EACH content block, exactly one:
+  - `tool_result`        -> PAIRABLE: a Patch if its call is in pairing state, else an
+                            `orphan_result` node
+  - `text`, `image`, `tool_use`, non-empty `thinking`, … -> a node
+  - `thinking` whose text is ""  -> silent
 ```
 
-Rung 5's set is therefore **what is left after rungs 1–4 have taken their rows**, which is what
-makes it small and checkable: an empty `thinking` block, and an assistant row whose only block is
-one. A paired `tool_result` never reaches rung 5 — rung 3 claimed it. A title-source row never
-reaches it — rung 2 did. Nothing else belongs there unless this list is extended deliberately.
+Rung 5 is therefore reached only when a message row's blocks *all* came out silent — which is why
+its set is two entries (§7.1 bucket 5) and not four: a paired `tool_result` was claimed at block
+level, a title-source row at rung 2.
 
-`normalize.coverage.test.ts` walks the ladder over every fixture row, records the rung each row
-stopped at, and asserts the recorded outcome matches the expected one **per row**. It reports a
-mismatch by **row type and byte offset** — a bare count would say "one row was classified wrong"
-without saying which, which is the difference between a failure you can fix and one you can only
-stare at.
+**The coverage proof is split across two tasks, because pairing does not exist until task 9 (D28).**
+`normalize.coverage.test.ts` at **task 8** classifies every row and block of the fixture **without
+pairing**: a `tool_result` block asserts only that it is **pairable**, which is a property of the
+block itself. **Task 9** extends the same test with pairing, so each pairable block resolves to a
+`Patch` or an `orphan_result`. No pairing logic exists — or is reimplemented — before task 9.
+
+Either way the test reports a mismatch **by row type and byte offset**, never as a bare count: "one
+row was classified wrong" is a failure you can only stare at.
 
 ### 7.2 Content blocks
 
@@ -1398,10 +1470,26 @@ B1 defect (tool results dropped) coming back through a different door. Pairing a
 do that, because a result whose call is not in the window has nothing to pair with.
 
 The orphan therefore has a specific, honest label: **"call is above the window"**. It is not an
-error state and the client does not present it as one. Loading earlier brings the call's row into
-the window, re-pairing runs over the enlarged row set, and the orphan is **replaced by the paired
-card** in place — the user sees the card complete itself, which is the truthful account of what
-happened.
+error state and the client does not present it as one.
+
+**How an orphan becomes a paired card — the wire operation, because "loading earlier re-pairs it"
+is not one (D27).** The orphan sits in the range the client *already holds*; back-fill returns the
+range *before* it. Re-running pairing over the returned range therefore cannot reach the orphan, and
+no response shape the earlier draft defined could have replaced it. So the client tells the server
+what it is holding:
+
+1. "Load earlier" sends `orphans=<tool_use_ids>` — the ids of the `orphan_result` nodes currently in
+   its window (§8.4 keeps that list; it is short by construction, bounded by the window).
+2. The server pairs as usual over the returned range, and additionally: for each supplied id whose
+   **`tool_use` lies in that range**, it emits a `Patch` addressed to the orphan's own
+   `RowAnchor.id`.
+3. Those arrive in `patches` and the client applies them **exactly like live patches** (§6.4) —
+   same replace-in-place path, no second mechanism.
+
+The user sees the card complete itself as the history scrolls in, which is the truthful account of
+what happened. An id whose call is *still* further back stays an orphan and is re-sent on the next
+back-fill; it resolves when its call finally enters a returned range, or never, if the call is
+before BOF.
 Measured: **0 orphan results and 1 unmatched call** across 33,721 calls in the whole corpus, so the
 orphan path is rare in *history* — but it is the normal path for a window that starts mid-session,
 which is exactly why it must be tested rather than trusted (fixture case `tool_result before its
@@ -1914,7 +2002,6 @@ non-JSON body (task 27).
 | --- | --- | --- |
 | `core/derive.ts` + `core/derive.test.ts` | 176 + 366 | status-page derivation |
 | `core/render.ts` + `core/render.test.ts` | 148 + 149 | status-page HTML renderer |
-| `core/model.ts` | 69 | status-page model (replaced by the new `core/model.ts` of §4) |
 | `core/live/model.ts` + `core/live/model.test.ts` | 65 + 29 | the old live wire contract, superseded by §4 |
 | `adapters/scan.adapter.ts` + `.test.ts` | 380 + 338 | the `~/.tribe` five-file scanner **and the runner-log tail** (D6) |
 | `core/live/page.ts` + `.test.ts` | 60 + 35 | the `/live` shell |
@@ -1923,6 +2010,25 @@ non-JSON body (task 27).
 | `fixtures/session-valid.jsonl`, `session-malformed.jsonl`, `subagent-valid.jsonl` | 3 files | replaced by `fixtures/build.ts` (§16.2) |
 | `e2e/harness.ts`, `e2e/harness.test.ts`, `e2e/live-viewer.e2e.test.ts` | 800 + 82 + 21 | rewritten against the new routes (§14) |
 | `idle-timeout.integration.test.ts` | 87 | folded into `serve.security.test.ts` |
+
+**Every path above is gone from the tree after this card.** That is what `deletion-guard.test.ts`
+rule 3 asserts, and it is why the next table exists separately.
+
+#### 11.1b Files REPLACED in place — the path survives, the contents do not
+
+`core/model.ts` is the case that matters: the old status-page model is deleted, and **a new
+`core/model.ts` takes the same path** carrying §4's wire contract. A guard that asserted "the path
+does not exist" would fail on the correct outcome, and one that skipped it would notice nothing if
+the old file survived.
+
+| Path | Old contents | Proof the replacement landed |
+| --- | --- | --- |
+| `core/model.ts` | 69-line status-page model | the file **exports `RENDER_NODE_KINDS`** (§4's runtime witness), which the old one could not have |
+
+So `deletion-guard.test.ts` has **two** rules, not one: rule 3 asserts every §11.1 path is **absent**,
+and **rule 3b** asserts every §11.1b path is **present and carries its content marker**. A replaced
+file is proved by what it now contains, never by its absence — the two are different claims and
+conflating them is how a rewrite gets mistaken for a deletion.
 
 Total removed: **~3,200 lines** of the current 6,076. The PR body carries the real
 `git diff --stat` numbers, not this estimate.
@@ -1964,7 +2070,10 @@ Mechanical, so G5 is a test and not a claim. Over every non-test `.ts`/`.tsx` fi
 1. none contains `runs/` adjacent to `logs` (no code path can open a runner log — D6);
 2. none contains the strings `scanTribeRoot`, `sessionTail`, `newestLog`, `--tribe-root`,
    `/live`, `/api/processes`, `app.css`;
-3. the deleted paths in §11.1 do not exist;
+3. every path in §11.1 (**deleted outright**) does not exist;
+3b. every path in §11.1b (**replaced in place**) **does** exist and contains its content marker —
+   `core/model.ts` exports `RENDER_NODE_KINDS`. Rule 3 must not be applied to these: the path
+   surviving is the correct outcome, and only the contents tell you which file is there;
 4. `adapters/campaign.adapter.ts` is the **only** file whose source contains `.tribe`;
 5. the zero-write wall of §12.6 — an **allowlist** (D16), not the old denylist of eight call names.
 
@@ -2171,7 +2280,7 @@ Every row is "what the user sees", and no row is a stack trace.
 | transcript deleted while streamed | `gone` frame, stream closed, client shows "this session's file is gone" and stops retrying |
 | transcript truncated or replaced **while streamed** | `reset` frame, then the **normal tail window** — never the file from byte 0; the client clears its store first (§6.1) |
 | transcript truncated or replaced **while disconnected** | nothing special is needed: a reconnect is a fresh snapshot of whatever file is there now, under a new `generation` (D12, §6.2) |
-| a single row exceeds the 1 MiB carry cap | one **`raw`** node, `rowType: "oversized"`, text `row too large (N bytes)`, anchored at that row's offset; the rest of the row is skipped to the next `0x0A` (§6.1). Distinct from the `unreadable` row above: that one is a line that failed to parse, this one is a line too big to hold |
+| a single row exceeds `ROW_CAP` (8 MiB) | one **`raw`** node, `rowType: "oversized"`, text `row too large (N bytes)`, anchored at that row's offset; the rest of the row is skipped to the next `0x0A` (§6.1). Distinct from the `unreadable` row above: that one is a line that failed to parse, this one is a line too big to hold |
 | `/api/spill` name fails the charset or containment check | `400 spill name refused`; the preview text already on the card still shows |
 | `/api/block` names an `at`/`i` that does not resolve to a block | `404`, the card keeps its elided placeholder |
 | 9th concurrent SSE stream | `503 too many live streams` |
@@ -2224,23 +2333,30 @@ times *open streams*.
 D9: *"'watchdog' is THE term for any mechanical process that watches a heartbeat and resumes/
 relaunches work… 'supervisor' and 'monitor' as names for that process are retired."*
 
-**Rename (7 sites — two `supervisor`, five `status viewer`).** The inventory is the exact output of
-the two greps in plan task 29; an earlier draft of this spec said five and was wrong, which would
-have made task 29's before-evidence contract unsatisfiable.
+**Rename (7 sites — two `supervisor`, five `status viewer`), and D9 retires only the PROCESS
+NAMES.** That qualifier is load-bearing and an earlier draft ignored it: D9 says *"'supervisor' and
+'monitor' as names for that process are retired"*. It does **not** say the viewer stopped reading
+`run.json` — it did not. **D8 and §9 have the viewer read `run.json` for the badge's
+runner-alive fact**, so a site that truthfully says "the viewer reads this" must keep saying so;
+only the *word* changes where the word is wrong.
+
+Sites 3 and 4 were mis-specified on exactly that point — both rewrote a truthful viewer reference
+into "watchdog", which would have made the README false in a new way. Corrected below.
 
 | # | File:line | From | To |
 | --- | --- | --- | --- |
 | 1 | `plugins/tribe/README.md:249` | "zero-token **supervisor** script" | "zero-token **watchdog** script" |
-| 2 | `plugins/tribe/scripts/runner/core/watchdog/watch-loop.ts:81` | "a crash of the **supervisor**" | "a crash of the **watchdog**" |
-| 3 | `plugins/tribe/README.md:225` | "this is what the **status viewer** below reads" | "this is what the **watchdog** reads" |
-| 4 | `plugins/tribe/scripts/runner/README.md:76` | "the **status viewer** (`scripts/viewer/`) reads to answer 'is this campaign's runner actually alive'" | "the **watchdog** reads…" — the viewer never reads `run.json` for liveness; the watchdog does |
-| 5 | `plugins/tribe/scripts/runner/README.md:129` | "the same package as the **status viewer**, grown a second surface" | rewritten with the section: one surface, no status page |
-| 6 | `plugins/tribe/scripts/runner/README.md:814` | "the shape a Monitor/`until` loop or the **status viewer** polls" | "…or the **watchdog** polls" |
-| 7 | `plugins/tribe/scripts/runner/README.md:860` | "the shape the **status viewer** uses to detect a dead runner" | "…the **watchdog** uses…" |
+| 2 | `runner/core/watchdog/watch-loop.ts:81` | "a crash of the **supervisor**" | "a crash of the **watchdog**" |
+| 3 | `plugins/tribe/README.md:225` | "this is what the **status viewer** below reads" | "this is what the **viewer** reads for a session's campaign badge, and the **watchdog** reads to decide whether a run is alive" — **both are true and both must stay**; only "status viewer" goes, because there is no status page any more |
+| 4 | `runner/README.md:76` | "the **status viewer** (`scripts/viewer/`) reads to answer 'is this campaign's runner actually alive'" | "the **viewer** reads for the badge's runner-alive fact (§9), and the **watchdog** reads to decide whether to relaunch" — the viewer **does** read `run.json`; what it never reads is the runner *log* (D6) |
+| 5 | `runner/README.md:129` | "the same package as the **status viewer**, grown a second surface" | rewritten with the section: one surface, no status page |
+| 6 | `runner/README.md:814` | "the shape a Monitor/`until` loop or the **status viewer** polls" | "…or the **watchdog** polls" — here the subject really is the watchdog's stall check |
+| 7 | `runner/README.md:860` | "the shape the **status viewer** uses to detect a dead runner" | "…the **watchdog** uses…" — likewise: detecting a dead runner to act on it is the watchdog's job; the viewer only displays it |
 
-Hits 4 and 5 fall inside README ranges that §11.3 already schedules for rewriting, so they cost
-nothing extra — but they must be *in the inventory*, because task 29's gate is "the grep returned
-exactly this set before, and returns empty after".
+The distinction across sites 3–4 versus 6–7 is worth stating once, because it is the whole of D9's
+scope: **who reads `run.json` and why.** The viewer reads it to *show* a badge; the watchdog reads
+it to *decide* whether to relaunch. Both are real readers, and a sweep that renamed every reader
+"watchdog" would have deleted a true fact to fix a naming problem.
 
 **Explicitly NOT renamed — these are false positives and a finding against them is refuted in
 advance:**
@@ -2392,9 +2508,15 @@ so few candidates are consumed by pairing and the rendered count stays above the
 With all three pinned: above the 2,000-node client cap (eviction and the pill are reachable), above
 the 500-node window (the backward scan overshoots, so the whole-row trim runs), and the four-block
 row sits where the 500-node boundary falls, so the trim is forced *through* a multi-block row — the
-case an exact-node trim would silently lose blocks on. `fixtures/build.test.ts` asserts **all three**
-numbers, the rendered one by running the normalizer **and pairing** over the fixture rather than by
-counting rows.
+case an exact-node trim would silently lose blocks on.
+
+**Two of the three are asserted by `fixtures/build.test.ts` (task 1); the third is asserted by
+`fixtures/session4.rendered.test.ts` (task 9) — D22.** Rows and candidate blocks are countable from
+the bytes the builder just wrote, with no production module in the room. The **rendered** count
+needs `core/normalize.ts` and `core/pair.ts`, which do not exist until tasks 7–9; asserting it at
+task 1 could only be done by duplicating pairing logic in the fixture test, and a second
+implementation agreeing with the first proves nothing. Tasks 24 and 31 depend on **task 9** for that
+number.
 
 Three projects, not two: D10 hides projects whose newest session is older than 30 days, so a
 two-project fixture cannot produce the "show N older projects" link at all. `<proj-C>` is the
@@ -2533,7 +2655,8 @@ Then, in the same run:
   1. `page.evaluate(() => window.__viewerEventSource.close())` — a deterministic drop, not a race
      with a network-level kill. The browser fires **no** `error` for a deliberate `close()`, which is
      exactly why step 2 exists.
-  2. `page.evaluate(() => window.__viewerReconnect())` — the dev-only entry point (§8.4) that opens
+  2. `page.evaluate(() => window.__viewerReconnect())` — the entry point of §8.4 (it **ships**,
+     D25) that opens
      a new stream by the same path the production `error` handler uses.
   3. Wait for a `hello` whose **`generation` differs** from the one held before step 1. That is the
      signal that this is a genuinely new stream rather than a late frame from the old one; waiting
