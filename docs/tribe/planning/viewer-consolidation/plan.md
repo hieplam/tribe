@@ -1069,7 +1069,7 @@ module names neither `logsDir` nor `statePath` anywhere (D6).
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Encoding: every frame type of spec §6.2 round-trips,
+- [x] **Step 1: Write the failing test.** Encoding: every frame type of spec §6.2 round-trips,
       **including `patch`**; `id:` is present on every frame and is a **per-stream monotonic
       sequence** starting at 1 on `hello` and incrementing by one per frame, of any type (D12) —
       assert a `hello`/`rows`/`patch`/`meta`/`ping` sequence carries ids 1,2,3,4,5; **`hello` carries a
@@ -1103,14 +1103,14 @@ Model: **Sonnet**.
       lists, never a single happy path.
 
       Expected: module missing.
-- [ ] **Step 2: Implement** `V/core/sse.ts`. Pure.
-- [ ] **Step 3: Run.**
+- [x] **Step 2: Implement** `V/core/sse.ts`. Pure.
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/sse.test.ts
       ```
       Expected: all pass, including the `U+2028`/`U+2029` cases.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): feed the encoder a frame whose payload contains a literal
 `\ndata: injected` sequence and confirm the receiving side sees one frame, not two. Frame-splitting
