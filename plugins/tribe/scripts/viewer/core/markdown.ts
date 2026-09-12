@@ -29,9 +29,16 @@ const NUMBERED_LINE_RE = /^\d+\.\s+(.*)$/;
 // keeping the whole pass linear.
 const LINK_RE = /\[([^\]\n]{0,500})\]\(([^)\n]{0,2000})\)/g;
 
-// Combined emphasis first, then bold, then italic, then inline code -- same priority order as the
-// HTML-era file (F25: matching `***...***` before the separate bold/italic passes produces valid
-// nesting instead of two independent, overlapping passes).
+// Combined emphasis first, then bold, then italic -- same priority order as the HTML-era file
+// (F25: matching `***...***` before the separate bold/italic passes produces valid nesting
+// instead of two independent, overlapping passes). Inline code is NOT part of this chain: it is
+// segmented out of the text before any emphasis pass ever runs (see `segmentInlineCode` /
+// `emphasisAndCode` below), so a `*`/`_` captured inside a backtick span can never be matched by
+// TRIPLE_RE/BOLD_RE/ITALIC_RE in the first place -- there is no ordering of a single regex chain
+// applied to the whole string that can make code's "everything inside is literal" contract hold,
+// since emphasis regexes scan past backtick characters as if they were not there (Phase-1 Sol
+// audit: `` `a*b*` `` misparsed as `text('`a')` + `em('b')` + `text('`')` under the old
+// emphasis-then-code ordering, across 3,808 spans in the real transcript corpus).
 const TRIPLE_RE = /\*\*\*(.+?)\*\*\*/g;
 const BOLD_RE = /\*\*(.+?)\*\*/g;
 const ITALIC_RE = /\*(.+?)\*/g;
@@ -87,19 +94,19 @@ interface Pass {
 }
 
 // Each pass's build() recurses into the REMAINING (lower-priority) passes for its own captured
-// content -- e.g. bold text can still contain italic or inline code, matched by later passes over
-// the same captured string, but never re-matched by triple/bold again.
-const PASSES: Pass[] = [
+// content -- e.g. bold text can still contain italic, matched by a later pass over the same
+// captured string, but never re-matched by triple/bold again. Inline code has no entry here: it
+// is resolved entirely by `segmentInlineCode` before any of these passes see the text.
+const EMPHASIS_PASSES: Pass[] = [
   { regex: TRIPLE_RE, build: (inner, next) => ({ t: 'strong', c: [{ t: 'em', c: runPass(inner, next) }] }) },
   { regex: BOLD_RE, build: (inner, next) => ({ t: 'strong', c: runPass(inner, next) }) },
   { regex: ITALIC_RE, build: (inner, next) => ({ t: 'em', c: runPass(inner, next) }) },
-  { regex: INLINE_CODE_RE, build: (inner) => ({ t: 'inline-code', v: inner }) },
 ];
 
 function runPass(text: string, passIndex: number): MdToken[] {
   if (text.length === 0) return [];
-  if (passIndex >= PASSES.length) return [{ t: 'text', v: text }];
-  const pass = PASSES[passIndex]!;
+  if (passIndex >= EMPHASIS_PASSES.length) return [{ t: 'text', v: text }];
+  const pass = EMPHASIS_PASSES[passIndex]!;
   const { regex, build } = pass;
   const out: MdToken[] = [];
   let lastIndex = 0;
@@ -114,8 +121,38 @@ function runPass(text: string, passIndex: number): MdToken[] {
   return out;
 }
 
+interface InlineCodeSegment {
+  code: boolean;
+  text: string;
+}
+
+// Segmented out FIRST, exactly like `segmentFences` segments fenced blocks out before block
+// tokenization (see the module doc comment) -- same discipline, one level down: a backtick span's
+// contents are sliced out of the string before the emphasis passes ever run over it, so
+// TRIPLE_RE/BOLD_RE/ITALIC_RE can only ever see text OUTSIDE a code span. There is no assembled
+// string and no placeholder token to collide with unrelated content (F21's lesson, applied here).
+function segmentInlineCode(text: string): InlineCodeSegment[] {
+  const segments: InlineCodeSegment[] = [];
+  let lastIndex = 0;
+  INLINE_CODE_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = INLINE_CODE_RE.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ code: false, text: text.slice(lastIndex, match.index) });
+    }
+    segments.push({ code: true, text: match[1] ?? '' });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    segments.push({ code: false, text: text.slice(lastIndex) });
+  }
+  return segments;
+}
+
 function emphasisAndCode(text: string): MdToken[] {
-  return runPass(text, 0);
+  return segmentInlineCode(text).flatMap((segment): MdToken[] =>
+    segment.code ? [{ t: 'inline-code', v: segment.text }] : runPass(segment.text, 0),
+  );
 }
 
 // Segment on LINK_RE FIRST, then run the emphasis/inline-code passes only over the non-link text

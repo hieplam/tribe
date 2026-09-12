@@ -205,3 +205,30 @@ test('a mailto: href is allowed by the widened scheme gate', () => {
 test('F37: a lone trailing carriage return before the closing fence leaves no stray `\\r`', () => {
   expect(tokenizeMarkdown('```\r\ncode\r```')).toEqual([{ t: 'code', v: 'code', lang: null }]);
 });
+
+// Phase-1 Sol audit: inline code must be segmented out BEFORE emphasis parsing, so a `*`/`_`
+// inside a backtick span is literal CODE, never reinterpreted as markup. Under the old
+// emphasis-then-code ordering, ITALIC_RE matched the `*b*` inside the backticks first, splitting
+// the span into `text('`a')`, `em('b')`, `text('`')` -- exactly the misparse Sol found across
+// 3,808 inline-code spans in the real transcript corpus.
+test('Sol audit: a `*` inside a backtick span stays literal code, never emphasis', () => {
+  expect(tokenizeMarkdown('`a*b*`')).toEqual([{ t: 'inline-code', v: 'a*b*' }]);
+});
+
+test('Sol audit: a `_` inside a backtick span stays literal code, never emphasis', () => {
+  expect(tokenizeMarkdown('a `b_c_d` e')).toEqual([
+    { t: 'text', v: 'a ' },
+    { t: 'inline-code', v: 'b_c_d' },
+    { t: 'text', v: ' e' },
+  ]);
+});
+
+test('Sol audit: emphasis outside code spans still works around a protected inline-code span', () => {
+  expect(tokenizeMarkdown('*x* `y` *z*')).toEqual([
+    { t: 'em', c: [{ t: 'text', v: 'x' }] },
+    { t: 'text', v: ' ' },
+    { t: 'inline-code', v: 'y' },
+    { t: 'text', v: ' ' },
+    { t: 'em', c: [{ t: 'text', v: 'z' }] },
+  ]);
+});
