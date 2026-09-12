@@ -99,7 +99,11 @@ function parseLimit(raw: string | null): number {
   if (raw === null || raw === '') return DEFAULT_ROWS_LIMIT;
   if (!/^\d+$/.test(raw)) return DEFAULT_ROWS_LIMIT;
   const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value < 0) return DEFAULT_ROWS_LIMIT;
+  // `raw` matched `/^\d+$/` above (digits only, no sign), so `Number(raw)` can never be
+  // negative — a `|| value < 0` guard here would be dead code (Tracker finding, phase-0 fix).
+  // The only way this parse can still be rejected is an unsafe integer (an oversized digit
+  // string that overflows to a float or Infinity).
+  if (!Number.isSafeInteger(value)) return DEFAULT_ROWS_LIMIT;
   return Math.min(value, MAX_ROWS_LIMIT); // clamped, never refused (§3.2)
 }
 
@@ -110,6 +114,25 @@ function parseOrphans(raw: string | null): string[] {
 
 function badRequest(reason: string): Route {
   return { kind: 'bad_request', reason };
+}
+
+/** The `session` + `agent` query-param gate shared by `/api/rows`, `/api/block`, `/api/spill`,
+ * and `/events` (§3.2). Extracted so a future regex/message change cannot silently miss one of
+ * the four call sites (`fail-closed-edges` obligation 1 — dedup, phase-0 fix). Pure string math:
+ * refuses with the SAME typed `badRequest` any of the four routes previously returned inline;
+ * never throws. */
+function parseSessionAndAgent(
+  searchParams: URLSearchParams,
+): { sessionId: string; agentId: string | null } | Route {
+  const sessionRaw = searchParams.get('session');
+  if (sessionRaw === null || sessionRaw === '' || !isValidSessionId(sessionRaw)) {
+    return badRequest('session must match ^[0-9a-fA-F-]{8,64}$');
+  }
+  const agentRaw = searchParams.get('agent');
+  if (agentRaw !== null && agentRaw !== '' && !isValidAgentId(agentRaw)) {
+    return badRequest('agent must be a safe identifier');
+  }
+  return { sessionId: sessionRaw, agentId: agentRaw === null || agentRaw === '' ? null : agentRaw };
 }
 
 function notFound(path: string): Route {
@@ -201,20 +224,14 @@ export function parseRoute(url: string): Route {
   }
 
   if (pathname === '/api/rows') {
-    const sessionRaw = searchParams.get('session');
-    if (sessionRaw === null || sessionRaw === '' || !isValidSessionId(sessionRaw)) {
-      return badRequest('session must match ^[0-9a-fA-F-]{8,64}$');
-    }
-    const agentRaw = searchParams.get('agent');
-    if (agentRaw !== null && agentRaw !== '' && !isValidAgentId(agentRaw)) {
-      return badRequest('agent must be a safe identifier');
-    }
+    const gated = parseSessionAndAgent(searchParams);
+    if ('kind' in gated) return gated;
     const before = parseOptionalNonNegativeInt(searchParams.get('before'));
     if (before === INVALID) return badRequest('before must be a non-negative integer row offset');
     return {
       kind: 'api_rows',
-      sessionId: sessionRaw,
-      agentId: agentRaw === null || agentRaw === '' ? null : agentRaw,
+      sessionId: gated.sessionId,
+      agentId: gated.agentId,
       before,
       limit: parseLimit(searchParams.get('limit')),
       orphans: parseOrphans(searchParams.get('orphans')),
@@ -222,64 +239,31 @@ export function parseRoute(url: string): Route {
   }
 
   if (pathname === '/api/block') {
-    const sessionRaw = searchParams.get('session');
-    if (sessionRaw === null || sessionRaw === '' || !isValidSessionId(sessionRaw)) {
-      return badRequest('session must match ^[0-9a-fA-F-]{8,64}$');
-    }
-    const agentRaw = searchParams.get('agent');
-    if (agentRaw !== null && agentRaw !== '' && !isValidAgentId(agentRaw)) {
-      return badRequest('agent must be a safe identifier');
-    }
+    const gated = parseSessionAndAgent(searchParams);
+    if ('kind' in gated) return gated;
     const at = parseRequiredNonNegativeInt(searchParams.get('at'));
     if (at === INVALID) return badRequest('at must be a non-negative integer byte offset');
     const i = parseRequiredNonNegativeInt(searchParams.get('i'));
     if (i === INVALID) return badRequest('i must be a non-negative integer block index');
-    return {
-      kind: 'api_block',
-      sessionId: sessionRaw,
-      agentId: agentRaw === null || agentRaw === '' ? null : agentRaw,
-      at,
-      i,
-    };
+    return { kind: 'api_block', sessionId: gated.sessionId, agentId: gated.agentId, at, i };
   }
 
   if (pathname === '/api/spill') {
-    const sessionRaw = searchParams.get('session');
-    if (sessionRaw === null || sessionRaw === '' || !isValidSessionId(sessionRaw)) {
-      return badRequest('session must match ^[0-9a-fA-F-]{8,64}$');
-    }
-    const agentRaw = searchParams.get('agent');
-    if (agentRaw !== null && agentRaw !== '' && !isValidAgentId(agentRaw)) {
-      return badRequest('agent must be a safe identifier');
-    }
+    const gated = parseSessionAndAgent(searchParams);
+    if ('kind' in gated) return gated;
     const name = searchParams.get('name');
     // Name shape only: this parser refuses an unsafe shape, but the actual open goes through
     // `containedJoin` (task 4) regardless — this check narrows what can reach that stage.
     if (name === null || name === '' || !ASSET_NAME_RE.test(name) || DOTS_ONLY_RE.test(name)) {
       return badRequest('spill name refused: unsafe shape');
     }
-    return {
-      kind: 'api_spill',
-      sessionId: sessionRaw,
-      agentId: agentRaw === null || agentRaw === '' ? null : agentRaw,
-      name,
-    };
+    return { kind: 'api_spill', sessionId: gated.sessionId, agentId: gated.agentId, name };
   }
 
   if (pathname === '/events') {
-    const sessionRaw = searchParams.get('session');
-    if (sessionRaw === null || sessionRaw === '' || !isValidSessionId(sessionRaw)) {
-      return badRequest('session must match ^[0-9a-fA-F-]{8,64}$');
-    }
-    const agentRaw = searchParams.get('agent');
-    if (agentRaw !== null && agentRaw !== '' && !isValidAgentId(agentRaw)) {
-      return badRequest('agent must be a safe identifier');
-    }
-    return {
-      kind: 'events',
-      sessionId: sessionRaw,
-      agentId: agentRaw === null || agentRaw === '' ? null : agentRaw,
-    };
+    const gated = parseSessionAndAgent(searchParams);
+    if ('kind' in gated) return gated;
+    return { kind: 'events', sessionId: gated.sessionId, agentId: gated.agentId };
   }
 
   // §3.2 closing rule: everything else under /p/ or /s/ (e.g. a malformed segment the patterns

@@ -221,6 +221,28 @@ describe('the refusal matrix — every case returns a typed route, never a throw
   test('a bare campaign slug with no "/" on /api/projects is also REJECTED', () => {
     expect(route('/api/projects?campaign=viewer-consolidation').kind).toBe('bad_request');
   });
+
+  // The session/agent validation block is shared by /api/rows, /api/block, /api/spill, and
+  // /events (dedup, phase-0 fix). /api/rows and /api/block already exercise an invalid session
+  // above; these four cases guard the two sites (and the invalid-agent branch) that were not yet
+  // asserted — since all four call the SAME extracted gate, this now guards every call site.
+  test('GET /events?session=<invalid> — bad_request, same gate as /api/rows and /api/block', () => {
+    expect(route('/events?session=not-a-valid-id').kind).toBe('bad_request');
+  });
+
+  test('GET /events?session=<valid>&agent=<invalid> — bad_request', () => {
+    expect(route(`/events?session=${VALID_SESSION}&agent=..%2f..%2fetc`).kind).toBe('bad_request');
+  });
+
+  test('GET /api/spill?session=<invalid>&name=<valid> — bad_request', () => {
+    expect(route('/api/spill?session=not-a-valid-id&name=fixturespill01.txt').kind).toBe('bad_request');
+  });
+
+  test('GET /api/spill?session=<valid>&agent=<invalid>&name=<valid> — bad_request', () => {
+    expect(
+      route(`/api/spill?session=${VALID_SESSION}&agent=..%2f..%2fetc&name=fixturespill01.txt`).kind,
+    ).toBe('bad_request');
+  });
 });
 
 describe('never a throw', () => {
