@@ -1,3 +1,0 @@
-{not valid json at all
-{"type":"user","uuid":"22222222-0000-0000-0000-000000000001","sessionId":"sess-fixture-2","timestamp":"2026-09-02T10:05:00.000Z","message":{"role":"user","content":"still readable"}}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"truncated mid-object"

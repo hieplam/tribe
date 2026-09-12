@@ -316,7 +316,7 @@ built from nothing **before** the server that reads it is designed into existenc
 
 Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
 
-- [ ] **Step 1: Write the failing test** `V/fixtures/build.test.ts`.
+- [x] **Step 1: Write the failing test** `V/fixtures/build.test.ts`.
 
       **The builder produces exactly TWO fake HOMEs** (spec §16.2), because one directory cannot
       both hold a populated `.claude/projects` and have no `.claude`:
@@ -410,12 +410,12 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       empty shape produces exactly the layout it names and nothing else.
 
       Expected on first run: `error: Cannot find module './build.ts'`.
-- [ ] **Step 2: Implement** `V/fixtures/build.ts`. Pure data plus one `mkdirSync`/`writeFileSync`
+- [x] **Step 2: Implement** `V/fixtures/build.ts`. Pure data plus one `mkdirSync`/`writeFileSync`
       edge; it takes the destination directory as an argument and constructs nothing it was not
       given (`pure-core.md`). Every row it writes is copied in shape from the real corpus — spec
       §7 names the fields, and `~/.claude/projects` is the oracle for any field the spec leaves
       unstated.
-- [ ] **Step 3: Verify against an empty target, by hand.** Run the tree builder into a bare
+- [x] **Step 3: Verify against an empty target, by hand.** Run the tree builder into a bare
       directory and walk it, proving the layout spec §5.1 expects is what actually lands:
 
       ```sh
@@ -437,14 +437,14 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       `<session>/tool-results/*.txt`; and exactly three symlinks with the targets named in step 1.
       (`<session-4>.rotated` is a fixture input, not a served session, and does not carry the
       `.jsonl` extension.) Paste both listings into the task report.
-- [ ] **Step 4: Run the suite.**
+- [x] **Step 4: Run the suite.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test fixtures/
       ```
       Expected: all new tests pass; the three deleted `.jsonl` fixtures are referenced by nothing
       (`grep -rn 'session-valid\|subagent-valid\|session-malformed' .` returns only history).
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): run the builder into a bare `mkdtemp` yourself, then diff the set of
 `type` values actually present in the generated session-1 file against spec §7.1's table. A type in
