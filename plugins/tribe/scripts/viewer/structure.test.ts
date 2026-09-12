@@ -184,6 +184,10 @@ const BANNED_IMPORT_SPECIFIERS = ['node:fs/promises', 'fs/promises', 'node:child
  * stated in `rawSourceOf`'s comment above. */
 function fsViolations(source: string): string[] {
   const bad: string[] = [];
+  // Import STATEMENTS are classified over a comment-stripped (strings-preserved) copy: a `;` hidden
+  // in a comment inside the clause used to abort the statement matcher below and let a disallowed
+  // member through (Phase-1 audit bypass 7). `stripComments` keeps the specifier string intact.
+  const noComments = stripComments(source);
   // (a) non-static-import forms of fs — require / dynamic import / TS import-equals.
   for (const imp of new Bun.Transpiler({ loader: 'ts' }).scanImports(source)) {
     if (FS_SPECIFIERS.includes(imp.path) && imp.kind !== 'import-statement') {
@@ -194,7 +198,7 @@ function fsViolations(source: string): string[] {
   // one (semicolon-terminated) statement so a distant `from 'fs'` cannot swallow an earlier import.
   const stmtRe = /\b(import|export)\b([^;]*?)\bfrom\s*['"`](?:node:)?fs['"`]/g;
   let m: RegExpExecArray | null;
-  while ((m = stmtRe.exec(source))) {
+  while ((m = stmtRe.exec(noComments))) {
     const keyword = m[1];
     const clause = m[2].trim();
     if (keyword === 'export') { bad.push('fs re-export (a re-exported member is not verifiable)'); continue; }
@@ -211,11 +215,26 @@ function fsViolations(source: string): string[] {
     }
   }
   // (c) a bare side-effect import of fs — not a named import.
-  if (/\bimport\s*['"`](?:node:)?fs['"`]/.test(source)) bad.push('fs side-effect import (not a named import)');
+  if (/\bimport\s*['"`](?:node:)?fs['"`]/.test(noComments)) bad.push('fs side-effect import (not a named import)');
   // (d) defence-in-depth universe scan: any known non-read member reached as a call.
   for (const name of FS_MEMBER_UNIVERSE) {
     if (ALLOWED_FS_READS.has(name)) continue;
     if (new RegExp(`\\b${name}\\s*\\(`).test(source)) bad.push(`refused fs member: ${name}`);
+  }
+  // (e) an allowlisted READ name used as a VALUE rather than at a literal call site (Phase-1 audit
+  // bypass 1). `const o = openSync; o(p,'w')` binds a read primitive to another identifier and calls
+  // it there, hiding the call from the read-name check (b) and the read-FLAG check
+  // (`openSyncFlagViolations`, which scans the literal `openSync(` call). The only permitted use of a
+  // read name is an immediate call. Comments and strings are stripped, and the braced clause of every
+  // `import`/`export { … }` is removed (where these names legitimately appear un-called), leaving a
+  // residue in which every occurrence of a read name MUST be followed by `(`. Fails toward false
+  // positives, like every rule here: a read name reached any other way (assignment, argument,
+  // return, array element) is refused because it cannot be proven to be a read call site. */
+  const residue = stripCommentsAndStrings(source).replace(/\b(?:import|export)\b\s*(?:type\s+)?\{[^}]*\}/g, ' ');
+  for (const name of ALLOWED_FS_READS) {
+    if (new RegExp(`\\b${name}\\b(?!\\s*\\()`).test(residue)) {
+      bad.push(`${name} used as a value (only a literal call site is permitted, never an alias)`);
+    }
   }
   return bad;
 }
@@ -271,25 +290,65 @@ function processKillViolations(label: string, source: string): string[] {
  *     is refused. */
 function bunViolations(label: string, source: string): string[] {
   const bad: string[] = [];
-  if (/\bBun\s*\[/.test(source)) bad.push('computed Bun[...] access');
-  if (/\bBun\s*\.\s*write\b/.test(source)) bad.push('Bun.write');
-  if (label !== 'serve.ts' && /\bBun\s*\.\s*serve\b/.test(source)) bad.push('Bun.serve outside serve.ts');
+  // Scanned over a comment-and-string-stripped copy so a `Bun.<member>` mention inside a doc comment
+  // (e.g. `core/paths.ts:29` describes `Bun.hash/wyhash`) or a string is not flagged. Under the CLOSED
+  // allowlist below such a mention would be a false positive on a live, non-doomed file (Phase-1
+  // audit bypass 5); a real capability is code, not prose, so stripping first is the correct boundary.
+  const s = stripCommentsAndStrings(source);
+  if (/\bBun\s*\[/.test(s)) bad.push('computed Bun[...] access');
+  // Closed allowlist (bypass 5): the ONLY permitted Bun members are `serve` (serve.ts only) and
+  // `file` (validated by the result-method scan below). EVERY other `Bun.<member>` — `spawn`,
+  // `spawnSync`, `write`, `connect`, … — is refused, so a capability nobody enumerated fails closed.
+  const memberRe = /\bBun\s*\.\s*([A-Za-z_$][\w$]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = memberRe.exec(s))) {
+    const member = m[1];
+    if (member === 'serve') { if (label !== 'serve.ts') bad.push('Bun.serve outside serve.ts'); continue; }
+    if (member === 'file') continue; // permitted; its result method is checked below
+    bad.push(`refused Bun capability: Bun.${member}`);
+  }
   // `Bun.file(...)` chains: inspect the member accessed on the result.
   const fileRe = /\bBun\s*\.\s*file\s*\(/g;
-  let m: RegExpExecArray | null;
-  while ((m = fileRe.exec(source))) {
+  while ((m = fileRe.exec(s))) {
     let depth = 1;
     let i = fileRe.lastIndex;
-    while (i < source.length && depth > 0) {
-      if (source[i] === '(') depth++;
-      else if (source[i] === ')') depth--;
+    while (i < s.length && depth > 0) {
+      if (s[i] === '(') depth++;
+      else if (s[i] === ')') depth--;
       i++;
     }
-    const rest = source.slice(i).replace(/^\s+/, '');
+    const rest = s.slice(i).replace(/^\s+/, '');
     if (rest.startsWith('[')) { bad.push('computed access on a Bun.file(...) result'); continue; }
     const mm = rest.match(/^\.\s*([A-Za-z_$][\w$]*)/);
     if (mm && !BUN_FILE_READS.has(mm[1])) bad.push(`refused Bun.file(...) method: ${mm[1]}`);
   }
+  return bad;
+}
+
+/** Ways a covered file can reach a world capability by INDIRECTION rather than a named import or a
+ * literal call — each refused for the whole covered set (Phase-1 audit bypasses 2, 3, 6). Scanned
+ * over a comment-and-string-stripped copy so a mention in prose or a string is not a false positive.
+ *   - `Reflect.*` / `Reflect[...]` — reflective apply/get reaches any binding with no literal call
+ *     site the flag/name scanners can read (bypass 2).
+ *   - `process.getBuiltinModule`, `require(`, `createRequire`, `eval(`, the `Function(` constructor —
+ *     each re-acquires a module or synthesises code at runtime, sidestepping the import scanner
+ *     entirely (bypass 3).
+ *   - an assignment whose right-hand side is a BARE global object (`process`/`Bun`/`globalThis`/
+ *     `Reflect`) — `const p = process; p.kill(pid,9)` launders every member reached through the alias
+ *     (bypass 6). The lookbehind excludes `==`/`===`/`!=`/`<=`/`>=`, and the lookahead excludes a
+ *     member access (`process.env`), a call, an index, and a comparison, so only a true alias binds. */
+function indirectionViolations(source: string): string[] {
+  const s = stripCommentsAndStrings(source);
+  const bad: string[] = [];
+  if (/\bReflect\s*[.[]/.test(s)) bad.push('Reflect indirection (reflective access is not statically verifiable)');
+  if (/\bgetBuiltinModule\b/.test(s)) bad.push('getBuiltinModule (re-acquires a module at runtime)');
+  if (/\brequire\s*\(/.test(s)) bad.push('require(...) (runtime module acquisition is not verifiable)');
+  if (/\bcreateRequire\b/.test(s)) bad.push('createRequire (manufactures a require)');
+  if (/\beval\s*\(/.test(s)) bad.push('eval(...) (runtime code execution)');
+  if (/\bFunction\s*\(/.test(s)) bad.push('Function(...) constructor (runtime code execution)');
+  const aliasRe = /(?<![=!<>])=\s*(process|Bun|globalThis|Reflect)\b\s*(?![.[(=])/g;
+  let m: RegExpExecArray | null;
+  while ((m = aliasRe.exec(s))) bad.push(`alias of the bare ${m[1]} global (launders every member reached through it)`);
   return bad;
 }
 
@@ -314,6 +373,7 @@ function allowlistViolations(label: string, source: string): string[] {
   for (const call of openSyncFlagViolations(source)) bad.push(`openSync not read-only: ${call}`);
   for (const call of bunViolations(label, source)) bad.push(call);
   for (const call of processKillViolations(label, source)) bad.push(call);
+  for (const v of indirectionViolations(source)) bad.push(v);
 
   return bad;
 }
@@ -384,6 +444,53 @@ function stripCommentsAndStrings(source: string): string {
       }
       i++; // skip the closing quote
       out += ' ';
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+/** `source` with every line and block comment removed but every string/template literal PRESERVED
+ * verbatim — the same string-aware scanner as `stripCommentsAndStrings`, differing only in that a
+ * string is copied through instead of blanked. Used by `fsViolations` to classify `import … from
+ * 'fs'` statements: the raw-source statement matcher stops at the first `;`, so a `;` buried in a
+ * comment inside the import clause made the statement
+ * never classify and let a disallowed member through (Phase-1 audit bypass 7). Removing comments
+ * first closes that. Strings are KEPT because the module specifier (`'node:fs'`) is the one string
+ * the classifier must read, and a named-import clause `{ … }` contains only identifiers — never a
+ * string — so preserving strings adds no new blind spot while keeping specifier detection intact.
+ * The scanner is string-aware (a `//` or `/*` inside a string is not a comment), which is exactly
+ * the F26/F27 hazard a naive comment stripper would reintroduce. */
+function stripComments(source: string): string {
+  let out = '';
+  let i = 0;
+  const n = source.length;
+  while (i < n) {
+    const c = source[i];
+    if (c === '/' && source[i + 1] === '/') { // line comment
+      i += 2;
+      while (i < n && source[i] !== '\n') i++;
+      continue;
+    }
+    if (c === '/' && source[i + 1] === '*') { // block comment
+      i += 2;
+      while (i < n && !(source[i] === '*' && source[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') { // string / template literal — preserved verbatim
+      const quote = c;
+      out += c;
+      i++;
+      while (i < n && source[i] !== quote) {
+        if (source[i] === '\\') { out += source[i]; i++; } // keep the char after a backslash
+        out += source[i];
+        i++;
+      }
+      if (i < n) out += source[i]; // closing quote
+      i++;
       continue;
     }
     out += c;
@@ -699,6 +806,118 @@ describe('viewer structural contract', () => {
 
     test('an UNALIASED read-flag openSync in an adapter passes clean', () => {
       expect(allowlistViolations('adapters/fs.adapter.ts', "import { openSync } from 'node:fs';\nopenSync('/x', 'r');\n")).toEqual([]);
+    });
+
+    // -------------------------------------------------------------------------------------------
+    // SECOND-ROUND TOTALITY (Phase-1 audit, GPT-5.6 Sol). Six bypasses proved still GREEN in a
+    // COVERED file — each launders a world capability past a rule that keyed on a literal call
+    // site or a raw-source match. Each probe below is a REAL violation the wall must now flag; the
+    // companion "stays clean" probes prove the tightenings did not become a rule that refuses
+    // everything (a rule that flags all inputs proves nothing).
+
+    // Bypass 1 — a permitted read binding aliased to another identifier then misused. The only
+    // permitted use of a read name is a LITERAL call site (`openSync(...)`); binding it to another
+    // name (`const o = openSync; o(p,'w')`) hides the call from the read-name / read-flag checks.
+    test('prove the wall bites: aliasing openSync to another identifier is flagged', () => {
+      const probe = "import { openSync } from 'node:fs';\nconst o = openSync;\no('/tmp/x', 'w');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: aliasing readFileSync to another identifier is flagged', () => {
+      const probe = "import { readFileSync } from 'node:fs';\nconst r = readFileSync;\nr('/tmp/x');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    // Bypass 2 — Reflect indirection. `Reflect.apply(openSync, null, [p,'w'])` reaches a write with
+    // no literal call site the flag scanner can read. Any `Reflect.*`/`Reflect[...]` is refused.
+    test('prove the wall bites: Reflect.apply indirection is flagged', () => {
+      const probe = "import { openSync } from 'node:fs';\nReflect.apply(openSync, null, ['/tmp/x', 'w']);\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: any Reflect member access (Reflect.get) is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', "Reflect.get(globalThis, 'x');\n")).not.toEqual([]);
+    });
+
+    // Bypass 3 — module re-acquisition: a fresh handle on a world module obtained at runtime,
+    // bypassing the import scanner entirely. `process.getBuiltinModule`, `require`, `createRequire`,
+    // `eval`, and the `Function(` constructor are all refused in COVERED files.
+    test('prove the wall bites: process.getBuiltinModule (re-acquiring fs at runtime) is flagged', () => {
+      const probe = "process.getBuiltinModule('fs').cpSync('/a', '/b');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a bare require() call is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', "const x = require('./local');\n")).not.toEqual([]);
+    });
+
+    test('prove the wall bites: createRequire is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', "const req = createRequire(import.meta.url);\n")).not.toEqual([]);
+    });
+
+    test('prove the wall bites: eval is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', "eval('1 + 1');\n")).not.toEqual([]);
+    });
+
+    test('prove the wall bites: the Function constructor is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', "const f = new Function('return this');\n")).not.toEqual([]);
+    });
+
+    // Bypass 5 — a Bun capability outside the allowlist. The ONLY permitted Bun usage is `Bun.serve`
+    // (serve.ts) and `Bun.file(...)` + a literal read method (adapters); every other `Bun.<member>`
+    // and any computed `Bun[...]` is refused. `Bun.spawn` is the audit's exemplar.
+    test('prove the wall bites: Bun.spawn (a Bun capability outside the allowlist) is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', "Bun.spawn(['ls']);\n")).not.toEqual([]);
+    });
+
+    test('prove the wall bites: Bun.spawnSync is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', "Bun.spawnSync(['ls']);\n")).not.toEqual([]);
+    });
+
+    // Bypass 6 — aliasing a bare global object launders every member reached through it
+    // (`const p = process; p.kill(pid,9)`). Any assignment whose right-hand side is a bare
+    // `process`/`Bun`/`globalThis`/`Reflect` is refused.
+    test('prove the wall bites: aliasing the process global (const p = process) is flagged even in campaign.adapter.ts', () => {
+      const probe = "const p = process;\np.kill(pid, 9);\n";
+      expect(allowlistViolations('adapters/campaign.adapter.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: aliasing the Bun global (const b = Bun) is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', "const b = Bun;\nb.spawn(['ls']);\n")).not.toEqual([]);
+    });
+
+    // Bypass 7 — a comment hiding a `;` inside an fs import clause. The raw-source statement matcher
+    // stops at the first `;`; a `;` buried in a comment BEFORE `from` made the clause never classify,
+    // so a disallowed (even aliased) fs member slipped through. Comments are now stripped first.
+    test('prove the wall bites: a comment-hidden `;` no longer defeats fs import classification', () => {
+      const probe = "import { writeFileSync /* ; */ } from 'node:fs';\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a comment-hidden `;` cannot smuggle an ALIASED fs write import (the aliased call evades the universe scan; only classification catches it)', () => {
+      const probe = "import { writeFileSync as w /* ; */ } from 'node:fs';\nw('/tmp/x', 'y');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    // Legitimate current shapes that MUST stay clean under the six tightenings above:
+    test('a Bun mention inside a comment is not flagged (comments are stripped before Bun classification — mirrors core/paths.ts:29)', () => {
+      expect(allowlistViolations('core/probe.ts', '// e.g. Claude Code\'s Bun.hash/wyhash for parity\nexport const x = 1;\n')).toEqual([]);
+    });
+
+    test('a process member access (process.argv) is not a bare-global alias and stays clean', () => {
+      expect(allowlistViolations('serve.ts', "const i = process.argv.indexOf('--port');\n")).toEqual([]);
+    });
+
+    test('a read-member fs import with an inline comment stays clean (comment stripping must not turn a legal read import red)', () => {
+      const probe = "import { readFileSync /* the bounded read */ } from 'node:fs';\nreadFileSync('/x', 'utf8');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).toEqual([]);
+    });
+
+    test('a Map.delete-style call is NOT reachable through these rules for core/pair.ts (the .delete method-name ban of bypass 4 is intentionally NOT implemented — see the Phase-1 audit report)', () => {
+      // core/pair.ts legitimately calls Map.prototype.delete (state.pending.delete, pending.delete).
+      // A blanket ".delete( on any receiver" ban would flag that live, non-doomed file. This test
+      // pins the deliberate omission so a future tightening cannot silently break core/pair.ts.
+      expect(allowlistViolations('core/pair.ts', 'state.pending.delete(id);\n')).toEqual([]);
     });
   });
 });
