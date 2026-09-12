@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { batchFrames, batchPatches, encodeFrame, type SseFrame } from './sse.ts';
+import { batchFrames, batchPatches, decodeFrame, encodeFrame, type SseFrame } from './sse.ts';
 import type { Agent, Badge, Patch, RenderNode, SessionSummary } from './model.ts';
 
 // ---------------------------------------------------------------------------------------------
@@ -88,94 +88,84 @@ function pingFrame(): SseFrame {
   return { event: 'ping', data: { t: '2026-01-01T00:00:00.000Z' } };
 }
 
-/** Extracts the `event:`, `id:` and `data:` field VALUES from one encoded frame, tolerating a
- * leading `retry:` line. Fails loudly (via non-null assertions) if the frame is malformed —
- * exactly what a malformed frame should do to a test. */
-function parseFields(encoded: string): { event: string; id: number; data: unknown; retryCount: number } {
+/** Counts the `retry:` lines in one encoded frame. `retry:` is transport plumbing (an SSE
+ * directive, not part of the decoded event payload), so it is checked directly against the wire
+ * text rather than through `decodeFrame` — every OTHER assertion below that needs a frame's
+ * `event`/`id`/`data` goes through the production `decodeFrame`, never a test-only parser. */
+function countRetryLines(encoded: string): number {
   expect(encoded.endsWith('\n\n')).toBe(true);
-  const body = encoded.slice(0, -2);
-  const lines = body.split('\n');
-  const retryLines = lines.filter((l) => l.startsWith('retry: '));
-  const eventLine = lines.find((l) => l.startsWith('event: '))!;
-  const idLine = lines.find((l) => l.startsWith('id: '))!;
-  const dataLine = lines.find((l) => l.startsWith('data: '))!;
-  return {
-    event: eventLine.slice('event: '.length),
-    id: Number(idLine.slice('id: '.length)),
-    data: JSON.parse(dataLine.slice('data: '.length)),
-    retryCount: retryLines.length,
-  };
+  return encoded.split('\n').filter((l) => l.startsWith('retry: ')).length;
 }
 
-describe('encodeFrame — round-trip of every §6.2 frame type', () => {
+describe('encodeFrame — round-trip of every §6.2 frame type, via the production decodeFrame', () => {
   test('hello round-trips, including generation, session, agents, badges, window bounds', () => {
     const frame = helloFrame('gen-A');
-    const { event, data } = parseFields(encodeFrame(frame, 1));
-    expect(event).toBe('hello');
-    expect(data).toEqual(frame.data);
+    const decoded = decodeFrame(encodeFrame(frame, 1));
+    expect(decoded.event).toBe('hello');
+    expect(decoded.data).toEqual(frame.data);
   });
 
   test('rows round-trips', () => {
     const frame = rowsFrame();
-    const { event, data } = parseFields(encodeFrame(frame, 2));
-    expect(event).toBe('rows');
-    expect(data).toEqual(frame.data);
+    const decoded = decodeFrame(encodeFrame(frame, 2));
+    expect(decoded.event).toBe('rows');
+    expect(decoded.data).toEqual(frame.data);
   });
 
   test('patch round-trips (D27)', () => {
     const frame = patchFrame();
-    const { event, data } = parseFields(encodeFrame(frame, 3));
-    expect(event).toBe('patch');
-    expect(data).toEqual(frame.data);
+    const decoded = decodeFrame(encodeFrame(frame, 3));
+    expect(decoded.event).toBe('patch');
+    expect(decoded.data).toEqual(frame.data);
   });
 
   test('meta round-trips', () => {
     const frame = metaFrame();
-    const { event, data } = parseFields(encodeFrame(frame, 4));
-    expect(event).toBe('meta');
-    expect(data).toEqual(frame.data);
+    const decoded = decodeFrame(encodeFrame(frame, 4));
+    expect(decoded.event).toBe('meta');
+    expect(decoded.data).toEqual(frame.data);
   });
 
   test('reset round-trips', () => {
     const frame: SseFrame = { event: 'reset', data: { reason: 'rotated' } };
-    const { event, data } = parseFields(encodeFrame(frame, 1));
-    expect(event).toBe('reset');
-    expect(data).toEqual(frame.data);
+    const decoded = decodeFrame(encodeFrame(frame, 1));
+    expect(decoded.event).toBe('reset');
+    expect(decoded.data).toEqual(frame.data);
   });
 
   test('ping round-trips', () => {
     const frame = pingFrame();
-    const { event, data } = parseFields(encodeFrame(frame, 5));
-    expect(event).toBe('ping');
-    expect(data).toEqual(frame.data);
+    const decoded = decodeFrame(encodeFrame(frame, 5));
+    expect(decoded.event).toBe('ping');
+    expect(decoded.data).toEqual(frame.data);
   });
 
   test('gone round-trips', () => {
     const frame: SseFrame = { event: 'gone', data: { reason: 'deleted' } };
-    const { event, data } = parseFields(encodeFrame(frame, 1));
-    expect(event).toBe('gone');
-    expect(data).toEqual(frame.data);
+    const decoded = decodeFrame(encodeFrame(frame, 1));
+    expect(decoded.event).toBe('gone');
+    expect(decoded.data).toEqual(frame.data);
   });
 });
 
 describe('id: — per-stream monotonic sequence, D12', () => {
   test('a hello/rows/patch/meta/ping sequence carries ids 1,2,3,4,5', () => {
     const frames = [helloFrame('gen-A'), rowsFrame(), patchFrame(), metaFrame(), pingFrame()];
-    const ids = frames.map((f, idx) => parseFields(encodeFrame(f, idx + 1)).id);
+    const ids = frames.map((f, idx) => decodeFrame(encodeFrame(f, idx + 1)).id);
     expect(ids).toEqual([1, 2, 3, 4, 5]);
   });
 
   test('the sequence increments by one per frame of ANY type — never restarts within a stream', () => {
     const frames: SseFrame[] = [helloFrame('gen-A'), pingFrame(), pingFrame(), rowsFrame(), pingFrame()];
-    const ids = frames.map((f, idx) => parseFields(encodeFrame(f, idx + 1)).id);
+    const ids = frames.map((f, idx) => decodeFrame(encodeFrame(f, idx + 1)).id);
     expect(ids).toEqual([1, 2, 3, 4, 5]);
   });
 });
 
 describe('generation — hello (D12, spec §6.2)', () => {
   test('two connections to the same session produce DIFFERENT generations', () => {
-    const connectionA = parseFields(encodeFrame(helloFrame('gen-A'), 1)).data as { generation: string };
-    const connectionB = parseFields(encodeFrame(helloFrame('gen-B'), 1)).data as { generation: string };
+    const connectionA = decodeFrame(encodeFrame(helloFrame('gen-A'), 1)).data as { generation: string };
+    const connectionB = decodeFrame(encodeFrame(helloFrame('gen-B'), 1)).data as { generation: string };
     expect(connectionA.generation).not.toBe(connectionB.generation);
   });
 });
@@ -184,7 +174,7 @@ describe('retry: — exactly once, in the first frame of every response', () => 
   test('present on seq 1, absent on every later seq', () => {
     const frames = [helloFrame('gen-A'), rowsFrame(), pingFrame()];
     const encoded = frames.map((f, idx) => encodeFrame(f, idx + 1));
-    const retryCounts = encoded.map((e) => parseFields(e).retryCount);
+    const retryCounts = encoded.map((e) => countRetryLines(e));
     expect(retryCounts).toEqual([1, 0, 0]);
   });
 
@@ -211,7 +201,7 @@ describe('payload edge cases — every one produces a single well-formed frame',
     const frame: SseFrame = { event: 'ping', data: { t: value } as unknown as { t: string } };
     const out = encodeFrame(frame, 1);
     expect(isWellFormed(out)).toBe(true);
-    expect(parseFields(out).data).toEqual({ t: value });
+    expect(decodeFrame(out).data).toEqual({ t: value });
   });
 
   test('U+2029 (PARAGRAPH SEPARATOR) in the payload round-trips inside one frame', () => {
@@ -219,7 +209,7 @@ describe('payload edge cases — every one produces a single well-formed frame',
     const frame: SseFrame = { event: 'ping', data: { t: value } as unknown as { t: string } };
     const out = encodeFrame(frame, 1);
     expect(isWellFormed(out)).toBe(true);
-    expect(parseFields(out).data).toEqual({ t: value });
+    expect(decodeFrame(out).data).toEqual({ t: value });
   });
 
   test('a BigInt payload (JSON.stringify throws) still yields a well-formed frame', () => {
@@ -240,7 +230,7 @@ describe('payload edge cases — every one produces a single well-formed frame',
     const frame: SseFrame = { event: 'ping', data: undefined as unknown as { t: string } };
     const out = encodeFrame(frame, 1);
     expect(isWellFormed(out)).toBe(true);
-    expect(parseFields(out).data).toBe(null);
+    expect(decodeFrame(out).data as unknown).toBe(null);
   });
 
   test('audit lens: a literal "\\ndata: injected" payload produces exactly ONE frame, never two', () => {
@@ -249,28 +239,67 @@ describe('payload edge cases — every one produces a single well-formed frame',
     // A raw newline reaching the wire would split this into two SSE "records" (terminated by a
     // blank line each). JSON.stringify escapes it, so exactly one blank-line terminator exists.
     expect(out.split('\n\n').filter((s) => s.length > 0)).toHaveLength(1);
-    expect((parseFields(out).data as { t: string }).t).toBe('\ndata: injected');
+    expect((decodeFrame(out).data as { t: string }).t).toBe('\ndata: injected');
   });
 });
 
-describe('Patch union — two ops, D27', () => {
+describe('Patch union — two ops, D27, decoded through the production decodeFrame', () => {
   test('{op:"result", id, node} round-trips with its node intact', () => {
     const node = rawNode(1, 200);
     const frame: SseFrame = { event: 'patch', data: { patches: [{ op: 'result', id: '1:0', node }] } };
-    const { data } = parseFields(encodeFrame(frame, 1));
-    const patch = (data as { patches: unknown[] }).patches[0] as Record<string, unknown>;
+    const decoded = decodeFrame(encodeFrame(frame, 1));
+    if (decoded.event !== 'patch') throw new Error('expected a patch frame');
+    const patch = decoded.data.patches[0]!;
     expect(patch.op).toBe('result');
     expect(patch.id).toBe('1:0');
+    // `patch.node` is only reachable once TypeScript has narrowed `op` to "result" — the
+    // decoder's typed `Patch` union does that narrowing, not a manual cast.
+    if (patch.op !== 'result') throw new Error('expected op "result"');
     expect(patch.node).toEqual(node);
   });
 
   test('{op:"remove", id} round-trips and carries NO `node` — a decoder reading `node` unconditionally is the bug this shape prevents', () => {
     const frame: SseFrame = { event: 'patch', data: { patches: [{ op: 'remove', id: '1:0' }] } };
-    const { data } = parseFields(encodeFrame(frame, 1));
-    const patch = (data as { patches: unknown[] }).patches[0] as Record<string, unknown>;
+    const decoded = decodeFrame(encodeFrame(frame, 1));
+    if (decoded.event !== 'patch') throw new Error('expected a patch frame');
+    const patch = decoded.data.patches[0]!;
     expect(patch.op).toBe('remove');
     expect(patch.id).toBe('1:0');
     expect('node' in patch).toBe(false);
+  });
+});
+
+describe('decodeFrame — the production decoder (spec §3.1: sse.ts is "frame encode/decode")', () => {
+  test('the module exports a decodeFrame function — round-tripping via a TEST-ONLY parser proves nothing about production code', async () => {
+    const mod = (await import('./sse.ts')) as unknown as Record<string, unknown>;
+    expect(typeof mod.decodeFrame).toBe('function');
+  });
+});
+
+describe('hello/meta frames are bounded at 1 MiB too, not just rows/patch (Phase-1 audit)', () => {
+  const MAX = 1024 * 1024;
+
+  function agentWithLabel(seed: number, labelLen: number): Agent {
+    return { ...agent(), id: `a${seed}`, label: 'x'.repeat(labelLen) };
+  }
+
+  test('hello with many large agent labels (20 x 60,000 chars) still encodes under 1 MiB', () => {
+    const agents = Array.from({ length: 20 }, (_, idx) => agentWithLabel(idx, 60_000));
+    const frame: SseFrame = {
+      event: 'hello',
+      data: { generation: 'g', session: session(), agents, badges: [badge()], from: 0, to: 10, truncatedBefore: false },
+    };
+    // Sanity: this exact shape is the Phase-1 audit's probe (1,203,531 B unbounded) — the gap this
+    // test guards against.
+    const out = encodeFrame(frame, 1);
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(MAX);
+  });
+
+  test('meta with many large agent labels still encodes under 1 MiB', () => {
+    const agents = Array.from({ length: 20 }, (_, idx) => agentWithLabel(idx, 60_000));
+    const frame: SseFrame = { event: 'meta', data: { agents, badges: [badge()], live: true } };
+    const out = encodeFrame(frame, 1);
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(MAX);
   });
 });
 

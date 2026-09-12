@@ -1,8 +1,11 @@
-// core/sse.ts — task 13: SSE frame encoding, per-stream sequence ids, and 1 MiB frame batching
-// (spec §6.2, §14; D12, D15, D27). Pure module: `generation` and `seq` arrive as arguments from
-// the caller; nothing here reads the clock, the filesystem, the network, or ambient env
-// (`pure-core.md`). D12: the server ignores the reconnecting browser's resume header entirely,
-// so this module carries no support for reading or parsing it — not even a stub.
+// core/sse.ts — task 13: SSE frame encode/decode, per-stream sequence ids, and 1 MiB frame
+// batching (spec §3.1, §6.2, §14; D12, D15, D27). Pure module: `generation` and `seq` arrive as
+// arguments from the caller; nothing here reads the clock, the filesystem, the network, or
+// ambient env (`pure-core.md`). D12: the server ignores the reconnecting browser's resume header
+// entirely, so this module carries no support for reading or parsing it — not even a stub.
+// `encodeFrame` bounds every emitted frame type at 1 MiB: `rows`/`patch` via the `batchFrames`/
+// `batchPatches` splitters below, `hello`/`meta` via a label-truncation fallback inside
+// `encodeFrame` itself (see `FRAME_MAX_BYTES`'s doc). `decodeFrame` is the production counterpart.
 
 import type { Agent, Badge, Patch, RenderNode, SessionSummary } from './model.ts';
 
@@ -54,20 +57,96 @@ function serializePayload(data: unknown): string {
   }
 }
 
+const wireEncoder = new TextEncoder();
+
+/** Byte length of a string once written to the wire (UTF-8) — the same unit the 1 MiB cap is
+ * measured in. */
+function encodedByteLength(s: string): number {
+  return wireEncoder.encode(s).length;
+}
+
+/** The 1 MiB SSE frame cap (spec §6.2, §14). `rows`/`patch` reach it via splitting
+ * (`batchFrames`/`batchPatches` below) because they carry an array the caller controls the size
+ * of. `hello` and `meta` cannot be split the same way — `hello` is emitted exactly once per
+ * connection and `meta` is a single point-in-time snapshot, so there is no "next frame" to
+ * overflow into. The one field on both that can grow without bound is `Agent.label` (Phase-1
+ * audit's probe: 20 agents x 60,000-char labels => 1,203,531 B unbounded), so an oversized
+ * `hello`/`meta` is bounded there: every agent's label is truncated to a shared budget, halved
+ * until the actual encoded frame fits — the same halve-until-it-fits shape `normalize.ts`'s
+ * `elideToFit` uses for a single node, generalized here to the one array field both frame kinds
+ * carry. */
+const FRAME_MAX_BYTES = 1024 * 1024;
+
+function boundAgentLabels<T extends { agents: Agent[] }>(data: T, labelBudget: number): T {
+  if (labelBudget < 0) return data;
+  return { ...data, agents: data.agents.map((a) => (a.label.length > labelBudget ? { ...a, label: a.label.slice(0, labelBudget) } : a)) };
+}
+
+/** Builds the wire text for one frame with `data` already resolved — shared by the fast path
+ * (unbounded `frame.data`) and the fallback path (a `hello`/`meta` payload with truncated agent
+ * labels) so both go through identical envelope logic (`retry:`/`event:`/`id:` lines). */
+function frameText(event: SseFrame['event'], seq: number, data: unknown): string {
+  const lines: string[] = [];
+  if (event === 'hello' && seq === 1) lines.push(`retry: ${RETRY_MS}`);
+  lines.push(`event: ${event}`);
+  lines.push(`id: ${seq}`);
+  lines.push(`data: ${serializePayload(data)}`);
+  return `${lines.join('\n')}\n\n`;
+}
+
 /** Encodes one `SseFrame` as an SSE wire record: an optional leading `retry:` line, then
  * `event:`, `id:`, and `data:` lines, terminated by the blank line that closes an SSE record.
  * `seq` is the caller-owned per-stream monotonic sequence number (D12) — this module never
  * generates or tracks it itself. `retry:` is written once, in the first frame of every response
  * (spec §6.2) — `hello` is always that first frame ("once, on connect"), so the gate is the
  * frame's own event kind together with `seq === 1`, never a bare seq check that would also fire
- * on an out-of-band `rows`/`ping` frame someone happens to encode at seq 1. */
+ * on an out-of-band `rows`/`ping` frame someone happens to encode at seq 1.
+ *
+ * `hello`/`meta` additionally never exceed `FRAME_MAX_BYTES`: the common case (labels well under
+ * the cap) pays only the one extra length check below; only an oversized frame pays for the
+ * label-truncation fallback. */
 export function encodeFrame(frame: SseFrame, seq: number): string {
-  const lines: string[] = [];
-  if (frame.event === 'hello' && seq === 1) lines.push(`retry: ${RETRY_MS}`);
-  lines.push(`event: ${frame.event}`);
-  lines.push(`id: ${seq}`);
-  lines.push(`data: ${serializePayload(frame.data)}`);
-  return `${lines.join('\n')}\n\n`;
+  const unbounded = frameText(frame.event, seq, frame.data);
+  if (frame.event !== 'hello' && frame.event !== 'meta') return unbounded;
+  if (encodedByteLength(unbounded) <= FRAME_MAX_BYTES) return unbounded;
+
+  const data = frame.data as { agents: Agent[] };
+  let budget = Math.max(0, ...data.agents.map((a) => a.label.length));
+  let candidate = unbounded;
+  while (encodedByteLength(candidate) > FRAME_MAX_BYTES && budget > 0) {
+    budget = Math.floor(budget / 2);
+    candidate = frameText(frame.event, seq, boundAgentLabels(data, budget));
+  }
+  return candidate;
+}
+
+/** One decoded SSE frame: the typed `event`/`data` pair plus the wire's `id:` sequence number.
+ * `SseFrame`'s discriminated union is preserved — narrowing on `.event` narrows `.data` exactly as
+ * it does for an `SseFrame`, so a caller reading a `patch` frame's `remove` op still cannot reach
+ * a `node` field that was never on the wire. */
+export type DecodedFrame = SseFrame & { id: number };
+
+/** Parses one encoded SSE record — the exact text `encodeFrame` produces — back into its typed
+ * `event`/`id`/`data`. This is the production counterpart `encodeFrame` never had (spec §3.1 lists
+ * `sse.ts` as "frame encode/decode"); it round-trips every frame type, including `patch`'s two ops
+ * (`{op:"result",...,node}` vs `{op:"remove",id}` — `JSON.parse` never fabricates an absent key, so
+ * a `remove` decoded here carries no `node`, exactly as encoded). It never reads or references the
+ * browser's reconnect-resume header (D12: the server ignores it) — this decodes the module's OWN
+ * frame text, not a request header. Malformed input (missing `event:`/`id:`/`data:` lines) fails
+ * closed with a clear error rather than returning a partially-populated frame. */
+export function decodeFrame(encoded: string): DecodedFrame {
+  const body = encoded.endsWith('\n\n') ? encoded.slice(0, -2) : encoded;
+  const lines = body.split('\n');
+  const eventLine = lines.find((l) => l.startsWith('event: '));
+  const idLine = lines.find((l) => l.startsWith('id: '));
+  const dataLine = lines.find((l) => l.startsWith('data: '));
+  if (eventLine === undefined || idLine === undefined || dataLine === undefined) {
+    throw new Error(`malformed SSE frame: missing event:/id:/data: line in ${JSON.stringify(encoded)}`);
+  }
+  const event = eventLine.slice('event: '.length) as SseFrame['event'];
+  const id = Number(idLine.slice('id: '.length));
+  const data = JSON.parse(dataLine.slice('data: '.length)) as unknown;
+  return { event, data, id } as DecodedFrame;
 }
 
 /** The largest value `seq`, `from`, or `to` can validly take on the wire — beyond
