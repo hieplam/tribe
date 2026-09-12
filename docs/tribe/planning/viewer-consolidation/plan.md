@@ -1126,7 +1126,7 @@ not bound a frame, and the initial window is exactly where the aggregate bites.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Extend `V/structure.test.ts` with the five new rules of
+- [x] **Step 1: Write the failing test.** Extend `V/structure.test.ts` with the five new rules of
       spec §12.6 that are checkable today (the client rules land in task 22): `process.argv`
       appears only in `serve.ts`; `.tribe` appears only in `adapters/campaign.adapter.ts` (assert
       the rule now, with the adapter not yet existing, so it fails loudly until task 16); the
@@ -1185,12 +1185,12 @@ Model: **Sonnet**.
 
       Expected: the `.tribe` rule and the allowlist rule both fail against the current tree (the old
       `scan.adapter.ts` is still present).
-- [ ] **Step 2: Make them pass** by removing what phase 1 has superseded: delete the empty
+- [x] **Step 2: Make them pass** by removing what phase 1 has superseded: delete the empty
       `V/core/live/` tree and any now-orphaned import. The `.tribe` rule stays failing only if a
       deleted file survives — if it does, delete it.
-- [ ] **Step 3: Update** `V/README.md`'s "Package layout" section to the tree in spec §3.1, and its
+- [x] **Step 3: Update** `V/README.md`'s "Package layout" section to the tree in spec §3.1, and its
       purity paragraph to name the new module set.
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bunx tsc --noEmit && bun test
@@ -1198,7 +1198,7 @@ Model: **Sonnet**.
       Expected: `tsc` clean; the whole suite green; `structure.test.ts` reports every rule passing
       except any whose subject is scheduled for a later phase, and each such exception is named in
       the test's own message.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): run `bun test structure.test.ts` and read each rule's implementation.
 Then **try to defeat the allowlist**: write `import * as fs from 'node:fs'; fs.writeFileSync(...)`,

@@ -89,8 +89,9 @@ function parseJsonObject(line: string): Record<string, unknown> | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
-  } catch {
-    return null;
+  } catch (e) {
+    if (e instanceof SyntaxError) return null;
+    throw e;
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
   return parsed as Record<string, unknown>;

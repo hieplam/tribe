@@ -457,8 +457,9 @@ function gateHref(value: string): string | null {
   try {
     const u = new URL(value);
     return u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:' ? value : null;
-  } catch {
-    return null;
+  } catch (e) {
+    if (e instanceof TypeError) return null;
+    throw e;
   }
 }
 
@@ -546,8 +547,9 @@ function elideInput(node: RenderNode): RenderNode {
 function parseRaw(raw: string): Record<string, unknown> | null {
   try {
     return asRecord(JSON.parse(raw));
-  } catch {
-    return null;
+  } catch (e) {
+    if (e instanceof SyntaxError) return null;
+    throw e;
   }
 }
 

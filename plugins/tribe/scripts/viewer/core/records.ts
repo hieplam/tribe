@@ -50,8 +50,9 @@ function parseLine(line: string): TranscriptRecord | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
-  } catch {
-    return null;
+  } catch (e) {
+    if (e instanceof SyntaxError) return null;
+    throw e;
   }
   // A JSON array or a bare scalar (number, string, boolean, null) parses without throwing but is
   // not a transcript row — reject both here, the same way as any other malformed shape.

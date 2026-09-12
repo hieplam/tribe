@@ -76,20 +76,45 @@ field for this feature):
 
 ## Package layout
 
+The consolidation collapses the two former surfaces into one package (spec §3.1). Every module
+under `core/` is PURE — no filesystem, clock, env, or network — and reaches the outside world only
+through the abstractions the three `adapters/` construct; `serve.ts` is the composition root that
+wires them (`pure-core.md`). The `core/live/` tree of the pre-consolidation viewer is gone: its
+contract, path math, tail state machine, records/markdown/normalize parsing, process derivation,
+and routes now live as the peer `core/` modules named below.
+
 ```
-core/                    pure: parsing, normalizing, process-tree derivation, HTML rendering
-core/live/                pure: the live-view wire contract, path math, tail state machine,
-                           transcript reader, markdown, normalize, process derivation, routes,
-                           page shell
-client/                  browser ES module + stylesheet — no build step, no imports
-adapters/scan.adapter.ts        status-page filesystem/process reads
-adapters/transcript.adapter.ts  live-view filesystem reads (transcripts, sidecars, assets)
-adapters/poller.adapter.ts      the live view's clock — one 400ms poll loop per SSE connection
 serve.ts                 composition root: routes + wiring
-structure.test.ts         executable purity wall for this package
-fixtures/                hand-authored transcript shapes used by the live-view unit tests
-e2e/                      opt-in, real end-to-end proof (card D4/G5) — see e2e/README.md
+core/                    PURE — no fs, no clock, no env, no network
+  model.ts               the wire contract: RenderNode, MdToken, SessionSummary, Frame, Route
+  paths.ts               cwd encoding, containment, fixed-layout joins
+  window.ts              complete-line selection over supplied raw bytes; findWindow backward reader
+  tail.ts                pure tail transition: offset, ackOffset, carry, inode reset
+  records.ts             tolerant JSONL row parse
+  markdown.ts            markdown -> MdToken[]
+  normalize.ts           rows -> RenderNode[] (spec §7 is its contract)
+  pair.ts                single forward pass tool_use/tool_result
+  title.ts               title selection (spec §5.3)
+  liveness.ts            live = grew or mtime within 10 min
+  subagents.ts           sidecar tree (from the former core/live/processes.ts)
+  badge.ts               badge derivation + campaign selection/cap (pure over already-read JSON)
+  routes.ts              URL -> Route (spec §3.2)
+  sse.ts                 frame encode/decode, sequence ids, 1 MiB frame batching
+adapters/                the only impure edges — thin, fail-closed
+  fs.adapter.ts          every transcript read (stat, readdir, ranged read, realpath)
+  campaign.adapter.ts    the ONLY two ~/.tribe reads + the pid liveness probe
+  poller.adapter.ts      the only clock owner: one poll loop per SSE stream
+client/                  the browser SPA (React + Vite; built to dist/)
+fixtures/build.ts        builds a whole ~/.claude/projects tree FROM NOTHING (spec §16.2)
+tools/                   one-off corpus measurement scripts; NOT core, never in a request path
+structure.test.ts        the executable purity + safety wall for this package
+e2e/                     opt-in, real end-to-end proofs (spec §14) — see e2e/README.md
 ```
+
+Some `core/` and `adapters/` modules of the target tree land in the consolidation's later phases;
+until then the pre-consolidation `serve.ts`, `core/derive.ts`, `core/render.ts`, and the
+`scan.adapter.ts`/`transcript.adapter.ts`/`poller.adapter.ts` trio remain in the tree, PENDING
+DELETION, and their broken imports are the only red in the suite (they are removed in phases 2–4).
 
 Check command: `bun run check` (`tsc --noEmit && bun test`).
 

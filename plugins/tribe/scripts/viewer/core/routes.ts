@@ -26,7 +26,7 @@ const AGENT_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 // hash suffix. 300 is a safety margin, not a magic number tied to one measurement.
 const PROJECT_DIR_RE = /^[A-Za-z0-9-]{1,300}$/;
 
-// repoKey / slug: real directory entries under ~/.tribe (§9) — never a value from inside a file.
+// repoKey / slug: real directory entries under the tribe home (§9) — never a value from inside a file.
 // Same identifier alphabet the pre-consolidation route parser already used for this purpose.
 const REPO_KEY_RE = /^[A-Za-z0-9._-]{1,200}$/;
 const SLUG_RE = /^[A-Za-z0-9._-]{1,200}$/;
@@ -145,8 +145,9 @@ function notFound(path: string): Route {
 function safeDecode(value: string): string | null {
   try {
     return decodeURIComponent(value);
-  } catch {
-    return null;
+  } catch (e) {
+    if (e instanceof URIError) return null;
+    throw e;
   }
 }
 

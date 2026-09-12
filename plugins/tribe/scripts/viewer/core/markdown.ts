@@ -51,8 +51,9 @@ function isAllowedHref(href: string): boolean {
   try {
     const u = new URL(href);
     return u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:';
-  } catch {
-    return false;
+  } catch (e) {
+    if (e instanceof TypeError) return false;
+    throw e;
   }
 }
 
