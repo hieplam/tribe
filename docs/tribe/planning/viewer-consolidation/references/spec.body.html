@@ -257,12 +257,14 @@ implementation detail and has already changed once</strong>. The <strong>Shaman<
 owner's delegate. The <strong>Warchief</strong> decides How: it writes this spec and the plan beside it, and
 dispatches the work. A <strong>hunter</strong> implements one planned task at a time under test-first discipline.
 A <strong>skinner</strong> is the audit lens: it reviews a finished change by <em>running</em> its proof rather than
-reading claims (currently an Opus subagent — D29). A <strong>blind reader</strong> is given this page and nothing
-else, and its job is to find what cannot be understood from the page alone (currently a Sonnet
-subagent — D29).</p>
-<p>Earlier revisions of this document named the <em>models</em> — "Sol audits", "Terra's findings" — and D29
-made every one of those names wrong in a single ruling. The roles did not change; only the models
-did. Where a review finding is cited below it is cited as a finding, not as a reviewer.</p>
+reading claims (<strong>GPT-5.6 Sol, falling back to Opus 5</strong> — D29). A <strong>blind reader</strong> is given this
+page and nothing else, and its job is to find what cannot be understood from the page alone
+(<strong>GPT-5.6 Luna, falling back to Claude Sonnet</strong> — D29).</p>
+<p><strong>Both review roles are deliberately a different vendor from the author</strong>, which is D29's whole
+point: an author and a reviewer trained on the same corpus share blind spots, so agreement between
+them measures less than it appears to. Earlier revisions of this document named the models inline —
+"Sol audits", "Terra's findings" — and one ruling made every such name wrong at a stroke; the roles
+never changed. Where a review finding is cited below it is cited as a finding, not as a reviewer.</p>
 <p>Everything below is settled law for the build: the rulings are quoted, never paraphrased, and this
 document does not reopen them.</p>
 <ul>
@@ -292,12 +294,17 @@ document does not reopen them.</p>
 <li><strong><code>pure-core.md</code></strong> — "core logic never constructs or reaches out for its dependencies; it
   receives them."</li>
 <li><strong><code>fail-closed-edges.md</code>, obligation 4</strong> — "A path from outside is contained before it is used."</li>
-<li><strong>D10</strong> — "the sidebar shows by default only projects whose newest session is within 30 days; a
+<li>
+<p><strong>D10</strong> — "the sidebar shows by default only projects whose newest session is within 30 days; a
   visible 'show N older projects' link (URL <code>?all=1</code>) reveals the rest. Stateless default, not a
-  preference, so D7 holds. Sessions inside a project are never hidden."</li>
+  preference, so D7 holds. Sessions inside a project are never hidden."</p>
+</li>
+<li>
+<p><strong>D11 — the owner approved this spec.</strong> <em>"Okay approve"</em> (owner, 2026-09-12). The build starts
+  from this revision; the rulings below are the delegated implementation detail, not the thing that
+  was approved (§6.0 is).</p>
+</li>
 </ul>
-<p>(<strong>D11 is reserved for the owner's spec approval</strong> — the numbering below skips it deliberately, not
-by oversight.)</p>
 <p><strong>Nineteen further rulings</strong> — eighteen issued across review rounds 2–10, plus <strong>D9 from the
 owner</strong> — supersede parts of the original transport, fixture and naming design. They are grouped below by what they govern — a flat
 list of nineteen is not readable, and a reader looking for "how big can a row be" should not have to
@@ -403,15 +410,32 @@ scan every one. Each is quoted verbatim; none is paraphrased.</p>
   <code>__viewerReconnect()</code> ship in the production build. They are read-only and harmless (they close
   and reopen the client's own stream; they touch nothing else), so there is no dev/prod split to
   prove."</em></li>
-<li><strong>D29 — reviewers are Claude models. This SUPERSEDES D4 while the Codex quota is out.</strong> <em>"Spec
-  audits on an Opus subagent with the same skinner brief; blind reads on a Sonnet subagent with the
-  same blind-reader brief."</em> D4 named GPT-5.6 Sol and Terra for the same two roles; where the two
-  rulings disagree, D29 governs. The <strong>roles</strong> are unchanged — only the models are — which is why
-  §1's opener names roles and puts the model in a parenthetical.</li>
+<li><strong>D29 (revised by the owner) — reviewers must come from a different vendor than the author.</strong>
+  <em>"reviewer default gpt5.6 sol. If it out of usage, fallback to opus 5. Why this? Because i want
+  different model with different context to review to avoid bias. Same model in same vendor still
+  have some chance to be bias as they trained from same source. So best is totally different model
+  from different vendor like claude and gpt."</em> Blind-reader page reviews run on <strong>GPT-5.6 Luna</strong>
+  (<code>codex exec -m gpt-5.6-luna</code>), falling back to <strong>Claude Sonnet</strong>. This <strong>supersedes D4</strong> for both
+  review roles; D4's hunter clause stands. The <strong>roles</strong> are unchanged — only the models are — which
+  is why §1's opener names roles and puts the model in a parenthetical.</li>
 <li><strong>D30 — a snapshot of a file that does not end in <code>\n</code>.</strong> <em>"Snapshot of a file not ending in
   '\n': trailing bytes after the last newline are the tail carry, never a row; <code>to</code> = after the last
   newline; forward tail seeded with ackOffset := to, carry := [to, eof), offset := eof (invariant
   offset == ackOffset + carry.length holds from tick one)."</em></li>
+<li><strong>D32 — the projects root honours <code>CLAUDE_CONFIG_DIR</code>.</strong> <em>"(a) The viewer's projects root is
+  <code>$CLAUDE_CONFIG_DIR/projects</code> when that variable is set, else <code>~/.claude/projects</code> — a real user
+  with the variable set must see their sessions; <code>serve.ts</code> resolves it once at start and prints it;
+  containment root follows it. (b) Fixture suites set <code>CLAUDE_CONFIG_DIR=&lt;tmp&gt;/cfg</code> instead of
+  faking HOME for <code>.claude</code>; <code>.tribe</code> for E3 still comes from a fake HOME. (c) The two real-Haiku
+  suites run against the REAL config dir, because a fresh sandbox is 'Not logged in' and credentials
+  are never copied; their assertions are scoped to the session or campaign the test itself created,
+  and the digest assertions apply to the fixture suites only."</em></li>
+</ul>
+<p>Verified on this machine 2026-09-12: <code>CLAUDE_CONFIG_DIR=/tmp/probe claude -p …</code> wrote
+  <code>/tmp/probe/projects/&lt;encoded-cwd&gt;/&lt;id&gt;.jsonl</code> (plus <code>sessions/</code>, <code>.claude.json</code>, <code>backups/</code>) and
+  <strong>nothing</strong> under the real <code>~/.claude</code>; the same run printed <code>Not logged in · Please run /login</code>,
+  which is exactly why (c) exists.</p>
+<ul>
 <li><strong>D31 — the backward reader lives in core.</strong> <em>"<code>core/window.ts</code> exports
   <code>findWindow(readBack: (end, len) =&gt; Uint8Array, eof, limit)</code>; the adapter supplies only <code>readBack</code>;
   <code>serve.ts</code> composes. Unit-tested with an in-memory <code>readBack</code> over the fixture bytes; the HTTP
@@ -1013,9 +1037,20 @@ label is the whole of it — the client renders no affordance in the second case
 an expansion that returns nothing.</p>
 <hr>
 <h2 id="5-on-disk-discovery">5. On-disk discovery</h2>
-<p>Everything below reads only <code>~/.claude/projects</code>, resolved once in <code>serve.ts</code> from <code>HOME</code>.
-<code>HOME</code> is the <em>only</em> environment value this package reads (§12.3), which is also what makes the
-fixture e2e possible without inventing a flag.</p>
+<p><strong>The projects root is resolved once, at start, and printed (D32):</strong></p>
+<pre><code>projectsRoot := CLAUDE_CONFIG_DIR is set and non-empty
+                  ? &lt;CLAUDE_CONFIG_DIR&gt;/projects
+                  : &lt;HOME&gt;/.claude/projects
+</code></pre>
+<p>Claude Code itself honours <code>CLAUDE_CONFIG_DIR</code> — verified on this machine, where a run with it set
+wrote its transcript under <code>&lt;that dir&gt;/projects/…</code> and nothing under <code>~/.claude</code>. A user who sets it
+has their sessions <em>there</em>, so a viewer that only ever looked at <code>~/.claude/projects</code> would show
+them an empty list and be wrong about it. <code>serve.ts</code> resolves the root once at boot, <strong>prints it on
+the startup line</strong>, and every path in this section, every containment check in §12.2, and the
+fixture suites of §16.2 use that one resolved value.</p>
+<p><code>HOME</code> and <code>CLAUDE_CONFIG_DIR</code> are the <em>only</em> environment values this package reads (§12.3) — and
+<code>CLAUDE_CONFIG_DIR</code> is also what lets a fixture suite point the viewer at a built tree without
+faking <code>HOME</code> for it.</p>
 <h3 id="51-the-scan">5.1 The scan</h3>
 <pre><code>projectsRoot = &lt;HOME&gt;/.claude/projects
 1. readdir(projectsRoot)                        -&gt; candidate project dir names
@@ -1126,6 +1161,81 @@ not a preference, so D7 holds. Sessions inside a project are never hidden."</em>
 <code>/private/tmp</code> throwaways. The window is the reason the sidebar is legible on this machine.</p>
 <hr>
 <h2 id="6-tail-and-the-sse-contract">6. Tail and the SSE contract</h2>
+<h3 id="60-tail-contract-what-the-owner-reviews">6.0 Tail contract — what the owner reviews</h3>
+<p>The rest of §6 is implementation. <strong>This page is the contract.</strong> If the sections below disagree with
+this one, this one is wrong and gets fixed — not the other way round.</p>
+<p><strong>What "the tail" does.</strong> It shows a transcript as it is being written:</p>
+<ul>
+<li>every row in <strong>file order</strong>, never timestamp order;</li>
+<li>a row appended to the file appears in the browser <strong>within 1 second</strong>;</li>
+<li><strong>tool calls are shown with their results</strong>, including a result that arrives later, and one whose
+  call is further back than the screen currently holds;</li>
+<li>it keeps working across a <strong>dropped connection</strong>, a <strong>rotated or truncated file</strong>, a <strong>half-written
+  last row</strong>, and rows of <strong>any size</strong>;</li>
+<li>it <strong>never writes anything</strong>, and never reads outside the projects root.</li>
+</ul>
+<p><strong>The oracle.</strong> The transcripts on this machine decide what is correct — not Kanna, not this
+document. 127,085 rows were measured to write §7. Two rules follow, and they are asymmetric on
+purpose: <strong>a row on disk that the viewer silently drops is a bug</strong>; a row it does not understand and
+shows as a raw JSON card is <strong>working as designed</strong>.</p>
+<p><strong>The cases the owner can name, and the test that proves each.</strong></p>
+<table>
+<thead>
+<tr>
+<th>What you would try</th>
+<th>What must happen</th>
+<th>Proved by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Leave a session open while it writes</td>
+<td>the new row appears <strong>within 1 s</strong></td>
+<td><code>live-tail.e2e</code> — worst of 40 samples, writer's own clock (§16.3)</td>
+</tr>
+<tr>
+<td>Scroll up while it is still writing</td>
+<td>it <strong>stops following</strong>; new rows do not yank the view</td>
+<td><code>live-tail.e2e</code> — <code>scrollTop</code> unchanged across an append (§8.3)</td>
+</tr>
+<tr>
+<td>Drop the connection and let it come back</td>
+<td>every row is shown <strong>exactly once</strong></td>
+<td><code>live-tail.e2e</code> — reconnect, generation differs, no duplicate ids (§6.2)</td>
+</tr>
+<tr>
+<td>A session file is rotated or truncated underneath</td>
+<td>the <strong>new</strong> file is shown, with no duplicated history</td>
+<td><code>live-tail.e2e</code> + <code>poller.adapter.test</code> — reset, then the tail window (§6.1)</td>
+</tr>
+<tr>
+<td>Open a session whose last row is still half-written</td>
+<td><strong>no error card</strong>; that row appears when its newline arrives</td>
+<td><code>core/window.test</code> + task 19 — the <code>&lt;session-cut&gt;</code> fixture (D30)</td>
+</tr>
+<tr>
+<td>A single row is enormous (9 MiB)</td>
+<td><strong>one</strong> card saying "row too large", and the rows around it are fine</td>
+<td><code>core/tail.test</code> + <code>core/window.test</code> — both readers, one cap (D26)</td>
+</tr>
+<tr>
+<td>A tool result arrives late, or its call is above the screen</td>
+<td>the card <strong>completes itself</strong>; nothing is lost</td>
+<td><code>pair.test</code>, <code>rowStore.test</code>, <code>live-tail.e2e</code> (§6.4, §7.5)</td>
+</tr>
+<tr>
+<td>Look for a session you know exists</td>
+<td><strong>every</strong> session under the projects root is listed</td>
+<td><code>dom-kinds.e2e</code> — set equality against what the fixture wrote (§16.2)</td>
+</tr>
+<tr>
+<td>Worry that it wrote something</td>
+<td>the fixture tree is <strong>byte-identical</strong> before and after</td>
+<td><code>dom-kinds.e2e</code> — recursive digest (§16.2)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>D12–D31 are the delegated implementation rulings; the owner reviews this page, not those.</strong></p>
 <h3 id="61-the-tail-state-machine-pure-and-over-raw-bytes-d13">6.1 The tail state machine — pure, and over raw bytes (D13)</h3>
 <p><code>core/tail.ts#advanceTail</code> is a <strong>pure transition</strong> over three supplied values: the previous state,
 a <code>FileObservation</code> (§4), and <strong>the raw bytes read this tick</strong> (<code>Uint8Array</code>). It returns the new
@@ -2888,7 +2998,8 @@ conflating them with the runtime would make the rule either false or unenforceab
 <p>Enforced <strong>structurally</strong> by §12.6's allowlist, over exactly that runtime file set, and
 <strong>observationally</strong> by §16.2's per-suite digests, which cover every byte the viewer must not touch
 <em>while it is serving</em> (<code>homeA</code> whole; E2's own copy minus the file its writer appends to;
-<code>homeB/.claude</code> only, because <code>homeB/.tribe</code> is the runner's to write).</p>
+and the two real-Haiku suites take no digest at all, because their <code>.claude</code> side is the owner's
+real config dir — D32c).</p>
 <p><strong>The two client hooks (<code>window.__viewerEventSource</code>, <code>window.__viewerReconnect()</code>, §8.4) ship and
 are allowed</strong> (D25): each acts only on the page's own <code>EventSource</code> — closing a connection the
 client already owns, or opening the replacement it would have opened itself on <code>error</code>. They read no
@@ -2922,10 +3033,13 @@ containment has two stages, and both are mandatory before any open:</p>
    <code>realpath</code> the adapter reports. A resolved target that does not start with
    <code>realpath(root) + sep</code> is refused, whatever the lexical result was.</li>
 </ol>
-<p><strong>The root is the resolved <code>~/.claude/projects</code> directory (D14) — not the session directory, not
-the project directory.</strong> This is decided by the oracle, not by taste. There is exactly one symlink
+<p><strong>The root is the resolved projects directory (D14) — not the session directory, not the project
+directory. Which directory that <em>is</em> follows D32</strong>: <code>$CLAUDE_CONFIG_DIR/projects</code> when the variable
+is set, else <code>~/.claude/projects</code>, resolved once at boot (§5). The containment root and the scan
+root are always the same value, because two roots that could disagree is a containment hole with a
+configuration switch attached.<strong> This is decided by the oracle, not by taste. There is exactly one symlink
 under <code>~/.claude/projects</code> on this machine, and it is a legitimate one: a subagent sidecar in
-session <code>f900f274-…</code> pointing at the same agent file under the <strong>sibling session</strong> <code>6c9855d5-…</code> in
+session <code>f900f274-…</code> pointing at the same agent file under the </strong>sibling session** <code>6c9855d5-…</code> in
 the same project. A session-rooted check would refuse a real row that Claude Code itself wrote,
 which is under-rendering — the one thing §0 calls a bug. A projects-rooted check accepts it and
 still refuses everything that leaves the tree.</p>
@@ -2944,7 +3058,8 @@ which is why resolved containment is part of the scan (§5.1) and not only of th
 </ul>
 <p><code>realpath</code> is also used once in <code>serve.ts</code> to resolve <code>HOME</code> and the two roots at boot.</p>
 <h3 id="123-environment">12.3 Environment</h3>
-<p><code>HOME</code> is the only environment value read, and only in <code>serve.ts</code>. <code>structure.test.ts</code> keeps
+<p><strong><code>HOME</code> and <code>CLAUDE_CONFIG_DIR</code> are the only environment values read</strong>, and only in <code>serve.ts</code>
+(D32). <code>structure.test.ts</code> keeps
 today's raw-source ban on <code>process.env</code> under <code>core/</code>, extended to <code>client/</code>, and adds a ban on
 <code>process.argv</code> outside <code>serve.ts</code>.</p>
 <h3 id="124-static-assets">12.4 Static assets</h3>
@@ -3079,8 +3194,16 @@ scan, deliberately failing toward false positives — keep that comment).</p>
 <td>one stderr line + exit 2 (§10.3)</td>
 </tr>
 <tr>
-<td><code>~/.claude/projects</code> missing or unreadable</td>
-<td>the list renders, empty, with the note <code>no sessions found under &lt;path&gt;</code> — never a crash</td>
+<td>the projects root is missing or unreadable</td>
+<td>the list renders, empty, with the note <code>no sessions found under &lt;path&gt;</code> — naming the <strong>resolved</strong> root, so a user who set <code>CLAUDE_CONFIG_DIR</code> sees which directory was actually searched — never a crash</td>
+</tr>
+<tr>
+<td><code>CLAUDE_CONFIG_DIR</code> is set to a path that does not exist, or is not a directory, or cannot be read</td>
+<td><strong>typed refusal at start</strong>: one stderr line <code>viewer: CLAUDE_CONFIG_DIR=&lt;path&gt; is not a readable directory</code>, exit 2. Not a silent fall back to <code>~/.claude</code> — a user who set the variable and got someone else's sessions would be worse off than one who got an error</td>
+</tr>
+<tr>
+<td><code>CLAUDE_CONFIG_DIR</code> is set but empty (<code>CLAUDE_CONFIG_DIR=</code>)</td>
+<td>treated as unset; the root is <code>~/.claude/projects</code> (§5)</td>
 </tr>
 <tr>
 <td><code>~/.tribe</code> missing entirely</td>
@@ -3408,9 +3531,9 @@ is "the status page is unbounded — 387 KB for 17 campaigns".</p>
 <p><code>fixtures/build.ts</code> builds a <strong>complete <code>~/.claude/projects</code> tree in an empty <code>mkdtemp</code>
 directory</strong>, from nothing — <code>fixtures-mirror-reality.md</code> obligation 2, and plan task <strong>1 runs it
 before any implementation task exists</strong>.</p>
-<p><strong><code>fixtures/build.ts</code> builds exactly TWO fake HOMEs, and every test names which one it uses.</strong> One
-directory cannot both hold a populated <code>.claude/projects</code> and have no <code>.claude</code> at all, so the
-variants are enumerated rather than described:</p>
+<p><strong><code>fixtures/build.ts</code> builds exactly TWO fixture roots, and every test names which one it uses.</strong>
+One directory cannot both hold a populated <code>projects/</code> and have none at all, so the variants are
+enumerated rather than described:</p>
 <table>
 <thead>
 <tr>
@@ -3422,7 +3545,7 @@ variants are enumerated rather than described:</p>
 <tbody>
 <tr>
 <td><strong><code>homeA</code></strong></td>
-<td>a populated <code>.claude/projects</code> (everything listed below) and <strong>no <code>.tribe</code> at all</strong></td>
+<td>a populated <code>cfg/projects/</code> (everything listed below) and <strong>no <code>.tribe</code> at all</strong></td>
 <td>G1, G2, G4 — the DOM, live-tail, refusal and write-hash suites</td>
 </tr>
 <tr>
@@ -3432,26 +3555,29 @@ variants are enumerated rather than described:</p>
 </tr>
 </tbody>
 </table>
-<p>Both come from <code>mkdtemp</code> (never a fixed <code>/tmp</code> path — a shared, unowned path makes concurrent runs
-race and invites a destructive <code>rm -rf</code>), and the server under test is started with <code>HOME=&lt;that
-directory&gt;</code> and nothing else. §5 resolves both roots from <code>HOME</code> (§12.3), which is what makes a
-fixture run need no test-only flag.</p>
-<pre><code>&lt;homeA&gt;/
-  .claude/projects/&lt;proj-A&gt;/&lt;session-1&gt;.jsonl          the &quot;every kind&quot; session
-  .claude/projects/&lt;proj-A&gt;/&lt;session-1&gt;/subagents/agent-*.jsonl + .meta.json   (5 sidecars)
-  .claude/projects/&lt;proj-A&gt;/&lt;session-1&gt;/tool-results/&lt;id&gt;.txt                  the spill
-  .claude/projects/&lt;proj-A&gt;/&lt;session-1&gt;/tool-results/escaping.txt   -&gt; outside the root  (symlink)
-  .claude/projects/&lt;proj-A&gt;/&lt;session-1&gt;/tool-results/in-session.txt -&gt; the spill          (symlink)
-  .claude/projects/&lt;proj-A&gt;/&lt;session-1&gt;/subagents/agent-&lt;sib&gt;.jsonl -&gt; &lt;session-2&gt;'s copy (symlink)
-  .claude/projects/&lt;proj-A&gt;/&lt;session-live&gt;.jsonl       the session E2's writer appends to
-  .claude/projects/&lt;proj-A&gt;/&lt;session-cut&gt;.jsonl        ends MID-ROW: no trailing newline (D30)
-  .claude/projects/&lt;proj-A&gt;/&lt;session-4&gt;.jsonl          the &gt;2,000-node session
-  .claude/projects/&lt;proj-A&gt;/&lt;session-4&gt;.rotated        the same-size replacement (not served)
-  .claude/projects/&lt;proj-B&gt;/&lt;session-2&gt;.jsonl          a second project
-  .claude/projects/&lt;proj-C&gt;/&lt;session-3&gt;.jsonl          a THIRD project, mtime 90 days old
+<p><strong>The <code>.claude</code> side is pointed at with <code>CLAUDE_CONFIG_DIR</code>, not by faking <code>HOME</code> (D32).</strong> The
+server under test is started with <code>CLAUDE_CONFIG_DIR=&lt;tmp&gt;/cfg</code>, which is the same mechanism Claude
+Code itself honours — verified on this machine — so a fixture run exercises the <strong>production</strong>
+resolution path of §5 rather than a test-only impersonation. <code>HOME</code> is still faked for <code>homeB</code>'s
+<code>.tribe</code>, because <code>~/.tribe</code> has no environment override in this card.</p>
+<p>Both roots come from <code>mkdtemp</code> (never a fixed <code>/tmp</code> path — a shared, unowned path makes concurrent
+runs race and invites a destructive <code>rm -rf</code>).</p>
+<pre><code>&lt;homeA&gt;/                       CLAUDE_CONFIG_DIR=&lt;homeA&gt;/cfg
+  cfg/projects/&lt;proj-A&gt;/&lt;session-1&gt;.jsonl          the &quot;every kind&quot; session
+  cfg/projects/&lt;proj-A&gt;/&lt;session-1&gt;/subagents/agent-*.jsonl + .meta.json   (5 sidecars)
+  cfg/projects/&lt;proj-A&gt;/&lt;session-1&gt;/tool-results/&lt;id&gt;.txt                  the spill
+  cfg/projects/&lt;proj-A&gt;/&lt;session-1&gt;/tool-results/escaping.txt   -&gt; outside the root  (symlink)
+  cfg/projects/&lt;proj-A&gt;/&lt;session-1&gt;/tool-results/in-session.txt -&gt; the spill          (symlink)
+  cfg/projects/&lt;proj-A&gt;/&lt;session-1&gt;/subagents/agent-&lt;sib&gt;.jsonl -&gt; &lt;session-2&gt;'s copy (symlink)
+  cfg/projects/&lt;proj-A&gt;/&lt;session-live&gt;.jsonl       the session E2's writer appends to
+  cfg/projects/&lt;proj-A&gt;/&lt;session-cut&gt;.jsonl        ends MID-ROW: no trailing newline (D30)
+  cfg/projects/&lt;proj-A&gt;/&lt;session-4&gt;.jsonl          the &gt;2,000-node session
+  cfg/projects/&lt;proj-A&gt;/&lt;session-4&gt;.rotated        the same-size replacement (not served)
+  cfg/projects/&lt;proj-B&gt;/&lt;session-2&gt;.jsonl          a second project
+  cfg/projects/&lt;proj-C&gt;/&lt;session-3&gt;.jsonl          a THIRD project, mtime 90 days old
   (no .tribe — this absence IS G1's precondition)
 
-&lt;homeB&gt;/ = &lt;homeA&gt;/ plus
+&lt;homeB&gt;/ = &lt;homeA&gt;/ plus            CLAUDE_CONFIG_DIR=&lt;homeB&gt;/cfg, HOME=&lt;homeB&gt;
   .tribe/&lt;repoKeyA&gt;/campaigns/&lt;slug&gt;/campaign-state.json
   .tribe/&lt;repoKeyB&gt;/campaigns/&lt;slug&gt;/campaign-state.json     same slug, same session id
 </code></pre>
@@ -3615,8 +3741,8 @@ number.</p>
 <p>Three projects, not two: D10 hides projects whose newest session is older than 30 days, so a
 two-project fixture cannot produce the "show N older projects" link at all. <code>&lt;proj-C&gt;</code> is the
 hidden one.</p>
-<p><code>e2e/dom-kinds.e2e.test.ts</code> spawns the real <code>serve.ts</code> with <code>HOME=&lt;homeA&gt;</code> — which has <strong>no
-<code>.tribe</code> inside it</strong>, G1's precondition — opens a real Chromium page at <code>/s/&lt;session-1&gt;</code>, and
+<p><code>e2e/dom-kinds.e2e.test.ts</code> spawns the real <code>serve.ts</code> with <strong><code>CLAUDE_CONFIG_DIR=&lt;homeA&gt;/cfg</code></strong> and
+<code>HOME=&lt;homeA&gt;</code> — which has <strong>no <code>.tribe</code> inside it</strong>, G1's precondition — opens a real Chromium page at <code>/s/&lt;session-1&gt;</code>, and
 asserts <strong>in the DOM</strong>, in two layers:</p>
 <p><strong>Layer 1 — kind coverage, driven by a runtime witness.</strong> For every key of <code>RENDER_NODE_KINDS</code>
 (§4), <code>document.querySelectorAll('[data-kind="k"]').length &gt;= 1</code>. The test iterates the <strong>witness
@@ -3719,11 +3845,16 @@ writes campaign state. A blanket digest would fail on the test's own fixture-mak
 viewer write, and a proof expected to fail teaches nobody anything.</p>
 <p>So the digest is scoped per suite, and the rule each time is "hash everything the <strong>viewer</strong> must not
 touch":</p>
+<p><strong>The digest assertions below apply to the FIXTURE suites only (D32c).</strong> E2 and E3 run a real
+Haiku session against the <strong>real</strong> config dir — a fresh sandbox is "Not logged in" and credentials
+are never copied into one — so a whole-tree digest there would be a digest of the owner's own
+<code>~/.claude</code>, which this card may not take and would not be meaningful if it did. Their assertions
+are scoped instead to <strong>the session or campaign the test itself created</strong>.</p>
 <table>
 <thead>
 <tr>
 <th>Suite</th>
-<th>HOME</th>
+<th>Root</th>
 <th>Digest covers</th>
 <th>Taken</th>
 </tr>
@@ -3731,21 +3862,27 @@ touch":</p>
 <tbody>
 <tr>
 <td><code>dom-kinds</code>, <code>url-refusals</code>, <code>served-build</code>, <code>real-transcript</code></td>
-<td><code>homeA</code></td>
-<td><strong>the whole tree</strong> — nothing in these suites writes to it</td>
+<td><code>CLAUDE_CONFIG_DIR=&lt;homeA&gt;/cfg</code></td>
+<td><strong>the whole <code>homeA</code> tree</strong> — nothing in these suites writes to it</td>
 <td>before the suite and after it; byte-identical</td>
 </tr>
 <tr>
-<td><code>live-tail</code> (E2)</td>
-<td><strong>its own copy of <code>homeA</code></strong></td>
+<td><code>live-tail</code> (E2) — <strong>fixture half</strong></td>
+<td><code>CLAUDE_CONFIG_DIR=&lt;copy of homeA&gt;/cfg</code></td>
 <td>the whole copy <strong>except <code>&lt;session-live&gt;.jsonl</code></strong>, the single file its writer appends to</td>
 <td>before the first append and after the last; byte-identical outside that file</td>
 </tr>
 <tr>
+<td><code>live-tail</code> (E2) — <strong>real-Haiku half</strong></td>
+<td>the <strong>real</strong> config dir (D32c)</td>
+<td><strong>no digest</strong> — assertions are scoped to the session the test created, by id</td>
+<td>—</td>
+</tr>
+<tr>
 <td><code>campaign-badge</code> (E3)</td>
-<td><code>homeB</code></td>
-<td><strong><code>homeB/.claude</code> only — never <code>homeB/.tribe</code></strong>, which the runner writes by design</td>
-<td>after the runner has exited, and again after the browser-read interval; byte-identical</td>
+<td>the <strong>real</strong> config dir for <code>.claude</code>; <code>HOME=&lt;homeB&gt;</code> for <code>.tribe</code></td>
+<td><strong><code>&lt;homeB&gt;/.tribe</code> is never digested</strong> (the runner writes it by design), and the real config dir is not digested either (D32c); assertions are scoped to the campaign and session the test created</td>
+<td>—</td>
 </tr>
 </tbody>
 </table>
@@ -3875,8 +4012,10 @@ commit it with a fixture identity (<code>-c user.email=… -c user.name=…</cod
 machine's git config), and assert <code>git remote -v</code> is <strong>empty</strong>. No remote is deliberate: the card
 can then never open a real pull request, and the run's purpose is the viewer, not the card's
 outcome.</p>
-<p><strong>2. The fake HOME and the two campaign homes.</strong> This is <code>homeB</code> of §16.2: the populated
-<code>.claude/projects</code> tree <strong>plus</strong> a <code>.tribe/</code>. Both campaign homes are written under that fake HOME —
+<p><strong>2. The roots.</strong> <code>.tribe</code> comes from the fake HOME <code>homeB</code> of §16.2; <strong><code>.claude</code> is the REAL config
+dir</strong> (D32c) — a fresh <code>CLAUDE_CONFIG_DIR</code> sandbox is <em>Not logged in</em>, so the runner's real Haiku
+session must write where its credentials are. The test therefore asserts against <strong>the session id
+the runner created</strong>, never against the whole tree, and takes no digest of the owner's config dir. Both campaign homes are written under that fake HOME —
 <strong>the owner's real <code>~/.tribe</code> is never written, never read and never touched by this test</strong>, and the
 runner is invoked with <code>HOME=&lt;homeB&gt;</code> precisely so it cannot be. Neither home is "the real one":
 both are synthetic, sharing one slug across two repo keys — the collision that exists on this
@@ -3913,7 +4052,7 @@ and its single task is deliberately trivial: <em>append one line to <code>README
 enough for Haiku 4.5 to finish inside the timeout; structured so it cannot be done without a
 dispatch.</p>
 <p><strong>4. The invocation</strong>, after a <code>--dry-run</code> pass has validated the state file:</p>
-<pre><code class="language-sh">HOME=&lt;tmp&gt; bun plugins/tribe/scripts/runner/run.ts \
+<pre><code class="language-sh">HOME=&lt;homeB&gt; bun plugins/tribe/scripts/runner/run.ts \
   --repo &lt;throwaway-repo&gt; \
   --model claude-haiku-4-5-20251001 \
   --home &lt;tmp&gt;/.tribe/&lt;repoKeyA&gt;/campaigns/&lt;slug&gt; \
