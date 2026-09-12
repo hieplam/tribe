@@ -158,7 +158,8 @@ function evictOldest(pending: Map<string, PendingCall>): void {
  * spec §6.4 point 2 / D19: the COMPLETE replacement `tool` node — `state`, `result` and
  * `resultAnchor` all set, never a delta. `elided`/`expandable` (D15) are true when EITHER half is:
  * the call's own (recorded when it was first seen) OR the result's own (`ToolResult.elided`, set
- * only on the `text` variant — spill/images/refs are never large enough to need it).
+ * only on the `text` variant — images/refs carry only counts, and a `spill`'s preview is bounded to
+ * `PREVIEW_CAP` at its source in `parseSpill`, so no non-text variant needs a per-node elide here).
  */
 function buildCompletedTool(pending: PendingCall, orphan: Extract<RenderNode, { k: 'orphan_result' }>): RenderNode {
   const resultElided = orphan.result.r === 'text' && orphan.result.elided;
@@ -204,7 +205,9 @@ function fitCompletedTool(node: Extract<RenderNode, { k: 'tool' }>): RenderNode 
   if (utf8Bytes(JSON.stringify(fitted)) <= NODE_CAP) return fitted;
 
   // 2. The result body alone still overflows: shrink its token prefix until the WHOLE node fits.
-  // (Non-text results — spill/images/refs — are bounded counts/basenames and never reach here.)
+  // (Non-text results never reach here: images/refs are bounded counts, and a `spill`'s preview is
+  // already bounded to `PREVIEW_CAP` at its source in `parseSpill`, so the whole node fits once the
+  // input is dropped in step 1 above.)
   if (fitted.result !== null && fitted.result.r === 'text') {
     const textResult = fitted.result; // narrowed to the `text` variant; kept as the reduction base.
     let body = textResult.body;

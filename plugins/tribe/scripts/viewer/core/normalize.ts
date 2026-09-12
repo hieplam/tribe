@@ -255,8 +255,9 @@ function rawBlockNode(base: RowAnchor, block: unknown): RenderNode {
  * text-bearing result is built THROUGH `elideToFit` so the fit check runs over the entire emitted
  * node — `id`, anchors, `toolUseId`, `resultAnchor` and all — not merely the inner `ToolResult`.
  * Sizing only the inner payload let a boundary-sized result yield a complete node just over the cap
- * while marked unelided (the defect this closes). refs/images/spill payloads are bounded (counts,
- * a basename, a preview) and carry no elidable body, so their node is built directly. */
+ * while marked unelided (the defect this closes). refs/images are bounded (counts, a basename) and
+ * carry no elidable body; a spill's preview is transcript-controlled but is bounded at its source
+ * (`parseSpill` sizes it to `PREVIEW_CAP`), so every non-text variant's node fits when built directly. */
 function orphanResultNode(base: RowAnchor, content: unknown, isError: boolean, toolUseId: string): RenderNode {
   const resultAnchor = { at: base.at, i: base.i };
   const classified = classifyResult(content);
@@ -474,7 +475,12 @@ function classifyResult(content: unknown): ClassifiedResult {
  * an ABSOLUTE path, which is NEVER used as given: the node keeps `basename()` only, and only when it
  * matches `^[A-Za-z0-9._-]{1,128}$` (else empty — refused). The absolute path, and every directory
  * separator from it, is dropped: leaking one is an information leak AND a traversal seed. The
- * preview text the marker already carries is kept, so a refused spill still shows something. */
+ * preview text the marker already carries is kept, so a refused spill still shows something. The
+ * preview capture is UNBOUNDED (`[\s\S]*?`) and its length is transcript-controlled, so the excerpt
+ * is sized to `PREVIEW_CAP` here — its single source of truth — through the SAME `elideToFit`
+ * algorithm the text path uses. That keeps the whole emitted node under D15's 64 KiB cap on BOTH
+ * the `orphan_result` and the paired-tool paths from one choke point, since neither of those sites
+ * sizes a `spill` body of its own (§6.5 rejects a "bounded because our corpus is small" defense). */
 function parseSpill(content: string): ToolResult | null {
   if (!content.includes('<persisted-output>')) return null;
   const pathMatch = /saved to:\s*(.+)/.exec(content);
@@ -484,7 +490,8 @@ function parseSpill(content: string): ToolResult | null {
   const name = /^[A-Za-z0-9._-]{1,128}$/.test(base) ? base : '';
   const previewMatch = /Preview[^\n]*:\s*\n([\s\S]*?)<\/persisted-output>/.exec(content);
   const preview = previewMatch !== null ? previewMatch[1]!.trim() : '';
-  return { r: 'spill', name, note: 'output spilled to a file', previewBody: tokenizeMarkdown(preview) };
+  const previewBody = elideToFit(preview, (t) => tokenizeMarkdown(t), PREVIEW_CAP);
+  return { r: 'spill', name, note: 'output spilled to a file', previewBody };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -584,21 +591,28 @@ function truncateUtf8(text: string, maxBytes: number): string {
  * calling `build` with the full text, so a multi-megabyte row (spec's 2 MiB / 8 MiB / 9 MiB
  * session-4 fixtures) never pays for tokenizing text that is certain to be truncated anyway.
  */
-function elideToFit<T>(text: string, build: (t: string, elided: boolean) => T): T {
-  if (utf8Bytes(text) <= NODE_CAP) {
+function elideToFit<T>(text: string, build: (t: string, elided: boolean) => T, cap: number = NODE_CAP): T {
+  if (utf8Bytes(text) <= cap) {
     const full = build(text, false);
-    if (utf8Bytes(JSON.stringify(full)) <= NODE_CAP) return full;
+    if (utf8Bytes(JSON.stringify(full)) <= cap) return full;
   }
-  let budget = NODE_CAP;
+  let budget = cap;
   let candidateText = truncateUtf8(text, budget);
   let value = build(candidateText, true);
-  while (utf8Bytes(JSON.stringify(value)) > NODE_CAP && budget > 1) {
+  while (utf8Bytes(JSON.stringify(value)) > cap && budget > 1) {
     budget = Math.floor(budget / 2);
     candidateText = truncateUtf8(text, budget);
     value = build(candidateText, true);
   }
   return value;
 }
+
+/** D15 for the spill preview (§6.5, §7.6): the byte budget the preview's TOKENIZED form is sized to,
+ * held below `NODE_CAP` so the wrapper around it (ids, anchors, the basename, the note — and, on the
+ * paired path, the tool's own fields after `fitCompletedTool` drops its input) always fits in the
+ * remaining room. A spill preview is a SHORT excerpt by definition; the full output lives in the file
+ * the marker names, never in the node, so bounding the excerpt loses nothing the client cannot fetch. */
+const PREVIEW_CAP = NODE_CAP - 4 * 1024;
 
 /** D15's tool-specific case: `input` is arbitrary structured JSON, not text with a clean "prefix",
  * so past the cap it is dropped ENTIRELY to `null` rather than truncated — "no full payload in the

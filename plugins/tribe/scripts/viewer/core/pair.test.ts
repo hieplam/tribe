@@ -483,6 +483,25 @@ describe('pair — D15: prompt/assistant/thinking/error/raw bodies over 64 KiB a
     expect(new TextEncoder().encode(JSON.stringify(node)).length).toBeLessThan(64 * 1024);
   });
 
+  test('a PAIRED tool node whose result is an oversized <persisted-output> spill is ≤ 64 KiB (F1: the spill path had no whole-node sizing)', () => {
+    // §7.6 + D15: a marker whose preview exceeds the cap must not ride into a completed tool node
+    // verbatim. `fitCompletedTool` only shrank `r:'text'` results, so a huge `r:'spill'` preview
+    // sailed past the cap on the paired path just as it did on the orphan path — the preview is
+    // bounded at its single source (`parseSpill`), which closes BOTH paths at one choke point.
+    const ABS = '/Users/someone/.claude/projects/-p/sid/tool-results/spill01.txt';
+    const content = `<persisted-output>\nFull output saved to: ${ABS}\n\nPreview (first 2KB):\n${'z'.repeat(300 * 1024)}\n</persisted-output>`;
+    const { nodes, patches } = normalizeAndPair([
+      toolUseRow(0, 'toolu_spill', 'Bash', { command: 'emit a lot' }),
+      toolResultRow(100, 'toolu_spill', content),
+    ]);
+    // The call pairs into a `result` patch carrying the COMPLETE tool node (spec §6.4).
+    expect(nodes.every((n) => n.k !== 'tool' || n.state === 'pending')).toBe(true);
+    const completed = patches.map((p) => (p.op === 'result' ? p.node : null)).find((n): n is RenderNode => n !== null);
+    if (completed === undefined || completed.k !== 'tool') throw new Error('expected a completed tool node');
+    expect(completed.result?.r).toBe('spill'); // the r:'spill' shape survives the bounding
+    expect(new TextEncoder().encode(JSON.stringify(completed)).length).toBeLessThanOrEqual(64 * 1024);
+  });
+
   test('after this task, no emitted node of ANY kind exceeds 64 KiB across a mixed batch', () => {
     const hugeText = 'm'.repeat(300 * 1024);
     const { nodes, patches } = normalizeAndPair([

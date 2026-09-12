@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { normalize, type RowInput } from './normalize.ts';
+import { normalize, NODE_CAP, utf8Bytes, type RowInput } from './normalize.ts';
 import { tokenizeMarkdown } from './markdown.ts';
 import type { TranscriptRecord } from './records.ts';
 
@@ -653,6 +653,38 @@ describe('normalize — <persisted-output> spill markers (spec §7.6, fail-close
     if (node.result.r !== 'spill') throw new Error('expected spill');
     expect(node.result.name).toBe('');
     expect(JSON.stringify(node)).not.toContain('passwd');
+  });
+});
+
+describe('normalize — D15: a <persisted-output> spill preview obeys the 64 KiB whole-node cap (§6.5, F1)', () => {
+  const ABS = '/Users/someone/.claude/projects/-p/sid/tool-results/spill01.txt';
+  const spillContent = (preview: string): string =>
+    `<persisted-output>\nOutput too large. Full output saved to: ${ABS}\n\nPreview (first 2KB):\n${preview}\n</persisted-output>`;
+
+  test('a >64 KiB spill preview still yields an orphan_result node ≤ NODE_CAP (the preview is transcript-controlled, not bounded by the corpus)', () => {
+    // §7.6: the preview is a SHORT excerpt; the full output lives in the referenced file. A marker
+    // whose preview is larger than the whole-node cap must not be emitted verbatim — D15 (§6.5) says
+    // NO node of ANY kind exceeds 64 KiB, and §6.5 rejects a "bounded because our corpus is small"
+    // defense. Before the fix, `previewBody: tokenizeMarkdown(preview)` was stored UNBOUNDED.
+    const node = only(normalize([userBlocks(700, [{ type: 'tool_result', tool_use_id: 'toolu_spill', content: spillContent('a'.repeat(200 * 1024)) }])]));
+    if (node.k !== 'orphan_result') throw new Error('expected orphan_result');
+    expect(node.result.r).toBe('spill'); // the r:'spill' shape is preserved — only the preview is bounded
+    expect(utf8Bytes(JSON.stringify(node))).toBeLessThanOrEqual(NODE_CAP);
+  });
+
+  test('a >1 MiB spill preview is bounded WELL under NODE_CAP, so it can never blow the 1 MiB frame cap either', () => {
+    const node = only(normalize([userBlocks(710, [{ type: 'tool_result', tool_use_id: 'toolu_spill', content: spillContent('b'.repeat(1024 * 1024 + 100)) }])]));
+    if (node.k !== 'orphan_result') throw new Error('expected orphan_result');
+    expect(node.result.r).toBe('spill');
+    expect(utf8Bytes(JSON.stringify(node))).toBeLessThanOrEqual(NODE_CAP);
+  });
+
+  test('a small ordinary spill preview is NOT truncated — the normal case is unchanged (over-eliding a small spill is a bug too)', () => {
+    const preview = 'line one\nline two\nline three';
+    const node = only(normalize([userBlocks(720, [{ type: 'tool_result', tool_use_id: 'toolu_spill', content: spillContent(preview) }])]));
+    if (node.k !== 'orphan_result') throw new Error('expected orphan_result');
+    if (node.result.r !== 'spill') throw new Error('expected spill');
+    expect(node.result.previewBody).toEqual(tokenizeMarkdown(preview)); // byte-for-byte, no truncation
   });
 });
 
