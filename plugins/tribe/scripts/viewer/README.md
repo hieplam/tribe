@@ -98,3 +98,33 @@ Check command: `bun run check` (`tsc --noEmit && bun test`).
 `e2e/` proves the whole picture — a real campaign run through the real runner, watched through
 this viewer — with a real (billed) Claude session. It never runs as part of `bun test`; see
 [`e2e/README.md`](e2e/README.md) for the opt-in gate, cost, and what it writes.
+
+---
+
+## Viewer consolidation (`docs/tribe/planning/viewer-consolidation/spec.md`)
+
+The sections above describe the pre-consolidation, two-surface package. They are being replaced,
+in place, by the sections below as the consolidation plan's later tasks land — see
+`.c3/adr/adr-20260911-viewer-consolidation.md` for the decision record. Do not delete the
+sections above until the section replacing them is filled in.
+
+### Routes
+
+_Filled in by Task 21 (the route table of spec §3.2)._
+
+### On-disk discovery
+
+_Filled in by Task 21 (the discovery algorithm of spec §5)._
+
+### Tail and the SSE contract
+
+_Filled in by Task 21 (spec §6)._
+
+### Build step
+
+_Filled in by Task 21 (spec §10.3); refined by Task 26 once `install.sh` and `doctor.sh` build
+the client._
+
+### Failure modes
+
+_Filled in by Task 21 (the fail-closed table of spec §13)._

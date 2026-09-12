@@ -522,7 +522,7 @@ possible; the patches land in tasks 21 and 29.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing check.** There is no unit test for an ADR; the mechanical gate is
+- [x] **Step 1: Write the failing check.** There is no unit test for an ADR; the mechanical gate is
       the C3 toolchain. Run it first and record the failure:
 
       ```sh
@@ -532,15 +532,15 @@ Model: **Sonnet**.
       Expected before the ADR exists: `c3x` reports no ADR covering the viewer contract change
       that tasks 21/29 will patch (or, if `c3x` is silent on that, record its actual output
       verbatim — the point is the before/after pair, not a specific message).
-- [ ] **Step 2: Author the ADR** with `status: accepted`, `date: "2026-09-11"`,
+- [x] **Step 2: Author the ADR** with `status: accepted`, `date: "2026-09-11"`,
       `supersedes: [adr-20260903-fix-viewer-launch-docs]`. Its Goal, Context and Decision restate
       spec §0, §3 and §11 — Context cites the measured numbers (83.6% log duplication, B1/B2/B3,
       0 unparsable rows in 127,085). Its Consequences name the two change units tasks 21 and 29
       will apply to `c3-215` rows 76 and 72.
-- [ ] **Step 3: Mark the old design spec superseded** — a header note at the top of
+- [x] **Step 3: Mark the old design spec superseded** — a header note at the top of
       `2026-09-02-campaign-live-viewer-design.md` pointing at this spec and this ADR. Do not delete
       it; it is the record of what the deleted code was for.
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
       ```sh
       bunx @c3x/cli@11.6.3 check </dev/null
@@ -548,7 +548,7 @@ Model: **Sonnet**.
 
       Expected: clean, or the same output as step 1 minus the ADR gap. Record both runs in the task
       report.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): confirm the ADR's `supersedes` names a real ADR id that exists on disk,
 and that the Consequences section names both change units by target (`c3-215` rows 72 and 76). An
