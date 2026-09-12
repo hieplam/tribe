@@ -22,10 +22,10 @@ therefore always means a current-code fix, never a future card.
 | B4 | stream frozen to one card | §9 |
 | B7 | never auto-scrolls | §8.3 |
 | B9 | empty thinking renders empty cards | §7.2 |
-| B12 | rotation re-emits the whole file | §6.1 |
-| B14 | bad CLI args fail open (NaN port, stack dump) | §13 |
-| B13 | per-connection state grows forever | §6.5 |
 | B10 | system rows dropped | §7.1, §7.4 |
+| B12 | rotation re-emits the whole file | §6.1 |
+| B13 | per-connection state grows forever | §6.5 |
+| B14 | bad CLI args fail open (NaN port, stack dump) | §13 |
 | B16 | no Host check | §12.5 |
 | B25 | status page unbounded | §16.1 |
 | L1 | no `result` row on disk | §7.1, §7.7 |
@@ -37,6 +37,11 @@ therefore always means a current-code fix, never a future card.
 | F51 | latency measured per event, not per frame | §16.3 |
 | F54 | shell metacharacters quoted in `commands.md` | §16 |
 | F56 | offset advances by bytes consumed | §6.1 |
+
+**Review-finding ids** (`N1`, `S4`, `R3`, …) appear only in `references/claude-audit-round*.md` and
+in the planning report, never in this document's own argument: a rule that needs a review ticket to
+justify it is a rule this page has failed to state. Where a finding changed the design, the change
+is stated here on its own terms.
 
 This document answers **How**. It does not reopen What or Why: the scope fence in the card is
 settled law, and every ruling D1–D9 below is quoted, never paraphrased.
@@ -107,13 +112,18 @@ under `~/.tribe` (`campaign-state.json` for session-to-card, `run.json` for whet
 process is alive). The previous viewer's status page and its `/live` route are deleted, and the
 viewer never reads the runner's own log.
 
-**The roles this page names**, each in one clause. The **Shaman** decides What and Why and is the
+**The roles this page names**, each in one clause, **by role — the model behind each is an
+implementation detail and has already changed once**. The **Shaman** decides What and Why and is the
 owner's delegate. The **Warchief** decides How: it writes this spec and the plan beside it, and
-dispatches the work. A **hunter** implements one planned task at a time under test-first
-discipline. A **skinner** — run on the GPT-5.6 Sol model, hence "Sol audits" — audits a finished
-change by *running* its proof rather than reading claims. **Terra** is a blind reader: a fresh model
-given this page and nothing else, whose job is to find what cannot be understood from the page
-alone.
+dispatches the work. A **hunter** implements one planned task at a time under test-first discipline.
+A **skinner** is the audit lens: it reviews a finished change by *running* its proof rather than
+reading claims (currently an Opus subagent — D29). A **blind reader** is given this page and nothing
+else, and its job is to find what cannot be understood from the page alone (currently a Sonnet
+subagent — D29).
+
+Earlier revisions of this document named the *models* — "Sol audits", "Terra's findings" — and D29
+made every one of those names wrong in a single ruling. The roles did not change; only the models
+did. Where a review finding is cited below it is cited as a finding, not as a reviewer.
 
 Everything below is settled law for the build: the rulings are quoted, never paraphrased, and this
 document does not reopen them.
@@ -128,9 +138,10 @@ document does not reopen them.
 - **D3** — "Process: spec is an artifact co-authored over several sessions; once the owner approves
   it, the Shaman drives the whole chain (planning warchief → build → Sol audits → merge) without
   further approval stops."
-- **D4** — "Audit/review lenses run on GPT-5.6 Sol via Codex (`codex exec -m gpt-5.6-sol`);
-  blind-reader page reviews on GPT-5.6 Terra (`codex exec -m gpt-5.6-terra --sandbox read-only`);
-  Claude Sonnet hunters implement."
+- **D4** (**superseded by D29** for the two review roles; its hunter clause stands) — "Audit/review
+  lenses run on GPT-5.6 Sol via Codex (`codex exec -m gpt-5.6-sol`); blind-reader page reviews on
+  GPT-5.6 Terra (`codex exec -m gpt-5.6-terra --sandbox read-only`); Claude Sonnet hunters
+  implement."
 - **D5** — "One server, one root (`~/.claude/projects`), no modes. Runner keeps reuse-or-spawn and
   prints a session URL."
 - **D8** — "Option A approved: single surface over ~/.claude/projects; campaign facts appear as a
@@ -146,10 +157,15 @@ document does not reopen them.
   visible 'show N older projects' link (URL `?all=1`) reveals the rest. Stateless default, not a
   preference, so D7 holds. Sessions inside a project are never hidden."
 
-Three further rulings arrived with review round 2 and **supersede** the earlier transport design:
+**Nineteen further rulings** were issued across review rounds 2–10, and they supersede parts of the
+original transport, fixture and naming design. They are grouped below by what they govern — a flat
+list of nineteen is not readable, and a reader looking for "how big can a row be" should not have to
+scan every one. Each is quoted verbatim; none is paraphrased.
 
-(**D11 is reserved for the owner's approval of this spec** and is therefore absent from this list —
-the numbering skips it deliberately rather than by oversight.)
+
+#### Transport and the wire (D12, D13, D27)
+
+How bytes reach the browser, and what a reconnect means.
 
 - **D12 — reconnect is a fresh snapshot.** *"Drop byte-offset resume entirely: `id:` on frames is a
   per-stream monotonic sequence used only for client-side dedupe; `Last-Event-ID` is ignored by the
@@ -159,24 +175,44 @@ the numbering skips it deliberately rather than by oversight.)
 - **D13 — the tail core works on raw bytes.** *"The pure tail transition takes the raw byte chunk
   and the file observation; it finds the last `0x0A` in the raw bytes itself, carries raw bytes (not
   a decoded string), and decodes only complete lines. The adapter does no decoding."*
+- **D27 (refined) — back-fill re-pairing is a wire operation, and the patch has two ops.**
+  *"`/api/rows` accepts `orphans=<comma-separated tool_use_ids>` (the orphan results the client
+  currently holds); the response carries `patches: Patch[]` for those whose call lies in the
+  returned range; the client applies them exactly like live patches. The response's `patches` may
+  carry two ops: `{op:"result", id, …}` (the existing live patch shape, attaches a result to a held
+  tool node) and `{op:"remove", id}` (deletes a held `orphan_result` node whose call has now arrived
+  in the back-filled range). The paired tool card is created in the back-filled range at the CALL's
+  anchor, so the identity rule — a node's id is its own anchor — is never violated; the orphan simply
+  disappears."*
+
+
+#### Containment and the zero-write wall (D14, D16, D18)
+
+What the viewer may read, and what it may never do.
+
 - **D14 — one containment root.** *"Containment root for all transcript reads is the resolved
   `~/.claude/projects` directory, not the session directory. Symlinks that resolve inside that root
   are accepted; anything resolving outside is refused."*
-- **D15 — every node kind has a size bound.** *"Text-bearing nodes (prompt, assistant text,
-  thinking, raw card) whose encoded size exceeds 64 KiB are elided the same way tool payloads are,
-  with `expandable` and `/api/block?at=&i=` for the full body. Therefore no single node can exceed
-  the frame cap and `batchFrames` has no 'emit oversized alone' branch."*
+- **D16 — the zero-write wall is an allowlist, not a denylist.** *"`structure.test.ts` permits only
+  these world-touching imports in adapters (`node:fs` readFile / open with read flags / stat / lstat
+  / readdir / realpath / read; `Bun.file` read; `Bun.serve`) and fails on any other `node:fs`,
+  `fs/promises`, `Bun.write`, `child_process` or `node:net` import or member."*
 - **D18 — the scope of the zero-write wall (D16, below), and how tokens reach the build.** *"The allowlist applies to
   `core/**`, `adapters/**`, `serve.ts` and `client/src/**` — runtime code. `tools/**` (measurement
   scripts, never imported by runtime code; `structure.test.ts` asserts no runtime import of
   `tools/`) and `fixtures/**`, `e2e/**` are outside the wall. Token delivery: no fs copy step; Vite
   imports `../../../../../../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css` (seven parents — verified) by path from
   `client/src/styles/index.css` (`@import`), so the build reads it and nothing copies it."*
-- **D19 — a tool node carries two anchors.** *"`call: {at,i}` (the `tool_use` block) and
-  `result: {at,i} | null` (the `tool_result` block in its later row, set by pairing). `/api/block`
-  stays `at`+`i`. The client expands the call payload with `call` and the result payload with
-  `result`. Orphan results carry only `result`. 'One address per payload' stands; a tool card simply
-  has two payloads."*
+
+
+#### Bounds — sizes, caps and windows (D15, D20, D21, D26)
+
+Every number the design commits to, and why each is the unit it is.
+
+- **D15 — every node kind has a size bound.** *"Text-bearing nodes (prompt, assistant text,
+  thinking, raw card) whose encoded size exceeds 64 KiB are elided the same way tool payloads are,
+  with `expandable` and `/api/block?at=&i=` for the full body. Therefore no single node can exceed
+  the frame cap and `batchFrames` has no 'emit oversized alone' branch."*
 - **D20 — window boundaries are whole rows.** *"The backward read trims from the front by whole rows
   only, stopping at the largest prefix removal that still leaves ≥500 nodes; the window may
   therefore exceed 500 by at most one row's nodes. `from` = the first retained row's offset (so
@@ -187,18 +223,6 @@ the numbering skips it deliberately rather than by oversight.)
   is the pre-pairing node count: every row's nodes are counted as the normalizer emits them before
   pairing, and a `tool_result` block counts as one candidate node. The boundary is therefore
   derivable before pairing; after pairing the rendered node count may be lower."*
-- **D22 — fixture proofs are phased.** *"Task 1 asserts only what a fixture builder can know
-  without production code: row counts, block counts, the three symlinks, the spill file, project
-  mtimes, session-4 = 2,400 rows / 2,600 candidate blocks. The ≥2,300 RENDERED count is asserted in
-  Task 9 (pairing) by a `fixtures/session4.rendered.test.ts` that runs the real normalizer + pairer
-  over the fixture; Tasks 24/31 depend on Task 9, not Task 1. No duplicated pairing logic
-  anywhere."*
-- **D23 — row classification is by PRECEDENCE, exactly one outcome per row**, in this order:
-  *"(1) unparsable → `unreadable`/`oversized` raw node; (2) title-source and other folded rows →
-  folded (no node); (3) `tool_result` whose call is in pairing state → Patch; (4) rows that emit
-  nodes; (5) silent by design (empty thinking, and nothing else unless listed). 'Total and disjoint'
-  means: the coverage test classifies every fixture row by this precedence and asserts the outcome;
-  bucket 5's exact set excludes anything caught earlier."*
 - **D26 — one row cap, 8 MiB, for both readers** (this **replaces** the earlier D24 text).
   *"Rows are `\n`-delimited. The backward snapshot read finds row boundaries by newline search,
   never by fixed slices: given `anchor` (start of the first held row), the previous row ends at
@@ -208,15 +232,23 @@ the numbering skips it deliberately rather than by oversight.)
   retained. If the row's length ≤ cap, parse it; if > cap, emit exactly one `raw` node with
   `rowType: "oversized"` anchored at the row's true start, and retain nothing. Repeat until ≥ limit
   candidates (D21) or BOF."*
-- **D27 (refined) — back-fill re-pairing is a wire operation, and the patch has two ops.**
-  *"`/api/rows` accepts `orphans=<comma-separated tool_use_ids>` (the orphan results the client
-  currently holds); the response carries `patches: Patch[]` for those whose call lies in the
-  returned range; the client applies them exactly like live patches. The response's `patches` may
-  carry two ops: `{op:"result", id, …}` (the existing live patch shape, attaches a result to a held
-  tool node) and `{op:"remove", id}` (deletes a held `orphan_result` node whose call has now arrived
-  in the back-filled range). The paired tool card is created in the back-filled range at the CALL's
-  anchor, so the identity rule — a node's id is its own anchor — is never violated; the orphan simply
-  disappears."*
+
+
+#### Identity and classification (D19, D23, D28)
+
+How a node is addressed, and how a row becomes nodes.
+
+- **D19 — a tool node carries two anchors.** *"`call: {at,i}` (the `tool_use` block) and
+  `result: {at,i} | null` (the `tool_result` block in its later row, set by pairing). `/api/block`
+  stays `at`+`i`. The client expands the call payload with `call` and the result payload with
+  `result`. Orphan results carry only `result`. 'One address per payload' stands; a tool card simply
+  has two payloads."*
+- **D23 — row classification is by PRECEDENCE, exactly one outcome per row**, in this order:
+  *"(1) unparsable → `unreadable`/`oversized` raw node; (2) title-source and other folded rows →
+  folded (no node); (3) `tool_result` whose call is in pairing state → Patch; (4) rows that emit
+  nodes; (5) silent by design (empty thinking, and nothing else unless listed). 'Total and disjoint'
+  means: the coverage test classifies every fixture row by this precedence and asserts the outcome;
+  bucket 5's exact set excludes anything caught earlier."*
 - **D28 — classification is per BLOCK for `user`/`assistant` rows and per ROW for every other row
   type.** *"Row-level rungs (1 unparsable/oversized, 2 folded, 5 silent) apply to the row; within a
   message row, each content block gets exactly one outcome: `tool_result` → pairable (Patch if its
@@ -225,30 +257,48 @@ the numbering skips it deliberately rather than by oversight.)
   node. The coverage proof is split: Task 8 classifies every block/row WITHOUT pairing (`tool_result`
   blocks assert `pairable`); Task 9 extends it with pairing (pairable → Patch or orphan). No pairing
   logic before Task 9."*
+
+
+#### Fixtures, proofs and process (D22, D25, D29, D30, D31)
+
+Where a proof runs, what ships, and who reviews.
+
+- **D22 — fixture proofs are phased.** *"Task 1 asserts only what a fixture builder can know
+  without production code: row counts, block counts, the three symlinks, the spill file, project
+  mtimes, session-4 = 2,400 rows / 2,600 candidate blocks. The ≥2,300 RENDERED count is asserted in
+  Task 9 (pairing) by a `fixtures/session4.rendered.test.ts` that runs the real normalizer + pairer
+  over the fixture; Tasks 24/31 depend on Task 9, not Task 1. No duplicated pairing logic
+  anywhere."*
 - **D25 — the two client hooks ship in production.** *"`__viewerEventSource` and
   `__viewerReconnect()` ship in the production build. They are read-only and harmless (they close
   and reopen the client's own stream; they touch nothing else), so there is no dev/prod split to
   prove."*
+- **D29 — reviewers are Claude models. This SUPERSEDES D4 while the Codex quota is out.** *"Spec
+  audits on an Opus subagent with the same skinner brief; blind reads on a Sonnet subagent with the
+  same blind-reader brief."* D4 named GPT-5.6 Sol and Terra for the same two roles; where the two
+  rulings disagree, D29 governs. The **roles** are unchanged — only the models are — which is why
+  §1's opener names roles and puts the model in a parenthetical.
+- **D30 — a snapshot of a file that does not end in `\n`.** *"The bytes after the last newline are
+  the tail carry, never a row. The snapshot window ends at that newline: `to` = the offset after it.
+  The forward tail is seeded with `ackOffset := to`, `carry := bytes [to, eof)`, and
+  `offset := eof` — so §6.1's invariant `offset == ackOffset + carry.length` holds from the first
+  tick and the next read starts at `eof`."*
+- **D31 — the backward reader lives in core.** *"`core/window.ts` exports
+  `findWindow(readBack: (end, len) => Uint8Array, eof, limit)`; the adapter supplies only `readBack`;
+  `serve.ts` composes. Unit-tested with an in-memory `readBack` over the fixture bytes; the HTTP
+  test stays as the integration proof. One implementation for both entry points."*
+
+
+#### Naming (D9)
+
+One word for the watch-and-resume process.
+
 - **D9 — one name for the watch-and-resume process.** *"'watchdog' is THE term for any mechanical
   process that watches a heartbeat and resumes/relaunches work (the runner watchdog today).
   'heartbeat' stays as the name of the signal being watched. 'supervisor' and 'monitor' as names for
   that process are retired; rename in code/docs where they occur."* (§15 applies it — and note what
   it does **not** say: nothing about who reads `run.json`.)
-- **D29 — reviewers are Claude models.** *"Spec audits on an Opus subagent with the same skinner
-  brief; blind reads on a Sonnet subagent with the same blind-reader brief."* The roles in §1's
-  opener are unchanged; only the models behind them are.
-- **D30 — a snapshot of a file that does not end in `\n`.** *"The backward loop treats the bytes
-  after the last `\n` as the tail carry, never as a row; the snapshot window ends at that last
-  `\n` (`to` = offset after it); the forward tail is seeded with `offset := to` and `carry := those
-  trailing bytes`, so the first tick continues the partial row."*
-- **D31 — the backward reader lives in core.** *"`core/window.ts` exports
-  `findWindow(readBack: (end, len) => Uint8Array, eof, limit)`; the adapter supplies only `readBack`;
-  `serve.ts` composes. Unit-tested with an in-memory `readBack` over the fixture bytes; the HTTP
-  test stays as the integration proof. One implementation for both entry points."*
-- **D16 — the zero-write wall is an allowlist, not a denylist.** *"`structure.test.ts` permits only
-  these world-touching imports in adapters (`node:fs` readFile / open with read flags / stat / lstat
-  / readdir / realpath / read; `Bun.file` read; `Bun.serve`) and fails on any other `node:fs`,
-  `fs/promises`, `Bun.write`, `child_process` or `node:net` import or member."*
+
 
 D22, D23, D25–D28 are corrections of a different kind from D18–D20: not over-reach but
 **over-claiming**. A proof scheduled where its dependencies do not yet exist; a partition called
@@ -656,8 +706,9 @@ export type RenderNode = RowAnchor & Sized & (
 
 /** A tool call's result, once it has one. `elided` here is the RESULT half's own flag — a call can
  * have a small input and a 2 MiB result, and the two halves are elided independently. The result's
- * expansion address is the node's `resultAnchor`, never its `call` (D19): the result physically
- * lives in a later row, so one address could not reach both. */
+ * expansion address is the node's **`resultAnchor`** — never its `call`, and never the node's own
+ * `at`+`i`, which IS the call (D19). The result physically lives in a later row, so one address
+ * could not reach both halves. */
 export type ToolResult =
   | { r: 'text';   body: MdToken[]; isError: boolean; elided: boolean }
   | { r: 'spill';  name: string; note: string; previewBody: MdToken[] } // <persisted-output>
@@ -909,10 +960,17 @@ started from zero after a window read would set `offset` to the *window's length
 would read from the middle of the file and re-send rows the client already has. The seed is:
 
 ```
-offset := to          # §6.3's windowEnd — one past the last complete row, NOT the window's length
-carry  := [to, eof)   # the trailing partial row, raw bytes, exactly as §6.3 left it
-ackOffset := to
+ackOffset := to          # §6.3's windowEnd — one past the last complete row
+carry     := [to, eof)   # the trailing partial row, raw bytes, exactly as §6.3 left it
+offset    := eof         # every byte already pulled off disk, carry INCLUDED
 ```
+
+**`offset := eof`, not `offset := to`.** `offset` means "every byte I have already read, including
+the ones sitting in `carry`" — that is what makes §6.1's invariant
+**`offset == ackOffset + carry.length`** true, and what makes the next read start at `eof` rather
+than re-reading the carry bytes and double-counting them. Seeding `offset := to` breaks the
+invariant on the very first tick: the carry is counted once in `carry` and again in the bytes the
+next read returns.
 
 With that seed the first tick's `combined := carry ++ read` continues the partial row where the
 snapshot stopped, which is why §6.1's concatenation and §6.3's `carrySeed` are the same mechanism
@@ -1006,9 +1064,10 @@ is anchored at the row's own start, so it sorts in file position like every othe
 
 The real case is a multi-megabyte base64 image row caught mid-write — the largest transcript on this
 machine averages ≈19 KB per row and its biggest rows are images, so 8 MiB bites only where it should.
-Named tests (task 5), against the two rows task 1 plants in `<session-4>`: a **2 MiB row** parses
-normally (under the cap — it is *not* oversized, which is the half the old 1 MiB cap got wrong), and
-a **9 MiB row** is skipped with **exactly one** `raw` "row too large" node at its offset, after which
+Named tests (task 5), against the **three** rows task 1 plants in `<session-4>`: a **2 MiB row**
+parses normally (under the cap — it is *not* oversized, which is the half the old 1 MiB cap got
+wrong); a row of **exactly `ROW_CAP`** also parses, because the test is `> ROW_CAP` strictly; and a
+**9 MiB row** is skipped with **exactly one** `raw` "row too large" node at its offset, after which
 **the next row parses normally** — that last clause is the point of the flag.
 
 ### 6.2 One stream per open session view
@@ -1101,7 +1160,7 @@ sequenceDiagram
   S->>P: open stream, slot 1 of 8
   P->>F: stat for size, mtime, inode
   P->>F: read the window back to the last complete row, keeping the trailing bytes as carry
-  P->>C: seed the tail from that window, offset at to and carry the trailing bytes, then normalizeRows
+  P->>C: seed the tail, ackOffset at to and offset at eof, carrying the trailing bytes, then normalizeRows
   C-->>B: hello with generation G and id 1
   C-->>B: rows, the window, batched so each frame stays under 1 MiB
   loop every 250 ms while the file grows
@@ -1173,6 +1232,7 @@ with each other.
   lastNl   := offset of the LAST 0x0A in the file, or -1 if the file has none
   windowEnd := lastNl + 1               # `to`: one past the last complete row. NOT eof.
   carrySeed := bytes [windowEnd, eof)   # may be empty; handed to the forward tail, never parsed
+                                        # the tail seeds ackOffset := windowEnd, offset := eof
 
   anchor   := windowEnd                 # start of the first row we hold; windowEnd before we hold any
   rows     := []                        # in file order, newest first while building
@@ -1189,7 +1249,7 @@ with each other.
           if found at k:            start := k + 1;  break
           if lo == 0:               start := 0;      break       # BOF: the row starts at byte 0
           # OVERSIZED iff the ROW's LENGTH exceeds ROW_CAP — so search one byte PAST the cap
-          # before declaring it. A row of exactly ROW_CAP is NOT oversized (S4).
+          # before declaring it. A row of exactly ROW_CAP is NOT oversized.
           if step > ROW_CAP:        start := OVERSIZED; break
           step := step * 2                                        # 512 KiB, 1 MiB, 2 MiB, 4 MiB, 8 MiB
       # NOTE: bytes past the cap are SCANNED for '\n' but never RETAINED — the scan is bounded
@@ -1220,7 +1280,8 @@ with each other.
   row that is on disk rendering as `unreadable` is under-rendering, which §0 calls a bug.
 
   So `to` is **one past the last `0x0A`**, never EOF, and `[to, eof)` is handed to the forward tail
-  as its initial `carry` (§6.1). The partial row is not dropped and not guessed at — it is held,
+  as its initial `carry`, with `ackOffset := to` and **`offset := eof`** (§6.1 — the carry bytes are
+  already read, so `offset` must account for them or the next tick reads them twice). The partial row is not dropped and not guessed at — it is held,
   exactly as the tail holds any partial row, and it renders **once**, when its newline arrives.
 
   Two further properties follow, and both were missing before. **The anchor is always a real row
@@ -1248,7 +1309,7 @@ with each other.
   ```
 
   **The trim is by whole rows, and "exactly 500 nodes" is deliberately not the contract (D20).** The
-  loop reads whole 256 KiB slices and overshoots; trimming to *precisely* 500 nodes would cut
+  loop yields whole rows and overshoots; trimming to *precisely* 500 nodes would cut
   through the middle of a row, and that loses data irrecoverably. Consider a four-block row where
   the 500-node boundary falls at block `i=2`: an exact trim keeps blocks 2 and 3 and records `from`
   as that row's byte offset — so "load earlier" with `before=from` reads rows *before* it and blocks
@@ -1272,7 +1333,7 @@ with each other.
   and §6.3 emit **the same `raw` node** for a row past it, and a user reaching that row either way
   sees the same card.
 
-  **The boundary is `length > ROW_CAP`, strictly, in both readers (S4).** A row of *exactly*
+  **The boundary is `length > ROW_CAP`, strictly, in both readers.** A row of *exactly*
   `ROW_CAP` bytes is a **valid row** and must parse; only a longer one is oversized. That forces the
   backward reader to grow its search one byte **past** the cap before declaring OVERSIZED — a reader
   that stops *at* the cap cannot tell "exactly 8 MiB" from "8 MiB + 1" and would reject the first.
@@ -1472,6 +1533,7 @@ ROW level — for EVERY row, first match wins:
   1. unparsable, or longer than ROW_CAP     -> `unreadable` / `raw oversized` node
   2. a title-source or otherwise folded row -> folded, no node of its own
   -- if the row is `user` or `assistant`, descend to BLOCK level, then resume at rung 5 --
+  -- (there is no row-level rung 3: pairing is a BLOCK outcome, D28) --
   4. a NON-message row that emits a node    -> that node: `attachment`, `system` (per subtype),
                                                `mode`, `queue-operation`, `pr-link`, `chip`, `raw`
   5. silent by design                       -> reachable ONLY by a message row whose every block
@@ -1494,7 +1556,8 @@ ladder omitted it, which left those rows falling through to rung 5 and made rung
 
 With rung 4 present, rung 5 is reachable **only** by a message row whose blocks all came out silent
 — which is why its set is two entries (§7.1 bucket 5) and not four: a paired `tool_result` was
-claimed at block level, a title-source row at rung 2, and every non-message row at rung 4.
+claimed at the **block rung (D28)**, a title-source row at rung 2, and every non-message row at
+rung 4.
 
 **The coverage proof is split across two tasks, because pairing does not exist until task 9 (D28).**
 `normalize.coverage.test.ts` at **task 8** classifies every row and block of the fixture **without
@@ -2606,6 +2669,7 @@ fixture run need no test-only flag.
   .claude/projects/<proj-A>/<session-1>/tool-results/in-session.txt -> the spill          (symlink)
   .claude/projects/<proj-A>/<session-1>/subagents/agent-<sib>.jsonl -> <session-2>'s copy (symlink)
   .claude/projects/<proj-A>/<session-live>.jsonl       the session E2's writer appends to
+  .claude/projects/<proj-A>/<session-cut>.jsonl        ends MID-ROW: no trailing newline (D30)
   .claude/projects/<proj-A>/<session-4>.jsonl          the >2,000-node session
   .claude/projects/<proj-A>/<session-4>.rotated        the same-size replacement (not served)
   .claude/projects/<proj-B>/<session-2>.jsonl          a second project
@@ -2627,8 +2691,9 @@ task needs but the fixture's test does not pin is a shape that can silently disa
 | String prompt **and** array prompt | `<session-1>.jsonl` | G1 layer 2 (the B2 case) |
 | `tool_use` pending / paired ok / paired error | `<session-1>.jsonl` | G1 layer 2, task 9 |
 | A `tool_result` whose call is **before the window** | `<session-1>.jsonl` | `orphan_result`, task 9, task 24 |
-| **A MIXED row: one `user` row carrying a `tool_result` AND a `text` block** | `<session-1>.jsonl` | D28's per-block ladder — tasks 8, 9, 30 |
+| **A MIXED row: one `user` row carrying a `tool_result` AND a `text` block**, whose `tool_use` is **earlier in the same window** (so the `tool_result` pairs rather than orphaning, and the `text` block is what a per-row rule would drop) | `<session-1>.jsonl` | D28's per-block ladder — tasks 8, 9, 30 |
 | A session E2's controlled writer appends to | `<session-live>.jsonl` | task 31; excluded from E2's digest (§16.2) |
+| **A file whose last byte is NOT `\n`** — a copy of `<session-2>` with the final row's trailing newline removed **and its last 40 bytes dropped**, so the tail is a genuine partial row rather than a whole row missing only its terminator | `<session-cut>.jsonl` | D30 — tasks 5, 18, 19 |
 | Empty **and** non-empty `thinking` | `<session-1>.jsonl` | G1 layer 2 (absence asserted) |
 | base64 `image` block | `<session-1>.jsonl` | G1 image proof, task 25 |
 | `isCompactSummary` row | `<session-1>.jsonl` | compaction `divider` |

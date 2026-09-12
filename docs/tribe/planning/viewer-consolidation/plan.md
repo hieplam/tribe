@@ -132,10 +132,11 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
 
 - **D29** — "Spec audits on an Opus subagent with the same skinner brief; blind reads on a Sonnet
   subagent with the same blind-reader brief." (The roles are unchanged; only the models are.)
-- **D30** — "The backward loop treats the bytes after the last `\n` as the tail carry, never as a
-  row; the snapshot window ends at that last `\n` (`to` = offset after it); the forward tail is
-  seeded with `offset := to` and `carry := those trailing bytes`, so the first tick continues the
-  partial row."
+- **D30** — "A file whose last byte is not `\n`: the bytes after the last newline are the tail
+  carry, never a row. The snapshot window ends at that newline: `to` = the offset after it. The
+  forward tail is seeded with `ackOffset := to`, `carry := bytes [to, eof)`, and `offset := eof` —
+  so §6.1's invariant `offset == ackOffset + carry.length` holds from the first tick and the next
+  read starts at `eof`."
 - **D31** — "`core/window.ts` exports `findWindow(readBack: (end, len) => Uint8Array, eof, limit)`;
   the adapter supplies only `readBack`; `serve.ts` composes. Unit test with an in-memory `readBack`
   over the fixture bytes; the HTTP test stays as the integration proof. One implementation for both
@@ -227,14 +228,25 @@ Sonnet by default — every task below states its model. Opus is warranted on ex
 - **Task 7 and Task 8** (the normalizer): the oracle-bearing tasks. Getting "nothing is silently
   dropped" right across 30 row types and 8 block shapes is judgment over a measured table, not
   transcription.
+**Task 18 stays Sonnet, deliberately** — it implements D26/D30's backward reader, which is the most
+intricate procedure in the design, and the instinct is to raise it. The reason not to: spec §6.3
+gives the algorithm as **line-by-line pseudocode**, and D31 gives it a pure signature with four named
+unit cases (2 MiB, exactly `ROW_CAP`, 9 MiB, cut-mid-row). That is transcription against a spelled-out
+contract with a mechanical oracle, which is exactly what Sonnet is for. The tasks below are on Opus
+because their contract is a *judgement* — what "nothing is silently dropped" means across 30 row
+types, or how four interacting state machines behave under a disconnect — not because they are long.
+
 - **Task 19** (the SSE poller): the tail transition, reset-on-rotate, frame batching and the tick
   caps interact, and a subtle error is invisible until a live run. (There is no resume to get wrong
   — D12 removed byte-offset resume entirely; what remains is getting the *live* stream right.)
 - **Task 24** (the session view): follow-the-tail, windowed back-fill and incoming frames interact
   in the scroll container; this is the one client task with real state-machine risk.
 
-Everything else is mechanical against a precise brief and runs on Sonnet. The audits run on
-GPT-5.6 Sol via Codex (D4); blind reads on GPT-5.6 Terra.
+Everything else is mechanical against a precise brief and runs on Sonnet. **The review roles are
+named by role, not by model** — the **skinner** (the audit lens) and the **blind reader**. D4 named
+GPT-5.6 Sol and Terra; **D29 supersedes it while the Codex quota is out**, putting an Opus subagent
+on the skinner brief and a Sonnet subagent on the blind-reader brief. Every `Audit lens (skinner, …)`
+header below is addressed to the role, so a future model change costs no edit.
 
 ---
 
@@ -287,9 +299,9 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       | **a 2 MiB single-line row in the MIDDLE of `<session-4>`** — UNDER the 8 MiB cap, so both readers must PARSE it | `<session-4>.jsonl` | tasks 5, 18 (D26) |
       | **a row of EXACTLY `ROW_CAP` bytes in `<session-4>`** — a VALID row; oversized is `length > ROW_CAP`, strictly | `<session-4>.jsonl` | tasks 5, 18 (S4) |
       | **a 9 MiB single-line row in the MIDDLE of `<session-4>`** — OVER the cap, so both readers must emit one `raw oversized` node | `<session-4>.jsonl` | tasks 5, 18 (D26) |
-      | **a MIXED row: one `user` row carrying a `tool_result` AND a `text` block** | `<session-1>.jsonl` | D28's per-block ladder — tasks 8, 9, 30 |
+      | **a MIXED row: one `user` row carrying a `tool_result` AND a `text` block**, whose `tool_use` is **earlier in the same window** (so it pairs rather than orphaning, and the `text` block is what a per-row rule drops) | `<session-1>.jsonl` | D28's per-block ladder — tasks 8, 9, 30 |
       | **`<session-live>.jsonl`** — the session E2's controlled writer appends to | `<proj-A>/` | task 31; excluded from E2's digest |
-      | **a file NOT ending in `\n`** (cut mid-row) | `<session-cut>.jsonl` | D30 — tasks 5, 18, 19 |
+      | **a file NOT ending in `\n`**: a copy of `<session-2>` with the final row's trailing newline removed **and its last 40 bytes dropped**, so the tail is a genuine partial row rather than a whole row missing only its terminator | `<session-cut>.jsonl` | D30 — tasks 5, 18, 19 |
       | **rotation pair**: same-size, different content | `<session-4>.rotated` | tasks 5, 19, 31 |
       | **a THIRD project, newest session 90 days old** | `<proj-C>/<session-3>.jsonl` | tasks 17, 23, 30 (D10) |
       | two campaigns, same slug, two repo keys, same session id | `homeB/.tribe/...` | tasks 12, 16, 32 |
@@ -359,10 +371,13 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       `mktemp -d` allocates a fresh, owned directory: a fixed path like `/tmp/vc-fixture` is shared,
       makes concurrent verification race, and turns a stray `rm -rf` into someone else's data loss.
 
-      Expected: every path under `$FIX/.claude/projects/`; exactly four
-      `<project>/<session>.jsonl` files; five `<session>/subagents/agent-*.jsonl` with five matching
-      `.meta.json`; one real `<session>/tool-results/*.txt`; and exactly three symlinks with the
-      targets named in step 1. No other file. Paste both listings into the task report.
+      Expected: every path under `$FIX/.claude/projects/`; **exactly six
+      `<project>/<session>.jsonl` files — `<session-1>`, `<session-live>`, `<session-cut>`,
+      `<session-4>`, `<session-2>`, `<session-3>` — and no other**; five
+      `<session>/subagents/agent-*.jsonl` with five matching `.meta.json`; one real
+      `<session>/tool-results/*.txt`; and exactly three symlinks with the targets named in step 1.
+      (`<session-4>.rotated` is a fixture input, not a served session, and does not carry the
+      `.jsonl` extension.) Paste both listings into the task report.
 - [ ] **Step 4: Run the suite.**
 
       ```sh
@@ -372,7 +387,7 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       (`grep -rn 'session-valid\|subagent-valid\|session-malformed' .` returns only history).
 - [ ] **Step 5: Commit**
 
-Audit lens (Sol, contract): run the builder into a bare `mkdtemp` yourself, then diff the set of
+Audit lens (skinner, contract): run the builder into a bare `mkdtemp` yourself, then diff the set of
 `type` values actually present in the generated session-1 file against spec §7.1's table. A type in
 the table with no row in the fixture is a Critical finding — the whole coverage proof rests on this
 file.
@@ -420,7 +435,7 @@ Model: **Sonnet**.
       Expected: `tsc` clean, every route case passing.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run the refusal matrix yourself against the parser. Verify that no
+Audit lens (skinner, contract): run the refusal matrix yourself against the parser. Verify that no
 branch of `routes.ts` returns a value that a later caller could join into a path without passing
 through `containedJoin` (task 4). A route that hands back an unvalidated string is a Critical
 finding (this is B3's class).
@@ -466,7 +481,7 @@ Model: **Sonnet**.
       report.
 - [ ] **Step 5: Commit**
 
-Audit lens (Sol, contract): confirm the ADR's `supersedes` names a real ADR id that exists on disk,
+Audit lens (skinner, contract): confirm the ADR's `supersedes` names a real ADR id that exists on disk,
 and that the Consequences section names both change units by target (`c3-215` rows 72 and 76). An
 ADR with no change units scheduled is the exact failure `rule-change-unit-ships-with-code` was
 written for.
@@ -522,7 +537,7 @@ Model: **Sonnet**.
       zero world-touching imports under `core/`.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): this is `fail-closed-edges` obligation 4's implementation. Run the
+Audit lens (skinner, contract): this is `fail-closed-edges` obligation 4's implementation. Run the
 refusal matrix yourself and additionally try three inputs the test does not list, of your own
 choosing, that a real attacker would try. Any input that produces a path outside `root` is a
 Critical finding.
@@ -553,12 +568,21 @@ Model: **Sonnet**.
       only complete lines.** A signature that accepts an already-decoded string is wrong, whatever
       it then computes.
       0. **The initial state can be SEEDED, and a snapshot always seeds it (D30).** `advanceTail`
-         accepts `{offset, carry, ackOffset}` as a starting state, and after a window read the
-         poller seeds it with `offset := to`, `carry := the bytes after the last 0x0A`. Assert:
-         seeded with a non-empty carry, the first chunk's `combined := carry ++ read` completes that
-         partial row and emits it **once**; and a tail seeded from zero after a window read would
-         put `offset` at the window's *length* and re-emit history — assert the seeded path does
-         not.
+         accepts `{offset, carry, ackOffset}` as a starting state; after a window read the poller
+         seeds `ackOffset := to`, `carry := bytes [to, eof)`, **`offset := eof`**.
+
+         **`offset := eof`, not `to`** — `offset` counts every byte already pulled off disk, carry
+         included, which is what keeps the invariant **`offset == ackOffset + carry.length`** true
+         from the first tick. Assert that invariant directly on the seeded state, and assert the two
+         failure shapes it rules out: seeding `offset := to` makes the next read return the carry
+         bytes **again** (they are counted once in `carry` and once in `read`), and seeding from
+         zero puts `offset` at the window's *length* so the next read starts in the middle of the
+         file and re-emits history.
+
+         **Derive the next read from `offset`; do not hand it to the test.** The point of the case
+         is that `[offset, …)` is the correct next range, so a test that supplies the range itself
+         proves nothing. Seeded from a real `<session-cut>.jsonl` snapshot, the first tick's
+         `combined := carry ++ read` must complete the partial row and emit it **exactly once**.
       1. `ackOffset` is one byte past the last `0x0A` the transition found. The property to assert
          is the one that matters: **for every state the machine passes through, the file has a
          `0x0A` at `ackOffset - 1`.** Feed a chunk ending mid-row and assert `offset` advances past
@@ -592,11 +616,12 @@ Model: **Sonnet**.
          row.** An earlier draft of this task said the opposite, which is exactly the 1 MiB/8 MiB
          disagreement D26 exists to kill. Assert it renders, elided per D15, not skipped.
 
-         **Both fixture rows, both outcomes.** The **2 MiB** row is UNDER the cap and must **parse
-         normally** — an earlier draft capped the forward tail at 1 MiB and would have skipped it,
-         while the backward reader parsed it, so the same row rendered as content when scrolled to
-         and as a skip marker when waited for. The **9 MiB** row is over the cap and yields exactly
-         one `raw oversized` node. Assert both.
+         **All THREE fixture rows, three outcomes.** The **2 MiB** row is under the cap and must
+         **parse normally** — an earlier draft capped the forward tail at 1 MiB and would have
+         skipped it, while the backward reader parsed it, so the same row rendered as content when
+         scrolled to and as a skip marker when waited for. The row of **exactly `ROW_CAP`** is
+         **still valid** and must also parse — the test is `> ROW_CAP`, strictly. The **9 MiB** row
+         is over the cap and yields exactly one `raw oversized` node. Assert all three.
 
       Expected on first run: all three modules missing.
 - [ ] **Step 2: Implement** all three. `tail.ts` keeps its current arithmetic exactly —
@@ -613,7 +638,7 @@ Model: **Sonnet**.
       Expected: all pass, including the three new tail cases.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run the tail state machine over a real 13 MB transcript in byte-ranged
+Audit lens (skinner, contract): run the tail state machine over a real 13 MB transcript in byte-ranged
 chunks of varying sizes — including boundaries that split a multi-byte character and that split a
 line — and prove the reassembled line set is identical to `readFileSync(...).split('\n')`. That is
 the only honest test of this module. Then check the invariant directly: **for every intermediate
@@ -644,7 +669,7 @@ Model: **Sonnet**.
       Expected: every carried-over case passes with token assertions.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): grep the new module for any string containing `<` followed by a letter.
+Audit lens (skinner, contract): grep the new module for any string containing `<` followed by a letter.
 The escape-then-markup property is replaced by a structural one — this module must be incapable of
 emitting markup. A single HTML-producing branch is a Critical finding.
 
@@ -673,7 +698,7 @@ exactly today's bug, B1/B2).
       Expected: every §7.2 case passes; the empty-thinking case asserts an empty node list.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): take 1,000 consecutive rows from a real subagent transcript, run them
+Audit lens (skinner, contract): take 1,000 consecutive rows from a real subagent transcript, run them
 through the normalizer, and account for every input row in the output. Under-rendering is a bug per
 the oracle — a row class present in your sample and absent from the output, other than empty
 `thinking`, is a Critical finding.
@@ -694,6 +719,7 @@ Model: **Opus.** Same reason as task 7; this half is where the open-world rule l
         1. unparsable, or longer than ROW_CAP     -> `unreadable` / `raw oversized` node
         2. a title-source or otherwise folded row -> folded, no node of its own
         -- if `user`/`assistant`, descend to BLOCK level, then resume at rung 5 --
+        -- (there is no row-level rung 3: pairing is a BLOCK outcome, D28) --
         4. a NON-message row that emits a node    -> that node: attachment, system (per subtype),
                                                      mode, queue-operation, pr-link, chip, raw
         5. silent by design                       -> reachable ONLY by a message row whose every
@@ -752,7 +778,7 @@ Model: **Opus.** Same reason as task 7; this half is where the open-world rule l
       passes.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run the coverage test against a **real** transcript of your choosing
+Audit lens (skinner, contract): run the coverage test against a **real** transcript of your choosing
 from `~/.claude/projects` (not the fixture) and report the unaccounted-row count. Also verify the
 `persisted-output` node carries no absolute path — leaking one is both an information leak and the
 seed of a traversal (B3's class).
@@ -839,7 +865,7 @@ Model: **Sonnet**.
       Expected: all pass, including the orphan case.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): measure the elision threshold's effect on a real transcript — count how
+Audit lens (skinner, contract): measure the elision threshold's effect on a real transcript — count how
 many nodes carry `elided: true`, and confirm no node's serialized size exceeds
 the 1 MiB frame budget of spec §14. Then feed the same transcript through the normalizer twice, once
 as one batch and once split into 50 arbitrary tick boundaries, and assert the resulting
@@ -881,7 +907,7 @@ Model: **Sonnet**.
       Expected: all pass.
 - [ ] **Step 5: Commit**
 
-Audit lens (Sol, contract): re-run the measurement yourself and report the number. A title rule
+Audit lens (skinner, contract): re-run the measurement yourself and report the number. A title rule
 that is right 90% of the time is a user-visible defect on a list page, and the only way to know is
 to run it against all 181 files.
 
@@ -908,7 +934,7 @@ Model: **Sonnet**.
       Expected: all pass, including both malformed-tree cases.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run this against a real session directory with subagents (116 exist on
+Audit lens (skinner, contract): run this against a real session directory with subagents (116 exist on
 this machine) and compare the tree to the `.meta.json` files by hand. Verify no field read from a
 `.meta.json` is used to form a path.
 
@@ -957,7 +983,7 @@ Model: **Sonnet**.
       Expected: all pass, including the traversal case.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): this module closes B3. Verify by reading it that no value originating in
+Audit lens (skinner, contract): this module closes B3. Verify by reading it that no value originating in
 a JSON file is ever concatenated into a path, and run the traversal case yourself. Also confirm the
 module names neither `logsDir` nor `statePath` anywhere (D6).
 
@@ -1010,7 +1036,7 @@ Model: **Sonnet**.
       Expected: all pass, including the `U+2028`/`U+2029` cases.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): feed the encoder a frame whose payload contains a literal
+Audit lens (skinner, contract): feed the encoder a frame whose payload contains a literal
 `\ndata: injected` sequence and confirm the receiving side sees one frame, not two. Frame-splitting
 through a payload is a Critical finding. Then serialize a real 500-node window from the largest
 transcript on this machine and confirm every emitted frame is under 1 MiB — node-level elision does
@@ -1098,7 +1124,7 @@ Model: **Sonnet**.
       the test's own message.
 - [ ] **Step 5: Commit**
 
-Audit lens (Sol, contract): run `bun test structure.test.ts` and read each rule's implementation.
+Audit lens (skinner, contract): run `bun test structure.test.ts` and read each rule's implementation.
 Then **try to defeat the allowlist**: write `import * as fs from 'node:fs'; fs.writeFileSync(...)`,
 a `fs/promises` import, a `Bun.write`, and an `openSync(path, 'w')`, and confirm each one goes red.
 Any that slips through means the wall is still a denylist wearing an allowlist's name, and G4 rests
@@ -1161,7 +1187,7 @@ Model: **Sonnet**.
       Expected: all pass.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): confirm by reading that every function is read-only, and that the
+Audit lens (skinner, contract): confirm by reading that every function is read-only, and that the
 adapter makes no line-boundary, cache or reset decision — those belong to `core/window.ts`,
 `core/cache.ts` and `core/tail.ts` (`pure-core.md`: an adapter that accumulates decisions is a
 Should-fix). Run it against the real 13 MB file at several window sizes, including a boundary landing
@@ -1219,7 +1245,7 @@ Model: **Sonnet**.
       has exactly one file to point at.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run this adapter against the real `~/.tribe` on this machine (17
+Audit lens (skinner, contract): run this adapter against the real `~/.tribe` on this machine (17
 campaigns exist) and print every path it opens, by instrumenting the adapter temporarily or by
 `fs_usage`-style observation. Any path outside the two file names is a Critical finding (D6).
 
@@ -1258,7 +1284,7 @@ Model: **Sonnet**.
       error.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run the real server against the real `~/.claude/projects` (181 sessions)
+Audit lens (skinner, contract): run the real server against the real `~/.claude/projects` (181 sessions)
 and time `/api/projects` cold and warm. Report both numbers against spec §14's budgets. Also confirm
 the cache key includes both size and mtime — a size-only key silently serves a stale title.
 
@@ -1409,7 +1435,7 @@ Model: **Sonnet**.
       and the uuid-less attachment expansion.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): attempt the traversal yourself, with at least these encodings: `..%2f`,
+Audit lens (skinner, contract): attempt the traversal yourself, with at least these encodings: `..%2f`,
 `%2e%2e/`, a NUL byte, a UTF-8 overlong `..`, and an absolute path. Any that reads a file outside the
 **resolved `~/.claude/projects` root** (D14 — that is the root, not the session directory) is a
 Critical finding. Then grep the implementation for `uuid`: `/api/block` must not accept or look one
@@ -1432,7 +1458,10 @@ and a reconnect is a fresh snapshot.)
       returned rather than re-deriving it (`pure-core.md`).
       - **`hello`'s window comes from `core/window.ts#findWindow` — the same function
         `/api/rows` uses (D31), not a second implementation** — and the poller seeds the tail from
-        its result: `offset := to`, `carry := carrySeed` (D30). Assert against `<session-cut>.jsonl`:
+        its result: **`ackOffset := to`, `carry := carrySeed`, `offset := eof`** (D30 — `offset`
+        counts the carry bytes too, so the invariant `offset == ackOffset + carry.length` holds from
+        the first tick and the next read starts at `eof` rather than re-reading the carry). Assert
+        against `<session-cut>.jsonl`:
         connect to a file that does **not** end in `\n`, and the first tick must **continue** the
         partial row rather than re-read from the window's length or emit an `unreadable` node;
       - a tick that finds growth emits one `rows` frame; a tick with no growth emits nothing;
@@ -1473,7 +1502,7 @@ and a reconnect is a fresh snapshot.)
       Expected: all pass, including the stream-slot accounting.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run a real stream against a file you append to yourself and kill the
+Audit lens (skinner, contract): run a real stream against a file you append to yourself and kill the
 connection **between a `tool_use` row and its `tool_result`**; reconnect and confirm the tool card
 arrives complete, with no orphan and no duplicate. Then do the same **between a `rows` frame and its
 `patch`**. Those two are the cases an offset cursor could not express and the reason D12 exists.
@@ -1527,7 +1556,7 @@ Model: **Sonnet**.
       Expected: the whole package green; `/healthz` byte-identical.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): curl the running server with a spoofed `Host`, with a path-traversing
+Audit lens (skinner, contract): curl the running server with a spoofed `Host`, with a path-traversing
 asset name, and with 9 simultaneous streams. Then check `/healthz` against spec §10.4's table: the
 body must be the v2 one, and the runner-side half (task 27) must reject the v1 body. Confirm the two
 halves agree — a v2 server with a probe that still accepts v1 leaves the stale-viewer defect open,
@@ -1565,7 +1594,7 @@ Model: **Sonnet**.
       row. Paste both.
 - [ ] **Step 5: Commit**
 
-Audit lens (Sol, contract): run `bunx @c3x/cli@11.6.3 check` yourself and read the new row against the code. A
+Audit lens (skinner, contract): run `bunx @c3x/cli@11.6.3 check` yourself and read the new row against the code. A
 Contract row that claims a route, a flag or a guarantee the code does not have is a Critical
 finding — this row is the architecture record and it was stale before.
 
@@ -1638,7 +1667,7 @@ Model: **Sonnet**.
       client files are gone.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run the build from a clean `node_modules` and confirm `dist/` is
+Audit lens (skinner, contract): run the build from a clean `node_modules` and confirm `dist/` is
 produced and git-ignored. Then grep the built bundle for any hex colour outside the token block — a
 literal reaching `dist/` from a source file the wall does not cover means the wall has a hole. Then
 confirm there is **no copy** of `tokens.css` under `client/` at all — the `@import` means the
@@ -1686,7 +1715,7 @@ Model: **Sonnet**.
       Expected: all pass; `structure.test.ts` still green (no literal slipped in).
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): render the list against the real server and count the rows against
+Audit lens (skinner, contract): render the list against the real server and count the rows against
 `ls ~/.claude/projects`. A project silently missing from the list is under-rendering by the oracle's
 own definition, one level up from rows.
 
@@ -1812,7 +1841,7 @@ getting it wrong is easy and silent.
       Expected: all pass; the build succeeds.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): drive the scroll state machine yourself through the sequence bottom, new
+Audit lens (skinner, contract): drive the scroll state machine yourself through the sequence bottom, new
 nodes, scroll up, new nodes, click pill, new nodes — and assert the viewport moves only in states 2
 and 6. Then drive the store through the sequence D12 makes routine: a `rows` frame carrying a
 pending `tool` node, a `patch` for it, then a **whole fresh window replayed** (what a reconnect
@@ -1855,7 +1884,7 @@ Model: **Sonnet**.
       Expected: all pass, including the two lazy-fetch assertions (nothing fetched before expand).
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): open a real session with subagents in a browser and compare the tab set
+Audit lens (skinner, contract): open a real session with subagents in a browser and compare the tab set
 to `ls` of its `subagents/` directory. A sidecar with no tab is under-rendering.
 
 ### Task 26: Phase 3 governance — the build step, doctor, and the client README
@@ -1885,7 +1914,7 @@ Model: **Sonnet**.
       Expected: the first two pass; `doctor.sh` reports the viewer client as built.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run `install.sh` on a machine state where `dist/` does not exist and
+Audit lens (skinner, contract): run `install.sh` on a machine state where `dist/` does not exist and
 confirm the viewer then starts. Then delete `dist/` and confirm `serve.ts` refuses with the
 one-line message rather than serving a blank page.
 
@@ -1942,7 +1971,7 @@ Model: **Sonnet**. Mechanical against a precise brief; the risk is breadth (645 
       cast.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run the runner on `--dry-run` and confirm zero viewer lines; then read
+Audit lens (skinner, contract): run the runner on `--dry-run` and confirm zero viewer lines; then read
 every `LoopIO` mock changed by this task and confirm none was silenced with `as any` or a
 `@ts-expect-error`. A widened interface satisfied by a cast is a Should-fix that hides the next
 breakage. Then stand up a **real** old-shape responder (a five-line Bun server returning the v1
@@ -1983,7 +2012,7 @@ Model: **Sonnet**.
       the PR body as G5's measurement. Paste it into the task report.
 - [ ] **Step 4: Commit**
 
-Audit lens (Opus, contract): run the grep guard's **six** rules yourself, by hand, with your own
+Audit lens (skinner, contract): run the grep guard's **six** rules yourself, by hand, with your own
 `grep`. A guard that passes because its pattern is subtly wrong is worse than no guard — check rule
 1 in particular (no code path may open anything under a runner logs directory, D6).
 
@@ -1995,27 +2024,35 @@ Audit lens (Opus, contract): run the grep guard's **six** rules yourself, by han
 - Create: `.c3/changes/adr-20260911-viewer-consolidation/02-c3-215-contract-runner-row.patch.md`
 - Modify: `.c3/c3-2-plugins/c3-215-tribe.md` (row 72, applying the change unit)
 - Modify: `plugins/tribe/scripts/runner/core/watchdog/watch-loop.ts` (line 81 comment)
+- Modify: **`plugins/tribe/scripts/viewer/package.json`** (the `description` field — site 8, and the
+  reason the gate drops `--include='*.md'`)
 
 Model: **Sonnet**.
 
 - [ ] **Step 1: Write the failing check.** The D9 sweep's gate is a grep, run before and after:
 
       ```sh
-      grep -rn -i 'supervisor' plugins/ .c3/ --include='*.md' --include='*.ts' --include='*.sh'
-      grep -rn 'status viewer' plugins/ .c3/ --include='*.md'
+      grep -rn -i 'supervisor' plugins/tribe .c3/
+      grep -rn 'status viewer' plugins/tribe .c3/
       ```
 
-      **Grep every file under `plugins/tribe/`, with NO `--include` filter.** The old gate carried
+      **Grep every file under `plugins/tribe/`, with NO `--include` filter** — the commands above
+      carry none, deliberately. The old gate carried
       `--include='*.md'` and was therefore blind to site 8, `scripts/viewer/package.json:6`, whose
       every word had gone stale ("refresh-based", "status viewer", "scans `~/.tribe`",
       "server-renders HTML"). An "exact list" a filter can hide a member from is not exact.
 
-      Expected before: **eight hits, exactly the eight in spec §15's table** — two `supervisor`
-      (`plugins/tribe/README.md:249`, `runner/core/watchdog/watch-loop.ts:81`) and five
-      `status viewer` (`plugins/tribe/README.md:225`, `runner/README.md:76`, `:129`, `:814`, `:860`,
-      **`scripts/viewer/package.json:6`**). Record the real output verbatim; if it is not seven, the inventory is stale and the
-      spec's §15 table is corrected in this same task before anything is renamed. Expected after:
-      zero.
+      Expected before: **eight hits — two `supervisor` and six `status viewer`**, exactly the eight
+      in spec §15's table:
+
+      - `supervisor` (2): `plugins/tribe/README.md:249`,
+        `runner/core/watchdog/watch-loop.ts:81`;
+      - `status viewer` (6): `plugins/tribe/README.md:225`, `runner/README.md:76`, `:129`, `:814`,
+        `:860`, **`scripts/viewer/package.json:6`**.
+
+      Record the real output verbatim. **If it is not eight, STOP** — the inventory is stale, and the
+      correct move is to fix spec §15's table in this same task *before* renaming anything: a sweep
+      run against a stale before-list cannot prove it finished. Expected after: **zero**.
 
       The `Monitor` and `ScheduleWakeup` tool names and the `artifact-comment-monitor` row type are
       **not** in scope and must still be present afterwards — assert that too.
@@ -2049,7 +2086,7 @@ Model: **Sonnet**.
       still present in `session.ts`. This closes follow-up card **FU2** (STATE.md `F2`).
 - [ ] **Step 5: Commit**
 
-Audit lens (Sol, contract): run both greps yourself. Then confirm the D9 rename did **not** touch a
+Audit lens (skinner, contract): run both greps yourself. Then confirm the D9 rename did **not** touch a
 Claude Code tool name or a transcript row type — an over-eager sweep here breaks the wait-tool denial
 hook, which no viewer test would catch. Then read sites 3 and 4 as they now stand and confirm they
 still say **the viewer reads `run.json`**: that is true (D8, spec §9), and a sweep that renamed every
@@ -2180,7 +2217,7 @@ Model: **Sonnet**.
       recorded verbatim — never widened to make the test pass.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run the DOM suites yourself with `HOME` set to a directory that has no
+Audit lens (skinner, contract): run the DOM suites yourself with `HOME` set to a directory that has no
 `.claude` and no `.tribe` at all, and confirm they pass — that is G1's actual claim. Then delete one
 component (say `RawCard`) and confirm `dom-kinds` goes **red**: a kind-coverage test that stays green
 with a missing renderer is proving nothing, and that is the single most important property of this
@@ -2269,7 +2306,7 @@ Model: **Sonnet**.
       pass.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): re-run this yourself and read `latency.json`. Confirm every sample's
+Audit lens (skinner, contract): re-run this yourself and read `latency.json`. Confirm every sample's
 start is the **writer's own** `performance.now()` — a sample derived from a row's `timestamp` field
 or a file mtime means the measurement has reverted to a proxy, and that is a Critical finding. Check
 the scroll assertions compare actual `scrollTop` numbers rather than a React state flag: only the
@@ -2361,7 +2398,7 @@ Model: **Sonnet**.
       pass; `commands.md` records every command actually run.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): confirm the printed session URL actually opens that session in the
+Audit lens (skinner, contract): confirm the printed session URL actually opens that session in the
 running viewer — the test asserts it in the browser, so re-run it and watch. Then, **separately and read-only**, start the viewer with the
 machine's own `HOME` and confirm a session under both
 `-Users-hip-repo-tribe/followups-2026-09-04` and
@@ -2436,7 +2473,7 @@ Model: **Sonnet**.
       Expected: identical, all green, and the evidence index resolves every link it names.
 - [ ] **Step 5: Commit**
 
-Audit lens (Sol, contract): open every link in the evidence index and confirm it resolves. Then
+Audit lens (skinner, contract): open every link in the evidence index and confirm it resolves. Then
 check each G1–G6 row against the card's own wording — a goal whose artifact proves something
 adjacent but not the stated claim is a Critical finding, because that is what a `SHIPPED` report
 would rest on.
