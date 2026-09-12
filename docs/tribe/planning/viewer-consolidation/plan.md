@@ -994,21 +994,21 @@ to run it against all 181 files.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Carry over every existing `processes.test.ts` case that
+- [x] **Step 1: Write the failing test.** Carry over every existing `processes.test.ts` case that
       concerns tree shape (including the F34 missing-parent and F36 any-length-cycle cases), drop
       the ones about `ProcessNode.status` (that concept is gone), and add: a sidecar with no
       `parentAgentId` (measured: 453 of 813 — the common case, hangs off the session); a sidecar
       whose `.meta.json` is missing entirely; ordering by `birthtimeIso` then `agentId`; a
       `toolUseId` present on 811 of 813 sidecars and absent on the rest. Expected: module missing.
-- [ ] **Step 2: Implement** `V/core/subagents.ts` returning `Agent[]` per spec §4. Pure: it takes
+- [x] **Step 2: Implement** `V/core/subagents.ts` returning `Agent[]` per spec §4. Pure: it takes
       already-read sidecar entries and stats.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/subagents.test.ts
       ```
       Expected: all pass, including both malformed-tree cases.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run this against a real session directory with subagents (116 exist on
 this machine) and compare the tree to the `.meta.json` files by hand. Verify no field read from a
