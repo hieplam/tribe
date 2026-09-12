@@ -570,7 +570,7 @@ written for.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** `V/core/paths.test.ts`. Carry over every existing
+- [x] **Step 1: Write the failing test** `V/core/paths.test.ts`. Carry over every existing
       `sanitizeProjectDirName` case unchanged (the encoding is ported from Claude Code's own and
       must not drift), then add `containedJoin` cases: an empty segment, `.`, `..`, `a/b`,
       `a\\b`, a segment with a NUL byte, an absolute segment, a segment that resolves back inside
@@ -595,12 +595,12 @@ Model: **Sonnet**.
         proves nothing, so the positive cases are mandatory.
 
       Expected on first run: `Cannot find module './paths.ts'`.
-- [ ] **Step 2: Implement** `V/core/paths.ts`: `containedJoin(root, ...segments)` and
+- [x] **Step 2: Implement** `V/core/paths.ts`: `containedJoin(root, ...segments)` and
       `isContainedResolved(root, resolvedTarget)` per spec §12.2, plus the fixed-layout helpers
       (`transcriptPathOf`, `subagentsDirOf`, `toolResultsDirOf`). Pure string math; `node:path`'s
       `join`/`resolve`/`sep` are pure and permitted, the filesystem is not — `realpath` is the
       adapter's act (task 15), and this module only judges the string it returns.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/paths.test.ts core/paths.containment.test.ts structure.test.ts
@@ -608,7 +608,7 @@ Model: **Sonnet**.
 
       Expected: all pass, including the positive containment case; the structure wall still reports
       zero world-touching imports under `core/`.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): this is `fail-closed-edges` obligation 4's implementation. Run the
 refusal matrix yourself and additionally try three inputs the test does not list, of your own
