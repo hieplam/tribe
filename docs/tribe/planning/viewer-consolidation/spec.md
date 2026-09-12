@@ -9,7 +9,10 @@ here self-contained): `references/` next to this file holds `tribe-viewer-resear
 **The short-code glossary**, so every `B`/`L`/`F` id on this page is followable without leaving it.
 `B<n>` = a defect of the **pre-consolidation viewer** (`tribe-viewer-research.md`); `L<n>` = a
 **limitation of the transcript format** (`kanna-store-vs-transcript.md`); `F<n>` = a **fix already
-in the current code** whose reasoning must survive a rewrite.
+in the current code** whose reasoning must survive a rewrite. **`FU<n>` = a follow-up card**, listed
+in STATE.md as `F1`–`F3` — renamed here to `FU1`–`FU3` because two numbering systems sharing one `F`
+prefix is exactly the collision a first-time reader cannot resolve. A bare `F<n>` on this page
+therefore always means a current-code fix, never a future card.
 
 | Id | In three words | Used in |
 | --- | --- | --- |
@@ -20,6 +23,7 @@ in the current code** whose reasoning must survive a rewrite.
 | B7 | never auto-scrolls | §8.3 |
 | B9 | empty thinking renders empty cards | §7.2 |
 | B12 | rotation re-emits the whole file | §6.1 |
+| B14 | bad CLI args fail open (NaN port, stack dump) | §13 |
 | B13 | per-connection state grows forever | §6.5 |
 | B10 | system rows dropped | §7.1, §7.4 |
 | B16 | no Host check | §12.5 |
@@ -45,6 +49,10 @@ settled law, and every ruling D1–D9 below is quoted, never paraphrased.
 > reference, never the standard. **Under-rendering** (a row type or content block present on disk
 > that the viewer drops silently) **is a bug. Over-rendering** (showing a raw-JSON fallback card
 > for an unknown row) **is by design.** File order is the display order — never sort by timestamp.
+
+(**Kanna** is a separate open-source web UI for Claude Code whose session browser is the model for
+this viewer; `references/kanna-research.md` maps how it reads, tails and renders transcripts. It is
+cited throughout as prior art and never as an authority — the sentence above is the reason.)
 
 Claude Code on this machine is **2.1.267**. **Every count in this spec comes from one scan, run
 2026-09-12 over the whole corpus at `~/.claude/projects`** — not recalled, and not stitched together
@@ -140,6 +148,9 @@ document does not reopen them.
 
 Three further rulings arrived with review round 2 and **supersede** the earlier transport design:
 
+(**D11 is reserved for the owner's approval of this spec** and is therefore absent from this list —
+the numbering skips it deliberately rather than by oversight.)
+
 - **D12 — reconnect is a fresh snapshot.** *"Drop byte-offset resume entirely: `id:` on frames is a
   per-stream monotonic sequence used only for client-side dedupe; `Last-Event-ID` is ignored by the
   server; on reconnect the client receives `hello` + the current window + current pairing state
@@ -218,6 +229,22 @@ Three further rulings arrived with review round 2 and **supersede** the earlier 
   `__viewerReconnect()` ship in the production build. They are read-only and harmless (they close
   and reopen the client's own stream; they touch nothing else), so there is no dev/prod split to
   prove."*
+- **D9 — one name for the watch-and-resume process.** *"'watchdog' is THE term for any mechanical
+  process that watches a heartbeat and resumes/relaunches work (the runner watchdog today).
+  'heartbeat' stays as the name of the signal being watched. 'supervisor' and 'monitor' as names for
+  that process are retired; rename in code/docs where they occur."* (§15 applies it — and note what
+  it does **not** say: nothing about who reads `run.json`.)
+- **D29 — reviewers are Claude models.** *"Spec audits on an Opus subagent with the same skinner
+  brief; blind reads on a Sonnet subagent with the same blind-reader brief."* The roles in §1's
+  opener are unchanged; only the models behind them are.
+- **D30 — a snapshot of a file that does not end in `\n`.** *"The backward loop treats the bytes
+  after the last `\n` as the tail carry, never as a row; the snapshot window ends at that last
+  `\n` (`to` = offset after it); the forward tail is seeded with `offset := to` and `carry := those
+  trailing bytes`, so the first tick continues the partial row."*
+- **D31 — the backward reader lives in core.** *"`core/window.ts` exports
+  `findWindow(readBack: (end, len) => Uint8Array, eof, limit)`; the adapter supplies only `readBack`;
+  `serve.ts` composes. Unit-tested with an in-memory `readBack` over the fixture bytes; the HTTP
+  test stays as the integration proof. One implementation for both entry points."*
 - **D16 — the zero-write wall is an allowlist, not a denylist.** *"`structure.test.ts` permits only
   these world-touching imports in adapters (`node:fs` readFile / open with read flags / stat / lstat
   / readdir / realpath / read; `Bun.file` read; `Bun.serve`) and fails on any other `node:fs`,
@@ -275,7 +302,7 @@ unit boundary. Layer-local tests still exist and are still required — they are
 | G1 | `~/.tribe` absent; list + render every kind from a fixture tree built from nothing | `e2e/dom-kinds.e2e.test.ts` — headless Chromium against the real server, driven by the runtime `RENDER_NODE_KINDS` witness (§4) so the kind list cannot silently drift from the model, **plus one DOM assertion per distinguishable input shape** (§16.2): kind-coverage alone is not enough, because a string prompt and an array prompt are both `k:"prompt"` and a pending, an ok and an error tool are all `k:"tool"`. (**B2** = the pre-consolidation viewer dropped array-form prompts.) | `core/normalize.coverage.test.ts` (one case per row of §7), `e2e/real-transcript.e2e.test.ts` | §7, §16.2 |
 | G2 | Appended line rendered within 1 s; follows tail at bottom, stops when scrolled up | `e2e/live-tail.e2e.test.ts` — a **controlled writer** appends a row and records its own `performance.now()`; the browser reports when that row's `[data-row-id]` first exists; worst sample ≤ 1000 ms. Follow proved on `scrollTop`: it advances on append while at bottom and is byte-identical before/after append while scrolled up | `adapters/poller.adapter.test.ts`, `client/src/useEventStream.test.ts` | §6, §16.3 |
 | G3 | Badge from campaign state; click filters; runner prints root URL + one session URL per card | `e2e/campaign-badge.e2e.test.ts` — the real runner on Haiku 4.5; both stdout lines captured verbatim; the badge asserted in the DOM; the filter proved by **clicking the badge element** and asserting the resulting session-row count and the URL. Its fixture carries **two campaigns sharing one slug under two repo keys** — the collision that exists on this machine today (§9) | `core/badge.test.ts`, `runner/core/viewer-launch.test.ts` | §9, §10, §16.4 |
-| G4 | Read-only **at runtime** (`serve.ts`, `adapters/**`, `core/**`, the built client serving a request — the build's `dist/` and `tools/**` output are build-time and outside the claim, §12.1), 127.0.0.1 only, every path contained, fail-closed refusals, `Host` checked | `core/paths.containment.test.ts` (lexical **and** resolved-symlink containment), `adapters/readonly.test.ts` (the D16 allowlist holds; narrow catches distinguish a parse error from a filesystem error), the fixture-tree **before/after hash** in `e2e/dom-kinds.e2e.test.ts` (no write actually happened), `serve.security.test.ts` (`Host`/`Origin`, the refusal matrix), `deletion-guard.test.ts` rule 5 | `structure.test.ts` (§12.6) | §12, §13 |
+| G4 | Read-only **at runtime** (`serve.ts`, `adapters/**`, `core/**`, the built client serving a request — the build's `dist/` and `tools/**` output are build-time and outside the claim, §12.1), 127.0.0.1 only, every path contained, fail-closed refusals, `Host` checked | `core/paths.containment.test.ts` (lexical **and** resolved-symlink containment), `adapters/readonly.test.ts` (the D16 allowlist holds; narrow catches distinguish a parse error from a filesystem error), the fixture-tree **before/after hash** in `e2e/dom-kinds.e2e.test.ts` (no write actually happened), `serve.security.test.ts` (`Host`/`Origin`, the refusal matrix), `deletion-guard.test.ts` rule 6 | `structure.test.ts` (§12.6) | §12, §13 |
 | G5 | Status page, `/live`, scan adapter, session-tail reader, `--tribe-root` gone; no `runs/*/logs/` read | `deletion-guard.test.ts` (grep guard over the package) + `git diff --stat` in the PR body | — | §11 |
 | G6 | `install.sh` builds the client; runner spawn serves the built output; `bun test` green both packages; c3-215 updated; D9 applied | `e2e/served-build.e2e.test.ts` — rebuild into the **real** `dist/`, hash it, start the server, fetch `/` and every asset it references and assert the hashes match, then restore the prior `dist/` (§16.5 — the server serves its fixed `dist/`, so a proof that needs it to serve somewhere else is not a proof of anything it does); plus `test-install-viewer-build.sh` | `bun run check` in both packages, `bunx @c3x/cli@11.6.3 check`, ADR + change units | §10.3, §10.4, §11.3, §15 |
 
@@ -380,7 +407,8 @@ plugins/tribe/scripts/viewer/
   core/                   PURE — no fs, no clock, no env, no network
     model.ts              the wire contract: RenderNode, MdToken, SessionSummary, Frame, Route
     paths.ts              cwd encoding, containment, fixed-layout joins
-    window.ts             complete-line selection over supplied raw bytes (the adapter decides nothing)
+    window.ts             complete-line selection over supplied raw bytes, AND `findWindow` — the
+                          D26/D30 backward reader, pure, with the read injected (D31)
     cache.ts              pure cache/eviction policy over a supplied clock reading
     scan.ts               the project/session index + the D10 30-day partition
     tail.ts               pure tail transition: offset, ackOffset, carry, inode reset
@@ -444,7 +472,7 @@ built asset returns the SPA shell so the client router can own the address bar.
 | `limit` | how many **pre-pairing candidate nodes** to gather (D21's unit — the same one the window boundary counts, so client and server never mean different things by "500"). **Default 500, maximum 2,000**; a larger value is clamped to 2,000, not refused, because the cap exists to bound the response rather than to police the caller |
 
 The response carries `from` (the first retained row's byte offset — pass it back as the next
-`before`), `to` (the window's end), `truncatedBefore` (true iff any row precedes `from`, which tells
+`before`), `to` (**one past the last complete row — not EOF**, D30), `truncatedBefore` (true iff any row precedes `from`, which tells
 the client whether to keep offering "load earlier"), and `patches` (D27, above). Whole-row trimming (D20) and
 after-trim pairing (D23 rung 3) apply here exactly as they do to `hello` — one algorithm, two entry
 points.
@@ -876,6 +904,20 @@ withholds an incomplete UTF-8 sequence: the withheld bytes are in neither the st
 so the computed offset can land mid-character rather than after a newline. Under D13 there is no
 decoder state to hide bytes in, and `ackOffset` is simply "one past the last `0x0A` I found".
 
+**The initial state comes from the snapshot, and getting it wrong re-emits history (D30).** A tail
+started from zero after a window read would set `offset` to the *window's length*, so the next tick
+would read from the middle of the file and re-send rows the client already has. The seed is:
+
+```
+offset := to          # §6.3's windowEnd — one past the last complete row, NOT the window's length
+carry  := [to, eof)   # the trailing partial row, raw bytes, exactly as §6.3 left it
+ackOffset := to
+```
+
+With that seed the first tick's `combined := carry ++ read` continues the partial row where the
+snapshot stopped, which is why §6.1's concatenation and §6.3's `carrySeed` are the same mechanism
+seen from two ends.
+
 Two offsets remain in the state, and their meanings are now trivial:
 
 | Field | Meaning |
@@ -941,7 +983,7 @@ without treating the remainder as a fresh row is to carry a flag:
 both readers, one `raw` node — see §6.3.)
 
 ```
-if not skipping and carry.length > ROW_CAP:
+if not skipping and carry.length > ROW_CAP:   # strictly greater: == ROW_CAP is a valid row
     skipping   := true
     rowStart   := the offset at which the oversized row began
     skipped    := carry.length                 # bytes discarded so far
@@ -1032,7 +1074,8 @@ rather than discovered, and it is the honest cost of the simpler wire.
 **Frame size is bounded at the frame as well as the node, and the two bounds compose.** D15 caps
 every node at 64 KiB, so no node can alone exceed the frame cap — but a tick may read 4 MiB, and
 many sub-64-KiB nodes can still serialize past 1 MiB together. So the poller **batches `rows` into
-as many frames as it takes**, each encoded frame ≤ 1 MiB, emitted in order, each with its own `id:`.
+as many frames as it takes** — `batchFrames(nodes, maxBytes)`, a pure splitter in `core/sse.ts` —
+each encoded frame ≤ 1 MiB, emitted in order, each with its own `id:`.
 
 Because of D15, `batchFrames` is total and has **no "emit an oversized node alone" branch**: such a
 node cannot exist. The earlier draft carried that branch, and it was an outright contradiction —
@@ -1057,8 +1100,8 @@ sequenceDiagram
   B->>S: GET /events?session=ID
   S->>P: open stream, slot 1 of 8
   P->>F: stat for size, mtime, inode
-  P->>F: read the window, the last 500 nodes worth of bytes
-  P->>C: advanceTail on raw bytes, then normalizeRows
+  P->>F: read the window back to the last complete row, keeping the trailing bytes as carry
+  P->>C: seed the tail from that window, offset at to and carry the trailing bytes, then normalizeRows
   C-->>B: hello with generation G and id 1
   C-->>B: rows, the window, batched so each frame stays under 1 MiB
   loop every 250 ms while the file grows
@@ -1096,13 +1139,42 @@ with each other.
   Finding where a 500-**node** window starts, with no index and without parsing the whole file, is
   the one non-obvious algorithm here, so it is stated exactly:
 
+  **It lives in `core/window.ts` as a pure function with the read injected (D31)**, not in the
+  composition root:
+
+  ```ts
+  export function findWindow(
+    readBack: (end: number, len: number) => Uint8Array,   // injected: the ONLY world contact
+    eof: number,
+    limit: number,
+  ): { rows: Uint8Array[]; from: number; to: number; truncatedBefore: boolean; carrySeed: Uint8Array }
+  ```
+
+  This is the most intricate decision procedure in the design — redesigned three times (D20, D24,
+  D26) — and it is read-**and**-decide: doubling reads interleaved with newline search, an oversized
+  branch, candidate accumulation, a whole-row trim. `pure-core.md` grades exactly that as
+  Blocker/Should-fix when it can only run against a live filesystem. With `readBack` injected it is
+  unit-testable over an in-memory buffer, which is where the 2 MiB, 9 MiB, exactly-`ROW_CAP` and
+  cut-mid-row cases are cheap to prove; `/api/rows` keeps its HTTP test as the integration proof.
+
+  **One implementation, two entry points.** `hello` (§6.2) and `/api/rows` (§3.2) both call
+  `findWindow`; the adapter supplies `readBack` and `serve.ts` composes. §3.2's "one algorithm, two
+  entry points" is only true if there is literally one function, and this is it.
+
   **It walks the file backwards ONE ROW AT A TIME, by newline search (D26)** — never by fixed
   slices. A slice is a means of finding a newline, not a unit of work, and confusing the two is what
   broke the earlier draft:
 
   ```
   ROW_CAP  := 8 MiB                     # the SAME cap the forward tail uses (§6.1)
-  anchor   := EOF                       # start of the first row we hold; EOF before we hold any
+
+  # D30: the file may end MID-ROW — it is being appended to right now, which is the whole point.
+  # Those trailing bytes are the tail's CARRY, never a row. Find where they start and stop there.
+  lastNl   := offset of the LAST 0x0A in the file, or -1 if the file has none
+  windowEnd := lastNl + 1               # `to`: one past the last complete row. NOT eof.
+  carrySeed := bytes [windowEnd, eof)   # may be empty; handed to the forward tail, never parsed
+
+  anchor   := windowEnd                 # start of the first row we hold; windowEnd before we hold any
   rows     := []                        # in file order, newest first while building
   candidates := 0                       # PRE-PAIRING node count (D21)
 
@@ -1116,7 +1188,9 @@ with each other.
           scan bytes [lo, end) backwards for the nearest '\n'
           if found at k:            start := k + 1;  break
           if lo == 0:               start := 0;      break       # BOF: the row starts at byte 0
-          if step >= ROW_CAP:       start := OVERSIZED; break     # no '\n' within the cap
+          # OVERSIZED iff the ROW's LENGTH exceeds ROW_CAP — so search one byte PAST the cap
+          # before declaring it. A row of exactly ROW_CAP is NOT oversized (S4).
+          if step > ROW_CAP:        start := OVERSIZED; break
           step := step * 2                                        # 512 KiB, 1 MiB, 2 MiB, 4 MiB, 8 MiB
       # NOTE: bytes past the cap are SCANNED for '\n' but never RETAINED — the scan is bounded
       # work on a bounded buffer, re-read slice by slice; nothing accumulates in memory.
@@ -1132,13 +1206,25 @@ with each other.
           anchor := start
           continue                      # retain NOTHING of this row
 
-      row := bytes [start, end)
+      row := bytes [start, end)         # `end` is the row's terminating 0x0A, so this is complete
       rows.prepend(row)
       candidates += candidateCount(row)   # D21: what the normalizer WOULD emit, before pairing
       anchor := start
   ```
 
-  Two properties follow, and both were missing before. **The anchor is always a real row start**,
+  **The window ends at the last complete row (D30), and the trailing bytes become the tail's
+  carry.** A live transcript is very often cut mid-row — that is what "live" means — and an earlier
+  draft started the loop at `EOF`, took `end := EOF-1`, and handed the partial row, minus its final
+  byte, to the parser. It fails `JSON.parse`, so **every live session would show an `unreadable`
+  card at its tail** — against a corpus §0 measured at **0 parse failures in 127,085 rows**, and a
+  row that is on disk rendering as `unreadable` is under-rendering, which §0 calls a bug.
+
+  So `to` is **one past the last `0x0A`**, never EOF, and `[to, eof)` is handed to the forward tail
+  as its initial `carry` (§6.1). The partial row is not dropped and not guessed at — it is held,
+  exactly as the tail holds any partial row, and it renders **once**, when its newline arrives.
+
+  Two further properties follow, and both were missing before. **The anchor is always a real row
+  start**,
   because it is derived from a newline rather than from a slice boundary — so `from` is always a
   byte a back-fill can pass back as `before` without losing a row. And **an oversized row is
   anchored at its true start**, found by continuing the same backward scan past the cap: the cap
@@ -1186,10 +1272,18 @@ with each other.
   and §6.3 emit **the same `raw` node** for a row past it, and a user reaching that row either way
   sees the same card.
 
-  Named tests (task 5 forward, task 18 backward), both against rows task 1 puts in the middle of
-  `<session-4>`: a **2 MiB row** — under the cap, so both readers parse it and the snapshot window
-  across it is correct — and a **9 MiB row** — over the cap, so both readers emit **exactly one**
-  `raw oversized` node anchored at the row's true start, and the window on either side is intact.
+  **The boundary is `length > ROW_CAP`, strictly, in both readers (S4).** A row of *exactly*
+  `ROW_CAP` bytes is a **valid row** and must parse; only a longer one is oversized. That forces the
+  backward reader to grow its search one byte **past** the cap before declaring OVERSIZED — a reader
+  that stops *at* the cap cannot tell "exactly 8 MiB" from "8 MiB + 1" and would reject the first.
+  The forward tail's `carry.length > ROW_CAP` is already strict; the two now agree by the same
+  inequality rather than by coincidence.
+
+  Named tests (task 5 forward, task 18 backward), against rows task 1 puts in the middle of
+  `<session-4>`: a **2 MiB row** — under the cap, both readers parse it, the snapshot window across
+  it is correct; a row of **exactly `ROW_CAP`** — still a valid row, both readers parse it; and a
+  **9 MiB row** — over the cap, both readers emit **exactly one** `raw oversized` node anchored at
+  the row's true start, with the window on either side intact.
 
   **The count is the PRE-PAIRING node count (D21).** Pairing runs after the trim, so a count that
   depended on pairing would be circular — the boundary would depend on the pairing, which depends on
@@ -1362,17 +1456,28 @@ enforce.
 **And both were applied to the wrong unit.** A `user` or `assistant` row is not one thing: it is a
 list of content blocks, and they can have *different* outcomes in the same row. A real example from
 this machine — `subagents/agent-a09522dcffd66dd8a.jsonl` row 33 — carries a `tool_result` **and** a
-`text` block, so it yields **one Patch and one prompt node**. Any per-row rule must call that row
-one thing and is therefore wrong about the other.
+`text` block, so it yields **one Patch and one prompt node**. A corpus sweep finds **5 such rows in
+5 files** across 127,085 rows: rare, and on disk, so §0's under-rendering rule applies in full. Any
+per-row rule must call that row one thing and is therefore wrong about the other, and the block it
+drops is the `text` one — B2's failure exactly.
+
+**The fixture carries this shape** (§16.2), because a coverage test that classifies "every row of the
+fixture" proves nothing about a shape the fixture lacks: a purely per-row implementation would pass
+green.
 
 So (D28): **row-level rungs for every row; block-level outcomes inside a message row.**
 
 ```
 ROW level — for EVERY row, first match wins:
-  1. unparsable, or longer than ROW_CAP   -> `unreadable` / `raw oversized` node
+  1. unparsable, or longer than ROW_CAP     -> `unreadable` / `raw oversized` node
   2. a title-source or otherwise folded row -> folded, no node of its own
-  -- if the row is `user` or `assistant`, descend to BLOCK level --
-  5. silent by design                     -> only if every block came out silent
+  -- if the row is `user` or `assistant`, descend to BLOCK level, then resume at rung 5 --
+  4. a NON-message row that emits a node    -> that node: `attachment`, `system` (per subtype),
+                                               `mode`, `queue-operation`, `pr-link`, `chip`, `raw`
+  5. silent by design                       -> reachable ONLY by a message row whose every block
+                                               came out silent; a non-message row cannot reach it,
+                                               because rung 4 catches every one that is not
+                                               folded or unparsable
 
 BLOCK level — inside a `user`/`assistant` row, for EACH content block, exactly one:
   - `tool_result`        -> PAIRABLE: a Patch if its call is in pairing state, else an
@@ -1381,9 +1486,15 @@ BLOCK level — inside a `user`/`assistant` row, for EACH content block, exactly
   - `thinking` whose text is ""  -> silent
 ```
 
-Rung 5 is therefore reached only when a message row's blocks *all* came out silent — which is why
-its set is two entries (§7.1 bucket 5) and not four: a paired `tool_result` was claimed at block
-level, a title-source row at rung 2.
+**Rung 4 is not optional scaffolding** — it is where the great majority of rows land. 14,032
+`attachment` rows, 1,062 `system` rows, 1,877 `mode`, 1,996 `queue-operation`, 710 `pr-link` and
+every unknown type reach a node without ever being a message row or a fold. An earlier draft of this
+ladder omitted it, which left those rows falling through to rung 5 and made rung 5's guard vacuous:
+"silent unless something above claimed it" is not a rule when nothing above can claim them.
+
+With rung 4 present, rung 5 is reachable **only** by a message row whose blocks all came out silent
+— which is why its set is two entries (§7.1 bucket 5) and not four: a paired `tool_result` was
+claimed at block level, a title-source row at rung 2, and every non-message row at rung 4.
 
 **The coverage proof is split across two tasks, because pairing does not exist until task 9 (D28).**
 `normalize.coverage.test.ts` at **task 8** classifies every row and block of the fixture **without
@@ -1555,7 +1666,9 @@ cost/duration footer, no `task_notification`, no `background_tasks_changed`. `co
 (76) give a cumulative cost chip and that is the whole of it. (**L1** and **L9** are limitations measured in `references/kanna-store-vs-transcript.md`: L1 = no
 `result` row is ever written to disk, L9 = 9.2% of a live chat's events never reach disk at all.)
 **Any audit finding that the viewer is missing a Kanna behaviour whose data is not on disk is
-REFUTED in advance** (plan.md's
+REFUTED in advance** — clause (b) of the adjudication rule, quoted here so it needs no lookup:
+*"any finding that a Kanna behaviour is missing when the transcript on disk does not carry the data
+(L9 stream-only events)"* is refuted (plan.md's
 adjudication rule, clause (b)).
 
 ---
@@ -2368,7 +2481,7 @@ times *open streams*.
 D9: *"'watchdog' is THE term for any mechanical process that watches a heartbeat and resumes/
 relaunches work… 'supervisor' and 'monitor' as names for that process are retired."*
 
-**Rename (7 sites — two `supervisor`, five `status viewer`), and D9 retires only the PROCESS
+**Rename (8 sites — two `supervisor`, six `status viewer`), and D9 retires only the PROCESS
 NAMES.** That qualifier is load-bearing and an earlier draft ignored it: D9 says *"'supervisor' and
 'monitor' as names for that process are retired"*. It does **not** say the viewer stopped reading
 `run.json` — it did not. **D8 and §9 have the viewer read `run.json` for the badge's
@@ -2387,6 +2500,7 @@ into "watchdog", which would have made the README false in a new way. Corrected 
 | 5 | `runner/README.md:129` | "the same package as the **status viewer**, grown a second surface" | rewritten with the section: one surface, no status page |
 | 6 | `runner/README.md:814` | "the shape a Monitor/`until` loop or the **status viewer** polls" | "…or the **watchdog** polls" — here the subject really is the watchdog's stall check |
 | 7 | `runner/README.md:860` | "the shape the **status viewer** uses to detect a dead runner" | "…the **watchdog** uses…" — likewise: detecting a dead runner to act on it is the watchdog's job; the viewer only displays it |
+| 8 | `scripts/viewer/package.json:6` | `"Read-only, refresh-based **status viewer** for tribe campaign runners (scans ~/.tribe, server-renders HTML; zero writes)"` | `"Read-only local transcript viewer for Claude Code sessions (reads ~/.claude/projects; campaign badges from two files under ~/.tribe; zero writes at runtime)"` — **not a `.md` file**, which is exactly why the earlier gate could not see it |
 
 The distinction across sites 3–4 versus 6–7 is worth stating once, because it is the whole of D9's
 scope: **who reads `run.json` and why.** The viewer reads it to *show* a badge; the watchdog reads
@@ -2403,7 +2517,7 @@ advance:**
 - Any remaining "viewer" wording that refers to this package: the viewer is a viewer; D9 is about
   the watch-and-resume process, not about the browser page.
 
-F2 (`watchdog-naming-sweep`) is therefore **closed by this card's docs task**, as STATE.md allows
+Follow-up card **FU2** (STATE.md `F2`, `watchdog-naming-sweep`) is therefore **closed by this card's docs task**, as STATE.md allows
 ("can ride with the viewer card's docs task").
 
 ---
@@ -2491,6 +2605,7 @@ fixture run need no test-only flag.
   .claude/projects/<proj-A>/<session-1>/tool-results/escaping.txt   -> outside the root  (symlink)
   .claude/projects/<proj-A>/<session-1>/tool-results/in-session.txt -> the spill          (symlink)
   .claude/projects/<proj-A>/<session-1>/subagents/agent-<sib>.jsonl -> <session-2>'s copy (symlink)
+  .claude/projects/<proj-A>/<session-live>.jsonl       the session E2's writer appends to
   .claude/projects/<proj-A>/<session-4>.jsonl          the >2,000-node session
   .claude/projects/<proj-A>/<session-4>.rotated        the same-size replacement (not served)
   .claude/projects/<proj-B>/<session-2>.jsonl          a second project
@@ -2512,6 +2627,8 @@ task needs but the fixture's test does not pin is a shape that can silently disa
 | String prompt **and** array prompt | `<session-1>.jsonl` | G1 layer 2 (the B2 case) |
 | `tool_use` pending / paired ok / paired error | `<session-1>.jsonl` | G1 layer 2, task 9 |
 | A `tool_result` whose call is **before the window** | `<session-1>.jsonl` | `orphan_result`, task 9, task 24 |
+| **A MIXED row: one `user` row carrying a `tool_result` AND a `text` block** | `<session-1>.jsonl` | D28's per-block ladder — tasks 8, 9, 30 |
+| A session E2's controlled writer appends to | `<session-live>.jsonl` | task 31; excluded from E2's digest (§16.2) |
 | Empty **and** non-empty `thinking` | `<session-1>.jsonl` | G1 layer 2 (absence asserted) |
 | base64 `image` block | `<session-1>.jsonl` | G1 image proof, task 25 |
 | `isCompactSummary` row | `<session-1>.jsonl` | compaction `divider` |
@@ -2582,6 +2699,7 @@ prompt) is completely broken. So the DOM is asserted for each shape by its own m
 | `tool_use` with a matching `tool_result` | the same card is `[data-state="ok"]` and contains the result text |
 | `tool_result` with `is_error: true` | `[data-state="error"]` |
 | `tool_result` whose call precedes the window | `[data-kind="orphan_result"]` exists |
+| **a `user` row with BOTH a `tool_result` and a `text` block** | the row yields **one Patch and one `prompt` node**: the tool card gains its result **and** `[data-kind="prompt"]` with the text block's text is **visible**. This is D28's whole reason — a per-row implementation drops the text block, which is B2's failure again |
 | empty `thinking` block | **no** `[data-kind="thinking"]` for that row — the absence is asserted |
 | non-empty `thinking` block | one collapsed thinking card |
 | base64 `image` block | Two phases, both asserted from the browser's request log. **Before expand:** the node renders and the page has issued **zero** requests for its bytes. **On expand:** exactly **one** request, `GET /api/block?at=&i=`, and then an `<img>` exists whose `src` is a `data:` URL of the **expected byte length**. G1 says the image renders, so the proof is a displayed image — and "no network request" alone would have been wrong, since the bytes have to come from somewhere |
@@ -2866,13 +2984,14 @@ link is opened and verified before the PR is reported green.
   (L9, §7.7).
 - Any prefs file (hide, rename, read markers, bookmarks) — D7 and the card's fence.
 - Sending messages, resuming, orchestrating, or writing anything to `~/.claude` — the fence.
-- Runner-log changes and the `resetsAt` migration — follow-up **F1**, sequenced after this ships.
+- Runner-log changes and the `resetsAt` migration — follow-up card **FU1** (STATE.md `F1`),
+  sequenced after this ships.
 - Syntax highlighting, Mermaid, virtualization libraries — the window (§6.3) is the answer to size;
   a highlighter is a later, additive card.
 - Decoding an encoded project directory name back to a path — the encoding is non-injective (L7);
   we read `cwd` from inside the rows instead (§5.1), and fall back to the raw directory name.
 - **Per-project hide/pin as a stored preference** — D10 settled the noise problem with a *stateless*
   30-day default plus `?all=1` (§5.6), which needs no persistence and so keeps D7 intact. A real
-  preference (hide this project forever, pin that one) is STATE.md follow-up **F3**.
+  preference (hide this project forever, pin that one) is follow-up card **FU3** (STATE.md `F3`).
 - **A manual light/dark toggle.** The tokens already carry both modes and follow the OS (§8.2); a
   toggle is one `data-theme` assignment and a control, and this card does not ask for it.

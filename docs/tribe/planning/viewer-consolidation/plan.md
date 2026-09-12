@@ -130,6 +130,17 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
   read-only and harmless (they close and reopen the client's own stream; they touch nothing else),
   so there is no dev/prod split to prove."
 
+- **D29** — "Spec audits on an Opus subagent with the same skinner brief; blind reads on a Sonnet
+  subagent with the same blind-reader brief." (The roles are unchanged; only the models are.)
+- **D30** — "The backward loop treats the bytes after the last `\n` as the tail carry, never as a
+  row; the snapshot window ends at that last `\n` (`to` = offset after it); the forward tail is
+  seeded with `offset := to` and `carry := those trailing bytes`, so the first tick continues the
+  partial row."
+- **D31** — "`core/window.ts` exports `findWindow(readBack: (end, len) => Uint8Array, eof, limit)`;
+  the adapter supplies only `readBack`; `serve.ts` composes. Unit test with an in-memory `readBack`
+  over the fixture bytes; the HTTP test stays as the integration proof. One implementation for both
+  entry points."
+
 **There is no `Last-Event-ID` handling anywhere in this plan.** If a task brief or a test name
 mentions resuming by byte offset, it predates D12 and is wrong.
 
@@ -274,7 +285,11 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       | **`<session-4>`: 2,400 rows / 2,600 candidate blocks** (this task) **/ ≥2,300 RENDERED nodes** (task 9, D22) | `<session-4>.jsonl` | tasks 9, 18, 24, 31 |
       | **a four-block row positioned to straddle the 500-node boundary** | `<session-4>.jsonl` | task 18 (D20) |
       | **a 2 MiB single-line row in the MIDDLE of `<session-4>`** — UNDER the 8 MiB cap, so both readers must PARSE it | `<session-4>.jsonl` | tasks 5, 18 (D26) |
+      | **a row of EXACTLY `ROW_CAP` bytes in `<session-4>`** — a VALID row; oversized is `length > ROW_CAP`, strictly | `<session-4>.jsonl` | tasks 5, 18 (S4) |
       | **a 9 MiB single-line row in the MIDDLE of `<session-4>`** — OVER the cap, so both readers must emit one `raw oversized` node | `<session-4>.jsonl` | tasks 5, 18 (D26) |
+      | **a MIXED row: one `user` row carrying a `tool_result` AND a `text` block** | `<session-1>.jsonl` | D28's per-block ladder — tasks 8, 9, 30 |
+      | **`<session-live>.jsonl`** — the session E2's controlled writer appends to | `<proj-A>/` | task 31; excluded from E2's digest |
+      | **a file NOT ending in `\n`** (cut mid-row) | `<session-cut>.jsonl` | D30 — tasks 5, 18, 19 |
       | **rotation pair**: same-size, different content | `<session-4>.rotated` | tasks 5, 19, 31 |
       | **a THIRD project, newest session 90 days old** | `<proj-C>/<session-3>.jsonl` | tasks 17, 23, 30 (D10) |
       | two campaigns, same slug, two repo keys, same session id | `homeB/.tribe/...` | tasks 12, 16, 32 |
@@ -312,6 +327,12 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       `escaping.txt` **outside** the projects root, `in-session.txt` inside the same session, and the
       **sibling-session sidecar** inside `<session-2>`. A fixture whose own test does not pin these
       three cannot support tasks 4, 15 and 30, which all assert behaviour against them.
+
+      Assert the **mixed row** specifically: one `user` row in `<session-1>` whose
+      `message.content` array contains **both** a `tool_result` and a `text` block — the shape at
+      `agent-a09522dcffd66dd8a.jsonl:33`, measured at 5 rows in 5 files across the corpus. Without
+      it in the fixture, tasks 8 and 9 classify "every row of the fixture" and a purely per-row
+      implementation passes green while dropping the `text` block — B2's failure again.
 
       Assert `homeB` adds exactly the two `campaign-state.json` files under its own `.tribe/` and
       nothing else. Assert each
@@ -531,6 +552,13 @@ Model: **Sonnet**.
       `FileObservation`, finds the last `0x0A` in those bytes itself, carries RAW BYTES, and decodes
       only complete lines.** A signature that accepts an already-decoded string is wrong, whatever
       it then computes.
+      0. **The initial state can be SEEDED, and a snapshot always seeds it (D30).** `advanceTail`
+         accepts `{offset, carry, ackOffset}` as a starting state, and after a window read the
+         poller seeds it with `offset := to`, `carry := the bytes after the last 0x0A`. Assert:
+         seeded with a non-empty carry, the first chunk's `combined := carry ++ read` completes that
+         partial row and emits it **once**; and a tail seeded from zero after a window read would
+         put `offset` at the window's *length* and re-emit history — assert the seeded path does
+         not.
       1. `ackOffset` is one byte past the last `0x0A` the transition found. The property to assert
          is the one that matters: **for every state the machine passes through, the file has a
          `0x0A` at `ackOffset - 1`.** Feed a chunk ending mid-row and assert `offset` advances past
@@ -545,17 +573,24 @@ Model: **Sonnet**.
          (rotation), and does **not** fire when `state.inode` is 0 (a platform with no inode —
          degrade to the truncation trigger alone, never a false reset);
       4. a carry crossing **`ROW_CAP` = 8 MiB — the SAME constant §6.3's backward reader uses
-         (D26), and there is no second cap** — enters the
+         (D26), and there is no second cap. The test is `> ROW_CAP`, strictly: a row of EXACTLY
+         `ROW_CAP` bytes is VALID and must parse (S4)** — enters the
          **discard state machine** of spec §6.1, which is a flag and not a sentence: set
          `skipping = true`, remember the oversized row's start offset, drop bytes until the next
          `0x0A`, emit **exactly one** `raw` node anchored at `{at: rowStart, i: 0}` with
          `rowType: "oversized"` and the text `row too large (<N> bytes)`, then clear the flag and
          resume normally. **It is a `raw` node, never an `unreadable` one** — `unreadable` is the
          *unparsable-JSON* case (spec §13), a different failure with a different shape, and spec
-         §6.1 and §6.5 both name `raw` here. Assert the kind, not just the presence. Named test: **a 2 MiB single-line row is skipped, one `raw` "row too
-         large" node is emitted at its offset, and the NEXT row parses normally** — that last clause
-         is the point of the flag. Without it the remainder of the oversized row is fed back into
-         the line splitter and a JSON fragment can masquerade as a record.
+         §6.1 and §6.5 both name `raw` here. Assert the kind, not just the presence.
+
+         Named test, with the **9 MiB** row (over `ROW_CAP`): it is skipped, one `raw` "row too
+         large" node is emitted at its offset, and **the NEXT row parses normally** — that last
+         clause is the point of the flag; without it the remainder of the oversized row is fed back
+         into the line splitter and a JSON fragment can masquerade as a record.
+
+         **The 2 MiB row is NOT skipped — it is under the cap and must render as a normal (elided)
+         row.** An earlier draft of this task said the opposite, which is exactly the 1 MiB/8 MiB
+         disagreement D26 exists to kill. Assert it renders, elided per D15, not skipped.
 
          **Both fixture rows, both outcomes.** The **2 MiB** row is UNDER the cap and must **parse
          normally** — an earlier draft capped the forward tail at 1 MiB and would have skipped it,
@@ -658,8 +693,11 @@ Model: **Opus.** Same reason as task 7; this half is where the open-world rule l
       ROW level — for EVERY row, first match wins:
         1. unparsable, or longer than ROW_CAP     -> `unreadable` / `raw oversized` node
         2. a title-source or otherwise folded row -> folded, no node of its own
-        -- if the row is `user` or `assistant`, descend to BLOCK level --
-        5. silent by design                       -> only if EVERY block came out silent
+        -- if `user`/`assistant`, descend to BLOCK level, then resume at rung 5 --
+        4. a NON-message row that emits a node    -> that node: attachment, system (per subtype),
+                                                     mode, queue-operation, pr-link, chip, raw
+        5. silent by design                       -> reachable ONLY by a message row whose every
+                                                     block came out silent
 
       BLOCK level — inside a `user`/`assistant` row, for EACH block, exactly one:
         - `tool_result`                           -> PAIRABLE
@@ -667,17 +705,24 @@ Model: **Opus.** Same reason as task 7; this half is where the open-world rule l
         - `thinking` whose text is ""             -> silent
       ```
 
+      **Rung 4 is not scaffolding** — it is where most rows land: 14,032 `attachment`, 1,062
+      `system`, 1,877 `mode`, 1,996 `queue-operation`, 710 `pr-link` and every unknown type reach a
+      node without being a message row or a fold. Omitting it (an earlier draft did) drops them
+      through to rung 5 and makes rung 5's guard vacuous.
+
       **The unit is the block, not the row** (D28). A `user`/`assistant` row is a list of content
-      blocks and they can have different outcomes in the same row — a real example on this machine,
-      `subagents/agent-a09522dcffd66dd8a.jsonl` row 33, carries a `tool_result` **and** a `text`
-      block, so it yields one Patch and one prompt node. Any per-row rule calls that row one thing
-      and is therefore wrong about the other.
+      blocks and they can have different outcomes in the same row — the fixture's **mixed row**
+      (task 1; the shape at `agent-a09522dcffd66dd8a.jsonl:33`) carries a `tool_result` **and** a
+      `text` block. **Assert it explicitly here**: the `tool_result` block classifies `pairable`
+      **and** the `text` block yields a `prompt` node, from the same row. A per-row rule calls that
+      row one thing and is wrong about the other — and the block it drops is the `text` one.
 
       **This task asserts `pairable` and stops there — there is no pairing yet** (D28). `core/pair.ts`
       does not exist until task 9, so a `tool_result` block asserts only that it *is* pairable, which
       is a property of the block itself. Task 9 extends this same test so each pairable block
-      resolves to a `Patch` or an `orphan_result`. **Do not reimplement pairing here** to close the
-      loop early: a second implementation agreeing with the first proves nothing.
+      resolves to a `Patch` or an `orphan_result` — **including the mixed row's**, which must come
+      out as one Patch **plus** one surviving prompt node. **Do not reimplement pairing here** to
+      close the loop early: a second implementation agreeing with the first proves nothing.
 
       **Ordered first-match, not a set of independent buckets** — that is what makes "exactly one
       outcome" true by construction. Two earlier drafts were both wrong: "every row produces a node
@@ -1219,6 +1264,7 @@ the cache key includes both size and mtime — a size-only key silently serves a
 
 ### Task 18: Row back-fill, block expansion, and spill reads
 
+- Modify: `V/core/window.ts` (add **`findWindow`** — D31), `V/core/window.test.ts`
 - Modify: `V/serve.ts` (routes `/api/rows`, `/api/block`, `/api/spill`)
 - Create: `V/serve.reads.test.ts`
 
@@ -1256,10 +1302,10 @@ Model: **Sonnet**.
       erroring.
 
       **It counts NODES, never rows** (spec §4's vocabulary: a row is a transcript line, a node is a
-      rendered unit, and one row can yield several nodes or none). It returns the **last
-      500 nodes** by default, found by spec §6.3's backwards-stepping algorithm — read backwards
-      from EOF in 256 KiB steps, drop the leading partial row unless at BOF, parse complete rows,
-      accumulate the node count, stop at ≥500 nodes or BOF, then trim.
+      rendered unit, and one row can yield several nodes or none). It returns the **last 500
+      candidate nodes** by default, produced by **`core/window.ts#findWindow`** (D31) — the
+      one-row-at-a-time backward newline walk of spec §6.3, **not** a fixed-slice scan and **not**
+      "drop the leading partial row": both of those are pre-D26 descriptions and neither survives.
 
       **The count is the PRE-PAIRING node count (D21)** — what the normalizer emits per row before
       pairing runs, with each `tool_result` block counting as **one candidate node**. It has to be:
@@ -1268,6 +1314,25 @@ Model: **Sonnet**.
       pairing, the **rendered** node count of a window may be **lower** than 500, since a result
       that finds its call becomes a patch rather than a node. The contract is "at least 500
       candidates", never "exactly 500 cards".
+
+      **The backward reader is `core/window.ts#findWindow`, pure, with the read injected (D31) —
+      NOT a loop in `serve.ts`.** Signature:
+
+      ```ts
+      export function findWindow(
+        readBack: (end: number, len: number) => Uint8Array,   // injected: the ONLY world contact
+        eof: number,
+        limit: number,
+      ): { rows: Uint8Array[]; from: number; to: number; truncatedBefore: boolean; carrySeed: Uint8Array }
+      ```
+
+      This is the most intricate decision procedure in the design — redesigned three times (D20,
+      D24, D26) — and it is read-**and**-decide. `pure-core.md` grades exactly that as
+      Blocker/Should-fix when it can only run against a live filesystem, and Task 15's own audit lens
+      forbids the adapter from deciding. **Unit-test it in `core/window.test.ts` with an in-memory
+      `readBack` over fixture bytes**: the 2 MiB row, the 9 MiB row, the exactly-`ROW_CAP` row, and
+      the cut-mid-row file. `serve.reads.test.ts` stays as the HTTP integration proof — not the only
+      proof. **One implementation, two entry points**: `hello` (task 19) calls the same function.
 
       **The backward read walks ONE ROW AT A TIME by newline search (D26), never by fixed slices.**
       Given `anchor` (the start of the first held row), the previous row **ends** at `anchor-1` and
@@ -1282,10 +1347,20 @@ Model: **Sonnet**.
       the two and anchored an oversized row at `anchor - step`, wherever the doubling happened to
       stop, which is a position with no meaning in the file.
 
-      **Named tests**, against the two rows task 1 plants in `<session-4>`: the **2 MiB** row is
-      under the cap, so the snapshot parses it and the window across it is correct; the **9 MiB**
-      row is over it, so exactly one `raw oversized` node appears, anchored at the row's true start,
-      with the window on either side intact. In both cases the anchor lands on a real row start.
+      **D30 — the file may end MID-ROW.** Start the loop at the **last `0x0A`**, not at EOF: `to` is
+      one past it, the bytes `[to, eof)` are returned as `carrySeed` for the forward tail, and they
+      are **never parsed as a row**. Starting at EOF hands the parser a partial row minus its last
+      byte, which fails `JSON.parse` — so **every live session would show an `unreadable` card at its
+      tail**, against a corpus measured at 0 parse failures in 127,085 rows. Named test: snapshot
+      `<session-cut>.jsonl` (task 1's file that does not end in `\n`) — **no `unreadable` node**,
+      and the partial row renders **once** when its newline arrives.
+
+      **Named tests**, against the rows task 1 plants in `<session-4>`: the **2 MiB** row is under
+      the cap, so the snapshot parses it and the window across it is correct; a row of **exactly
+      `ROW_CAP`** is still valid and parses (S4 — the backward search grows one byte *past* the cap
+      before declaring oversized, or it cannot tell 8 MiB from 8 MiB + 1); the **9 MiB** row is over
+      it, so exactly one `raw oversized` node appears, anchored at the row's true start, with the
+      window on either side intact. In every case the anchor lands on a real row start.
 
       **The trim is by WHOLE ROWS (D20), and "exactly 500 nodes" is deliberately NOT the contract.**
       Drop the largest prefix of whole rows that still leaves ≥500 nodes; the window may exceed 500
@@ -1355,6 +1430,11 @@ and a reconnect is a fresh snapshot.)
       adapter **observes and emits; it decides nothing** — every branch under test is a call into
       `core/tail.ts` or `core/normalize.ts`, and the test asserts the adapter forwards what core
       returned rather than re-deriving it (`pure-core.md`).
+      - **`hello`'s window comes from `core/window.ts#findWindow` — the same function
+        `/api/rows` uses (D31), not a second implementation** — and the poller seeds the tail from
+        its result: `offset := to`, `carry := carrySeed` (D30). Assert against `<session-cut>.jsonl`:
+        connect to a file that does **not** end in `\n`, and the first tick must **continue** the
+        partial row rather than re-read from the window's length or emit an `unreadable` node;
       - a tick that finds growth emits one `rows` frame; a tick with no growth emits nothing;
       - **a `tool_use` on tick 1 and its `tool_result` on tick 3 emits a `patch` frame on tick 3 and
         no new row** (spec §6.4);
@@ -1879,9 +1959,10 @@ body) on the probe port and confirm the runner neither reuses nor spawns, and pr
 Model: **Sonnet**.
 
 - [ ] **Step 1: Write the failing test** `V/deletion-guard.test.ts`, implementing spec §11.4's rules
-      exactly — note it is **six** rules now, because 3 split in two.
+      exactly — **six** rules now, because the old rule 3 split into 3 (absent) and 4 (present with
+      a content marker), renumbering what follows.
 
-      **Rule 3 asserts every §11.1 path is ABSENT. Rule 3b asserts every §11.1b path is PRESENT and
+      **Rule 3 asserts every §11.1 path is ABSENT. Rule 4 asserts every §11.1b path is PRESENT and
       carries its content marker.** `core/model.ts` is the case that forces the split: the old
       status-page model is deleted and a **new `core/model.ts` takes the same path** carrying §4's
       wire contract. A guard asserting "the path does not exist" would fail on the correct outcome;
@@ -1902,7 +1983,7 @@ Model: **Sonnet**.
       the PR body as G5's measurement. Paste it into the task report.
 - [ ] **Step 4: Commit**
 
-Audit lens (Sol, contract): run the grep guard's five rules yourself, by hand, with your own
+Audit lens (Opus, contract): run the grep guard's **six** rules yourself, by hand, with your own
 `grep`. A guard that passes because its pattern is subtly wrong is worse than no guard — check rule
 1 in particular (no code path may open anything under a runner logs directory, D6).
 
@@ -1924,16 +2005,21 @@ Model: **Sonnet**.
       grep -rn 'status viewer' plugins/ .c3/ --include='*.md'
       ```
 
-      Expected before: **seven hits, exactly the seven in spec §15's table** — two `supervisor`
+      **Grep every file under `plugins/tribe/`, with NO `--include` filter.** The old gate carried
+      `--include='*.md'` and was therefore blind to site 8, `scripts/viewer/package.json:6`, whose
+      every word had gone stale ("refresh-based", "status viewer", "scans `~/.tribe`",
+      "server-renders HTML"). An "exact list" a filter can hide a member from is not exact.
+
+      Expected before: **eight hits, exactly the eight in spec §15's table** — two `supervisor`
       (`plugins/tribe/README.md:249`, `runner/core/watchdog/watch-loop.ts:81`) and five
-      `status viewer` (`plugins/tribe/README.md:225`, `runner/README.md:76`, `:129`, `:814`,
-      `:860`). Record the real output verbatim; if it is not seven, the inventory is stale and the
+      `status viewer` (`plugins/tribe/README.md:225`, `runner/README.md:76`, `:129`, `:814`, `:860`,
+      **`scripts/viewer/package.json:6`**). Record the real output verbatim; if it is not seven, the inventory is stale and the
       spec's §15 table is corrected in this same task before anything is renamed. Expected after:
       zero.
 
       The `Monitor` and `ScheduleWakeup` tool names and the `artifact-comment-monitor` row type are
       **not** in scope and must still be present afterwards — assert that too.
-- [ ] **Step 2: Apply the seven renames** of spec §15 and rewrite the two README sections against
+- [ ] **Step 2: Apply the eight renames** of spec §15 and rewrite the two README sections against
       the new single surface and the two stdout lines of spec §10.2.
 
       **D9 retires only the PROCESS NAMES, and sites 3–4 are where that distinction bites.** D9 says
@@ -1960,7 +2046,7 @@ Model: **Sonnet**.
       ```
 
       Expected: `bunx @c3x/cli@11.6.3 check` clean; the runner suite green; the supervisor grep empty; `Monitor`
-      still present in `session.ts`. This closes follow-up F2.
+      still present in `session.ts`. This closes follow-up card **FU2** (STATE.md `F2`).
 - [ ] **Step 5: Commit**
 
 Audit lens (Sol, contract): run both greps yourself. Then confirm the D9 rename did **not** touch a
@@ -2004,7 +2090,10 @@ Model: **Sonnet**.
       shapes collapse to one `k` and kind coverage alone would pass while the array-prompt path (the
       defect that hid every runner prompt) is broken. One case each, per spec §16.2's table: string
       prompt; **array prompt**; `tool` pending (`[data-state="pending"]`); `tool` ok with its result
-      text; `tool` error (`[data-state="error"]`); `orphan_result`; **empty thinking asserted
+      text; `tool` error (`[data-state="error"]`); `orphan_result`; **a MIXED row** — one `user` row
+      carrying a `tool_result` AND a `text` block: the tool card gains its result **and** a
+      `[data-kind="prompt"]` with the text block's text is **visible**, which is the only assertion
+      that catches a per-row implementation dropping the text block (D28); **empty thinking asserted
       absent**; non-empty thinking present; **`image` displayed** — the same three clauses spec §16.2
       and task 25 state, word for word: **before expand**, zero requests for its bytes; **on
       expand**, exactly **one** request, `GET /api/block?at=&i=`; and then an `<img>` whose `src` is
