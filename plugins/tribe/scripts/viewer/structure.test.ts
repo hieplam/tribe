@@ -287,7 +287,13 @@ function processKillViolations(label: string, source: string): string[] {
  *     the composition root, not an adapter.
  *   - On a `Bun.file(...)` result, only the literal READ methods in `BUN_FILE_READS` are permitted;
  *     any write method (`.write`/`.writer`/`.delete`/`.unlink`) or ANY computed access on the result
- *     is refused. */
+ *     is refused. This holds whether the result is used DIRECTLY on the chain
+ *     (`Bun.file(p).writer()`) or bound to a variable first (`const h = Bun.file(p); h.writer()`) —
+ *     a single-statement `const|let|var <id> = Bun.file(...)` binding is tracked as a handle and its
+ *     later non-read usage is refused too (result-binding tracking). Deeper dataflow (reassignment,
+ *     returns, aliases-of-aliases) is out of scope (Shaman ruling R7). Note that `delete` is refused
+ *     ONLY on a tracked handle, never as a bare method name: `Map.prototype.delete` on an arbitrary
+ *     receiver (the live `core/pair.ts` evicts through it) must stay legal. */
 function bunViolations(label: string, source: string): string[] {
   const bad: string[] = [];
   // Scanned over a comment-and-string-stripped copy so a `Bun.<member>` mention inside a doc comment
@@ -321,6 +327,24 @@ function bunViolations(label: string, source: string): string[] {
     if (rest.startsWith('[')) { bad.push('computed access on a Bun.file(...) result'); continue; }
     const mm = rest.match(/^\.\s*([A-Za-z_$][\w$]*)/);
     if (mm && !BUN_FILE_READS.has(mm[1])) bad.push(`refused Bun.file(...) method: ${mm[1]}`);
+  }
+  // Result-binding tracking: a `Bun.file(...)` result bound to a variable is still a handle, but its
+  // later use sits on a different statement than the chain scan above can see. For each single-statement
+  // `const|let|var <id> = Bun.file(...)` binding, apply the SAME refusal to every member reached on
+  // `<id>`: a non-read method (`<id>.writer(`, `<id>.delete(`) or ANY computed access (`<id>[...]`) is
+  // refused, mirroring the direct-chain logic; a literal read method stays permitted. This is why
+  // `delete` is NOT a banned bare method name — it is refused only on a receiver proven to be a
+  // `Bun.file` handle, so `Map.prototype.delete` on any other receiver stays legal. Single-statement
+  // binding is the whole contract (Shaman ruling R7); deeper dataflow is deliberately out of scope.
+  const bindRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*Bun\s*\.\s*file\s*\(/g;
+  while ((m = bindRe.exec(s))) {
+    const id = m[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // identifier chars are safe, but escape defensively
+    if (new RegExp(`\\b${id}\\s*\\[`).test(s)) bad.push('computed access on a Bun.file(...) result');
+    const useRe = new RegExp(`\\b${id}\\s*\\.\\s*([A-Za-z_$][\\w$]*)`, 'g');
+    let u: RegExpExecArray | null;
+    while ((u = useRe.exec(s))) {
+      if (!BUN_FILE_READS.has(u[1])) bad.push(`refused Bun.file(...) method: ${u[1]}`);
+    }
   }
   return bad;
 }
@@ -913,11 +937,42 @@ describe('viewer structural contract', () => {
       expect(allowlistViolations('adapters/probe.ts', probe)).toEqual([]);
     });
 
-    test('a Map.delete-style call is NOT reachable through these rules for core/pair.ts (the .delete method-name ban of bypass 4 is intentionally NOT implemented — see the Phase-1 audit report)', () => {
-      // core/pair.ts legitimately calls Map.prototype.delete (state.pending.delete, pending.delete).
-      // A blanket ".delete( on any receiver" ban would flag that live, non-doomed file. This test
-      // pins the deliberate omission so a future tightening cannot silently break core/pair.ts.
+    // Bypass 4 (Warchief adjudication). Two mechanisms close the aliased-handle write without a
+    // blanket `.delete(` ban (which would flag Map.prototype.delete in the live core/pair.ts):
+    //   (i)  the node:fs write member names (`write`, `unlink`, `writeFileSync`, …) are in
+    //        FS_MEMBER_UNIVERSE, so the defence-in-depth call scan refuses them on ANY receiver;
+    //   (ii) a variable assigned `Bun.file(...)` is tracked as a handle, and any member on it other
+    //        than a literal read method — `writer`, `delete`, … — is refused. This is what closes
+    //        the aliased `.writer()`/`.delete()`, whose names are NOT in the fs universe.
+    //   `delete` is deliberately NOT a banned bare name; Map.delete on any other receiver stays legal.
+    test('prove the wall bites: an aliased Bun.file handle write (const h = Bun.file(p); h.writer()) is flagged', () => {
+      const probe = "const h = Bun.file('/tmp/x');\nh.writer();\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: an aliased Bun.file handle delete (const h = Bun.file(p); h.delete()) is flagged via result-binding tracking', () => {
+      const probe = "const h = Bun.file('/tmp/x');\nh.delete();\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: an aliased Bun.file handle unlink (any receiver .unlink()) is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', "record.unlink();\n")).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a .write() call on any receiver is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', "stream.write('data');\n")).not.toEqual([]);
+    });
+
+    // Map.prototype.delete stays legal — the live core/pair.ts (§6.5/§7.5) evicts through it.
+    test('a Map.delete-style call on an arbitrary receiver stays clean (delete is excluded from the write-method ban; core/pair.ts must stay green)', () => {
       expect(allowlistViolations('core/pair.ts', 'state.pending.delete(id);\n')).toEqual([]);
+      expect(allowlistViolations('core/pair.ts', 'pending.delete(oldest);\n')).toEqual([]);
+    });
+
+    // A Bun.file handle used ONLY for reads stays clean under result-binding tracking.
+    test('a Bun.file handle bound to a variable and read (h.text()) stays clean', () => {
+      const probe = "const h = Bun.file('/x');\nconst s = await h.text();\nconst b = await h.bytes();\n";
+      expect(allowlistViolations('adapters/fs.adapter.ts', probe)).toEqual([]);
     });
   });
 });
