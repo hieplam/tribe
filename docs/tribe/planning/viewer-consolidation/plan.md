@@ -232,19 +232,19 @@ Sonnet by default — every task below states its model. Opus is warranted on ex
 - **Task 7 and Task 8** (the normalizer): the oracle-bearing tasks. Getting "nothing is silently
   dropped" right across 30 row types and 8 block shapes is judgment over a measured table, not
   transcription.
-**Task 18 stays Sonnet, deliberately** — it implements D26/D30's backward reader, which is the most
-intricate procedure in the design, and the instinct is to raise it. The reason not to: spec §6.3
-gives the algorithm as **line-by-line pseudocode**, and D31 gives it a pure signature with four named
-unit cases (2 MiB, exactly `ROW_CAP`, 9 MiB, cut-mid-row). That is transcription against a spelled-out
-contract with a mechanical oracle, which is exactly what Sonnet is for. The tasks below are on Opus
-because their contract is a *judgement* — what "nothing is silently dropped" means across 30 row
-types, or how four interacting state machines behave under a disconnect — not because they are long.
-
 - **Task 19** (the SSE poller): the tail transition, reset-on-rotate, frame batching and the tick
   caps interact, and a subtle error is invisible until a live run. (There is no resume to get wrong
   — D12 removed byte-offset resume entirely; what remains is getting the *live* stream right.)
 - **Task 24** (the session view): follow-the-tail, windowed back-fill and incoming frames interact
   in the scroll container; this is the one client task with real state-machine risk.
+
+**Task 18 stays Sonnet, deliberately** — it implements D26/D30's backward reader, which is the most
+intricate procedure in the design, and the instinct is to raise it. The reason not to: spec §6.3
+gives the algorithm as **line-by-line pseudocode**, and D31 gives it a pure signature with four named
+unit cases (2 MiB, exactly `ROW_CAP`, 9 MiB, cut-mid-row). That is transcription against a spelled-out
+contract with a mechanical oracle, which is exactly what Sonnet is for. The four above are on Opus
+because their contract is a *judgement* — what "nothing is silently dropped" means across 30 row
+types, or how four interacting state machines behave under a disconnect — not because they are long.
 
 Everything else is mechanical against a precise brief and runs on Sonnet. **The review roles are
 named by role, not by model** — the **skinner** (the audit lens) and the **blind reader**. D4 named
@@ -639,9 +639,12 @@ Model: **Sonnet**.
 - [ ] **Step 3: Run.**
 
       ```sh
-      cd plugins/tribe/scripts/viewer && bun test core/records.test.ts core/tail.test.ts
+      cd plugins/tribe/scripts/viewer && bun test core/records.test.ts core/tail.test.ts core/window.test.ts
       ```
-      Expected: all pass, including the three new tail cases.
+
+      Expected: all pass — including the seeded-state case, the three tail cases, and
+      `core/window.test.ts`'s complete-line selection (this task creates `core/window.ts`, so its
+      test runs here, not only in task 18).
 - [ ] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the tail state machine over a real 13 MB transcript in byte-ranged

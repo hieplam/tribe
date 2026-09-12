@@ -136,14 +136,14 @@ document does not reopen them.
   transcript."
 - **D1** — "Stack: React + Vite client with a build step (Kanna-style)."
 - **D2** — "Liveness of a session = file growth only (mtime within N min or size grew)."
-- **D3** (its **model names are superseded by D29**; the process it describes stands) — "Process:
-  spec is an artifact co-authored over several sessions; once the owner approves it, the Shaman
-  drives the whole chain (planning warchief → build → Sol audits → merge) without further approval
-  stops."
-- **D4** (**superseded by D29** for the two review roles; its hunter clause stands) — "Audit/review
-  lenses run on GPT-5.6 Sol via Codex (`codex exec -m gpt-5.6-sol`); blind-reader page reviews on
-  GPT-5.6 Terra (`codex exec -m gpt-5.6-terra --sandbox read-only`); Claude Sonnet hunters
-  implement."
+- **D3** — "Process: spec is an artifact co-authored over several sessions; once the owner approves
+  it, the Shaman drives the whole chain (planning warchief → build → Sol audits → merge) without
+  further approval stops." (Its **model names are superseded by D29**; the process it describes
+  stands.)
+- **D4** — "Audit/review lenses run on GPT-5.6 Sol via Codex (`codex exec -m gpt-5.6-sol`);
+  blind-reader page reviews on GPT-5.6 Terra (`codex exec -m gpt-5.6-terra --sandbox read-only`);
+  Claude Sonnet hunters implement." (**Superseded by D29** for the two review roles; its hunter
+  clause stands.)
 - **D5** — "One server, one root (`~/.claude/projects`), no modes. Runner keeps reuse-or-spawn and
   prints a session URL."
 - **D8** — "Option A approved: single surface over ~/.claude/projects; campaign facts appear as a
@@ -529,7 +529,7 @@ built asset returns the SPA shell so the client router can own the address bar.
 The response carries `from` (the first retained row's byte offset — pass it back as the next
 `before`), `to` (**one past the last complete row — not EOF**, D30), `truncatedBefore` (true iff any row precedes `from`, which tells
 the client whether to keep offering "load earlier"), and `patches` (D27, above). Whole-row trimming (D20) and
-after-trim pairing (D23 rung 3) apply here exactly as they do to `hello` — one algorithm, two entry
+after-trim pairing (**block rung 3 (D28)**) apply here exactly as they do to `hello` — one algorithm, two entry
 points.
 
 **The one rule for a path not in the table above**, because two rules for the same request is a
@@ -686,10 +686,12 @@ export type RenderNode = RowAnchor & Sized & (
   | { k: 'tool';          name: string; input: unknown; state: 'pending'|'ok'|'error';
                           result: ToolResult | null; toolUseId: string | null;
                           agentId: string | null;
-                          /** D19: a tool card is TWO payloads in two different rows. `call` is the
-                           * `tool_use` block (always `= {at, i}` of this node); `result` is the
-                           * `tool_result` block in its LATER row, filled by pairing, null while
-                           * pending. Each is expanded with its own `/api/block?at=&i=`. */
+                          /** D19: a tool card is TWO payloads in two different rows, so it carries
+                           * TWO addresses. `call` is this node's own `{at, i}` — the `tool_use`
+                           * block. **`resultAnchor`** is the expansion address of the paired
+                           * result: the `tool_result` block's `{at, i}` in its LATER row, set by
+                           * pairing and **null while pending**. Each half is expanded with its own
+                           * `/api/block?at=&i=`; neither can reach the other. */
                           call: Anchor; resultAnchor: Anchor | null }
   | { k: 'orphan_result'; toolUseId: string; result: ToolResult;
                           /** only the result half exists here, by definition */
@@ -1314,7 +1316,7 @@ with each other.
       rows := rows[1:]
   anchor          := offset of the FIRST retained row
   truncatedBefore := anchor > 0
-  # pairing runs HERE, after the trim, over `rows` only (D23 rung 3, D28)
+  # pairing runs HERE, after the trim, over `rows` only (block rung 3 (D28))
   nodes    := normalizeAndPair(rows)
   ```
 
@@ -1514,7 +1516,8 @@ mapping is stated after the ladder.
    | an assistant row whose **only** block is such a `thinking` | the row is not dropped; every one of its blocks fell in the line above, so the row legitimately yields nothing |
 
    That is the whole set. Two cases an earlier draft listed here have moved to their proper rungs: a
-   paired `tool_result` is **rung 3** (it becomes a `Patch`, which is an outcome, not a silence), and
+   paired `tool_result` is **block rung 3 (D28)** (it becomes a `Patch`, which is an outcome, not a
+   silence), and
    a title-source row is **rung 2** (it is folded into the session title). Listing them here as well
    is what made the old "disjoint" claim unprovable. Any row that produces no node and is not in this
    table is a bug, and the coverage test is what says so.
@@ -1549,7 +1552,7 @@ ROW level — for EVERY row, first match wins:
   1. unparsable, or longer than ROW_CAP     -> `unreadable` / `raw oversized` node
   2. a title-source or otherwise folded row -> folded, no node of its own
   -- if the row is `user` or `assistant`, descend to BLOCK level, then resume at rung 5 --
-  -- (there is no row-level rung 3: pairing is a BLOCK outcome, D28) --
+  -- (no row-level rung 3: pairing is block rung 3 (D28)) --
   4. a NON-message row that emits a node    -> that node: `attachment`, `system` (per subtype),
                                                `mode`, `queue-operation`, `pr-link`, `chip`, `raw`
   5. silent by design                       -> reachable ONLY by a message row whose every block
