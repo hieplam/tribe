@@ -12,13 +12,22 @@ import type { TranscriptRecord } from './records.ts';
 // pre-pairing candidate node, an `orphan_result` (spec §7.5: a result with no call in pairing state
 // is an orphan — never a drop).
 
-/** Build a TranscriptRecord the way records.ts would, with the fields a message row carries. */
+/** Build a TranscriptRecord the way records.ts would, carrying every field the normalizer reads
+ * off the typed record (message-row specials) plus the verbatim `raw` line the metadata half and
+ * the `raw` card re-read (spec §4). Metadata fields (mode, operation, prUrl, …) live only in `raw`,
+ * exactly as records.ts leaves them. */
 function rec(obj: Record<string, unknown>): TranscriptRecord {
   const raw = JSON.stringify(obj);
   const record: TranscriptRecord = { type: obj.type as string, raw };
   if (typeof obj.uuid === 'string') record.uuid = obj.uuid;
   if (typeof obj.timestamp === 'string') record.timestamp = obj.timestamp;
   if ('message' in obj) record.message = obj.message;
+  if (typeof obj.subtype === 'string') record.subtype = obj.subtype;
+  if ('content' in obj) record.content = obj.content;
+  if ('attachment' in obj) record.attachment = obj.attachment;
+  if (typeof obj.isCompactSummary === 'boolean') record.isCompactSummary = obj.isCompactSummary;
+  if (typeof obj.apiErrorStatus === 'number') record.apiErrorStatus = obj.apiErrorStatus;
+  if (typeof obj.isApiErrorMessage === 'boolean') record.isApiErrorMessage = obj.isApiErrorMessage;
   return record;
 }
 
@@ -297,5 +306,352 @@ describe('normalize — message rows and content blocks (spec §7.2)', () => {
     ]);
     expect(nodes.map((n) => n.k)).toEqual(['prompt', 'assistant', 'tool', 'orphan_result', 'prompt']);
     expect(nodes.map((n) => n.at)).toEqual([10, 20, 20, 30, 40]);
+  });
+});
+
+// Task 8: the METADATA half (spec §7.1 rung 4, §7.4 system subtypes, §7.3 attachment, §7.6 chips /
+// spills, the open-world raw card). The oracle (spec §0) still governs: a row on disk this half
+// drops silently is a bug; a raw-JSON card for an unknown row is by design.
+
+/** A whole-row (non-message) record, addressed at byte offset `at`. Metadata fields live in `raw`. */
+function metaRow(at: number, obj: Record<string, unknown>): RowInput {
+  return input(at, obj);
+}
+
+/** The single node a whole-row type emits (rung 4). */
+function only(nodes: ReturnType<typeof normalize>): (typeof nodes)[number] {
+  expect(nodes).toHaveLength(1);
+  return nodes[0]!;
+}
+
+describe('normalize — system rows by subtype (spec §7.4, B10: payload is top-level `content`)', () => {
+  test('turn_duration renders a divider "32.3s · 22 messages" from durationMs/messageCount', () => {
+    const node = only(normalize([metaRow(0, { type: 'system', subtype: 'turn_duration', durationMs: 32309, messageCount: 22 })]));
+    expect(node.k).toBe('divider');
+    if (node.k !== 'divider') throw new Error('unreachable');
+    expect(node.label).toBe('32.3s · 22 messages');
+  });
+
+  test('compact_boundary renders a "context compacted" divider', () => {
+    const node = only(normalize([metaRow(0, { type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted' })]));
+    expect(node.k).toBe('divider');
+    if (node.k !== 'divider') throw new Error('unreachable');
+    expect(node.label).toBe('context compacted');
+  });
+
+  test('away_summary renders a chip with content as detail', () => {
+    const node = only(normalize([metaRow(0, { type: 'system', subtype: 'away_summary', content: 'here is the away summary' })]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.detail).toBe('here is the away summary');
+  });
+
+  test('informational renders a chip with content as detail', () => {
+    const node = only(normalize([metaRow(0, { type: 'system', subtype: 'informational', content: 'Usage limit reached' })]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.detail).toBe('Usage limit reached');
+  });
+
+  test('stop_hook_summary renders a chip carrying hookCount and stopReason', () => {
+    const node = only(normalize([metaRow(0, { type: 'system', subtype: 'stop_hook_summary', hookCount: 2, stopReason: 'done' })]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.detail).toContain('2');
+    expect(node.detail).toContain('done');
+  });
+
+  test('local_command renders a chip with the <command-name> parsed out of content (§7.6)', () => {
+    const node = only(normalize([
+      metaRow(0, {
+        type: 'system',
+        subtype: 'local_command',
+        content: '<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>fable</command-args>',
+      }),
+    ]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.label).toBe('/model');
+    expect(node.detail).toBe('fable');
+  });
+
+  test('bridge_status renders a chip', () => {
+    const node = only(normalize([metaRow(0, { type: 'system', subtype: 'bridge_status', content: '/remote-control is active' })]));
+    expect(node.k).toBe('chip');
+  });
+
+  test('scheduled_task_fire renders a chip', () => {
+    const node = only(normalize([metaRow(0, { type: 'system', subtype: 'scheduled_task_fire', content: 'resuming wakeup' })]));
+    expect(node.k).toBe('chip');
+  });
+
+  test('a system row with no subtype renders as raw (0 measured, handled anyway — §7.4)', () => {
+    const node = only(normalize([metaRow(0, { type: 'system', content: 'no subtype here' })]));
+    expect(node.k).toBe('raw');
+    if (node.k !== 'raw') throw new Error('unreachable');
+    expect(node.rowType).toBe('system');
+  });
+});
+
+describe('normalize — named metadata rows (spec §7.1)', () => {
+  test('attachment renders an attachment node labelled by attachment.type with rendered as detail (§7.3)', () => {
+    const node = only(normalize([
+      metaRow(0, { type: 'attachment', attachment: { type: 'total_tokens_reminder', rendered: 'Approaching context limit.' } }),
+    ]));
+    expect(node.k).toBe('attachment');
+    if (node.k !== 'attachment') throw new Error('unreachable');
+    expect(node.label).toBe('total_tokens_reminder');
+    expect(node.detail).toBe('Approaching context limit.'); // rendered shown inline, no fetch
+    expect(node.expandable).toBe(false);
+  });
+
+  test('an attachment whose whole content is its label is not expandable (§7.3)', () => {
+    const node = only(normalize([metaRow(0, { type: 'attachment', attachment: { type: 'batching_reminder_sent' } })]));
+    expect(node.k).toBe('attachment');
+    if (node.k !== 'attachment') throw new Error('unreachable');
+    expect(node.label).toBe('batching_reminder_sent');
+    expect(node.detail).toBeNull();
+    expect(node.expandable).toBe(false);
+  });
+
+  test('mode renders a chip labelled by `mode`', () => {
+    const node = only(normalize([metaRow(0, { type: 'mode', mode: 'normal' })]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.label).toBe('normal');
+  });
+
+  test('queue-operation renders a chip labelled by `operation`, with `content` as detail when present', () => {
+    const node = only(normalize([metaRow(0, { type: 'queue-operation', operation: 'enqueue', content: '<task-notification/>' })]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.label).toBe('enqueue');
+    expect(node.detail).toBe('<task-notification/>');
+  });
+
+  test('permission-mode renders a chip labelled by `permissionMode`', () => {
+    const node = only(normalize([metaRow(0, { type: 'permission-mode', permissionMode: 'bypassPermissions' })]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.label).toBe('bypassPermissions');
+  });
+
+  test('pr-link renders a chip whose href is the gated prUrl (§12.5)', () => {
+    const node = only(normalize([
+      metaRow(0, { type: 'pr-link', prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' }),
+    ]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.href).toBe('https://github.com/o/r/pull/7');
+  });
+
+  test('pr-link with a non-http(s) prUrl drops the href (gate §12.5) but still renders the chip', () => {
+    const node = only(normalize([metaRow(0, { type: 'pr-link', prNumber: 7, prUrl: 'javascript:alert(1)' })]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.href).toBeNull();
+  });
+
+  test('frame-link renders a chip whose href is the gated frameUrl when present', () => {
+    const node = only(normalize([
+      metaRow(0, { type: 'frame-link', frameUrl: 'https://claude.ai/code/artifact/x', title: 'Artifact' }),
+    ]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.href).toBe('https://claude.ai/code/artifact/x');
+  });
+
+  test('agent-name renders a chip labelled by `agentName`', () => {
+    const node = only(normalize([metaRow(0, { type: 'agent-name', agentName: 'my-agent' })]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.label).toBe('my-agent');
+  });
+
+  test('cost-state renders a chip carrying totalCostUSD and totalDuration', () => {
+    const node = only(normalize([metaRow(0, { type: 'cost-state', totalCostUSD: 0.42, totalDuration: 19887 })]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.label).toContain('0.42');
+    expect(node.detail).toContain('19887');
+  });
+
+  test('relocated renders a chip labelled by `relocatedCwd`', () => {
+    const node = only(normalize([metaRow(0, { type: 'relocated', relocatedCwd: '/tmp/worktree' })]));
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(node.label).toBe('/tmp/worktree');
+  });
+
+  test('a collapsed-raw metadata type (worktree-state) renders a raw card carrying its rowType and JSON', () => {
+    const raw = { type: 'worktree-state', sessionId: 's', worktreeSession: { branch: 'x' } };
+    const node = only(normalize([metaRow(0, raw)]));
+    expect(node.k).toBe('raw');
+    if (node.k !== 'raw') throw new Error('unreachable');
+    expect(node.rowType).toBe('worktree-state');
+    expect(node.json).toBe(JSON.stringify(raw));
+    expect(node.text).toBeNull(); // `text` is the oversized label ONLY (§6.1); a plain raw card has none.
+  });
+
+  test('title-source rows (last-prompt, ai-title, custom-title) are FOLDED — no node (rung 2, §5.3)', () => {
+    // A fold is not a drop: §5.3 consumes these into the session title. The coverage test proves it
+    // over the fixture; here it is asserted directly so the fold cannot silently become a raw card.
+    expect(normalize([metaRow(0, { type: 'last-prompt', lastPrompt: 'x' })])).toEqual([]);
+    expect(normalize([metaRow(0, { type: 'ai-title', aiTitle: 'x' })])).toEqual([]);
+    expect(normalize([metaRow(0, { type: 'custom-title', customTitle: 'x' })])).toEqual([]);
+  });
+});
+
+describe('normalize — the open-world raw fallback (spec §7.1 anything-else, bucket D)', () => {
+  test('an INVENTED row type from a future Claude Code release renders as a raw card, never dropped', () => {
+    const raw = { type: 'row-type-from-the-future-2099', payload: { anything: true } };
+    const node = only(normalize([metaRow(0, raw)]));
+    expect(node.k).toBe('raw');
+    if (node.k !== 'raw') throw new Error('unreachable');
+    expect(node.rowType).toBe('row-type-from-the-future-2099');
+    expect(node.json).toBe(JSON.stringify(raw));
+    expect(node.bytes).toBe(new TextEncoder().encode(JSON.stringify(raw)).length);
+  });
+});
+
+describe('normalize — apiErrorStatus rows render an error node (spec §8.1 ErrorCard)', () => {
+  test('an assistant row carrying apiErrorStatus renders ONE error node with status + body', () => {
+    const node = only(normalize([
+      input(0, {
+        type: 'assistant',
+        uuid: 'e1',
+        timestamp: 't',
+        apiErrorStatus: 429,
+        isApiErrorMessage: true,
+        message: { role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: "You've hit your session limit" }] },
+      }),
+    ]));
+    expect(node.k).toBe('error');
+    if (node.k !== 'error') throw new Error('unreachable');
+    expect(node.status).toBe(429);
+    expect(node.body).toEqual(tokenizeMarkdown("You've hit your session limit"));
+    // The error row does NOT ALSO emit its text block as a separate assistant node.
+  });
+});
+
+describe('normalize — isCompactSummary rows render the compaction divider (spec §7.4)', () => {
+  test('a user row with isCompactSummary:true renders ONE divider, not its content', () => {
+    const node = only(normalize([
+      input(0, { type: 'user', uuid: 'c1', timestamp: 't', isCompactSummary: true, message: { role: 'user', content: 'summary text' } }),
+    ]));
+    expect(node.k).toBe('divider');
+    if (node.k !== 'divider') throw new Error('unreachable');
+    expect(node.label).toBe('context compacted');
+  });
+});
+
+describe('normalize — XML chip extraction on prompts (spec §7.6)', () => {
+  test('a <system-reminder> is lifted into the prompt node chips, removed from the body', () => {
+    const nodes = normalize([
+      userBlocks(0, [{ type: 'text', text: 'before\n<system-reminder>\nThe user named this session "x".\n</system-reminder>\nafter' }]),
+    ]);
+    const node = only(nodes);
+    expect(node.k).toBe('prompt');
+    if (node.k !== 'prompt') throw new Error('unreachable');
+    expect(node.chips).toHaveLength(1);
+    const chip = node.chips[0]!;
+    expect(chip.kind).toBe('system-reminder');
+    expect(chip.label).toBe('The user named this session "x".');
+    expect(chip.anchor).toEqual({ at: 0, i: 0 });
+    // The tag XML is gone from the markdown body; the surrounding text survives.
+    const bodyText = JSON.stringify(node.body);
+    expect(bodyText).not.toContain('system-reminder');
+    expect(bodyText).toContain('before');
+    expect(bodyText).toContain('after');
+  });
+
+  test('a slash command <command-name>/<command-args> becomes a slash-command chip (label=command, detail=args)', () => {
+    const nodes = normalize([
+      userBlocks(0, [{ type: 'text', text: '<command-name>/deploy</command-name><command-args>--prod</command-args>' }]),
+    ]);
+    const node = only(nodes);
+    if (node.k !== 'prompt') throw new Error('expected prompt');
+    expect(node.chips).toHaveLength(1);
+    expect(node.chips[0]!.kind).toBe('slash-command');
+    expect(node.chips[0]!.label).toBe('/deploy');
+    expect(node.chips[0]!.detail).toBe('--prod');
+  });
+
+  test('an <ide_opened_file> becomes an ide-context chip', () => {
+    const nodes = normalize([
+      userBlocks(0, [{ type: 'text', text: '<ide_opened_file>The user opened /a/b.ts in the IDE.</ide_opened_file>' }]),
+    ]);
+    const node = only(nodes);
+    if (node.k !== 'prompt') throw new Error('expected prompt');
+    expect(node.chips).toHaveLength(1);
+    expect(node.chips[0]!.kind).toBe('ide-context');
+  });
+
+  test('an unrecognised or unbalanced tag degrades to plain text, never a throw (§7.6)', () => {
+    const nodes = normalize([
+      userBlocks(0, [{ type: 'text', text: 'plain <not-a-known-tag>stuff</not-a-known-tag> and <system-reminder>unclosed' }]),
+    ]);
+    const node = only(nodes);
+    if (node.k !== 'prompt') throw new Error('expected prompt');
+    expect(node.chips).toEqual([]); // nothing balanced-and-recognised => no chip
+    expect(JSON.stringify(node.body)).toContain('not-a-known-tag');
+  });
+});
+
+describe('normalize — <persisted-output> spill markers (spec §7.6, fail-closed obligation 4)', () => {
+  const ABS = '/Users/someone/.claude/projects/-p/sid/tool-results/spill01.txt';
+
+  test('a tool_result carrying a <persisted-output> marker keeps ONLY the basename — never the absolute path', () => {
+    const nodes = normalize([
+      userBlocks(0, [
+        {
+          type: 'tool_result',
+          tool_use_id: 'toolu_spill',
+          content: `<persisted-output>\nOutput too large (2.4KB). Full output saved to: ${ABS}\n\nPreview (first 2KB):\nthe preview text\n</persisted-output>`,
+        },
+      ]),
+    ]);
+    const node = only(nodes);
+    if (node.k !== 'orphan_result') throw new Error('expected orphan_result');
+    expect(node.result.r).toBe('spill');
+    if (node.result.r !== 'spill') throw new Error('unreachable');
+    expect(node.result.name).toBe('spill01.txt'); // basename ONLY
+
+    // The absolute path (and any directory separator from it) must not survive ANYWHERE on the node
+    // — leaking it is both an information leak and a path-traversal seed (B3's class).
+    const serialized = JSON.stringify(node);
+    expect(serialized).not.toContain(ABS);
+    expect(serialized).not.toContain('/Users/');
+    expect(serialized).not.toContain('tool-results');
+  });
+
+  test('the spill node keeps the preview text the marker already carries (a refused spill still shows it)', () => {
+    const nodes = normalize([
+      userBlocks(0, [
+        {
+          type: 'tool_result',
+          tool_use_id: 'toolu_spill',
+          content: `<persisted-output>\nFull output saved to: ${ABS}\n\nPreview (first 2KB):\nvisible preview\n</persisted-output>`,
+        },
+      ]),
+    ]);
+    const node = only(nodes);
+    if (node.k !== 'orphan_result') throw new Error('expected orphan_result');
+    if (node.result.r !== 'spill') throw new Error('expected spill');
+    expect(JSON.stringify(node.result.previewBody)).toContain('visible preview');
+  });
+
+  test('a basename failing the ^[A-Za-z0-9._-]{1,128}$ gate is refused to empty, still no path leak', () => {
+    const evil = '/Users/x/tool-results/..%2f..%2fetc%2fpasswd bad name';
+    const nodes = normalize([
+      userBlocks(0, [
+        { type: 'tool_result', tool_use_id: 't', content: `<persisted-output>\nFull output saved to: ${evil}\n\nPreview (first 2KB):\np\n</persisted-output>` },
+      ]),
+    ]);
+    const node = only(nodes);
+    if (node.k !== 'orphan_result') throw new Error('expected orphan_result');
+    if (node.result.r !== 'spill') throw new Error('expected spill');
+    expect(node.result.name).toBe('');
+    expect(JSON.stringify(node)).not.toContain('passwd');
   });
 });

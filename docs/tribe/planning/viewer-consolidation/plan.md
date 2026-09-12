@@ -786,7 +786,7 @@ the oracle — a row class present in your sample and absent from the output, ot
 
 Model: **Opus.** Same reason as task 7; this half is where the open-world rule lives.
 
-- [ ] **Step 1: Write the failing tests.** `normalize.coverage.test.ts` is the mechanical proof of
+- [x] **Step 1: Write the failing tests.** `normalize.coverage.test.ts` is the mechanical proof of
       spec §7.1. It loads the task-1 fixture and classifies **every row, and every block inside a
       message row**, by D23's precedence ladder at the granularity D28 fixes:
 
@@ -842,17 +842,17 @@ Model: **Opus.** Same reason as task 7; this half is where the open-world rule l
       (asserting the node keeps only a `basename`, never the absolute path), `apiErrorStatus` rows,
       and an invented row type rendering as `raw`. Expected on first run: unaccounted rows reported
       by the coverage test.
-- [ ] **Step 2: Implement** the metadata half. The default branch of the row dispatch is a `raw`
+- [x] **Step 2: Implement** the metadata half. The default branch of the row dispatch is a `raw`
       node — `continue` appears nowhere in this module except for the declared empty-`thinking`
       exception, which carries the spec §7.2 citation in a comment.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/normalize
       ```
       Expected: the coverage test reports 0 unaccounted rows over the fixture; every subtype case
       passes.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the coverage test against a **real** transcript of your choosing
 from `~/.claude/projects` (not the fixture) and report the unaccounted-row count. Also verify the
