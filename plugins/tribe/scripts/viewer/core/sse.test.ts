@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { batchFrames, encodeFrame, type SseFrame } from './sse.ts';
-import type { Agent, Badge, RenderNode, SessionSummary } from './model.ts';
+import { batchFrames, batchPatches, encodeFrame, type SseFrame } from './sse.ts';
+import type { Agent, Badge, Patch, RenderNode, SessionSummary } from './model.ts';
 
 // ---------------------------------------------------------------------------------------------
 // sse.test.ts — task 13: SSE frame encoding, per-stream sequence ids, and 1 MiB frame batching
@@ -286,6 +286,22 @@ describe('D12 — no Last-Event-ID support of any kind', () => {
   });
 });
 
+// A REAL caller never emits the 0/0/1 placeholder `batchFrames` used to measure against
+// internally — it substitutes the actual window bounds and a real, non-trivial per-stream
+// sequence id once it decides emission order. Every assertion below that checks an ACTUAL
+// emitted frame's byte length goes through these two helpers, never the placeholder, because a
+// batch measured "just under the cap" against the placeholder can encode PAST the cap once these
+// wider, real numbers replace it (Phase-1 audit — see the two `describe` blocks below).
+const REAL_FROM = 8_388_608;
+const REAL_TO = 9_437_183;
+const REAL_SEQ = 654_321;
+function encodeRealRows(nodes: RenderNode[]): string {
+  return encodeFrame({ event: 'rows', data: { nodes, from: REAL_FROM, to: REAL_TO } }, REAL_SEQ);
+}
+function encodeRealPatch(patches: Patch[]): string {
+  return encodeFrame({ event: 'patch', data: { patches } }, REAL_SEQ);
+}
+
 describe('batchFrames — 1 MiB frame cap (spec §6.2, §14)', () => {
   const MAX = 1024 * 1024;
 
@@ -294,7 +310,7 @@ describe('batchFrames — 1 MiB frame cap (spec §6.2, §14)', () => {
     const batches = batchFrames(nodes, MAX);
     expect(batches.length).toBeGreaterThan(1);
     for (const batch of batches) {
-      const encoded = encodeFrame({ event: 'rows', data: { nodes: batch, from: 0, to: 0 } }, 1);
+      const encoded = encodeRealRows(batch);
       expect(new TextEncoder().encode(encoded).length).toBeLessThanOrEqual(MAX);
     }
   });
@@ -307,13 +323,14 @@ describe('batchFrames — 1 MiB frame cap (spec §6.2, §14)', () => {
   });
 
   test('a single node near the cap sits alone in its frame', () => {
-    // Leave headroom for the frame envelope (event/id/data/braces/field-name overhead) so the
+    // Leave headroom for the frame envelope (event/id/data/braces/field-name overhead, PLUS the
+    // real from/to/seq digits a caller actually sends — never just the 0/0/1 placeholder) so the
     // node's OWN size is what is "near the cap", not something already over it.
     const nodes: RenderNode[] = [rawNode(0, MAX - 2000)];
     const batches = batchFrames(nodes, MAX);
     expect(batches).toHaveLength(1);
     expect(batches[0]).toHaveLength(1);
-    const encoded = encodeFrame({ event: 'rows', data: { nodes: batches[0]!, from: 0, to: 0 } }, 1);
+    const encoded = encodeRealRows(batches[0]!);
     expect(new TextEncoder().encode(encoded).length).toBeLessThanOrEqual(MAX);
   });
 
@@ -347,11 +364,81 @@ describe('batchFrames — 1 MiB frame cap (spec §6.2, §14)', () => {
       });
       const batches = batchFrames(nodes, MAX);
       for (const batch of batches) {
-        const encoded = encodeFrame({ event: 'rows', data: { nodes: batch, from: 0, to: 0 } }, 1);
+        // The REAL emitted frame, not the 0/0/1 placeholder `batchFrames` measures against.
+        const encoded = encodeRealRows(batch);
         const byteLen = new TextEncoder().encode(encoded).length;
         expect(byteLen).toBeLessThanOrEqual(MAX);
       }
       expect(batches.flat().map((n) => n.id)).toEqual(nodes.map((n) => n.id));
     }
+  });
+
+  test('a boundary-sized rows batch stays under the cap once the REAL from/to/seq are applied — not just the 0/0/1 placeholder `batchFrames` measures against (Phase-1 audit)', () => {
+    const nodeA = rawNode(0, Math.floor(MAX / 2));
+
+    // Binary-search the largest SECOND node payload whose PLACEHOLDER-envelope (from:0, to:0,
+    // seq:1) frame — with `nodeA` already in the batch — is still <= MAX: exactly the boundary
+    // the unfixed `batchFrames` used to accept `nodeB` into `nodeA`'s batch, using the narrowest
+    // envelope that batch could ever be measured with.
+    const placeholderBytes = (bytes: number): number =>
+      new TextEncoder().encode(
+        encodeFrame({ event: 'rows', data: { nodes: [nodeA, rawNode(1, bytes)], from: 0, to: 0 } }, 1),
+      ).length;
+    let lo = 0;
+    let hi = MAX;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi + 1) / 2);
+      if (placeholderBytes(mid) <= MAX) lo = mid;
+      else hi = mid - 1;
+    }
+    const nodeB = rawNode(1, lo);
+
+    const batches = batchFrames([nodeA, nodeB], MAX);
+    // Whatever `batchFrames` decides — one batch or two — every batch it hands back must survive
+    // being encoded with the REAL bounds/seq a composition root actually sends, never just the
+    // 0/0/1 placeholder `batchFrames` measures candidates against internally.
+    for (const batch of batches) {
+      const encoded = encodeRealRows(batch);
+      expect(new TextEncoder().encode(encoded).length).toBeLessThanOrEqual(MAX);
+    }
+    expect(batches.flat().map((n) => n.id)).toEqual(['0:0', '1:0']);
+  });
+});
+
+describe('batchPatches — the 1 MiB frame cap applies to patch frames too (spec §6.2/§6.4, §14; Phase-1 audit)', () => {
+  const MAX = 1024 * 1024;
+
+  test('18 result patches, each carrying a node just under the 64 KiB per-node cap (D15), split into MULTIPLE patch frames, each under 1 MiB', () => {
+    const patches: Patch[] = Array.from({ length: 18 }, (_, idx) => ({
+      op: 'result' as const,
+      id: `${idx}:0`,
+      node: rawNode(idx, 64 * 1024 - 100),
+    }));
+
+    // Sanity: sent as a single frame — today's behavior, because patch frames are never split at
+    // all — this exceeds the cap. That gap is exactly the defect this test guards against.
+    const singleFrame = encodeRealPatch(patches);
+    expect(new TextEncoder().encode(singleFrame).length).toBeGreaterThan(MAX);
+
+    const batches = batchPatches(patches, MAX);
+    expect(batches.length).toBeGreaterThan(1);
+    for (const batch of batches) {
+      const encoded = encodeRealPatch(batch);
+      expect(new TextEncoder().encode(encoded).length).toBeLessThanOrEqual(MAX);
+    }
+    expect(batches.flat().map((p) => p.id)).toEqual(patches.map((p) => p.id));
+  });
+
+  test('a `remove` patch (no node) survives batching untouched, alongside `result` patches', () => {
+    const patches: Patch[] = [
+      { op: 'result', id: '0:0', node: rawNode(0, 200) },
+      { op: 'remove', id: '1:0' },
+    ];
+    const batches = batchPatches(patches, MAX);
+    expect(batches.flat()).toEqual(patches);
+  });
+
+  test('an empty patch list produces no frames', () => {
+    expect(batchPatches([], MAX)).toEqual([]);
   });
 });

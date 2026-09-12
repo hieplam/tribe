@@ -70,28 +70,33 @@ export function encodeFrame(frame: SseFrame, seq: number): string {
   return `${lines.join('\n')}\n\n`;
 }
 
-/** Splits `nodes` into as many `rows` frames as it takes so that no single encoded frame exceeds
- * `maxBytes` (spec §6.2, §14). Every node appears exactly once, in the order given. There is no
- * "oversized node" branch: D15 (task 9) bounds every node at 64 KiB upstream, so a node larger
- * than the frame cap cannot occur here — this function only ever needs to decide how many nodes
- * fit together, never what to do with one that alone exceeds the cap. `from`/`to` are dummy
- * bounds (0) for measurement purposes only; the caller fills in the real window bounds when it
- * actually emits each batch as a frame. */
-export function batchFrames(nodes: RenderNode[], maxBytes: number): RenderNode[][] {
-  if (nodes.length === 0) return [];
+/** The largest value `seq`, `from`, or `to` can validly take on the wire — beyond
+ * `Number.MAX_SAFE_INTEGER` a JS number can no longer address a distinct integer. Measuring a
+ * candidate batch's encoded size against THIS, rather than against a `0`/`1` placeholder, is what
+ * makes the bound below hold for whatever real, wider `seq`/`from`/`to` the composition root
+ * substitutes once it decides emission order — not just the narrowest envelope a test happened to
+ * measure with. A placeholder envelope (`from:0, to:0, seq:1`) undercounts a real frame's bytes by
+ * up to 45 (three numeric fields, each up to 15 digits wider than its 1-digit placeholder), and a
+ * batch measured "just under the cap" against it can encode past the cap once the real numbers
+ * replace it — the Phase-1 audit's exact finding (measured 1,048,576; real-envelope encode
+ * 1,048,593). */
+const MEASURE_MAX_SAFE = Number.MAX_SAFE_INTEGER;
 
-  const encoder = new TextEncoder();
-  const frameBytes = (batch: RenderNode[]): number =>
-    encoder.encode(encodeFrame({ event: 'rows', data: { nodes: batch, from: 0, to: 0 } }, 1)).length;
+/** Splits `items` into as many frames as it takes so that no candidate batch, once turned into an
+ * encoded frame by `frameBytesFor`, exceeds `maxBytes`. Shared by `batchFrames` and
+ * `batchPatches` — both are "keep adding until the next item would tip the encoded frame over the
+ * cap", differing only in what they batch and how they build the candidate frame. */
+function batchBySize<T>(items: T[], maxBytes: number, frameBytesFor: (batch: T[]) => number): T[][] {
+  if (items.length === 0) return [];
 
-  const batches: RenderNode[][] = [];
-  let current: RenderNode[] = [];
+  const batches: T[][] = [];
+  let current: T[] = [];
 
-  for (const node of nodes) {
-    const candidate = [...current, node];
-    if (current.length > 0 && frameBytes(candidate) > maxBytes) {
+  for (const item of items) {
+    const candidate = [...current, item];
+    if (current.length > 0 && frameBytesFor(candidate) > maxBytes) {
       batches.push(current);
-      current = [node];
+      current = [item];
     } else {
       current = candidate;
     }
@@ -99,4 +104,40 @@ export function batchFrames(nodes: RenderNode[], maxBytes: number): RenderNode[]
   if (current.length > 0) batches.push(current);
 
   return batches;
+}
+
+/** Splits `nodes` into as many `rows` frames as it takes so that no single encoded frame exceeds
+ * `maxBytes` (spec §6.2, §14). Every node appears exactly once, in the order given. There is no
+ * "oversized node" branch: D15 (task 9) bounds every node at 64 KiB upstream, so a node larger
+ * than the frame cap cannot occur here — this function only ever needs to decide how many nodes
+ * fit together, never what to do with one that alone exceeds the cap. Measured against
+ * `MEASURE_MAX_SAFE`'s worst-case `from`/`to`/`seq`, never a `0`/`0`/`1` placeholder (see
+ * `MEASURE_MAX_SAFE`'s doc) — the caller still fills in the real window bounds and a real
+ * sequence id when it actually emits each batch as a frame; this only changes what the batching
+ * DECISION is measured against, not what gets encoded. */
+export function batchFrames(nodes: RenderNode[], maxBytes: number): RenderNode[][] {
+  const encoder = new TextEncoder();
+  const frameBytesFor = (batch: RenderNode[]): number =>
+    encoder.encode(
+      encodeFrame(
+        { event: 'rows', data: { nodes: batch, from: MEASURE_MAX_SAFE, to: MEASURE_MAX_SAFE } },
+        MEASURE_MAX_SAFE,
+      ),
+    ).length;
+  return batchBySize(nodes, maxBytes, frameBytesFor);
+}
+
+/** Splits `patches` into as many `patch` frames as it takes so that no single encoded frame
+ * exceeds `maxBytes` (spec §6.2/§6.4, §14). A `patch` frame carries a node array too — an
+ * `{op:"result"}` patch's `node` is a full `RenderNode`, bounded at 64 KiB by D15 exactly like a
+ * `rows` node — so it needs the identical batching guarantee `batchFrames` gives `rows`. Before
+ * this function existed, patch frames were never split at all: 18 sub-64-KiB result patches sent
+ * as one frame encoded to 1,083,232 bytes (the Phase-1 audit's second finding). Every patch
+ * appears exactly once, in the order given. There is no "oversized patch" branch for the same
+ * reason `batchFrames` has none: D15 bounds the one variable-size part (`node`) upstream. */
+export function batchPatches(patches: Patch[], maxBytes: number): Patch[][] {
+  const encoder = new TextEncoder();
+  const frameBytesFor = (batch: Patch[]): number =>
+    encoder.encode(encodeFrame({ event: 'patch', data: { patches: batch } }, MEASURE_MAX_SAFE)).length;
+  return batchBySize(patches, maxBytes, frameBytesFor);
 }
