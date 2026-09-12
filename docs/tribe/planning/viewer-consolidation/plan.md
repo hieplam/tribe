@@ -1021,7 +1021,7 @@ this machine) and compare the tree to the `.meta.json` files by hand. Verify no 
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Build the index from already-read JSON per spec §9:
+- [x] **Step 1: Write the failing test.** Build the index from already-read JSON per spec §9:
       a well-formed state file indexes every card with a session id; a card with a null session id
       is skipped; a session id failing the id charset is dropped and counted; a malformed state
       file contributes nothing and does not throw; `runnerAlive` is true only when `endedAt` is
@@ -1047,17 +1047,17 @@ Model: **Sonnet**.
       name — so the adapter performs the reads the selection names and chooses nothing.
 
       Expected: module missing.
-- [ ] **Step 2: Implement.** The module takes already-read JSON values and a
+- [x] **Step 2: Implement.** The module takes already-read JSON values and a
       `processAlive: (pid: number) => boolean` function — injected, never constructed
       (`pure-core.md`), plus `selectCampaigns`. `statePath` from `run.json` is never read; there is
       no code path that could.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/badge.test.ts
       ```
       Expected: all pass, including the traversal case.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): this module closes B3. Verify by reading it that no value originating in
 a JSON file is ever concatenated into a path, and run the traversal case yourself. Also confirm the
