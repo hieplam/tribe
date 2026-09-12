@@ -103,6 +103,8 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
   emit nodes; (5) silent by design (empty thinking, and nothing else unless listed). 'Total and
   disjoint' means: the coverage test classifies every fixture row by this precedence and asserts the
   outcome; bucket 5's exact set excludes anything caught earlier."
+  (Spec §7.1 letters the buckets **A–E** so they cannot be read as rung numbers; the ruling's
+  "bucket 5" is **bucket E**.)
 - **D26** (**replaces D24**) — "One row cap, 8 MiB, for both readers. Rows are `\n`-delimited. The
   backward snapshot read finds row boundaries by newline search, never by fixed slices: given
   `anchor` (start of the first held row), the previous row ends at `anchor-1`; its start is one byte
@@ -132,15 +134,17 @@ Paths are relative to the repo root. The viewer package is `plugins/tribe/script
 
 - **D29** — "Spec audits on an Opus subagent with the same skinner brief; blind reads on a Sonnet
   subagent with the same blind-reader brief." (The roles are unchanged; only the models are.)
-- **D30** — "A file whose last byte is not `\n`: the bytes after the last newline are the tail
-  carry, never a row. The snapshot window ends at that newline: `to` = the offset after it. The
-  forward tail is seeded with `ackOffset := to`, `carry := bytes [to, eof)`, and `offset := eof` —
-  so §6.1's invariant `offset == ackOffset + carry.length` holds from the first tick and the next
-  read starts at `eof`."
+- **D30** — "Snapshot of a file not ending in '\n': trailing bytes after the last newline are the
+  tail carry, never a row; `to` = after the last newline; forward tail seeded with ackOffset := to,
+  carry := [to, eof), offset := eof (invariant offset == ackOffset + carry.length holds from tick
+  one)."
 - **D31** — "`core/window.ts` exports `findWindow(readBack: (end, len) => Uint8Array, eof, limit)`;
   the adapter supplies only `readBack`; `serve.ts` composes. Unit test with an in-memory `readBack`
   over the fixture bytes; the HTTP test stays as the integration proof. One implementation for both
   entry points."
+
+(**D11 is reserved for the owner's spec approval** — the numbering below skips it deliberately, not
+by oversight.)
 
 **There is no `Last-Event-ID` handling anywhere in this plan.** If a task brief or a test name
 mentions resuming by byte offset, it predates D12 and is wrong.
@@ -297,7 +301,7 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       | **`<session-4>`: 2,400 rows / 2,600 candidate blocks** (this task) **/ ≥2,300 RENDERED nodes** (task 9, D22) | `<session-4>.jsonl` | tasks 9, 18, 24, 31 |
       | **a four-block row positioned to straddle the 500-node boundary** | `<session-4>.jsonl` | task 18 (D20) |
       | **a 2 MiB single-line row in the MIDDLE of `<session-4>`** — UNDER the 8 MiB cap, so both readers must PARSE it | `<session-4>.jsonl` | tasks 5, 18 (D26) |
-      | **a row of EXACTLY `ROW_CAP` bytes in `<session-4>`** — a VALID row; oversized is `length > ROW_CAP`, strictly | `<session-4>.jsonl` | tasks 5, 18 (S4) |
+      | **a row of EXACTLY `ROW_CAP` bytes in `<session-4>`** — a VALID row; oversized is `length > ROW_CAP`, strictly | `<session-4>.jsonl` | tasks 5, 18 |
       | **a 9 MiB single-line row in the MIDDLE of `<session-4>`** — OVER the cap, so both readers must emit one `raw oversized` node | `<session-4>.jsonl` | tasks 5, 18 (D26) |
       | **a MIXED row: one `user` row carrying a `tool_result` AND a `text` block**, whose `tool_use` is **earlier in the same window** (so it pairs rather than orphaning, and the `text` block is what a per-row rule drops) | `<session-1>.jsonl` | D28's per-block ladder — tasks 8, 9, 30 |
       | **`<session-live>.jsonl`** — the session E2's controlled writer appends to | `<proj-A>/` | task 31; excluded from E2's digest |
@@ -341,7 +345,9 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       three cannot support tasks 4, 15 and 30, which all assert behaviour against them.
 
       Assert the **mixed row** specifically: one `user` row in `<session-1>` whose
-      `message.content` array contains **both** a `tool_result` and a `text` block — the shape at
+      `message.content` array contains **both** a `tool_result` and a `text` block, **and whose
+      `tool_use` is earlier in the same window** — so the `tool_result` pairs rather than orphaning,
+      which is what makes the surviving `text` block the thing under test. The shape is
       `agent-a09522dcffd66dd8a.jsonl:33`, measured at 5 rows in 5 files across the corpus. Without
       it in the fixture, tasks 8 and 9 classify "every row of the fixture" and a purely per-row
       implementation passes green while dropping the `text` block — B2's failure again.
@@ -598,7 +604,7 @@ Model: **Sonnet**.
          degrade to the truncation trigger alone, never a false reset);
       4. a carry crossing **`ROW_CAP` = 8 MiB — the SAME constant §6.3's backward reader uses
          (D26), and there is no second cap. The test is `> ROW_CAP`, strictly: a row of EXACTLY
-         `ROW_CAP` bytes is VALID and must parse (S4)** — enters the
+         `ROW_CAP` bytes is VALID and must parse** — enters the
          **discard state machine** of spec §6.1, which is a flag and not a sentence: set
          `skipping = true`, remember the oversized row's start offset, drop bytes until the next
          `0x0A`, emit **exactly one** `raw` node anchored at `{at: rowStart, i: 0}` with
@@ -719,11 +725,11 @@ Model: **Opus.** Same reason as task 7; this half is where the open-world rule l
         1. unparsable, or longer than ROW_CAP     -> `unreadable` / `raw oversized` node
         2. a title-source or otherwise folded row -> folded, no node of its own
         -- if `user`/`assistant`, descend to BLOCK level, then resume at rung 5 --
-        -- (there is no row-level rung 3: pairing is a BLOCK outcome, D28) --
+        -- (no row-level rung 3: pairing is BLOCK rung 3, moved there by D28) --
         4. a NON-message row that emits a node    -> that node: attachment, system (per subtype),
                                                      mode, queue-operation, pr-link, chip, raw
         5. silent by design                       -> reachable ONLY by a message row whose every
-                                                     block came out silent
+                                                     block came out silent (spec §7.1 bucket E)
 
       BLOCK level — inside a `user`/`assistant` row, for EACH block, exactly one:
         - `tool_result`                           -> PAIRABLE
@@ -1383,8 +1389,8 @@ Model: **Sonnet**.
 
       **Named tests**, against the rows task 1 plants in `<session-4>`: the **2 MiB** row is under
       the cap, so the snapshot parses it and the window across it is correct; a row of **exactly
-      `ROW_CAP`** is still valid and parses (S4 — the backward search grows one byte *past* the cap
-      before declaring oversized, or it cannot tell 8 MiB from 8 MiB + 1); the **9 MiB** row is over
+      `ROW_CAP`** is still valid and parses — the backward search grows one byte *past* the cap before
+      declaring oversized, or it cannot tell 8 MiB from 8 MiB + 1; the **9 MiB** row is over
       it, so exactly one `raw oversized` node appears, anchored at the row's true start, with the
       window on either side intact. In every case the anchor lands on a real row start.
 
@@ -2453,6 +2459,22 @@ Model: **Sonnet**.
       code fence, which silently swallowed four whole sections into a code block and reduced three
       Mermaid diagrams to one. Nothing else in the gate set can see that — `tsc`, `bun test` and
       `c3x` are all blind to Markdown — and a blind reader lost half the document to it.
+
+      **One more check, and it is a one-liner:** every id in spec §0's glossary must appear **at
+      least once outside the glossary table** — a glossary row for an id the document never cites is
+      either a deleted argument or a row nobody needs, and both are defects a reader hits before a
+      test does:
+
+      ```sh
+      for id in $(sed -n 's/^| \(B[0-9]*\|L[0-9]*\|F[0-9]*\) |.*/\1/p' \
+                  docs/tribe/planning/viewer-consolidation/spec.md); do
+        n=$(grep -c "\b$id\b" docs/tribe/planning/viewer-consolidation/spec.md)
+        [ "$n" -ge 2 ] || echo "UNCITED GLOSSARY ID: $id"
+      done
+      ```
+
+      Expected: no output. (Five ids — B13, F44, F51, F54, F56 — were uncited at revision 14 and
+      each had its citing sentence restored; this check is what stops that recurring.)
 
       Note the viewer's `bun test` now includes the DOM suites of task 30 (they are **not** gated
       behind an environment variable — only the two Haiku suites are), so a missing browser fails

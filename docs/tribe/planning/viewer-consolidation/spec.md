@@ -38,10 +38,11 @@ therefore always means a current-code fix, never a future card.
 | F54 | shell metacharacters quoted in `commands.md` | §16 |
 | F56 | offset advances by bytes consumed | §6.1 |
 
-**Review-finding ids** (`N1`, `S4`, `R3`, …) appear only in `references/claude-audit-round*.md` and
-in the planning report, never in this document's own argument: a rule that needs a review ticket to
-justify it is a rule this page has failed to state. Where a finding changed the design, the change
-is stated here on its own terms.
+**Audit-finding ids** (`S<n>`, `N<n>`, `R<n>` from `references/claude-audit-round*.md`) never appear
+in this document's own argument: a rule that needs a review ticket to justify it is a rule this page
+has failed to state. Where a finding changed the design, the change is argued here on its own terms.
+**§17's `R1`–`R7` are risk ids — a different namespace**, defined in that section and unrelated to
+any audit round.
 
 This document answers **How**. It does not reopen What or Why: the scope fence in the card is
 settled law, and every ruling D1–D9 below is quoted, never paraphrased.
@@ -135,9 +136,10 @@ document does not reopen them.
   transcript."
 - **D1** — "Stack: React + Vite client with a build step (Kanna-style)."
 - **D2** — "Liveness of a session = file growth only (mtime within N min or size grew)."
-- **D3** — "Process: spec is an artifact co-authored over several sessions; once the owner approves
-  it, the Shaman drives the whole chain (planning warchief → build → Sol audits → merge) without
-  further approval stops."
+- **D3** (its **model names are superseded by D29**; the process it describes stands) — "Process:
+  spec is an artifact co-authored over several sessions; once the owner approves it, the Shaman
+  drives the whole chain (planning warchief → build → Sol audits → merge) without further approval
+  stops."
 - **D4** (**superseded by D29** for the two review roles; its hunter clause stands) — "Audit/review
   lenses run on GPT-5.6 Sol via Codex (`codex exec -m gpt-5.6-sol`); blind-reader page reviews on
   GPT-5.6 Terra (`codex exec -m gpt-5.6-terra --sandbox read-only`); Claude Sonnet hunters
@@ -148,7 +150,8 @@ document does not reopen them.
   badge on sessions, sourced from campaign-state.json (session id → card) and run.json (runner
   alive); status page and /live route deleted; viewer never reads the runner log."
 - **Card, scope fence** — "No design tokens invented by the implementer: the client consumes the
-  owner's design system (P1). Until P1 is delivered, the spec names tokens; the build does not
+  owner's design system (**P1** — the owner's design-system precondition, **met by sea salt**,
+  STATE.md D17). Until P1 is delivered, the spec names tokens; the build does not
   start."
 - **`pure-core.md`** — "core logic never constructs or reaches out for its dependencies; it
   receives them."
@@ -157,8 +160,11 @@ document does not reopen them.
   visible 'show N older projects' link (URL `?all=1`) reveals the rest. Stateless default, not a
   preference, so D7 holds. Sessions inside a project are never hidden."
 
-**Nineteen further rulings** were issued across review rounds 2–10, and they supersede parts of the
-original transport, fixture and naming design. They are grouped below by what they govern — a flat
+(**D11 is reserved for the owner's spec approval** — the numbering below skips it deliberately, not
+by oversight.)
+
+**Nineteen further rulings** — eighteen issued across review rounds 2–10, plus **D9 from the
+owner** — supersede parts of the original transport, fixture and naming design. They are grouped below by what they govern — a flat
 list of nineteen is not readable, and a reader looking for "how big can a row be" should not have to
 scan every one. Each is quoted verbatim; none is paraphrased.
 
@@ -245,10 +251,10 @@ How a node is addressed, and how a row becomes nodes.
   has two payloads."*
 - **D23 — row classification is by PRECEDENCE, exactly one outcome per row**, in this order:
   *"(1) unparsable → `unreadable`/`oversized` raw node; (2) title-source and other folded rows →
-  folded (no node); (3) `tool_result` whose call is in pairing state → Patch; (4) rows that emit
-  nodes; (5) silent by design (empty thinking, and nothing else unless listed). 'Total and disjoint'
+  folded (no node); (3) `tool_result` whose call is in pairing state → Patch **[block rung 3 —
+  moved to block level by D28]**; (4) rows that emit nodes; (5) silent by design (empty thinking, and nothing else unless listed). 'Total and disjoint'
   means: the coverage test classifies every fixture row by this precedence and asserts the outcome;
-  bucket 5's exact set excludes anything caught earlier."*
+  bucket E's exact set excludes anything caught earlier."*
 - **D28 — classification is per BLOCK for `user`/`assistant` rows and per ROW for every other row
   type.** *"Row-level rungs (1 unparsable/oversized, 2 folded, 5 silent) apply to the row; within a
   message row, each content block gets exactly one outcome: `tool_result` → pairable (Patch if its
@@ -278,11 +284,10 @@ Where a proof runs, what ships, and who reviews.
   same blind-reader brief."* D4 named GPT-5.6 Sol and Terra for the same two roles; where the two
   rulings disagree, D29 governs. The **roles** are unchanged — only the models are — which is why
   §1's opener names roles and puts the model in a parenthetical.
-- **D30 — a snapshot of a file that does not end in `\n`.** *"The bytes after the last newline are
-  the tail carry, never a row. The snapshot window ends at that newline: `to` = the offset after it.
-  The forward tail is seeded with `ackOffset := to`, `carry := bytes [to, eof)`, and
-  `offset := eof` — so §6.1's invariant `offset == ackOffset + carry.length` holds from the first
-  tick and the next read starts at `eof`."*
+- **D30 — a snapshot of a file that does not end in `\n`.** *"Snapshot of a file not ending in
+  '\n': trailing bytes after the last newline are the tail carry, never a row; `to` = after the last
+  newline; forward tail seeded with ackOffset := to, carry := [to, eof), offset := eof (invariant
+  offset == ackOffset + carry.length holds from tick one)."*
 - **D31 — the backward reader lives in core.** *"`core/window.ts` exports
   `findWindow(readBack: (end, len) => Uint8Array, eof, limit)`; the adapter supplies only `readBack`;
   `serve.ts` composes. Unit-tested with an in-memory `readBack` over the fixture bytes; the HTTP
@@ -944,8 +949,13 @@ arithmetic:
 - The transition scans the raw bytes for the last `0x0A` **itself**. Everything up to and including
   that byte is complete; everything after it is the carry.
 - The carry is **raw bytes**, never a decoded string.
+- The offset advances by **the bytes actually consumed** — never `fileSize` (the file may have grown
+  since the read) and never `chunk.length` (a character count, not a byte count). That is **F56**, a
+  fix already in the current code: either substitution marks unread bytes consumed and loses them
+  permanently.
 - Only complete lines are decoded, and each is decoded whole, so a multi-byte character can never
-  straddle a decode boundary.
+  straddle a decode boundary — the defect **F44** fixed in the current code by making the adapter
+  return raw bytes, and the reason D13 keeps decoding out of the adapter entirely.
 - **The adapter does no decoding at all.** It performs `stat` and "read bytes `[a, b)`" and hands
   both to core (`pure-core.md`).
 
@@ -983,8 +993,8 @@ Two offsets remain in the state, and their meanings are now trivial:
 | `offset` | every byte read so far, including the raw carry |
 | `ackOffset` | one byte past the last `0x0A` seen — always a real line boundary in the file |
 
-`ackOffset` is **no longer a wire value** (D12 removed byte-offset resume). It survives for two
-reasons: it is what makes "we have processed exactly these complete rows" checkable in a test, and
+**`ackOffset` is no longer a wire value** — D12 removed byte-offset resume, so nothing on the wire
+carries it. It survives for two internal reasons: it is what makes "we have processed exactly these complete rows" checkable in a test, and
 it is where a re-read starts after a reset.
 
 **How the next tick combines the carry with new bytes — the formula, because a reader cannot derive
@@ -1422,7 +1432,9 @@ card arrives already complete. The named test is exactly that: *disconnect betwe
 
 ### 6.5 The eviction contract — every per-stream structure has a number
 
-Every per-stream structure has a stated maximum. "Bounded because our corpus is small today" is not
+This section is **B13**'s fix: in the pre-consolidation viewer every per-connection map grew for the
+life of the stream, with no bound stated anywhere. Every per-stream structure here has a stated
+maximum. "Bounded because our corpus is small today" is not
 a bound — the oracle is open-world.
 
 | Structure | Bound | What happens at the bound |
@@ -1480,16 +1492,20 @@ later one, which is what lets these counts be compared with each other.
 | `fork-context-ref` | 0 | 2 | `raw`, collapsed | |
 | **anything else** | — | — | `raw`, collapsed | the open-world case; this is the rule, not the exception |
 
-**The rule that makes this maintainable:** five buckets, and nothing outside them.
-1. **Message rows** (`assistant`, `user`) render per content block.
-2. **Named metadata rows** render as a one-line `chip` or a `divider`.
-3. **`attachment` rows** render as an `attachment` node, grouped by the client into one collapsed
+**The rule that makes this maintainable: five buckets, lettered A–E, and nothing outside them.**
+They are lettered on purpose. The precedence ladder below numbers its *rungs* 1–5, and an earlier
+draft numbered the buckets 1–5 too — two different five-item lists, same numbers, different meaning.
+A bucket is **what a row renders as**; a rung is **the order in which the classifier decides**. The
+mapping is stated after the ladder.
+**A. Message rows** (`assistant`, `user`) render per content block.
+**B. Named metadata rows** render as a one-line `chip` or a `divider`.
+**C. `attachment` rows** render as an `attachment` node, grouped by the client into one collapsed
    strip (§7.3). They are their own bucket, not a sub-case of the others: there are 14,032 of them,
    more than every metadata row type combined, and collapsing them into chips would bury the
    conversation while rendering them as raw cards would bury it differently.
-4. **Everything else** renders as a collapsed `raw` card carrying `rowType` and the row's JSON
+**D. Everything else** renders as a collapsed `raw` card carrying `rowType` and the row's JSON
    (elided past 64 KiB per D15, expandable via `/api/block`).
-5. **Silent by design** — the last rung of D23's precedence ladder below, and therefore a *short*
+**E. Silent by design** — reached only at the ladder's last rung, and therefore a *short*
    list: it holds only what rungs 1–4 did not already claim.
 
    | Input | Why no node |
@@ -1503,8 +1519,8 @@ later one, which is what lets these counts be compared with each other.
    is what made the old "disjoint" claim unprovable. Any row that produces no node and is not in this
    table is a bug, and the coverage test is what says so.
 
-A new Claude Code release that invents a row type therefore falls into bucket 4 and renders as a raw
-card on day one, and is never silently dropped.
+A new Claude Code release that invents a row type therefore falls into **bucket D** and renders as
+a raw card on day one, and is never silently dropped.
 
 **The mechanical guarantee: a PRECEDENCE LADDER (D23), applied at the right granularity (D28).**
 
@@ -1548,6 +1564,11 @@ BLOCK level — inside a `user`/`assistant` row, for EACH content block, exactly
   - `thinking` whose text is ""  -> silent
 ```
 
+**Buckets to rungs, once.** Rung 1 produces a bucket-D node (`raw oversized`) or an `unreadable`
+one; rung 2 is a bucket-B row consumed as a title; the **block rung 3** and the block-level outcomes
+under it are how a bucket-A row becomes nodes; rung 4 is buckets B, C and D; rung 5 is bucket E.
+Buckets describe the output, rungs describe the decision order, and neither numbering is the other.
+
 **Rung 4 is not optional scaffolding** — it is where the great majority of rows land. 14,032
 `attachment` rows, 1,062 `system` rows, 1,877 `mode`, 1,996 `queue-operation`, 710 `pr-link` and
 every unknown type reach a node without ever being a message row or a fold. An earlier draft of this
@@ -1555,7 +1576,7 @@ ladder omitted it, which left those rows falling through to rung 5 and made rung
 "silent unless something above claimed it" is not a rule when nothing above can claim them.
 
 With rung 4 present, rung 5 is reachable **only** by a message row whose blocks all came out silent
-— which is why its set is two entries (§7.1 bucket 5) and not four: a paired `tool_result` was
+— which is why its set is two entries (§7.1 bucket E) and not four: a paired `tool_result` was
 claimed at the **block rung (D28)**, a title-source row at rung 2, and every non-message row at
 rung 4.
 
@@ -1815,7 +1836,9 @@ the decision auditable later and what would catch a future theme change that upd
 and not the other — a spec sentence alone can go stale, an assertion cannot.
 
 **There is no alias layer, and the implementer invents nothing.** The token names below are copied
-from `design/matcha/tokens.css` and are identical in all three candidates. Every component style
+from **`design/sea-salt/tokens.css`** — the chosen theme, and therefore the source of truth for the
+names as well as the values. They are identical across all three candidates, which is why the table
+was correct before the choice landed and needs no change now. Every component style
 uses these names and only these names:
 
 | Group | Tokens |
@@ -2778,7 +2801,9 @@ it. So: collect the rendered `SessionRow` ids from the DOM and assert the set is
 to the set of session ids `fixtures/build.ts` wrote, with these two passes:
 
 1. Default view — the set equals every session in the projects inside D10's 30-day window
-   (`<proj-A>`'s two sessions and `<proj-B>`'s one), and `<proj-C>`'s session is **absent**.
+   (`<proj-A>`'s **four** sessions and `<proj-B>`'s one), and `<proj-C>`'s session is **absent**.
+   The gloss is a reading aid; **set equality against what the builder wrote is the assertion**, so
+   it stays correct even if a later task adds a fixture session.
 2. After clicking **"show 1 older projects"** (or loading `?all=1`) — the set equals **every**
    session the fixture built, `<proj-C>`'s included.
 
@@ -2854,7 +2879,10 @@ the test owns the writer:
 3. The page is polled for `[data-row-id="<that id>"]`; the sample is
    `arrivalMs - writeCompletedMs`, both from clocks the test owns.
 4. 40 samples, appended at irregular intervals (so a tick boundary is sometimes hit and sometimes
-   missed). **Worst sample ≤ 1000 ms.** `latency.json` records every sample; nothing is clamped or
+   missed), each measured **per row, never per frame** — **F51**, a lesson already paid for in the
+   current harness: the poller batches every line written since its last tick into one frame, so a
+   per-frame measurement silently discards every sample in a batch but the last. **Worst sample
+   ≤ 1000 ms.** `latency.json` records every sample; nothing is clamped or
    discarded, and a missed budget is reported as measured, never widened.
 
 Then, in the same run:
@@ -3017,6 +3045,11 @@ Plus `test-install-viewer-build.sh` (the hook builds; the hook survives a missin
 `bun run check` in both packages.
 
 ### 16.6 Hosting
+
+Every command a reader would need to reproduce a run is recorded in `commands.md`, **quoted against
+the full shell-metacharacter class** — **F54**, a fix already in the current harness: a URL
+containing a bare `&`, pasted into a real shell, backgrounds the command mid-URL and silently drops
+everything after it.
 
 Screenshots and JSON artifacts are committed under
 `docs/tribe/planning/viewer-consolidation/evidence/` and referenced from the PR body by same-origin
