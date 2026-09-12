@@ -729,21 +729,21 @@ finding. Confirm by reading the signature that no decoded string enters this mod
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Carry over the **entire** existing `markdown.test.ts`
+- [x] **Step 1: Write the failing test.** Carry over the **entire** existing `markdown.test.ts`
       corpus, rewriting each assertion from an HTML string to the `MdToken[]` tree of spec §4. Add
       one case per injection shape the old tests covered (script tags, `javascript:` hrefs, unclosed
       fences, angle brackets in code) and assert the token tree contains the raw text as `text`/
       `code` token values with no markup. Expected on first run: `Cannot find module './markdown.ts'`.
-- [ ] **Step 2: Implement** the tokenizer. Same segmentation the current file uses (fences first,
+- [x] **Step 2: Implement** the tokenizer. Same segmentation the current file uses (fences first,
       then inline), emitting tokens instead of strings. Keep the href gate (`http:`, `https:`,
       `mailto:` only). No HTML string is produced anywhere in this module.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/markdown.test.ts
       ```
       Expected: every carried-over case passes with token assertions.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): grep the new module for any string containing `<` followed by a letter.
 The escape-then-markup property is replaced by a structural one — this module must be incapable of
