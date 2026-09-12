@@ -4,7 +4,7 @@
 // symlinks. `realpath` — the ONLY step that touches disk — is the adapter's act (task 15); this
 // module judges only the strings it is handed.
 
-import { join, resolve, sep } from 'node:path';
+import { resolve, sep } from 'node:path';
 
 const MAX_SANITIZED_LENGTH = 200;
 
@@ -38,27 +38,41 @@ function hashSuffix(name: string): string {
  * Ported verbatim from Kanna's src/server/claude-pty/jsonl-path.adapter.ts:26-41
  * (sanitizePath + encodeCwd), minus the realpath call — that filesystem read
  * belongs to the Task 12 adapter. This module is pure string math only (D1).
+ *
+ * The hash enters through a caller-supplied SEAM (`pure-core.md`): the >200-char suffix is
+ * decided by the injected `hash`, never by ambient global state, so the core is deterministic
+ * from its inputs. The default (`hashSuffix`) preserves the observable output existing callers
+ * rely on — it is the same function the body used to call directly.
  */
-export function sanitizeProjectDirName(absPath: string): string {
+export function sanitizeProjectDirName(absPath: string, hash: (name: string) => string = hashSuffix): string {
   const normalized = absPath.normalize('NFC');
   const sanitized = normalized.replace(/[^a-zA-Z0-9]/g, '-');
   if (sanitized.length <= MAX_SANITIZED_LENGTH) return sanitized;
-  return `${sanitized.slice(0, MAX_SANITIZED_LENGTH)}-${hashSuffix(normalized)}`;
+  return `${sanitized.slice(0, MAX_SANITIZED_LENGTH)}-${hash(normalized)}`;
 }
 
 // --- Fixed on-disk layout (spec §5.1 diagram, §7.6): projectDir/session.jsonl,
 // projectDir/session/subagents/agent-*.jsonl(+.meta.json), projectDir/session/tool-results/*. ---
 
-export function transcriptPathOf(projectDir: string, sessionId: string): string {
-  return join(projectDir, `${sessionId}.jsonl`);
+// `sessionId` is untrusted (it is a path segment from the client, spec §12.2). Every one of these
+// fixed-layout joins routes it through `containedJoin`, so an unsafe segment — `..`, a slash, a NUL
+// byte, an empty string, anything that escapes `projectDir` — is REFUSED with `null` rather than
+// silently building an escaping path (Sol probe: raw `join` turned `../../../../etc/passwd` into
+// `/etc/passwd.jsonl`). `null` = refused; the caller turns it into a 400/404. Never throws.
+
+export function transcriptPathOf(projectDir: string, sessionId: string): string | null {
+  // Validate + contain the segment first, then append the fixed `.jsonl` suffix. The suffix cannot
+  // re-open an escape: `sessionId` has already been proven slash-free and contained.
+  const contained = containedJoin(projectDir, sessionId);
+  return contained === null ? null : `${contained}.jsonl`;
 }
 
-export function subagentsDirOf(projectDir: string, sessionId: string): string {
-  return join(projectDir, sessionId, 'subagents');
+export function subagentsDirOf(projectDir: string, sessionId: string): string | null {
+  return containedJoin(projectDir, sessionId, 'subagents');
 }
 
-export function toolResultsDirOf(projectDir: string, sessionId: string): string {
-  return join(projectDir, sessionId, 'tool-results');
+export function toolResultsDirOf(projectDir: string, sessionId: string): string | null {
+  return containedJoin(projectDir, sessionId, 'tool-results');
 }
 
 function isSafeSegment(segment: string): boolean {

@@ -18,6 +18,19 @@ test('a path longer than 200 sanitized chars is truncated and hash-suffixed', ()
   expect(sanitizeProjectDirName(long)).toBe(out);
 });
 
+// The hash enters through a caller-supplied SEAM (pure-core.md): given its inputs the core is
+// deterministic, and the INJECTED hasher — not any ambient global — decides the >200-char suffix.
+test('sanitizeProjectDirName takes the hash through an injected seam — the seam decides the suffix', () => {
+  const long = `/Users/hip/${'a'.repeat(300)}`;
+  const prefix = long.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 200);
+  const out = sanitizeProjectDirName(long, () => 'STUBHASH');
+  expect(out).toBe(`${prefix}-STUBHASH`);
+  // deterministic: same inputs (same seam) → identical output
+  expect(sanitizeProjectDirName(long, () => 'STUBHASH')).toBe(out);
+  // a DIFFERENT injected hasher yields a DIFFERENT suffix — proving the seam, not a global, decides it
+  expect(sanitizeProjectDirName(long, () => 'OTHER')).toBe(`${prefix}-OTHER`);
+});
+
 // --- fixed-layout helpers (spec line ~402, §7.6) ---
 
 test('builds the transcript and subagent locations from a session id', () => {
@@ -29,6 +42,43 @@ test('builds the transcript and subagent locations from a session id', () => {
 test('builds the tool-results spill directory from a session id (spec §7.6, <persisted-output>)', () => {
   const dir = '/home/.claude/projects/-Users-hip-repo-wiki-harness';
   expect(toolResultsDirOf(dir, 'abc-123')).toBe(`${dir}/abc-123/tool-results`);
+});
+
+// --- fixed-layout helpers route the sessionId through `containedJoin` (spec §12.2:
+// "everything path-shaped goes through it"). A hostile sessionId must be REFUSED (`null`) — never
+// an escaping path, never a partial path, never a throw — mirroring `containedJoin`'s contract. ---
+
+const PROJECT_DIR = '/home/.claude/projects/-Users-hip-repo-wiki-harness';
+
+// The exact Sol probe: a raw `join` returned `/etc/passwd.jsonl`, escaping the root. Now refused.
+test('transcriptPathOf refuses a sessionId that escapes the root (the Sol probe)', () => {
+  expect(transcriptPathOf('/safe/project', '../../../../etc/passwd')).toBeNull();
+});
+
+const HOSTILE_SESSION_IDS: Array<[string, string]> = [
+  ['a parent-traversal payload', '../../etc/passwd'],
+  ['a slash-bearing id', 'a/b'],
+  ['exactly ".."', '..'],
+  ['an empty id', ''],
+  ['an id carrying a NUL byte', 'a\x00b'],
+];
+
+for (const [label, sessionId] of HOSTILE_SESSION_IDS) {
+  test(`transcriptPathOf refuses ${label}`, () => {
+    expect(transcriptPathOf(PROJECT_DIR, sessionId)).toBeNull();
+  });
+  test(`subagentsDirOf refuses ${label}`, () => {
+    expect(subagentsDirOf(PROJECT_DIR, sessionId)).toBeNull();
+  });
+  test(`toolResultsDirOf refuses ${label}`, () => {
+    expect(toolResultsDirOf(PROJECT_DIR, sessionId)).toBeNull();
+  });
+}
+
+test('a safe sessionId still yields the correct contained paths from all three helpers', () => {
+  expect(transcriptPathOf(PROJECT_DIR, 'abc-123')).toBe(`${PROJECT_DIR}/abc-123.jsonl`);
+  expect(subagentsDirOf(PROJECT_DIR, 'abc-123')).toBe(`${PROJECT_DIR}/abc-123/subagents`);
+  expect(toolResultsDirOf(PROJECT_DIR, 'abc-123')).toBe(`${PROJECT_DIR}/abc-123/tool-results`);
 });
 
 // --- containedJoin — the LEXICAL stage (spec §12.2). Pure string math: no filesystem access, no
