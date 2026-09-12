@@ -265,13 +265,30 @@ function openSyncFlagViolations(source: string): string[] {
  *     call happens through a binding this scanner cannot follow; refused everywhere;
  *   - a literal `process.kill(...)` call with anything other than exactly two args ending in `0`,
  *     or from any file other than `campaign.adapter.ts`. */
+/** Collapse optional-chaining (`?.`) and non-null-assertion (`!.`, and the spaced `! .`) member
+ * access to a plain `.` — the two ordinary TS spellings that reach a member the same way `.` does
+ * (`Bun?.spawn` ≡ `Bun.spawn`; `h!.writer()` ≡ `h.writer()`). The Bun / Bun.file / handle and
+ * process.kill scans match a literal `.` between a receiver and a member, so without this a routine
+ * `?.`/`!.` would slip the wall (spec §12.6 (7)/D16: the wall is total across access FORMS; these are
+ * the last ordinary-spelling variant, NOT the deep indirection Shaman ruling R7 refutes). Pure, and
+ * applied only to the scanned COPY. It fails in the same safe direction as every rule here: collapsing
+ * an unrelated `?.`/`!.` can only make a scan see a plain member access, i.e. flag more, never less. */
+function normalizeMemberAccess(source: string): string {
+  return source.replace(/\?\./g, '.').replace(/!\s*\./g, '.');
+}
+
 function processKillViolations(label: string, source: string): string[] {
   const bad: string[] = [];
-  if (/\bprocess\s*\[/.test(source)) bad.push('computed process[...] access (callee not a literal)');
-  if (/\bprocess\s*\.\s*kill\b(?!\s*\()/.test(source)) bad.push('process.kill referenced without an immediate call (alias/assignment)');
+  // Optional-chaining (`?.`) and non-null-assertion (`!.`/`! .`) are ordinary TS spellings of the
+  // SAME member access the scans below match (`process?.kill` is `process.kill`): normalize both to a
+  // plain `.` in the scanned copy so this last ordinary variant cannot slip the wall (§12.6 (7)/D16,
+  // totality across access FORMS). This is NOT the deep indirection Shaman ruling R7 refutes.
+  const s = normalizeMemberAccess(source);
+  if (/\bprocess\s*\[/.test(s)) bad.push('computed process[...] access (callee not a literal)');
+  if (/\bprocess\s*\.\s*kill\b(?!\s*\()/.test(s)) bad.push('process.kill referenced without an immediate call (alias/assignment)');
   const re = /\bprocess\s*\.\s*kill\s*\(([^)]*)\)/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(source))) {
+  while ((m = re.exec(s))) {
     const args = m[1].split(',').map((a) => a.trim());
     const isZeroSignal = args.length === 2 && args[1] === '0';
     if (label !== 'adapters/campaign.adapter.ts' || !isZeroSignal) bad.push(m[0]);
@@ -300,7 +317,11 @@ function bunViolations(label: string, source: string): string[] {
   // (e.g. `core/paths.ts:29` describes `Bun.hash/wyhash`) or a string is not flagged. Under the CLOSED
   // allowlist below such a mention would be a false positive on a live, non-doomed file (Phase-1
   // audit bypass 5); a real capability is code, not prose, so stripping first is the correct boundary.
-  const s = stripCommentsAndStrings(source);
+  // Optional-chaining (`?.`) and non-null-assertion (`!.`/`! .`) are then normalized to a plain `.`:
+  // `Bun?.spawn`, `Bun.file(p)?.writer()`, and `h!.writer()` are ordinary TS spellings of the SAME
+  // Bun / Bun.file / handle member access the scans below match (§12.6 (7)/D16, totality across access
+  // FORMS — the last ordinary variant, NOT the deep indirection Shaman ruling R7 refutes).
+  const s = normalizeMemberAccess(stripCommentsAndStrings(source));
   if (/\bBun\s*\[/.test(s)) bad.push('computed Bun[...] access');
   // Closed allowlist (bypass 5): the ONLY permitted Bun members are `serve` (serve.ts only) and
   // `file` (validated by the result-method scan below). EVERY other `Bun.<member>` — `spawn`,
@@ -973,6 +994,48 @@ describe('viewer structural contract', () => {
     test('a Bun.file handle bound to a variable and read (h.text()) stays clean', () => {
       const probe = "const h = Bun.file('/x');\nconst s = await h.text();\nconst b = await h.bytes();\n";
       expect(allowlistViolations('adapters/fs.adapter.ts', probe)).toEqual([]);
+    });
+
+    // -------------------------------------------------------------------------------------------
+    // ORDINARY-SPELLING TOTALITY (§12.6 (7)/D16). Optional-chaining (`?.`) and non-null-assertion
+    // (`!.`/`! .`) are ordinary TS member-access spellings of shapes the Bun / Bun.file / handle and
+    // process.kill scans already match — the LAST ordinary variant, not the deep indirection Shaman
+    // ruling R7 refutes. The scans normalize `?.`/`!.` to a plain `.` in their scanned copy, so these
+    // spellings cannot slip the wall. Each probe below is a REAL violation the wall must flag; the
+    // companion "stays clean" probes prove the normalization did not become a rule that flags reads.
+    test('prove the wall bites: Bun?.spawn (optional-chained Bun capability) is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', 'Bun?.spawn(x);\n')).not.toEqual([]);
+    });
+
+    test('prove the wall bites: an optional-chained write on a Bun.file(...) result (?.writer) is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', "Bun.file('/x')?.writer();\n")).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a non-null-asserted write on a Bun.file(...) result (!.writer) is flagged', () => {
+      expect(allowlistViolations('adapters/probe.ts', "Bun.file('/x')!.writer();\n")).not.toEqual([]);
+    });
+
+    test('prove the wall bites: an optional-chained write on a tracked Bun.file handle (h?.writer) is flagged', () => {
+      const probe = "const h = Bun.file('/x');\nh?.writer();\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: an optional-chained process?.kill(pid, 9) is flagged even in campaign.adapter.ts', () => {
+      expect(allowlistViolations('adapters/campaign.adapter.ts', 'process?.kill(pid, 9);\n')).not.toEqual([]);
+    });
+
+    // Legitimate optional-chained shapes that MUST stay clean under the normalization:
+    test('an optional-chained Bun.file handle READ (h?.text()) stays clean', () => {
+      const probe = "const h = Bun.file('/x');\nconst s = await h?.text();\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).toEqual([]);
+    });
+
+    test('the permitted process.kill(pid, 0) liveness probe stays clean (normalization must not break it)', () => {
+      expect(allowlistViolations('adapters/campaign.adapter.ts', 'process.kill(pid, 0);\n')).toEqual([]);
+    });
+
+    test('the optional-chained signal-0 liveness probe (process?.kill(pid, 0)) stays clean in campaign.adapter.ts', () => {
+      expect(allowlistViolations('adapters/campaign.adapter.ts', 'process?.kill(pid, 0);\n')).toEqual([]);
     });
   });
 });
