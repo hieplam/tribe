@@ -757,22 +757,22 @@ Model: **Opus.** The oracle-bearing task: "nothing on disk is silently dropped" 
 a measured table, and the failure mode is invisible (a green suite over a lossy normalizer is
 exactly today's bug, B1/B2).
 
-- [ ] **Step 1: Write the failing test** `V/core/normalize.test.ts`, one case per row of spec §7.2:
+- [x] **Step 1: Write the failing test** `V/core/normalize.test.ts`, one case per row of spec §7.2:
       `message.content` as a bare string (user and assistant); array `text` blocks on a user row
       (B2 — every runner prompt); assistant `text`; `thinking` non-empty; `thinking` empty (asserts
       **no node**, with the measured 8,411-of-17,873 rationale in a comment); `tool_use`;
       `tool_result` in each of its four measured content shapes plus `is_error`; a base64 `image`
       block on a user row. Assert `RowAnchor` is populated (`uuid`, `i`, `at`, `ts`) on every node
       and that node order equals input order. Expected on first run: module missing.
-- [ ] **Step 2: Implement** the message-row half of `V/core/normalize.ts`. Signature takes already
+- [x] **Step 2: Implement** the message-row half of `V/core/normalize.ts`. Signature takes already
       parsed rows plus their byte offsets and returns `RenderNode[]` — no I/O, no clock.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/normalize.test.ts
       ```
       Expected: every §7.2 case passes; the empty-thinking case asserts an empty node list.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): take 1,000 consecutive rows from a real subagent transcript, run them
 through the normalizer, and account for every input row in the output. Under-rendering is a bug per
