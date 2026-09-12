@@ -223,6 +223,51 @@ describe('pair — D15/D19: a result over 64 KiB elides the ToolResult itself', 
   });
 });
 
+describe('pair — D15/D19: the WHOLE completed tool node is capped, even when NEITHER half alone crosses 64 KiB', () => {
+  const enc = (s: string): number => new TextEncoder().encode(s).length;
+
+  test('a ~40 KiB input paired with a ~40 KiB result — each under the cap alone — is capped as ONE node (was 80,321 B, pairedElided:false)', () => {
+    // Sol's probe: neither the call node (40 KiB input) nor the orphan_result (40 KiB result) trips
+    // its own elision, so pairing combined them into an 80,321-byte `tool` node with `elided:false`.
+    // D19 gives a tool card two payloads but NO size exemption — the COMPLETE node must be ≤ 65,536 B.
+    const input40k = { command: 'x'.repeat(40000) };
+    const result40k = 'y'.repeat(40000);
+    const { patches } = normalizeAndPair([
+      toolUseRow(0, 'toolu_bothmid', 'Bash', input40k),
+      toolResultRow(100, 'toolu_bothmid', result40k),
+    ]);
+    const patch = patches[0]!;
+    if (patch.op !== 'result' || patch.node.k !== 'tool') throw new Error('unreachable');
+    expect(enc(JSON.stringify(patch.node))).toBeLessThanOrEqual(64 * 1024);
+    expect(patch.node.elided).toBe(true);
+    expect(patch.node.expandable).toBe(true);
+  });
+
+  test('a NEAR-cap input paired with a NEAR-cap result stays ≤ 64 KiB (boundary regression)', () => {
+    const nearCap = 63 * 1024;
+    const { patches } = normalizeAndPair([
+      toolUseRow(0, 'toolu_nearcap', 'Bash', { command: 'x'.repeat(nearCap) }),
+      toolResultRow(100, 'toolu_nearcap', 'y'.repeat(nearCap)),
+    ]);
+    const patch = patches[0]!;
+    if (patch.op !== 'result' || patch.node.k !== 'tool') throw new Error('unreachable');
+    expect(enc(JSON.stringify(patch.node))).toBeLessThanOrEqual(64 * 1024);
+    expect(patch.node.elided).toBe(true);
+  });
+
+  test('a small call paired with a small result is NOT elided (the cap bites only at the boundary)', () => {
+    const { patches } = normalizeAndPair([
+      toolUseRow(0, 'toolu_bothsmall', 'Bash', { command: 'ls' }),
+      toolResultRow(100, 'toolu_bothsmall', 'file1\nfile2'),
+    ]);
+    const patch = patches[0]!;
+    if (patch.op !== 'result' || patch.node.k !== 'tool') throw new Error('unreachable');
+    expect(patch.node.elided).toBe(false);
+    expect(patch.node.input).toEqual({ command: 'ls' }); // small input is preserved whole.
+    expect(enc(JSON.stringify(patch.node))).toBeLessThanOrEqual(64 * 1024);
+  });
+});
+
 describe('pair — D19: two anchors, call and resultAnchor', () => {
   test('a paired node’s resultAnchor.at is greater than its call.at (the result is a later row)', () => {
     const { patches } = normalizeAndPair([

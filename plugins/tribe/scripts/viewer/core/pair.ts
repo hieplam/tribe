@@ -27,6 +27,7 @@
  * step 2).
  */
 import type { Anchor, Patch, RenderNode } from './model.ts';
+import { NODE_CAP, utf8Bytes } from './normalize.ts';
 
 /** spec §6.5 — the pending tool map's bound. Past it, the OLDEST entry is evicted; its eventual
  * result renders as an `orphan_result` rather than growing the map without limit. */
@@ -163,7 +164,7 @@ function buildCompletedTool(pending: PendingCall, orphan: Extract<RenderNode, { 
   const resultElided = orphan.result.r === 'text' && orphan.result.elided;
   const isError = orphan.result.r === 'text' && orphan.result.isError;
   const elided = pending.elided || resultElided;
-  return {
+  const node: Extract<RenderNode, { k: 'tool' }> = {
     id: pending.rowAnchorId,
     at: pending.at,
     i: pending.i,
@@ -181,4 +182,36 @@ function buildCompletedTool(pending: PendingCall, orphan: Extract<RenderNode, { 
     call: pending.call,
     resultAnchor: orphan.resultAnchor,
   };
+  return fitCompletedTool(node);
+}
+
+/**
+ * D15/D19: a tool card has two payloads but NO size exemption. `normalize()` caps the call's `input`
+ * and the result's body EACH as a standalone node, so neither may cross 64 KiB alone — yet a call
+ * and a result that are each just under the cap combine here into one node WELL over it (Sol: a
+ * ~40 KiB input + ~40 KiB result → an 80,321-byte node marked `elided:false`). The whole COMPLETED
+ * node is therefore measured against the same `NODE_CAP` the normalizer uses, and shrunk in the D19
+ * order until it fits: first drop the call's `input` entirely (it is fetchable at `call`/`/api/block`,
+ * exactly as `elideInput` drops an oversized input), then, only if the result body alone still
+ * overflows, truncate that body to a token prefix (fetchable at `resultAnchor`). Both payloads keep
+ * their own address, so nothing is lost — only relocated behind an expand.
+ */
+function fitCompletedTool(node: Extract<RenderNode, { k: 'tool' }>): RenderNode {
+  if (utf8Bytes(JSON.stringify(node)) <= NODE_CAP) return node;
+
+  // 1. Drop the call's input payload entirely (D19: expandable via `call`), mirroring `elideInput`.
+  let fitted: Extract<RenderNode, { k: 'tool' }> = { ...node, input: null, elided: true, expandable: true };
+  if (utf8Bytes(JSON.stringify(fitted)) <= NODE_CAP) return fitted;
+
+  // 2. The result body alone still overflows: shrink its token prefix until the WHOLE node fits.
+  // (Non-text results — spill/images/refs — are bounded counts/basenames and never reach here.)
+  if (fitted.result !== null && fitted.result.r === 'text') {
+    const textResult = fitted.result; // narrowed to the `text` variant; kept as the reduction base.
+    let body = textResult.body;
+    while (body.length > 0 && utf8Bytes(JSON.stringify(fitted)) > NODE_CAP) {
+      body = body.slice(0, Math.floor(body.length / 2));
+      fitted = { ...fitted, result: { ...textResult, body, elided: true } };
+    }
+  }
+  return fitted;
 }

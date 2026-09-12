@@ -74,12 +74,20 @@ function expectedFor(rec: TranscriptRecord, seenCalls: Set<string>): { kinds: st
     // Classification is TOTAL (D23/D28): a message row whose `message`/`content` is malformed
     // (absent, or neither a string nor an array) is NOT one of bucket E's silent cases — it renders
     // a visible `raw` fallback (bucket D). Silence is reserved STRICTLY for a `thinking` block whose
-    // text is "" (asserted at the block rung below). An empty ARRAY is well-formed and yields no
-    // node — the loop runs zero times — which is distinct from the malformed shape here.
+    // text is "" (asserted at the block rung below).
     if (!Array.isArray(content)) return { kinds: ['raw'], note: 'malformed message (absent/non-array content) -> raw fallback (bucket D)' };
+    // An EMPTY array is a row with ZERO blocks: it is NOT in spec §7.1's silent set (bucket E holds
+    // only an empty `thinking` and a row whose ONLY block is such a thinking), so "any row that
+    // produces no node and is not in this table is a bug" — it renders a visible raw fallback.
+    if (content.length === 0) return { kinds: ['raw'], note: 'empty content array (0 blocks) -> raw fallback (bucket D)' };
     const kinds: string[] = [];
     for (const block of content) {
-      if (block === null || typeof block !== 'object') continue;
+      if (block === null || typeof block !== 'object' || Array.isArray(block)) {
+        // A NON-object block (scalar, null, nested array) is NOT the silent case (only thinking===""
+        // is): classification is total, so it renders a visible raw fallback (bucket D), never a drop.
+        kinds.push('raw');
+        continue;
+      }
       const b = block as Record<string, unknown>;
       switch (b.type) {
         case 'text':
@@ -249,7 +257,9 @@ describe('normalize coverage — every fixture row/block classified by the D23/D
       { type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', signature: 's' }] } }, // thinking MISSING
       { type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 7 }] } }, // thinking NON-string
       { type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: '' }] } }, // the ONE silent case
-      { type: 'user', message: { role: 'user', content: [] } }, // well-formed empty array — legitimately silent
+      { type: 'user', message: { role: 'user', content: [] } }, // empty array (0 blocks) -> raw fallback, NOT silent
+      { type: 'assistant', message: { role: 'assistant', content: [42] } }, // scalar block -> raw fallback, NOT silent
+      { type: 'user', message: { role: 'user', content: [null] } }, // null block -> raw fallback, NOT silent
     ];
 
     rows.forEach((row, idx) => {
@@ -259,10 +269,10 @@ describe('normalize coverage — every fixture row/block classified by the D23/D
       expect({ shape: idx, kinds: actual }).toEqual({ shape: idx, kinds: expected.kinds });
     });
 
-    // Belt-and-braces: the ONLY silent shape among the above is the exactly-"" thinking (and the
-    // well-formed empty array). Every other malformed shape produced a visible node.
+    // Belt-and-braces: the ONLY silent shape among the above is the exactly-"" thinking (shape 5).
+    // Every other shape — including the empty array and a scalar/null block — produced a visible node.
     const visibleCounts = rows.map((row, idx) => normalize([synth(idx * 1000, row).input]).length);
-    expect(visibleCounts).toEqual([1, 1, 1, 1, 1, 0, 0]);
+    expect(visibleCounts).toEqual([1, 1, 1, 1, 1, 0, 1, 1, 1]);
   });
 
   test('D28 mixed row: one row, a tool_result block that PAIRS (a Patch) and a text block that survives as a prompt', () => {

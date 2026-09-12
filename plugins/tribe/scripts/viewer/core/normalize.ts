@@ -136,10 +136,17 @@ function normalizeMessageRow(row: RowInput, out: RenderNode[]): void {
     return;
   }
   // A `content` that is neither a string nor an array (absent, a number, an object, …) is the same
-  // malformed shape: a visible `raw` fallback (bucket D), never dropped. An EMPTY array is a
-  // well-formed row with zero renderable blocks and legitimately yields nothing (it is handled by
-  // the loop below running zero times, not by this guard).
+  // malformed shape: a visible `raw` fallback (bucket D), never dropped.
   if (!Array.isArray(content)) {
+    out.push(rawNode(row));
+    return;
+  }
+  // An EMPTY content array is a message row with ZERO blocks. Spec §7.1's silent set (bucket E) is
+  // exhaustive — "That is the whole set" — and lists only an empty `thinking` block and a row whose
+  // ONLY block is such a thinking; a row with no blocks at all is NEITHER. "Any row that produces no
+  // node and is not in this table is a bug" (§7.1), so silence here would be an under-render (§0):
+  // it renders a visible `raw` fallback (bucket D), like every other non-silent no-node shape.
+  if (content.length === 0) {
     out.push(rawNode(row));
     return;
   }
@@ -157,6 +164,11 @@ function normalizeMessageRow(row: RowInput, out: RenderNode[]): void {
       // (see `blockToNode`), so silence stays reserved strictly for `thinking === ""`.
       if (raw.type === 'thinking' && raw.thinking === '') continue;
       out.push(blockToNode(row, i, raw, model));
+    } else {
+      // A NON-object block (a scalar, `null`, or a nested array) is NOT the silent case (only a
+      // `thinking` whose text is "" is, spec §7.1 bucket E). Classification is total (D23/D28), so
+      // it renders a visible `raw` fallback (bucket D) at its OWN block index, never a silent skip.
+      out.push(rawBlockNode(anchorOf(row, i), raw));
     }
   }
 }
@@ -231,9 +243,12 @@ function blockToNode(row: RowInput, i: number, block: Record<string, unknown>, m
  * malformed content block's own JSON verbatim. The single visible fallback for any block shape the
  * ladder does not otherwise render — so classification stays total (D23/D28), never a silent drop.
  * `json` is elided past the 64 KiB cap (D15); `bytes` always reports the TRUE total. */
-function rawBlockNode(base: RowAnchor, block: Record<string, unknown>): RenderNode {
-  const json = JSON.stringify(block);
-  return elideToFit(json, (t, elided) => ({ ...base, elided, expandable: elided, k: 'raw' as const, rowType: `block:${String(block.type)}`, json: t, bytes: utf8Bytes(json), text: null }));
+function rawBlockNode(base: RowAnchor, block: unknown): RenderNode {
+  // Accepts ANY block value (an object the ladder did not render, or a non-object scalar/null/array
+  // entry) — the single visible fallback for every block shape, so classification stays total.
+  const json = JSON.stringify(block) ?? 'null';
+  const type = isObject(block) ? String(block.type) : block === null ? 'null' : Array.isArray(block) ? 'array' : typeof block;
+  return elideToFit(json, (t, elided) => ({ ...base, elided, expandable: elided, k: 'raw' as const, rowType: `block:${type}`, json: t, bytes: utf8Bytes(json), text: null }));
 }
 
 /** The COMPLETE `orphan_result` node (spec §7.5), sized to the 64 KiB cap AS A WHOLE (D15). A
@@ -329,12 +344,23 @@ function attachmentNode(row: RowInput, obj: Record<string, unknown> | null): Ren
   // `rendered` and nothing beyond the label, there is nothing to expand into (`expandable: false`);
   // with other content present, the full object is fetchable via /api/block.
   const hasMore = Object.keys(att).some((k) => k !== 'type' && k !== 'rendered');
-  const expandable = rendered === null && hasMore;
-  return { ...anchorOf(row, 0), elided: false, expandable, k: 'attachment', label, detail: rendered };
+  if (rendered === null) {
+    return { ...anchorOf(row, 0), elided: false, expandable: hasMore, k: 'attachment', label, detail: null };
+  }
+  // D15: `rendered` is arbitrary text (bounded only by ROW_CAP), so the WHOLE node goes through the
+  // same size guard every text-bearing kind uses. Small rendered stays inline unelided (§7.3,
+  // `expandable: false`); an oversized one is truncated to a prefix and the full text becomes
+  // fetchable at this node's own `at`+`i` (§4), so no attachment node can exceed 64 KiB.
+  return elideToFit(rendered, (t, elided) => ({ ...anchorOf(row, 0), elided, expandable: elided, k: 'attachment' as const, label, detail: t }));
 }
 
 function chipNode(row: RowInput, label: string, detail: string | null, href: string | null): RenderNode {
-  return { ...anchorOf(row, 0), ...sized(), k: 'chip', label, detail, href };
+  // A chip's `label` and `href` are bounded fields (a mode, an operation, a subtype, a gated URL);
+  // its `detail` is the one arbitrary-length text it carries (a `content`/`stdout` field, up to the
+  // 8 MiB ROW_CAP). D15 applies to every kind, so a detail-bearing chip runs through the same size
+  // guard: an oversized detail is truncated to a prefix and the whole payload becomes fetchable.
+  if (detail === null) return { ...anchorOf(row, 0), ...sized(), k: 'chip', label, detail, href };
+  return elideToFit(detail, (t, elided) => ({ ...anchorOf(row, 0), elided, expandable: elided, k: 'chip' as const, label, detail: t, href }));
 }
 
 function dividerNode(row: RowInput, label: string): RenderNode {
@@ -524,7 +550,10 @@ function sized(): Sized {
 // exceeds 64 KiB" is a single guarantee rather than N ad-hoc ones.
 // ---------------------------------------------------------------------------------------------
 
-const NODE_CAP = 64 * 1024;
+/** D15's single source of truth for the per-node cap (spec §7: "every node, ANY kind, ≤ 64 KiB").
+ * Exported so `core/pair.ts` measures the completed tool node against the SAME constant — the guard
+ * is one number in one place, never two that can drift. */
+export const NODE_CAP = 64 * 1024;
 
 /** Truncates `text` to at most `maxBytes` of UTF-8, cutting only at a boundary that cannot split a
  * surrogate pair, so the result is always a valid string. */
@@ -615,8 +644,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** UTF-8 byte length of a string, computed without decoding into a Buffer (pure, no Node global). */
-function utf8Bytes(s: string): number {
+/** UTF-8 byte length of a string, computed without decoding into a Buffer (pure, no Node global).
+ * Exported so `core/pair.ts` measures the completed tool node's encoded size with the SAME function
+ * the normalizer's own D15 guard uses — one measurement, not two that can diverge. */
+export function utf8Bytes(s: string): number {
   return new TextEncoder().encode(s).length;
 }
 

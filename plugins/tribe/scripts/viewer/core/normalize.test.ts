@@ -732,4 +732,73 @@ describe('normalize — classification is TOTAL (D23/D28): every unmatched messa
   test('the ONE silent block is exactly a thinking block whose `thinking` is "" (spec §7.2 named exception) — the boundary of the contract', () => {
     expect(normalize([assistantBlocks(500, [{ type: 'thinking', thinking: '', signature: 's' }])])).toEqual([]);
   });
+
+  test('an EMPTY content array is NOT in spec §7.1 bucket E — it renders a visible raw fallback, never a silent drop', () => {
+    // Bucket E (spec §7.1) lists ONLY an empty `thinking` block and a row whose ONLY block is such a
+    // thinking. An array with ZERO blocks is neither, so "Any row that produces no node and is not
+    // in this table is a bug" applies: silence here would be an under-render (§0). Sol reproduced the
+    // silent drop (0 nodes) — the contract is a raw card (bucket D).
+    const nodes = normalize([input(600, { type: 'user', uuid: 'u', timestamp: 't', message: { role: 'user', content: [] } })]);
+    expect(nodes).toHaveLength(1);
+    const node = nodes[0]!;
+    expect(node.k).toBe('raw');
+    if (node.k !== 'raw') throw new Error('unreachable');
+    expect(node.rowType).toBe('user');
+  });
+
+  test('a SCALAR block inside a content array is NOT silent — it renders a visible raw fallback (bucket D)', () => {
+    // Block ladder (spec §7.1): the ONLY silent block is a `thinking` whose text is "". A scalar
+    // entry (a number, string, boolean) is not that, so it must not vanish. Sol reproduced the
+    // silent skip (`if (isObject(raw))` with no else → 0 nodes).
+    const nodes = normalize([assistantBlocks(700, [42])]);
+    expect(nodes).toHaveLength(1);
+    const node = nodes[0]!;
+    expect(node.k).toBe('raw');
+    if (node.k !== 'raw') throw new Error('unreachable');
+    expect(node.rowType).toBe('block:number');
+    expect(node.i).toBe(0); // the block's TRUE index is preserved (spec §4).
+  });
+
+  test('a NULL block inside a content array is NOT silent — it renders a visible raw fallback (bucket D)', () => {
+    const nodes = normalize([userBlocks(800, [null])]);
+    expect(nodes).toHaveLength(1);
+    const node = nodes[0]!;
+    expect(node.k).toBe('raw');
+    if (node.k !== 'raw') throw new Error('unreachable');
+    expect(node.rowType).toBe('block:null');
+  });
+
+  test('a scalar block does not swallow its sibling blocks — each block gets exactly one outcome (D28)', () => {
+    // A row carrying a scalar block AND a real text block yields BOTH: a raw fallback and a node.
+    const nodes = normalize([assistantBlocks(900, [42, { type: 'text', text: 'hello' }])]);
+    expect(nodes.map((n) => n.k)).toEqual(['raw', 'assistant']);
+    expect(nodes.map((n) => n.i)).toEqual([0, 1]);
+  });
+});
+
+describe('normalize — D15: the 64 KiB cap holds for the WHOLE node of every text-bearing kind (spec §7, "every node, ANY kind")', () => {
+  test('an attachment whose `rendered` text exceeds 64 KiB is elided so the EMITTED node is ≤ 64 KiB (was 70,125 B, unelided)', () => {
+    // §7.3 puts `rendered` inline as the detail; without the size guard a ~70 KiB rendered produced a
+    // 70,125-byte node marked `elided:false` (Sol). D15 requires no node of ANY kind over 65,536 B.
+    const nodes = normalize([metaRow(0, { type: 'attachment', attachment: { type: 'big_reminder', rendered: 'a'.repeat(70 * 1024) } })]);
+    const node = only(nodes);
+    expect(node.k).toBe('attachment');
+    if (node.k !== 'attachment') throw new Error('unreachable');
+    expect(enc(JSON.stringify(node))).toBeLessThanOrEqual(64 * 1024);
+    expect(node.elided).toBe(true);
+    expect(node.expandable).toBe(true); // the full rendered is fetchable at /api/block (§4).
+    expect(JSON.stringify(node)).not.toContain('a'.repeat(70 * 1024)); // no full payload survives.
+  });
+
+  test('a chip whose `detail` (a `content` field, up to the 8 MiB ROW_CAP) exceeds 64 KiB is elided so the EMITTED node is ≤ 64 KiB', () => {
+    // A `queue-operation` row's `content` is arbitrary text bounded only by ROW_CAP (8 MiB); a chip
+    // is a text-bearing kind (spec §7 "every node, ANY kind"), so the same guard applies.
+    const nodes = normalize([metaRow(0, { type: 'queue-operation', operation: 'enqueue', content: 'b'.repeat(70 * 1024) })]);
+    const node = only(nodes);
+    expect(node.k).toBe('chip');
+    if (node.k !== 'chip') throw new Error('unreachable');
+    expect(enc(JSON.stringify(node))).toBeLessThanOrEqual(64 * 1024);
+    expect(node.elided).toBe(true);
+    expect(node.expandable).toBe(true);
+  });
 });
