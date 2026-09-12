@@ -1,0 +1,26 @@
+LOCATION: §3.2 — “addressed by `RowAnchor.id`”
+WHAT BROKE: `RowAnchor` is used before the page defines it in §4, so I had to defer understanding this route.
+SEVERITY: NIT
+
+LOCATION: §6.3 — “a row larger than the 8 MiB cap”
+WHAT BROKE: I could not determine how a 2 MiB row renders consistently, because the forward tail skips rows over 1 MiB while the backward snapshot treats rows as oversized only after 8 MiB.
+SEVERITY: BLOCK
+
+LOCATION: §6.3 — “anchored at `max(0, anchor - step)`”
+WHAT BROKE: For a row larger than 8 MiB, the algorithm may be in its middle and gives no way to find the row’s actual start, so I could not follow how it emits exactly one correctly anchored raw node.
+SEVERITY: BLOCK
+
+LOCATION: §7.5 — “Loading earlier brings the call's row into the window”
+WHAT BROKE: The back-fill route returns and pairs only the preceding range, while the orphan result remains in the already-held range, so no specified response or patch can replace that orphan with the claimed paired card.
+SEVERITY: BLOCK
+
+LOCATION: §12.6 — “The zero-write wall is an allowlist”
+WHAT BROKE: This was the hardest passage: I understood the rules, but the numbering shifts from 1–7 into 7a–7c and then resumes with 8 outside the list, making its structure hard to track.
+SEVERITY: NIT
+
+LOCATION: §16.2 — “`fixtures/build.test.ts` asserts all three numbers”
+WHAT BROKE: This contradicts D22, which says Task 1 cannot use production normalization/pairing and that the rendered-node assertion belongs to Task 9.
+SEVERITY: BLOCK
+
+READER: FAIL 4 BLOCK
+terra exit=0
