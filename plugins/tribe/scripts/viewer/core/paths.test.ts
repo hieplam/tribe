@@ -31,6 +31,24 @@ test('sanitizeProjectDirName takes the hash through an injected seam — the sea
   expect(sanitizeProjectDirName(long, () => 'OTHER')).toBe(`${prefix}-OTHER`);
 });
 
+// The DEFAULT hasher (no seam supplied) must be PURE (pure-core.md): a mutated global must not
+// change its output. A default that reaches for `globalThis.Bun.hash` is impure — the same inputs
+// produce a different >200-char suffix depending on ambient global state.
+test('sanitizeProjectDirName default hash is pure — mutating globalThis.Bun.hash does not change the output', () => {
+  const long = `/Users/hip/${'a'.repeat(300)}`;
+  const before = sanitizeProjectDirName(long); // no seam → the DEFAULT hasher
+  const holder = globalThis as unknown as { Bun?: { hash?: unknown } };
+  const originalBun = holder.Bun;
+  const originalHash = originalBun?.hash;
+  try {
+    if (originalBun) originalBun.hash = () => 123456789n; // a wyhash-shaped result, different value
+    const after = sanitizeProjectDirName(long); // still the DEFAULT hasher
+    expect(after).toBe(before);
+  } finally {
+    if (originalBun) originalBun.hash = originalHash;
+  }
+});
+
 // --- fixed-layout helpers (spec line ~402, §7.6) ---
 
 test('builds the transcript and subagent locations from a session id', () => {

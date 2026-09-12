@@ -23,14 +23,13 @@ function djb2Hash(str: string): number {
 }
 
 function hashSuffix(name: string): string {
-  // Mirror claude-code/src/utils/sessionStoragePortable.ts: prefer Bun.hash (wyhash) when
-  // running under Bun, fall back to djb2 elsewhere. Both encode base36. Cross-runtime stability
-  // matters only for paths >200 chars.
-  const globalWithBun: { Bun?: { hash: (s: string) => number | bigint } } = globalThis as never;
-  const maybeBun = globalWithBun.Bun;
-  if (maybeBun && typeof maybeBun.hash === 'function') {
-    return maybeBun.hash(name).toString(36);
-  }
+  // The DEFAULT hasher is a FIXED, deterministic djb2 (base36) — no ambient global lookup, so a
+  // call without the injected seam is pure (`pure-core.md`): the same input yields the same suffix
+  // on run 1 and run 100, whatever globals happen to exist. A caller that needs a different hash
+  // (e.g. Claude Code's Bun.hash/wyhash for cross-runtime parity) supplies it through the seam
+  // parameter of `sanitizeProjectDirName`; the core never reaches for it. This only affects the
+  // >200-char suffix, a rare path; djb2 is the runtime-independent form and matches a Node-runtime
+  // Claude Code.
   return Math.abs(djb2Hash(name)).toString(36);
 }
 

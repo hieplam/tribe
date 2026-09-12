@@ -121,6 +121,17 @@ function nonDoomed(files: string[]): string[] {
  * write depending on an argument, not on which module it came from. */
 const ALLOWED_FS_READS = new Set(['readFileSync', 'openSync', 'readSync', 'closeSync', 'statSync', 'lstatSync', 'readdirSync', 'realpathSync']);
 
+/** The module specifiers that name `node:fs` under the two spellings a caller can write. Every
+ * OTHER world module is refused wholesale (`BANNED_IMPORT_SPECIFIERS`); `node:fs`/`fs` are the one
+ * partially-permitted module, so they alone need the strict-shape analysis in `fsViolations`. */
+const FS_SPECIFIERS = ['node:fs', 'fs'];
+
+/** The ONLY methods permitted on a `Bun.file(...)` result (spec §12.6 (7b)): bounded reads. Every
+ * other method (`write`, `writer`, `delete`, `unlink`, …) is a write capability and is refused, and
+ * so is ANY computed access (`Bun.file(x)[expr]`) — a computed member is not statically verifiable
+ * as a read, so it fails closed, the same safe direction as every other rule in this file. */
+const BUN_FILE_READS = new Set(['text', 'arrayBuffer', 'bytes', 'stream', 'json']);
+
 /** The known `node:fs` API surface, read and write members together — this is what makes the
  * refusal side of the allowlist total rather than a denylist of "the eight calls someone
  * remembered": any member of `node:fs` this file has never heard of does not reach this list
@@ -145,77 +156,66 @@ const FS_MEMBER_UNIVERSE = [
  * generator itself. */
 const BANNED_IMPORT_SPECIFIERS = ['node:fs/promises', 'fs/promises', 'node:child_process', 'child_process', 'node:net', 'net', 'node:http', 'http', 'node:https', 'https', 'node:crypto', 'crypto'];
 
-/** The LOCAL names an `import … from 'node:fs'|'fs'` introduces, split by whether they are refused
- * outright. This is what makes the allowlist TOTAL rather than a denylist of remembered names, and
- * closes the two bypasses a raw-source universe scan leaves open:
- *   - an ALIAS (`import { writeFileSync as persist }`) — the raw call is `persist(`, a name the
- *     universe scan never heard of, so the binding is resolved to its ORIGINAL member instead; and
- *   - an UNLISTED member (`import { cpSync }`) — never in the enumerated universe, but refused here
- *     the moment its original name is not an allowlisted read.
- * `refusedLocals` are named/aliased bindings whose ORIGINAL member is not in `ALLOWED_FS_READS` —
- * importing one at all is the violation, independent of how (or whether) it is later called.
- * `namespaces` are `* as ns` and default (`import fs from 'node:fs'`) bindings — the whole module,
- * checked via `ns.<member>` member expressions by the caller. `import type …` is erased at compile
- * time and never a runtime dependency, so it is skipped entirely (matching `scanImports`). */
-function fsImportBindings(source: string): { refusedLocals: string[]; namespaces: string[] } {
-  const refusedLocals: string[] = [];
-  const namespaces: string[] = [];
-  const importRe = /import\s+([^;]*?)\s+from\s*['"`](?:node:)?fs['"`]/g;
-  let m: RegExpExecArray | null;
-  while ((m = importRe.exec(source))) {
-    const clause = m[1];
-    if (/^\s*type\b/.test(clause)) continue; // `import type … from 'node:fs'` — erased, not a dep
-    const ns = clause.match(/\*\s+as\s+([A-Za-z_$][\w$]*)/);
-    if (ns) namespaces.push(ns[1]);
-    const braces = clause.match(/\{([^}]*)\}/);
-    // A default import binds the whole module (fs's default export IS the namespace): a leading
-    // identifier before any `{` or `*`.
-    const def = clause.match(/^\s*([A-Za-z_$][\w$]*)\s*(?:,|$)/);
-    if (def && !ns && !braces) namespaces.push(def[1]);
-    else if (def && (braces || ns) && clause.trimStart()[0] !== '{' && clause.trimStart()[0] !== '*') {
-      namespaces.push(def[1]); // `import fs, { readFileSync } from 'node:fs'`
-    }
-    if (braces) {
-      for (const part of braces[1].split(',')) {
-        const t = part.trim();
-        if (!t || /^type\b/.test(t)) continue; // inline `{ type Stats }` — erased
-        const asMatch = t.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
-        const original = asMatch ? asMatch[1] : t;
-        const local = asMatch ? asMatch[2] : t;
-        if (!ALLOWED_FS_READS.has(original)) refusedLocals.push(local);
-      }
-    }
-  }
-  return { refusedLocals, namespaces };
-}
-
-/** Every refused fs access in `source`, by three complementary layers, all failing toward false
- * positives (this file's whole philosophy, stated in `rawSourceOf`'s comment above):
- *   (i)  a named/aliased import binding whose ORIGINAL member is not an allowlisted read — refused
- *        outright, so an alias or an unlisted member can no longer hide;
- *   (ii) a namespace/default fs binding's `ns.<member>` access whose member is not allowlisted —
- *        the member-expression scan spec §12.6 (7c) demands, now driven by the actual binding name
- *        rather than a hard-coded `fs.`; and
- *   (iii) the original defence-in-depth universe scan: any KNOWN non-read member reached as
- *        `<name>(` or `<x>.<name>(`, even absent a resolvable import binding above. */
-function fsMemberViolations(source: string): string[] {
+/** Every refused `node:fs`/`fs` access in `source` — a TRUE allowlist for the covered set, total
+ * across import/access FORM rather than a denylist of remembered spellings (spec §12.6 (7c), D16).
+ * Enumerating bad forms failed twice; this instead permits exactly ONE form and refuses all else,
+ * so a form nobody anticipated fails closed by default.
+ *
+ * The ONLY permitted way a covered file may touch fs is a STATIC NAMED import whose every name is
+ * an allowlisted read: `import { readFileSync, statSync } from 'node:fs'`. The reasoning: a name
+ * reached any other way is not statically verifiable as read-only.
+ *   (a) `require(...)`, dynamic `import(...)`, and TS `import fs = require(...)` — reported by
+ *       `scanImports` as `require-call`/`dynamic-import` kinds — are refused: what a runtime
+ *       binding resolves to, and how it is later indexed, cannot be read off the source.
+ *   (b) Every `import`/`export … from 'fs'` STATEMENT is classified. A re-export
+ *       (`export { … } from 'fs'`), a namespace import (`* as fs`), a default import
+ *       (`import fs from 'fs'`), or a default+named combo is refused — each hands out the whole
+ *       module or a binding whose member access (including computed `fs['writeFileSync']`) cannot
+ *       be verified. A plain `{ … }` named import is permitted only when every ORIGINAL name is an
+ *       allowlisted read; `openSync` additionally may not be ALIASED, because its read-only-flag
+ *       check (`openSyncFlagViolations`) scans the literal call `openSync(` and an alias would hide
+ *       the call site from it.
+ *   (c) A bare side-effect import (`import 'node:fs'`) is refused: it is not a named import.
+ *   (d) Defence in depth: the original universe scan still flags any KNOWN non-read member reached
+ *       as `<name>(` or `<x>.<name>(`, even with no resolvable import — so a global or injected
+ *       binding cannot smuggle one past the shape rules above.
+ * `import type … from 'fs'` is erased at compile time and never a runtime dependency, so it is
+ * skipped (matching `scanImports`). Every layer fails toward false positives — the philosophy
+ * stated in `rawSourceOf`'s comment above. */
+function fsViolations(source: string): string[] {
   const bad: string[] = [];
-  const seen = new Set<string>();
-  const push = (name: string) => {
-    if (!seen.has(name)) { seen.add(name); bad.push(name); }
-  };
-  const { refusedLocals, namespaces } = fsImportBindings(source);
-  for (const local of refusedLocals) push(local); // (i)
-  for (const ns of namespaces) { // (ii)
-    const re = new RegExp(`\\b${ns}\\s*\\.\\s*([A-Za-z_$][\\w$]*)`, 'g');
-    let mm: RegExpExecArray | null;
-    while ((mm = re.exec(source))) {
-      if (!ALLOWED_FS_READS.has(mm[1])) push(mm[1]);
+  // (a) non-static-import forms of fs — require / dynamic import / TS import-equals.
+  for (const imp of new Bun.Transpiler({ loader: 'ts' }).scanImports(source)) {
+    if (FS_SPECIFIERS.includes(imp.path) && imp.kind !== 'import-statement') {
+      bad.push(`fs reached via ${imp.kind} (only a static named import is verifiable)`);
     }
   }
-  for (const name of FS_MEMBER_UNIVERSE) { // (iii)
+  // (b) every `import`/`export … from 'fs'` statement, classified. `[^;]*?` keeps the match inside
+  // one (semicolon-terminated) statement so a distant `from 'fs'` cannot swallow an earlier import.
+  const stmtRe = /\b(import|export)\b([^;]*?)\bfrom\s*['"`](?:node:)?fs['"`]/g;
+  let m: RegExpExecArray | null;
+  while ((m = stmtRe.exec(source))) {
+    const keyword = m[1];
+    const clause = m[2].trim();
+    if (keyword === 'export') { bad.push('fs re-export (a re-exported member is not verifiable)'); continue; }
+    if (/^type\b/.test(clause)) continue; // `import type … from 'fs'` — erased, not a runtime dep
+    const named = clause.match(/^\{([^}]*)\}$/);
+    if (!named) { bad.push('fs import is not a plain named import (namespace/default forms are refused)'); continue; }
+    for (const part of named[1].split(',')) {
+      const t = part.trim();
+      if (!t || /^type\b/.test(t)) continue; // inline `{ type Stats }` — erased
+      const asMatch = t.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
+      const original = asMatch ? asMatch[1] : t;
+      if (!ALLOWED_FS_READS.has(original)) { bad.push(`refused fs member: ${original}`); continue; }
+      if (original === 'openSync' && asMatch) bad.push('openSync may not be aliased (its read-flag check scans the literal call site)');
+    }
+  }
+  // (c) a bare side-effect import of fs — not a named import.
+  if (/\bimport\s*['"`](?:node:)?fs['"`]/.test(source)) bad.push('fs side-effect import (not a named import)');
+  // (d) defence-in-depth universe scan: any known non-read member reached as a call.
+  for (const name of FS_MEMBER_UNIVERSE) {
     if (ALLOWED_FS_READS.has(name)) continue;
-    if (new RegExp(`\\b${name}\\s*\\(`).test(source)) push(name);
+    if (new RegExp(`\\b${name}\\s*\\(`).test(source)) bad.push(`refused fs member: ${name}`);
   }
   return bad;
 }
@@ -235,13 +235,22 @@ function openSyncFlagViolations(source: string): string[] {
   return bad;
 }
 
-/** `process.kill(pid, 0)` — signal `0`, literally — is the ONE permitted call, and ONLY inside
+/** `process.kill(pid, 0)` — signal `0`, LITERALLY — is the ONE permitted form, and ONLY inside
  * `adapters/campaign.adapter.ts` (spec §12.6 (7b), a liveness probe: the kernel performs only the
- * permission-and-existence check and sends nothing). Any other signal, or the same call from any
- * other file, is refused: the wall must be able to tell a probe from a real signal. */
+ * permission-and-existence check and sends nothing). The wall must be able to tell that probe from
+ * a real signal, so it refuses every way of reaching `process.kill` that hides the signal argument
+ * or the identity of the callee from this scanner:
+ *   - a COMPUTED access on `process` (`process['kill'](pid, 9)`) — the member is not a literal, so
+ *     the callee cannot be identified; refused everywhere;
+ *   - `process.kill` referenced WITHOUT an immediate call (`const k = process.kill`) — the real
+ *     call happens through a binding this scanner cannot follow; refused everywhere;
+ *   - a literal `process.kill(...)` call with anything other than exactly two args ending in `0`,
+ *     or from any file other than `campaign.adapter.ts`. */
 function processKillViolations(label: string, source: string): string[] {
   const bad: string[] = [];
-  const re = /\bprocess\.kill\s*\(([^)]*)\)/g;
+  if (/\bprocess\s*\[/.test(source)) bad.push('computed process[...] access (callee not a literal)');
+  if (/\bprocess\s*\.\s*kill\b(?!\s*\()/.test(source)) bad.push('process.kill referenced without an immediate call (alias/assignment)');
+  const re = /\bprocess\s*\.\s*kill\s*\(([^)]*)\)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(source))) {
     const args = m[1].split(',').map((a) => a.trim());
@@ -251,13 +260,36 @@ function processKillViolations(label: string, source: string): string[] {
   return bad;
 }
 
-/** `Bun.write` is refused everywhere in `COVERED` (spec §12.6 (7c)); `Bun.serve` is permitted
- * ONLY in `serve.ts` — the single place the process binds a socket, and the composition root
- * rather than an adapter, so "adapters only" would be the wrong home for it (spec §12.6 (7b)). */
+/** Every refused `Bun` global access in `source` — total across access FORM (spec §12.6 (7b)/(7c)).
+ *   - ANY COMPUTED access on the `Bun` global (`Bun['write']`) is refused everywhere: a computed
+ *     member is not statically verifiable, so it fails closed.
+ *   - `Bun.write` (a literal write) is refused everywhere.
+ *   - `Bun.serve` is permitted ONLY in `serve.ts` — the single place the process binds a socket and
+ *     the composition root, not an adapter.
+ *   - On a `Bun.file(...)` result, only the literal READ methods in `BUN_FILE_READS` are permitted;
+ *     any write method (`.write`/`.writer`/`.delete`/`.unlink`) or ANY computed access on the result
+ *     is refused. */
 function bunViolations(label: string, source: string): string[] {
   const bad: string[] = [];
-  if (/\bBun\.write\b/.test(source)) bad.push('Bun.write');
-  if (label !== 'serve.ts' && /\bBun\.serve\b/.test(source)) bad.push('Bun.serve outside serve.ts');
+  if (/\bBun\s*\[/.test(source)) bad.push('computed Bun[...] access');
+  if (/\bBun\s*\.\s*write\b/.test(source)) bad.push('Bun.write');
+  if (label !== 'serve.ts' && /\bBun\s*\.\s*serve\b/.test(source)) bad.push('Bun.serve outside serve.ts');
+  // `Bun.file(...)` chains: inspect the member accessed on the result.
+  const fileRe = /\bBun\s*\.\s*file\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = fileRe.exec(source))) {
+    let depth = 1;
+    let i = fileRe.lastIndex;
+    while (i < source.length && depth > 0) {
+      if (source[i] === '(') depth++;
+      else if (source[i] === ')') depth--;
+      i++;
+    }
+    const rest = source.slice(i).replace(/^\s+/, '');
+    if (rest.startsWith('[')) { bad.push('computed access on a Bun.file(...) result'); continue; }
+    const mm = rest.match(/^\.\s*([A-Za-z_$][\w$]*)/);
+    if (mm && !BUN_FILE_READS.has(mm[1])) bad.push(`refused Bun.file(...) method: ${mm[1]}`);
+  }
   return bad;
 }
 
@@ -278,7 +310,7 @@ function allowlistViolations(label: string, source: string): string[] {
     bad.push('node:fs imported outside adapters/**');
   }
 
-  for (const name of fsMemberViolations(source)) bad.push(`refused fs member: ${name}`);
+  for (const v of fsViolations(source)) bad.push(v);
   for (const call of openSyncFlagViolations(source)) bad.push(`openSync not read-only: ${call}`);
   for (const call of bunViolations(label, source)) bad.push(call);
   for (const call of processKillViolations(label, source)) bad.push(call);
@@ -318,18 +350,71 @@ function catchBodies(source: string): string[] {
   return bodies;
 }
 
-/** A `catch` is bare unless its FALL-THROUGH re-throws — i.e. the last statement of its body is a
- * `throw` (`fail-closed-edges` obligation 1). Presence of `instanceof` alone is not enough: a
- * catch may discriminate a known error and `return`, but any UNRECOGNISED error must reach a
- * `throw`, and the only way that path is guaranteed to re-throw is if the body's terminal
- * statement is itself a `throw`. So the rule is: the trimmed body must END with a `throw …`
- * statement. This flags `catch (e) { if (e instanceof X) return null; return null; }` — which
- * completes without re-throwing on an unmatched error — while passing the real core/** pattern
- * `if (e instanceof X) return null; throw e;`. It fails toward false positives (an inverted but
- * still-safe `if (!(e instanceof X)) throw e; return null;` is flagged even though it re-throws
- * first) — the same safe direction every rule in this file takes. */
+/** `source` with every line comment, block comment, and string/template literal replaced by a
+ * single space — so a `throw`, `instanceof`, or `;` that appears only INSIDE one of those cannot
+ * be mistaken for code. A prior version of the catch rule text-scanned for a trailing `throw`
+ * token and was satisfiable by a `throw` word buried in a comment or a string literal; stripping
+ * them first closes that. The scanner honours backslash escapes inside quotes so an escaped quote
+ * does not end the literal early; a template literal's `${…}` interior is stripped along with the
+ * rest, which can only ever HIDE a real `throw` (making a catch look barer, a false positive) —
+ * the safe direction this whole file takes. */
+function stripCommentsAndStrings(source: string): string {
+  let out = '';
+  let i = 0;
+  const n = source.length;
+  while (i < n) {
+    const c = source[i];
+    if (c === '/' && source[i + 1] === '/') { // line comment
+      i += 2;
+      while (i < n && source[i] !== '\n') i++;
+      continue;
+    }
+    if (c === '/' && source[i + 1] === '*') { // block comment
+      i += 2;
+      while (i < n && !(source[i] === '*' && source[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') { // string / template literal
+      const quote = c;
+      i++;
+      while (i < n && source[i] !== quote) {
+        if (source[i] === '\\') i++; // skip the char after a backslash
+        i++;
+      }
+      i++; // skip the closing quote
+      out += ' ';
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+/** A `catch` is bare unless its FALL-THROUGH re-throws UNCONDITIONALLY — the body's last statement
+ * is a bare `throw <ident>;` (`fail-closed-edges` obligation 1). Presence of `instanceof` alone is
+ * not enough: a catch may discriminate a known error and `return`, but any UNRECOGNISED error must
+ * reach a `throw` on the fall-through, and the only way that is guaranteed is if the terminal
+ * statement is itself an unconditional `throw` — not one guarded by an `if`, and not a `throw`
+ * token that lives only in a comment or a string.
+ *
+ * So: strip comments and string literals first (`stripCommentsAndStrings`), then require the LAST
+ * top-level statement (split on `;`) to be exactly `throw <ident>` — which is `false` for a
+ * conditional `if (retryable) throw e;` (the last statement is the whole `if (…) throw e`, not a
+ * bare `throw`) and for `return null;`. This passes the real core/** pattern
+ * `if (e instanceof X) return null; throw e;` and flags every satisfiable-by-accident shape. It
+ * fails toward false positives (an inverted-but-safe `if (!(e instanceof X)) throw e; return null;`
+ * is flagged even though it re-throws first) — the same safe direction every rule here takes. */
 function rethrowsOnFallThrough(body: string): boolean {
-  return /\bthrow\b[^;{}]*;?\s*$/.test(body);
+  const stripped = stripCommentsAndStrings(body);
+  const statements = stripped.split(';');
+  let last = '';
+  for (let k = statements.length - 1; k >= 0; k--) {
+    const t = statements[k].trim();
+    if (t) { last = t; break; }
+  }
+  return /^throw\s+[A-Za-z_$][\w$]*$/.test(last);
 }
 
 function bareCatchCount(source: string): number {
@@ -399,6 +484,32 @@ describe('viewer structural contract', () => {
   test('a discriminating catch whose fall-through re-throws passes clean (the real core/** pattern stays green)', () => {
     const probe = 'try { risky(); } catch (e) {\n  if (e instanceof SyntaxError) return null;\n  throw e;\n}\n';
     expect(bareCatchCount(probe)).toBe(0);
+  });
+
+  // The catch wall must not be satisfiable by a `throw` token that never runs. Three ways to write
+  // one (fail-closed-edges obligation 1): the token inside a comment, inside a string literal, or
+  // inside a CONDITIONAL that the unrecognised-error path can skip. Each must be flagged.
+  test('prove the catch wall bites: a `throw` that appears ONLY inside a line comment is flagged', () => {
+    const probe = 'try { risky(); } catch (e) {\n  return null; // throw e\n}\n';
+    expect(bareCatchCount(probe)).toBeGreaterThan(0);
+  });
+
+  test('prove the catch wall bites: a `throw` that appears ONLY inside a string literal is flagged', () => {
+    const probe = 'try { risky(); } catch (e) {\n  logger("please throw e");\n}\n';
+    expect(bareCatchCount(probe)).toBeGreaterThan(0);
+  });
+
+  test('prove the catch wall bites: a CONDITIONAL throw as the last statement (the unmatched path can skip it) is flagged', () => {
+    const probe = 'try { risky(); } catch (e) {\n  if (e instanceof SyntaxError) return null;\n  if (retryable) throw e;\n}\n';
+    expect(bareCatchCount(probe)).toBeGreaterThan(0);
+  });
+
+  test('the real core/** pattern (discriminate, then an UNCONDITIONAL bare `throw e;`) still passes clean', () => {
+    const probe = 'try { risky(); } catch (e) {\n  if (e instanceof SyntaxError) return null;\n  throw e;\n}\n';
+    expect(bareCatchCount(probe)).toBe(0);
+    // ...and with a comment mentioning throw ABOVE the real unconditional throw, still clean.
+    const withComment = 'try { risky(); } catch (e) {\n  // fall through: re-throw anything we do not recognise\n  if (e instanceof SyntaxError) return null;\n  throw e;\n}\n';
+    expect(bareCatchCount(withComment)).toBe(0);
   });
 
   describe('the structural allowlist wall (§12.6 (7), D16) — replaces the old zero-write denylist', () => {
@@ -502,6 +613,92 @@ describe('viewer structural contract', () => {
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    });
+
+    // -------------------------------------------------------------------------------------------
+    // TOTALITY (§12.6 (7c), D16): the allowlist must be a TRUE allowlist for the covered set — it
+    // fails CLOSED for EVERY way of reaching a world capability, not the common spellings only.
+    // The only permitted fs shape is a STATIC NAMED import of read members; every other import or
+    // access form of a world capability is refused, alias-/syntax-independent. Each probe below is
+    // a bypass a fresh audit proved still open; the wall must flag all of them.
+
+    test('prove the wall bites: a re-export of a world fs member is flagged', () => {
+      const probe = "export { writeFileSync } from 'node:fs';\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a destructuring require of node:fs is flagged', () => {
+      const probe = "const { writeFileSync } = require('node:fs');\nwriteFileSync('/tmp/x', 'y');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a namespace require of node:fs is flagged', () => {
+      const probe = "const fs = require('node:fs');\nfs.writeFileSync('/tmp/x', 'y');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a dynamic import() of node:fs is flagged', () => {
+      const probe = "const fs = await import('node:fs');\nfs.writeFileSync('/tmp/x', 'y');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a COMPUTED member access on an fs namespace binding is flagged', () => {
+      const probe = "import * as fs from 'node:fs';\nfs['writeFileSync']('/tmp/x', 'y');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a TypeScript import-equals require of node:fs is flagged', () => {
+      const probe = "import fs = require('node:fs');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: aliasing openSync (which hides its write-flag call from the flag scanner) is flagged', () => {
+      const probe = "import { openSync as raw } from 'node:fs';\nraw('/tmp/x', 'w');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a COMPUTED Bun global access (Bun[...]) is flagged', () => {
+      const probe = "Bun['write']('/tmp/x', 'y');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a write method on a Bun.file(...) result (.delete) is flagged', () => {
+      const probe = "Bun.file('/tmp/x').delete();\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a writer on a Bun.file(...) result (.writer) is flagged', () => {
+      const probe = "Bun.file('/tmp/x').writer();\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a COMPUTED member access on a Bun.file(...) result is flagged', () => {
+      const probe = "Bun.file('/tmp/x')['write']('y');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: an ALIASED process.kill (assigned to a binding) is flagged even in campaign.adapter.ts', () => {
+      const probe = "const k = process.kill;\nk(pid, 9);\n";
+      expect(allowlistViolations('adapters/campaign.adapter.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a COMPUTED process["kill"] is flagged even in campaign.adapter.ts', () => {
+      const probe = "process['kill'](pid, 9);\n";
+      expect(allowlistViolations('adapters/campaign.adapter.ts', probe)).not.toEqual([]);
+    });
+
+    // Legitimate current shapes that must STAY clean under the stricter rule (a rule that refuses
+    // everything proves nothing):
+    test('a Bun.file(...) READ method (.text) in an adapter passes clean', () => {
+      expect(allowlistViolations('adapters/fs.adapter.ts', "const s = await Bun.file('/x').text();\n")).toEqual([]);
+    });
+
+    test('a static named import of a read member (readFileSync) in an adapter passes clean', () => {
+      expect(allowlistViolations('adapters/fs.adapter.ts', "import { readFileSync } from 'node:fs';\nreadFileSync('/x', 'utf8');\n")).toEqual([]);
+    });
+
+    test('an UNALIASED read-flag openSync in an adapter passes clean', () => {
+      expect(allowlistViolations('adapters/fs.adapter.ts', "import { openSync } from 'node:fs';\nopenSync('/x', 'r');\n")).toEqual([]);
     });
   });
 });
