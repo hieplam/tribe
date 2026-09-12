@@ -138,20 +138,84 @@ const FS_MEMBER_UNIVERSE = [
 ];
 
 /** A whole module refused everywhere in `COVERED`, regardless of which member is used —
- * importing it at all is the violation (spec §12.6 (7c)). */
-const BANNED_IMPORT_SPECIFIERS = ['node:fs/promises', 'fs/promises', 'node:child_process', 'child_process', 'node:net', 'net', 'node:http', 'http', 'node:https', 'https'];
+ * importing it at all is the violation (spec §12.6 (7c)). `node:crypto`/`crypto` are here for a
+ * different reason than the I/O modules: they are a non-deterministic RANDOMNESS source, and
+ * `pure-core.md` bans randomness reached directly from core logic — a covered file that wants a
+ * uuid or a random value must receive it as an injected input at the edge, never import the
+ * generator itself. */
+const BANNED_IMPORT_SPECIFIERS = ['node:fs/promises', 'fs/promises', 'node:child_process', 'child_process', 'node:net', 'net', 'node:http', 'http', 'node:https', 'https', 'node:crypto', 'crypto'];
 
-/** Every `FS_MEMBER_UNIVERSE` name NOT in `ALLOWED_FS_READS` found as `<name>(` in `source` —
- * bare identifier OR `<anything>.<name>(` in the SAME regex, which is exactly the member-
- * expression scan spec §12.6 (7c) demands: `import * as fs from 'node:fs'; fs.writeFileSync(…)`
- * is caught the same way a named import `writeFileSync(…)` is, because the regex never looks at
- * what precedes the dot. Fails toward false positives (an unrelated object with a method by the
- * same name) — this file's whole philosophy, stated already in `rawSourceOf`'s comment above. */
+/** The LOCAL names an `import … from 'node:fs'|'fs'` introduces, split by whether they are refused
+ * outright. This is what makes the allowlist TOTAL rather than a denylist of remembered names, and
+ * closes the two bypasses a raw-source universe scan leaves open:
+ *   - an ALIAS (`import { writeFileSync as persist }`) — the raw call is `persist(`, a name the
+ *     universe scan never heard of, so the binding is resolved to its ORIGINAL member instead; and
+ *   - an UNLISTED member (`import { cpSync }`) — never in the enumerated universe, but refused here
+ *     the moment its original name is not an allowlisted read.
+ * `refusedLocals` are named/aliased bindings whose ORIGINAL member is not in `ALLOWED_FS_READS` —
+ * importing one at all is the violation, independent of how (or whether) it is later called.
+ * `namespaces` are `* as ns` and default (`import fs from 'node:fs'`) bindings — the whole module,
+ * checked via `ns.<member>` member expressions by the caller. `import type …` is erased at compile
+ * time and never a runtime dependency, so it is skipped entirely (matching `scanImports`). */
+function fsImportBindings(source: string): { refusedLocals: string[]; namespaces: string[] } {
+  const refusedLocals: string[] = [];
+  const namespaces: string[] = [];
+  const importRe = /import\s+([^;]*?)\s+from\s*['"`](?:node:)?fs['"`]/g;
+  let m: RegExpExecArray | null;
+  while ((m = importRe.exec(source))) {
+    const clause = m[1];
+    if (/^\s*type\b/.test(clause)) continue; // `import type … from 'node:fs'` — erased, not a dep
+    const ns = clause.match(/\*\s+as\s+([A-Za-z_$][\w$]*)/);
+    if (ns) namespaces.push(ns[1]);
+    const braces = clause.match(/\{([^}]*)\}/);
+    // A default import binds the whole module (fs's default export IS the namespace): a leading
+    // identifier before any `{` or `*`.
+    const def = clause.match(/^\s*([A-Za-z_$][\w$]*)\s*(?:,|$)/);
+    if (def && !ns && !braces) namespaces.push(def[1]);
+    else if (def && (braces || ns) && clause.trimStart()[0] !== '{' && clause.trimStart()[0] !== '*') {
+      namespaces.push(def[1]); // `import fs, { readFileSync } from 'node:fs'`
+    }
+    if (braces) {
+      for (const part of braces[1].split(',')) {
+        const t = part.trim();
+        if (!t || /^type\b/.test(t)) continue; // inline `{ type Stats }` — erased
+        const asMatch = t.match(/^([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)$/);
+        const original = asMatch ? asMatch[1] : t;
+        const local = asMatch ? asMatch[2] : t;
+        if (!ALLOWED_FS_READS.has(original)) refusedLocals.push(local);
+      }
+    }
+  }
+  return { refusedLocals, namespaces };
+}
+
+/** Every refused fs access in `source`, by three complementary layers, all failing toward false
+ * positives (this file's whole philosophy, stated in `rawSourceOf`'s comment above):
+ *   (i)  a named/aliased import binding whose ORIGINAL member is not an allowlisted read — refused
+ *        outright, so an alias or an unlisted member can no longer hide;
+ *   (ii) a namespace/default fs binding's `ns.<member>` access whose member is not allowlisted —
+ *        the member-expression scan spec §12.6 (7c) demands, now driven by the actual binding name
+ *        rather than a hard-coded `fs.`; and
+ *   (iii) the original defence-in-depth universe scan: any KNOWN non-read member reached as
+ *        `<name>(` or `<x>.<name>(`, even absent a resolvable import binding above. */
 function fsMemberViolations(source: string): string[] {
   const bad: string[] = [];
-  for (const name of FS_MEMBER_UNIVERSE) {
+  const seen = new Set<string>();
+  const push = (name: string) => {
+    if (!seen.has(name)) { seen.add(name); bad.push(name); }
+  };
+  const { refusedLocals, namespaces } = fsImportBindings(source);
+  for (const local of refusedLocals) push(local); // (i)
+  for (const ns of namespaces) { // (ii)
+    const re = new RegExp(`\\b${ns}\\s*\\.\\s*([A-Za-z_$][\\w$]*)`, 'g');
+    let mm: RegExpExecArray | null;
+    while ((mm = re.exec(source))) {
+      if (!ALLOWED_FS_READS.has(mm[1])) push(mm[1]);
+    }
+  }
+  for (const name of FS_MEMBER_UNIVERSE) { // (iii)
     if (ALLOWED_FS_READS.has(name)) continue;
-    if (new RegExp(`\\b${name}\\s*\\(`).test(source)) bad.push(name);
+    if (new RegExp(`\\b${name}\\s*\\(`).test(source)) push(name);
   }
   return bad;
 }
@@ -254,11 +318,22 @@ function catchBodies(source: string): string[] {
   return bodies;
 }
 
-/** A `catch` that neither discriminates (`instanceof`) nor re-throws is bare — it converts every
- * possible failure, expected or not, into the same silent fallback (`fail-closed-edges`
- * obligation 1). */
+/** A `catch` is bare unless its FALL-THROUGH re-throws — i.e. the last statement of its body is a
+ * `throw` (`fail-closed-edges` obligation 1). Presence of `instanceof` alone is not enough: a
+ * catch may discriminate a known error and `return`, but any UNRECOGNISED error must reach a
+ * `throw`, and the only way that path is guaranteed to re-throw is if the body's terminal
+ * statement is itself a `throw`. So the rule is: the trimmed body must END with a `throw …`
+ * statement. This flags `catch (e) { if (e instanceof X) return null; return null; }` — which
+ * completes without re-throwing on an unmatched error — while passing the real core/** pattern
+ * `if (e instanceof X) return null; throw e;`. It fails toward false positives (an inverted but
+ * still-safe `if (!(e instanceof X)) throw e; return null;` is flagged even though it re-throws
+ * first) — the same safe direction every rule in this file takes. */
+function rethrowsOnFallThrough(body: string): boolean {
+  return /\bthrow\b[^;{}]*;?\s*$/.test(body);
+}
+
 function bareCatchCount(source: string): number {
-  return catchBodies(source).filter((body) => !/instanceof|throw\b/.test(body)).length;
+  return catchBodies(source).filter((body) => !rethrowsOnFallThrough(body)).length;
 }
 
 describe('viewer structural contract', () => {
@@ -312,6 +387,18 @@ describe('viewer structural contract', () => {
     for (const f of nonDoomed([...walk('core'), ...walk('adapters')])) {
       expect({ file: f, bad: bareCatchCount(rawSourceOf(f)) }).toEqual({ file: f, bad: 0 });
     }
+  });
+
+  test('prove the catch wall bites: a discriminating catch that returns for the UNMATCHED path (no re-throw) is flagged (fail-closed-edges obligation 1)', () => {
+    // Contains `instanceof`, so the old presence-of-a-keyword rule let it pass — yet an
+    // unrecognised error completes this catch WITHOUT re-throwing. The fall-through must re-throw.
+    const probe = 'try { risky(); } catch (e) {\n  if (e instanceof SyntaxError) return null;\n  return null;\n}\n';
+    expect(bareCatchCount(probe)).toBeGreaterThan(0);
+  });
+
+  test('a discriminating catch whose fall-through re-throws passes clean (the real core/** pattern stays green)', () => {
+    const probe = 'try { risky(); } catch (e) {\n  if (e instanceof SyntaxError) return null;\n  throw e;\n}\n';
+    expect(bareCatchCount(probe)).toBe(0);
   });
 
   describe('the structural allowlist wall (§12.6 (7), D16) — replaces the old zero-write denylist', () => {
@@ -378,6 +465,31 @@ describe('viewer structural contract', () => {
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    });
+
+    test('prove the wall bites: an ALIASED fs write import is flagged (the allowlist binds the local name, not the raw call text)', () => {
+      // The old rule searched raw source for a finite universe of member names; renaming the
+      // binding hid the write entirely. A true allowlist binds `persist` to `writeFileSync` and
+      // refuses it because the ORIGINAL member is not a read.
+      const probe = "import { writeFileSync as persist } from 'node:fs';\npersist('/tmp/x', 'y');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: an UNLISTED fs member import is flagged (the allowlist is total, not a denylist of remembered names)', () => {
+      // `cpSync` was never in the enumerated universe, so it slipped through. Under a true
+      // allowlist, any imported fs member that is not an allowlisted read is refused.
+      const probe = "import { cpSync } from 'node:fs';\ncpSync('/a', '/b');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: an UNLISTED namespace-member fs write under a non-fs alias is flagged', () => {
+      const probe = "import * as sys from 'node:fs';\nsys.cpSync('/a', '/b');\n";
+      expect(allowlistViolations('adapters/probe.ts', probe)).not.toEqual([]);
+    });
+
+    test('prove the wall bites: a COVERED file importing node:crypto (a randomness source, pure-core.md) is flagged', () => {
+      const probe = "import { randomUUID } from 'node:crypto';\n";
+      expect(allowlistViolations('core/probe.ts', probe)).not.toEqual([]);
     });
 
     test('prove the wall bites, end to end: a real file on disk importing from tools/ is flagged, then removed', () => {
