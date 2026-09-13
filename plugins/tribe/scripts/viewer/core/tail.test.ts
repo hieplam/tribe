@@ -418,3 +418,41 @@ test('§6.1: an oversized row spanning a chunk boundary keeps offset == ackOffse
   expect(t2.state.offset).toBe(ROW_CAP + 6);
   expect(t2.state.carry.length).toBe(0);
 });
+
+// --- B13: the retained tail carry is right-sized, not a view pinning a large parent (spec §6.5) --
+// §6.5: "nothing a stream holds is proportional to the transcript's total size — only to the window
+// and the caps above." The carry `advanceTail` retains ACROSS ticks must therefore be sized to the
+// real trailing partial row, never a `subarray` VIEW that pins the whole combined/read buffer (up to
+// TICK_READ_CAP = 4 MiB) alive for the life of the stream. `byteLength === buffer.byteLength` is the
+// mechanical proof the carry owns a right-sized buffer of its own, not a slice of a bigger one.
+test('B13: the retained carry does not pin a buffer larger than itself', () => {
+  // A chunk far larger than its own trailing partial row: one complete row up front, then a big run
+  // of bytes that all belong to a single still-unterminated (tiny, relative to the chunk) partial
+  // row — the shape a live append produces when the last line has not landed its `\n` yet.
+  const bigChunk = new Uint8Array(64 * 1024);
+  bigChunk.fill(0x61); // 'a' everywhere...
+  bigChunk[10] = 0x0a; // ...with a single newline at byte 10, so the first 11 bytes are one row.
+  // Bytes [11, 65536) are the trailing partial row: 65525 bytes with no terminator. That partial is
+  // legitimately retained as carry — but the carry must be a 65525-byte buffer of its own, NOT a
+  // view over the whole 65536-byte chunk. (Here the partial happens to be large; the pin is worst
+  // when the partial is TINY yet still holds a multi-MiB read buffer alive.)
+  const r = advanceTail(initialTailState(), bigChunk, obs(bigChunk.length));
+  expect(r.lines).toEqual(['aaaaaaaaaa']); // the one complete row, 10 'a's before the newline.
+  expect(r.state.carry.byteLength).toBe(bigChunk.length - 11); // the trailing partial row.
+  // The retention proof: the carry's own bytes are the WHOLE of its backing buffer — it pins nothing
+  // larger. RED before the fix (a `subarray` view keeps the 64 KiB parent buffer alive).
+  expect(r.state.carry.byteLength).toBe(r.state.carry.buffer.byteLength);
+  expect(r.state.carry.byteOffset).toBe(0);
+});
+
+test('B13: a tiny carry after a large chunk still owns a right-sized buffer', () => {
+  // The worst-case pin: a complete row filling almost the entire chunk, then only 3 trailing bytes.
+  // The buggy view would keep the entire chunk buffer alive to hold 3 bytes.
+  const chunk = new Uint8Array(32 * 1024);
+  chunk.fill(0x62); // 'b'
+  chunk[chunk.length - 4] = 0x0a; // newline near the very end
+  const r = advanceTail(initialTailState(), chunk, obs(chunk.length));
+  expect(r.state.carry.byteLength).toBe(3); // 'bbb', the trailing partial after the last newline.
+  expect(r.state.carry.byteLength).toBe(r.state.carry.buffer.byteLength);
+  expect(r.state.carry.byteOffset).toBe(0);
+});

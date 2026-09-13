@@ -91,6 +91,18 @@ function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
   return out;
 }
 
+/** A fresh, right-sized COPY of `view` — its own `ArrayBuffer`, sized to exactly `view.length`,
+ * pinning nothing else (spec §6.5: "nothing a stream holds is proportional to the transcript's
+ * total size"). B13: the carry retained across ticks was `combined.subarray(idx)`, a VIEW that
+ * keeps the whole `combined`/read buffer (up to TICK_READ_CAP = 4 MiB) alive for the life of the
+ * stream even when the real trailing partial row is tiny. `new Uint8Array(view)` copies element-wise
+ * into a new buffer — and, unlike `view.slice()`, it does so regardless of whether `view` is a plain
+ * `Uint8Array` or a Node `Buffer` (whose `.slice()` returns an aliasing view, not a copy), so the
+ * parent buffer is released the moment nothing else references it. */
+function rightSizedCopy(view: Uint8Array): Uint8Array {
+  return new Uint8Array(view);
+}
+
 function oversizedNode(rowStart: number, bytes: number): RenderNode {
   return {
     k: 'raw',
@@ -193,7 +205,10 @@ export function advanceTail(state: TailState, chunk: Uint8Array, obs: FileObserv
     idx = nl + 1;
   }
 
-  const finalCarry = skipping ? new Uint8Array(0) : combined.subarray(idx);
+  // A right-sized COPY, never a `subarray` view: `state.carry` is retained across ticks, so a view
+  // here would pin the whole `combined` buffer (up to prevCarry + TICK_READ_CAP bytes) for the life
+  // of the stream even when the trailing partial row is a few bytes (B13, spec §6.5).
+  const finalCarry = skipping ? new Uint8Array(0) : rightSizedCopy(combined.subarray(idx));
   const offset = base.offset + chunk.length;
 
   const newState: TailState = {
