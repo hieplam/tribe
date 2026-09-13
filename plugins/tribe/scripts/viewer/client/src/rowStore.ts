@@ -157,15 +157,15 @@ export function createRowStore(): RowStore {
 
   function applyPatches(patches: Patch[]): void {
     if (patches.length === 0) return;
-    let nodes = state.nodes;
+    // A mutable working copy from the start: `state.nodes` is `readonly RenderNode[]`, and
+    // `.slice()` returns a fresh mutable `RenderNode[]`. `changed` still gates the commit, so a
+    // batch that matches no id costs one throwaway copy and leaves the snapshot untouched.
+    const nodes: RenderNode[] = state.nodes.slice();
     let changed = false;
     for (const p of patches) {
       const idx = nodes.findIndex((n) => n.id === p.id);
       if (idx === -1) continue; // a patch for an id outside the window is dropped silently (§6.4)
-      if (!changed) {
-        nodes = nodes.slice();
-        changed = true;
-      }
+      changed = true;
       if (p.op === 'result') {
         nodes[idx] = p.node; // replace in place, position preserved
       } else {

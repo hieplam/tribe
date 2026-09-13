@@ -2,9 +2,10 @@
 // per open session view and reads its rows exclusively from the store (`rowStore.ts` is the single
 // owner of row identity; this view keeps no copy). The header carries the title, liveness, badges,
 // and the "found in N projects" collision count (§5.2) relocated here from the list's SessionRow.
-import { useSyncExternalStore, useState } from 'react';
+import { useEffect, useSyncExternalStore, useState } from 'react';
 import type { Agent, Badge, SessionSummary } from '../../../core/model.ts';
 import { useEventStream, type MetaUpdate } from '../useEventStream.ts';
+import { AgentTabs } from './AgentTabs.tsx';
 import { LoadEarlier } from './LoadEarlier.tsx';
 import { RowList } from './RowList.tsx';
 
@@ -34,7 +35,14 @@ export interface SessionViewProps {
 export function SessionView({ sessionId, agentId, session = null }: SessionViewProps) {
   const [meta, setMeta] = useState<MetaUpdate | null>(null);
   const onMeta = (m: MetaUpdate) => setMeta(m);
-  const { store, fetchRows } = useEventStream(sessionId, agentId, onMeta);
+  // The active agent is the route's agent by default; selecting a tab re-points it, which re-keys
+  // `useEventStream` and opens a fresh stream for that agent (AgentTabs' documented `onSelect`
+  // contract). It follows the route prop when the address bar changes (back/forward).
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId);
+  useEffect(() => {
+    setActiveAgentId(agentId);
+  }, [agentId]);
+  const { store, fetchRows } = useEventStream(sessionId, activeAgentId, onMeta);
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [busy, setBusy] = useState(false);
 
@@ -54,10 +62,17 @@ export function SessionView({ sessionId, agentId, session = null }: SessionViewP
   return (
     <div className="session-view">
       <SessionHeader session={session} />
-      {agents.length > 0 && <div className="session-view__agents" data-agent-count={agents.length} />}
+      {agents.length > 0 && (
+        <AgentTabs
+          sessionId={sessionId}
+          agents={agents}
+          activeAgentId={activeAgentId}
+          onSelect={setActiveAgentId}
+        />
+      )}
       {badges.length > 0 && <div className="session-view__badges" data-badge-count={badges.length} />}
       {snap.truncatedBefore && <LoadEarlier onLoad={loadEarlier} busy={busy} />}
-      <RowList nodes={snap.nodes} />
+      <RowList nodes={snap.nodes} sessionId={sessionId} agentId={activeAgentId} />
     </div>
   );
 }

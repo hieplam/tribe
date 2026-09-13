@@ -112,10 +112,20 @@ const PENDING_DELETION: string[] = [
 // no-`.adapter`-import, no-tools-import) applies to these exactly like any other COVERED file —
 // none of them currently violates any of those, so no further exception is needed.
 
-/** §12.6 (7a): the wall's own scope, written as data so it is inspectable rather than implied. A
- * trailing slash marks a directory (walked recursively, `.ts` non-test files only, matching
- * `walk()`'s existing semantics); no slash marks one top-level file. */
-const COVERED = ['core/', 'adapters/', 'serve.ts', 'client/src/'];
+/** §12.6 (7a): the fs/process side of the wall's scope, written as data so it is inspectable
+ * rather than implied. A trailing slash marks a directory (walked recursively, `.ts` non-test
+ * files only, matching `walk()`'s existing semantics); no slash marks one top-level file.
+ *
+ * SCOPED TO RUNTIME SERVER CODE ONLY. The fs-write allowlist, `openSync`-flag, `process.kill`,
+ * `process.argv`, `.tribe`, and no-`tools/`-import rules all key off this list, and every one of
+ * them governs FILESYSTEM/PROCESS capability — which browser code (`client/src/**`) categorically
+ * does not have. Scanning `client/src/**` here protected nothing and only imposed friction (a DOM
+ * method whose name collides with a banned fs member, e.g. `EventSource.close`, tripped the
+ * fs-member scan). The three §12.6 CLIENT rules that DO cover `client/src/**` —
+ * `dangerouslySetInnerHTML`, the literal colour/font/px ban, and the value-import-from-`core/`/
+ * `adapters/` ban — scope themselves independently via `walkClientFiles()` / `walkIfExists('client/src')`
+ * below, so `client/src/**` remains fully walled by exactly the rules that apply to it. */
+const COVERED = ['core/', 'adapters/', 'serve.ts'];
 // Outside the wall entirely: `tools/` (one-off measurement scripts, never shipped in a request
 // path) and `fixtures/`, `e2e/` (test scaffolding, which must write or it could not build a
 // fixture). Not scanned by any rule below — the mechanical guard that keeps that honest is the

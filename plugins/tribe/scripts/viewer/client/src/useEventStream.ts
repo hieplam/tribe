@@ -89,16 +89,6 @@ export function createStreamController(store: RowStore, deps: StreamDeps): Strea
     return true;
   }
 
-  // The structural wall (structure.test.ts §12.6(7c)) matches the bare `fs` member tokens
-  // `fs.close`/`fs.open` (as `<name>` immediately followed by a paren) to refuse filesystem writes.
-  // The browser `EventSource` has its own network-teardown method of the same name — not a
-  // filesystem write, and explicitly mandated by the design (spec §8.4: the handle whose teardown
-  // simulates a drop). We reach it through a computed key and name the internal helpers
-  // `openStream`/`shutStream`, so the fs regex does not false-positive on a DOM API the wall was
-  // never meant to govern. The wall's own philosophy treats such name collisions as false positives
-  // to be reworded (see structure.test.ts's raw-source false-positive note).
-  const CLOSE_METHOD = 'close' as const;
-
   function openStream(): void {
     shutStream();
     const source = new deps.EventSourceCtor(deps.url);
@@ -163,8 +153,8 @@ export function createStreamController(store: RowStore, deps: StreamDeps): Strea
 
   function shutStream(): void {
     if (es) {
-      es[CLOSE_METHOD](); // EventSource network teardown (see CLOSE_METHOD note above)
-      es = null;
+      es.close(); // EventSource network teardown (§8.4) — not a filesystem write; the wall no
+      es = null; // longer scans browser code, so no computed-key workaround is needed.
     }
   }
 

@@ -10,13 +10,18 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import type { RenderNode } from '../../../core/model.ts';
 import { AssistantCard } from './AssistantCard.tsx';
+import { AttachmentStrip } from './AttachmentStrip.tsx';
 import { ChipRow } from './ChipRow.tsx';
 import { Divider } from './Divider.tsx';
 import { ErrorCard } from './ErrorCard.tsx';
 import { FollowTail } from './FollowTail.tsx';
+import { ImageCard } from './ImageCard.tsx';
+import { OrphanResultCard } from './OrphanResultCard.tsx';
 import { PromptCard } from './PromptCard.tsx';
+import { RawCard } from './RawCard.tsx';
 import { ThinkingCard } from './ThinkingCard.tsx';
 import { ToolCard } from './ToolCard.tsx';
+import { UnreadableNote } from './UnreadableNote.tsx';
 
 /** The single predicate that decides "the viewport is at the bottom" (spec §8.3). The 32-pixel
  * band absorbs sub-pixel rounding and the last row's own height. */
@@ -24,11 +29,12 @@ export function isAtBottom(m: { scrollHeight: number; scrollTop: number; clientH
   return m.scrollHeight - m.scrollTop - m.clientHeight <= 32;
 }
 
-/** Dispatch one node to its card. The kinds this task owns render their real card; the five kinds
- * task 25 enriches (orphan_result, image, attachment, raw, unreadable) render a minimal inline
- * body here — the `data-kind`/`data-row-id` wrapper (added by `RowList`) is what §16.2's coverage
- * proof and §12.6 require of EVERY kind, so none may be absent. */
-function CardBody({ node }: { node: RenderNode }): ReactElement {
+/** Dispatch one node to its REAL card. Every one of the twelve kinds mounts its dedicated
+ * component — the five expandable kinds (orphan_result, image, attachment, raw, unreadable) take
+ * `sessionId`/`agentId` so their lazy `/api/block`/`/api/spill` expand-fetch is session-scoped
+ * (§4). The `data-kind`/`data-row-id` wrapper (added by `Row`) is what §16.2's coverage proof and
+ * §12.6 require of every kind. */
+function CardBody({ node, sessionId, agentId }: { node: RenderNode; sessionId: string; agentId: string | null }): ReactElement {
   switch (node.k) {
     case 'prompt':
       return <PromptCard node={node} />;
@@ -37,7 +43,7 @@ function CardBody({ node }: { node: RenderNode }): ReactElement {
     case 'thinking':
       return <ThinkingCard node={node} />;
     case 'tool':
-      return <ToolCard node={node} />;
+      return <ToolCard node={node} sessionId={sessionId} agentId={agentId} />;
     case 'chip':
       return <ChipRow node={node} />;
     case 'divider':
@@ -45,19 +51,19 @@ function CardBody({ node }: { node: RenderNode }): ReactElement {
     case 'error':
       return <ErrorCard node={node} />;
     case 'orphan_result':
-      return <span className="orphan-result" style={{ color: 'var(--warn)' }}>tool result — call is above the window</span>;
+      return <OrphanResultCard node={node} sessionId={sessionId} agentId={agentId} />;
     case 'image':
-      return <span className="image" style={{ color: 'var(--ink-soft)' }}>image ({node.mediaType})</span>;
+      return <ImageCard node={node} sessionId={sessionId} agentId={agentId} />;
     case 'attachment':
-      return <span className="attachment" style={{ color: 'var(--ink-soft)' }}>{node.label}</span>;
+      return <AttachmentStrip nodes={[node]} sessionId={sessionId} agentId={agentId} />;
     case 'raw':
-      return <span className="raw" style={{ color: 'var(--ink-soft)', fontFamily: 'var(--font-mono)' }}>{node.text ?? node.rowType}</span>;
+      return <RawCard node={node} />;
     case 'unreadable':
-      return <span className="unreadable" style={{ color: 'var(--warn)' }}>{node.count} unreadable row(s)</span>;
+      return <UnreadableNote node={node} />;
   }
 }
 
-function Row({ node }: { node: RenderNode }) {
+function Row({ node, sessionId, agentId }: { node: RenderNode; sessionId: string; agentId: string | null }) {
   return (
     <div
       className="row"
@@ -65,12 +71,18 @@ function Row({ node }: { node: RenderNode }) {
       data-row-id={node.id}
       data-state={node.k === 'tool' ? node.state : undefined}
     >
-      <CardBody node={node} />
+      <CardBody node={node} sessionId={sessionId} agentId={agentId} />
     </div>
   );
 }
 
-export function RowList({ nodes }: { nodes: readonly RenderNode[] }) {
+export interface RowListProps {
+  nodes: readonly RenderNode[];
+  sessionId: string;
+  agentId: string | null;
+}
+
+export function RowList({ nodes, sessionId, agentId }: RowListProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
   const followingRef = useRef(following);
@@ -101,7 +113,7 @@ export function RowList({ nodes }: { nodes: readonly RenderNode[] }) {
     <>
       <div ref={ref} data-scroll="rows" className="rows" onScroll={onScroll} style={{ overflowY: 'auto' }}>
         {nodes.map((node) => (
-          <Row key={node.id} node={node} />
+          <Row key={node.id} node={node} sessionId={sessionId} agentId={agentId} />
         ))}
       </div>
       {!following && <FollowTail onResume={resume} />}

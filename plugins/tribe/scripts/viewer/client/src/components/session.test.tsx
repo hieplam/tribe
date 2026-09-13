@@ -71,7 +71,7 @@ describe('session view — one node per kind, the DOM contract, follow-the-tail'
   test('RowList renders one element per RenderNode kind (§4), each carrying data-kind and data-row-id (§12.6)', () => {
     const kinds = Object.keys(RENDER_NODE_KINDS) as RenderNode['k'][];
     const nodes = kinds.map((k, idx) => nodeOfKind(k, 1000 + idx * 100));
-    const { container, root } = renderInto(<RowList nodes={nodes} />);
+    const { container, root } = renderInto(<RowList nodes={nodes} sessionId="sess-1" agentId={null} />);
     for (const k of kinds) {
       const el = container.querySelector(`[data-kind="${k}"]`);
       expect({ kind: k, present: el !== null }).toEqual({ kind: k, present: true });
@@ -81,14 +81,14 @@ describe('session view — one node per kind, the DOM contract, follow-the-tail'
   });
 
   test('the row list carries data-scroll="rows" (§12.6 — the scroll address the DOM proofs use)', () => {
-    const { container, root } = renderInto(<RowList nodes={[nodeOfKind('assistant', 1000)]} />);
+    const { container, root } = renderInto(<RowList nodes={[nodeOfKind('assistant', 1000)]} sessionId="sess-1" agentId={null} />);
     expect(container.querySelector('[data-scroll="rows"]')).not.toBeNull();
     cleanup(container, root);
   });
 
   test('every rendered row carries data-row-id equal to its RowAnchor.id', () => {
     const nodes = [nodeOfKind('prompt', 1000), nodeOfKind('assistant', 1100)];
-    const { container, root } = renderInto(<RowList nodes={nodes} />);
+    const { container, root } = renderInto(<RowList nodes={nodes} sessionId="sess-1" agentId={null} />);
     const rows = Array.from(container.querySelectorAll('[data-row-id]'));
     const ids = rows.map((r) => r.getAttribute('data-row-id'));
     expect(ids).toContain('1000:0');
@@ -100,7 +100,7 @@ describe('session view — one node per kind, the DOM contract, follow-the-tail'
     for (const state of ['pending', 'ok', 'error'] as const) {
       const n = nodeOfKind('tool', 1000) as Extract<RenderNode, { k: 'tool' }>;
       const node: RenderNode = { ...n, state, result: state === 'pending' ? null : { r: 'text', body: TEXT, isError: state === 'error', elided: false }, resultAnchor: state === 'pending' ? null : { at: 1000, i: 0 } };
-      const { container, root } = renderInto(<RowList nodes={[node]} />);
+      const { container, root } = renderInto(<RowList nodes={[node]} sessionId="sess-1" agentId={null} />);
       expect(container.querySelector('[data-kind="tool"]')!.getAttribute('data-state')).toBe(state);
       cleanup(container, root);
     }
@@ -204,12 +204,12 @@ describe('session view — one node per kind, the DOM contract, follow-the-tail'
 
   test('follow-the-tail scrolls to the new bottom on new rows while within the 32-pixel band', () => {
     const nodes = [nodeOfKind('assistant', 1000)];
-    const { container, root } = renderInto(<RowList nodes={nodes} />);
+    const { container, root } = renderInto(<RowList nodes={nodes} sessionId="sess-1" agentId={null} />);
     const el = container.querySelector('[data-scroll="rows"]') as HTMLElement;
     mockGeom(el, 1000);
     const before = el.scrollTop;
     act(() => {
-      root.render(<RowList nodes={[...nodes, nodeOfKind('assistant', 1100)]} />);
+      root.render(<RowList nodes={[...nodes, nodeOfKind('assistant', 1100)]} sessionId="sess-1" agentId={null} />);
     });
     expect(el.scrollTop).toBeGreaterThan(before); // the viewport moved to the new bottom
     cleanup(container, root);
@@ -217,7 +217,7 @@ describe('session view — one node per kind, the DOM contract, follow-the-tail'
 
   test('follow-the-tail does NOT scroll when the user is outside the band, and shows the follow pill', () => {
     const nodes = [nodeOfKind('assistant', 1000)];
-    const { container, root } = renderInto(<RowList nodes={nodes} />);
+    const { container, root } = renderInto(<RowList nodes={nodes} sessionId="sess-1" agentId={null} />);
     const el = container.querySelector('[data-scroll="rows"]') as HTMLElement;
     mockGeom(el, 1000);
     // the user scrolls up out of the band
@@ -228,7 +228,7 @@ describe('session view — one node per kind, the DOM contract, follow-the-tail'
     expect(container.querySelector('[data-testid="follow-pill"]')).not.toBeNull();
     const frozen = el.scrollTop;
     act(() => {
-      root.render(<RowList nodes={[...nodes, nodeOfKind('assistant', 1100)]} />);
+      root.render(<RowList nodes={[...nodes, nodeOfKind('assistant', 1100)]} sessionId="sess-1" agentId={null} />);
     });
     expect(el.scrollTop).toBe(frozen); // new rows arrived, viewport did NOT move
     cleanup(container, root);
@@ -236,7 +236,7 @@ describe('session view — one node per kind, the DOM contract, follow-the-tail'
 
   test('clicking the follow pill resumes following and returns to the bottom', () => {
     const nodes = [nodeOfKind('assistant', 1000)];
-    const { container, root } = renderInto(<RowList nodes={nodes} />);
+    const { container, root } = renderInto(<RowList nodes={nodes} sessionId="sess-1" agentId={null} />);
     const el = container.querySelector('[data-scroll="rows"]') as HTMLElement;
     mockGeom(el, 1000);
     act(() => {
