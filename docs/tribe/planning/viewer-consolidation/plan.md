@@ -1334,7 +1334,7 @@ campaigns exist) and print every path it opens, by instrumenting the adapter tem
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** `core/scan.test.ts` (pure: takes already-read directory
+- [x] **Step 1: Write the failing test.** `core/scan.test.ts` (pure: takes already-read directory
       listings and stats, returns the index) covers ordering, the
       `size+mtime+inode` cache key, the duplicate-session-id-across-projects case of spec §5.2
       (**`projects: string[]`** — every encoded project dir holding that id, on `SessionSummary`
@@ -1350,16 +1350,16 @@ Model: **Sonnet**.
       project's own URL lists **all** of its sessions; an empty projects root; a missing `.claude`
       directory; and an unknown session id (404 with a one-line body). Expected: routes 404 before
       implementation.
-- [ ] **Step 2: Implement.** The index lives in `core/scan.ts` (pure) and is fed by the adapters at
+- [x] **Step 2: Implement.** The index lives in `core/scan.ts` (pure) and is fed by the adapters at
       the composition root.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/scan.test.ts serve.api.test.ts
       ```
       Expected: all pass; the empty and missing-root cases return an empty list with a note, not an
       error.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the real server against the real `~/.claude/projects` (181 sessions)
 and time `/api/projects` cold and warm. Report both numbers against spec §14's budgets. Also confirm
