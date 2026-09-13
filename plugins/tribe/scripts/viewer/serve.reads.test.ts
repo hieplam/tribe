@@ -396,10 +396,19 @@ describe('/api/spill — contained, capped (spec §7.6)', () => {
     expect(status).toBe(400);
   });
 
-  test('a shape-valid name that resolves OUTSIDE the projects root (the fixture\'s own escaping symlink, D14) is refused', async () => {
+  test('a shape-valid name that resolves OUTSIDE the projects root (the fixture\'s own escaping symlink, D14) is refused with 400 (R8)', async () => {
     const { server } = await startFullFixtureServer();
-    const { status } = await getJson(server.port, `/api/spill?session=${SESSION_1_ID}&name=escaping.txt`);
-    expect(status).not.toBe(200);
+    const { status, body } = await getJson(server.port, `/api/spill?session=${SESSION_1_ID}&name=escaping.txt`);
+    expect(status).toBe(400);
+    expect((body as { error: string }).error).toBe('spill name refused');
+  });
+
+  test('a charset-valid name too long for a single path component (>255 chars) is refused with 400 — the lexical containment branch, never a 404 (R8)', async () => {
+    const { server } = await startFullFixtureServer();
+    const tooLongName = `${'a'.repeat(256)}.txt`;
+    const { status, body } = await getJson(server.port, `/api/spill?session=${SESSION_1_ID}&name=${tooLongName}`);
+    expect(status).toBe(400);
+    expect((body as { error: string }).error).toBe('spill name refused');
   });
 
   test('caps the read at 2 MiB', async () => {

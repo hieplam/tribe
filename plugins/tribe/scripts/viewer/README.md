@@ -298,7 +298,8 @@ Every row is what the user sees; no row is a stack trace. Every one of these is 
 | transcript truncated or replaced while disconnected | nothing special: a reconnect is a fresh snapshot under a new `generation` |
 | a single row exceeds `ROW_CAP` (8 MiB) | one `raw` node, `rowType: "oversized"`, the rest of the row skipped to the next newline |
 | `/api/spill` name fails the charset check | `400 spill name refused: unsafe shape` |
-| `/api/spill` name is shaped fine but fails containment or does not resolve | `404 spill name refused` / `404 spill not found` |
+| `/api/spill` name is shaped fine but fails containment (lexically, or the resolved path escapes the root) | `400 spill name refused` (R8) |
+| `/api/spill` name is contained but the file is absent | `404 spill not found` |
 | `/api/block` names an `at`/`i` that does not resolve to a block | `404` |
 | 9th concurrent SSE stream | `503 too many live streams` |
 | `Host`/`Origin` mismatch | `403` |

@@ -474,6 +474,10 @@ function jsonNotFound(message: string): Response {
   return Response.json({ error: message }, { status: 404 });
 }
 
+function jsonBadRequest(message: string): Response {
+  return Response.json({ error: message }, { status: 400 });
+}
+
 function routeNotFound(path: string): Response {
   // spec §3.2 closing rule's exact body — distinct from `jsonNotFound` above (used by the API
   // routes' own messages, already asserted by `serve.api.test.ts`/`serve.reads.test.ts`): a path
@@ -689,9 +693,12 @@ function routeResponse(req: Request): Response {
         const dir = resolveToolResultsDir(route.sessionId, nowMs, nowIso);
         if (dir === null) return jsonNotFound(`no session ${route.sessionId} under ~/.claude/projects`);
         const joined = containedJoin(dir, route.name);
-        if (joined === null) return jsonNotFound('spill name refused');
+        // R8: both containment refusals — lexical (joined === null) and resolved
+        // (resolved === null) — are 400 "spill name refused". Only a contained name whose
+        // file is absent is a 404 "spill not found" (below).
+        if (joined === null) return jsonBadRequest('spill name refused');
         const resolved = resolveContained(projectsRootResolved, joined);
-        if (resolved === null) return jsonNotFound('spill not found');
+        if (resolved === null) return jsonBadRequest('spill name refused');
         const obs = statOrNull(resolved);
         if (obs === null) return jsonNotFound('spill not found');
         const text = new TextDecoder('utf-8').decode(readRange(resolved, 0, Math.min(obs.sizeBytes, SPILL_READ_CAP)));

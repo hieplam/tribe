@@ -32,13 +32,18 @@ fresh_home() { # fresh_home HOME_DIR
 }
 
 # doctor_fixture — a throwaway scripts/ tree for doctor.sh: $1 is the dir, $2 is
-# "provisioned" (runner/node_modules/ present) or "unprovisioned" (absent). doctor.sh is COPIED,
-# not symlinked, because it resolves its own directory with `pwd -P`; a symlink would point it
-# back at this checkout and the fixture would silently become the host's install state again.
+# "provisioned" (runner/node_modules/ AND viewer/dist/index.html present) or "unprovisioned"
+# (absent). doctor.sh is COPIED, not symlinked, because it resolves its own directory with
+# `pwd -P`; a symlink would point it back at this checkout and the fixture would silently
+# become the host's install state again. The stub index.html is a fixture-only placeholder —
+# doctor.sh only checks the file's presence, it never reads or builds it (no `vite build` here).
 doctor_fixture() { # doctor_fixture DIR provisioned|unprovisioned
-  mkdir -p "$1/runner"
+  mkdir -p "$1/runner" "$1/viewer/dist"
   cp "$DOCTOR" "$1/doctor.sh"
-  [[ "$2" == provisioned ]] && mkdir -p "$1/runner/node_modules"
+  if [[ "$2" == provisioned ]]; then
+    mkdir -p "$1/runner/node_modules"
+    printf '<!doctype html>\n' > "$1/viewer/dist/index.html"
+  fi
   return 0
 }
 
