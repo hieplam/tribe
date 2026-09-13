@@ -6,13 +6,16 @@ import { join } from 'node:path';
 const ROOT = import.meta.dir;
 const WORLD = ['fs', 'node:fs', 'node:fs/promises', 'child_process', 'node:child_process', 'http', 'node:http', 'https', 'node:https'];
 
+// `.tsx` joins `.ts` as of task 22 (client/src/**'s React components) — both are non-test
+// runtime-shaped source files under this wall's scope; a `.test.ts`/`.test.tsx` file is never
+// walked, matching the existing semantics for `.ts` test files.
 function walk(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(join(ROOT, dir))) {
     if (entry === 'node_modules') continue;
     const rel = `${dir}/${entry}`;
     if (statSync(join(ROOT, rel)).isDirectory()) { out.push(...walk(rel)); continue; }
-    if (!entry.endsWith('.ts') || entry.endsWith('.test.ts')) continue;
+    if (!/\.tsx?$/.test(entry) || /\.test\.tsx?$/.test(entry)) continue;
     out.push(rel);
   }
   return out;
@@ -22,6 +25,26 @@ function walk(dir: string): string[] {
  * is scanned by several rules below before task 22 has created it. */
 function walkIfExists(dir: string): string[] {
   return existsSync(join(ROOT, dir)) ? walk(dir) : [];
+}
+
+/** Every file under `client/`, ANY extension, recursively (unlike `walk`, test files and
+ * non-`.ts(x)` files included) — the two §12.6 client rules below (`dangerouslySetInnerHTML`,
+ * the literal-design-token ban) apply to `.css` alongside `.ts`/`.tsx`, and D18 makes `client/`
+ * the one place with NO exempt file, so nothing under it is skipped. Returns `[]` if `client/`
+ * does not exist (mirrors `walkIfExists`'s safety, though the directory always does today). */
+function walkClientFiles(): string[] {
+  if (!existsSync(join(ROOT, 'client'))) return [];
+  const out: string[] = [];
+  const recurse = (dir: string) => {
+    for (const entry of readdirSync(join(ROOT, dir))) {
+      if (entry === 'node_modules') continue;
+      const rel = `${dir}/${entry}`;
+      if (statSync(join(ROOT, rel)).isDirectory()) { recurse(rel); continue; }
+      out.push(rel);
+    }
+  };
+  recurse('client');
+  return out;
 }
 
 /** Raw source of `file`, byte for byte — no comment-stripping. Used ONLY for the `process.env`
@@ -48,12 +71,22 @@ function rawSourceOf(file: string): string {
  * source directly (not a file path) so the SAME extraction the real-file rules use can also run
  * against a synthetic probe string below — "prove the wall bites" exercises this function, not a
  * copy of it. */
-function importsOfSource(source: string, loader: 'ts' | 'js'): string[] {
+function importsOfSource(source: string, loader: 'ts' | 'tsx' | 'js'): string[] {
   return new Bun.Transpiler({ loader }).scanImports(source).map((i) => i.path);
 }
 
-function importsOf(file: string, loader: 'ts' | 'js'): string[] {
+function importsOf(file: string, loader: 'ts' | 'tsx' | 'js'): string[] {
   return importsOfSource(rawSourceOf(file), loader);
+}
+
+/** Bun's `ts` transpiler loader rejects JSX syntax outright (`Expected ">" but found
+ * "className"`) — a `.tsx` file (client/src/App.tsx, main.tsx) MUST be parsed with the `tsx`
+ * loader or every Transpiler-based scan below throws on it. Every call site that scans a real
+ * file by its label derives the loader from the label's extension here, so a `.tsx` file is
+ * never handed to the `ts` loader; every synthetic probe string in this file names a `.ts`
+ * label, so this is a pure extension, not a behavior change for any existing rule. */
+function loaderForLabel(label: string): 'ts' | 'tsx' {
+  return label.endsWith('.tsx') ? 'tsx' : 'ts';
 }
 
 // -------------------------------------------------------------------------------------------
@@ -183,14 +216,14 @@ const BANNED_IMPORT_SPECIFIERS = ['node:fs/promises', 'fs/promises', 'node:child
  * `import type … from 'fs'` is erased at compile time and never a runtime dependency, so it is
  * skipped (matching `scanImports`). Every layer fails toward false positives — the philosophy
  * stated in `rawSourceOf`'s comment above. */
-function fsViolations(source: string): string[] {
+function fsViolations(source: string, loader: 'ts' | 'tsx' = 'ts'): string[] {
   const bad: string[] = [];
   // Import STATEMENTS are classified over a comment-stripped (strings-preserved) copy: a `;` hidden
   // in a comment inside the clause used to abort the statement matcher below and let a disallowed
   // member through (Phase-1 audit bypass 7). `stripComments` keeps the specifier string intact.
   const noComments = stripComments(source);
   // (a) non-static-import forms of fs — require / dynamic import / TS import-equals.
-  for (const imp of new Bun.Transpiler({ loader: 'ts' }).scanImports(source)) {
+  for (const imp of new Bun.Transpiler({ loader }).scanImports(source)) {
     if (FS_SPECIFIERS.includes(imp.path) && imp.kind !== 'import-statement') {
       bad.push(`fs reached via ${imp.kind} (only a static named import is verifiable)`);
     }
@@ -404,7 +437,8 @@ function indirectionViolations(source: string): string[] {
  * exercises exactly this function, not a reimplementation of its logic. */
 function allowlistViolations(label: string, source: string): string[] {
   const bad: string[] = [];
-  const imports = importsOfSource(source, 'ts');
+  const loader = loaderForLabel(label);
+  const imports = importsOfSource(source, loader);
 
   for (const spec of imports) {
     if (BANNED_IMPORT_SPECIFIERS.includes(spec)) bad.push(`banned import: ${spec}`);
@@ -415,7 +449,7 @@ function allowlistViolations(label: string, source: string): string[] {
     bad.push('node:fs imported outside adapters/**');
   }
 
-  for (const v of fsViolations(source)) bad.push(v);
+  for (const v of fsViolations(source, loader)) bad.push(v);
   for (const call of openSyncFlagViolations(source)) bad.push(`openSync not read-only: ${call}`);
   for (const call of bunViolations(label, source)) bad.push(call);
   for (const call of processKillViolations(label, source)) bad.push(call);
@@ -426,9 +460,11 @@ function allowlistViolations(label: string, source: string): string[] {
 
 /** Every module `source` imports from `tools/` — the rule that keeps the wall's OUTSIDE scope
  * from becoming a loophole (spec §12.6 (7a)): a measurement script the shipped server could
- * reach at runtime would be inside the wall in every sense that matters. */
-function importsFromTools(source: string): boolean {
-  return importsOfSource(source, 'ts').some((s) => s.includes('tools/'));
+ * reach at runtime would be inside the wall in every sense that matters. `loader` defaults to
+ * `ts` (every existing call site names a `.ts` file); a `.tsx` caller passes `tsx` so JSX syntax
+ * does not throw out of the transpiler (see `loaderForLabel`). */
+function importsFromTools(source: string, loader: 'ts' | 'tsx' = 'ts'): boolean {
+  return importsOfSource(source, loader).some((s) => s.includes('tools/'));
 }
 
 // -------------------------------------------------------------------------------------------
@@ -597,8 +633,65 @@ describe('viewer structural contract', () => {
     }
   });
 
-  test('the browser client imports nothing at all, in any import form', () => {
-    expect(importsOf('client/app.js', 'js')).toEqual([]);
+  // `client/app.js` (the vanilla-JS browser client, Task 10/11) is DELETED by task 22, replaced
+  // by the React client under `client/src/**` — its "imports nothing" rule retires with the
+  // file. The three rules below (§12.6 (1)/(2)/(3)) are its replacement.
+
+  describe('the client half of the structural wall (§12.6, task 22)', () => {
+    test('no file under client/ contains dangerouslySetInnerHTML (§12.6.2)', () => {
+      for (const f of walkClientFiles()) {
+        expect({ file: f, bad: rawSourceOf(f).includes('dangerouslySetInnerHTML') }).toEqual({ file: f, bad: false });
+      }
+    });
+
+    // #rgb / #rrggbb, rgb(/rgba(/hsl(/oklch(, a font-family value, or a bare Npx length. There is
+    // NO exempt file under client/ (D18): the owner's tokens.css lives OUTSIDE client/ and is
+    // reached only by `@import`, so every literal reaching a file under client/ is an invention.
+    // `font-family:` is refused UNLESS its value is a `var(--…)` reference — `font-family:
+    // var(--font-sans)` is exactly the token-consuming pattern §8.2 requires and must stay clean.
+    const CLIENT_LITERAL_RE = /#[0-9a-fA-F]{3}\b|#[0-9a-fA-F]{6}\b|\brgb\(|\brgba\(|\bhsl\(|\boklch\(|font-family\s*:(?!\s*var\()|\b\d+(?:\.\d+)?px\b/;
+
+    test('no file under client/ contains a literal colour, font-family value, or bare px length (§12.6.3, D18 — no exempt file)', () => {
+      for (const f of walkClientFiles()) {
+        if (!/\.(css|tsx?|jsx?)$/.test(f)) continue; // spec §12.6.3's own file-type scope
+        const bad = CLIENT_LITERAL_RE.test(rawSourceOf(f));
+        expect({ file: f, bad }).toEqual({ file: f, bad: false });
+      }
+    });
+
+    // Prove the detector distinguishes a literal font stack from a token reference — otherwise
+    // the very pattern §8.2 requires (`font-family: var(--font-sans)`) would falsely trip the
+    // rule it is meant to satisfy.
+    test('prove the wall bites: a literal font-family value is flagged', () => {
+      expect(CLIENT_LITERAL_RE.test('.x { font-family: Arial, sans-serif; }')).toBe(true);
+    });
+
+    test('font-family: var(--font-sans) — the required token-consuming pattern — stays clean', () => {
+      expect(CLIENT_LITERAL_RE.test('.x { font-family: var(--font-sans); }')).toBe(false);
+    });
+
+    test('client/src/** value-imports nothing from core/ or adapters/ (§12.6.1; type-only imports pass)', () => {
+      for (const f of walkIfExists('client/src')) {
+        const imports = importsOf(f, loaderForLabel(f));
+        const bad = imports.filter((s) => /(^|\/)core(\/|$)/.test(s) || /(^|\/)adapters(\/|$)/.test(s));
+        expect({ file: f, bad }).toEqual({ file: f, bad: [] });
+      }
+    });
+
+    // "Prove the wall bites" (this file's own convention): the value-import rule above is only
+    // as good as its underlying detector — these two synthetic probes show it tells a VALUE
+    // import from core/ apart from a type-only one, which the brief requires to keep passing.
+    test('prove the client wall bites: a VALUE import from core/ is flagged', () => {
+      const probe = "import { normalize } from '../../core/normalize.ts';\nexport const x = 1;\n";
+      const bad = importsOfSource(probe, 'ts').filter((s) => /(^|\/)core(\/|$)/.test(s));
+      expect(bad).not.toEqual([]);
+    });
+
+    test('a TYPE-ONLY import from core/ passes clean (erased at compile time, never a runtime dependency)', () => {
+      const probe = "import type { RenderNode } from '../../core/model.ts';\nexport const x = 1;\n";
+      const bad = importsOfSource(probe, 'ts').filter((s) => /(^|\/)core(\/|$)/.test(s));
+      expect(bad).toEqual([]);
+    });
   });
 
   test('process.argv appears only in serve.ts, across every file the wall covers (§12.6.5)', () => {
@@ -617,7 +710,7 @@ describe('viewer structural contract', () => {
 
   test('no file under the wall imports from tools/ (§12.6 (7a) — the scope fence, not a loophole)', () => {
     for (const f of nonDoomed(coveredFiles())) {
-      expect({ file: f, bad: importsFromTools(rawSourceOf(f)) }).toEqual({ file: f, bad: false });
+      expect({ file: f, bad: importsFromTools(rawSourceOf(f), loaderForLabel(f)) }).toEqual({ file: f, bad: false });
     }
   });
 

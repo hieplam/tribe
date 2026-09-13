@@ -1711,7 +1711,7 @@ file, there is no alias layer, and no component may introduce a name the file do
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Extend `structure.test.ts`: no file under `client/`
+- [x] **Step 1: Write the failing test.** Extend `structure.test.ts`: no file under `client/`
       contains `dangerouslySetInnerHTML`; **no file under `client/` at all** contains a literal
       colour (there is no `tokens.css` under `client/` to exempt — D18 delivers tokens by `@import`
       from the owner's file, so the only exempt file is `design/sea-salt/tokens.css` itself, which
@@ -1721,7 +1721,7 @@ Model: **Sonnet**.
       Add `V/client/src/routes.test.ts` asserting the four URL shapes of spec §3.2 parse and
       round-trip through `pushState`. Expected: the client rules fail against the old `app.css`,
       which is full of literals.
-- [ ] **Step 2: Implement** the scaffold. **Tokens arrive by `@import`, not by a copy step (D18).**
+- [x] **Step 2: Implement** the scaffold. **Tokens arrive by `@import`, not by a copy step (D18).**
       `client/src/styles/index.css` carries exactly:
 
       ```css
@@ -1747,7 +1747,7 @@ Model: **Sonnet**.
       with the one-line remedy `bunx playwright install chromium` when none resolves**. It must not
       skip: a user-visible goal that goes green because its browser was missing is exactly the
       proxy-proof failure this revision exists to remove.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer
@@ -1756,7 +1756,7 @@ Model: **Sonnet**.
 
       Expected: `dist/index.html` and `dist/assets/` exist; every structural rule passes; the old
       client files are gone.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the build from a clean `node_modules` and confirm `dist/` is
 produced and git-ignored. Then grep the built bundle for any hex colour outside the token block — a

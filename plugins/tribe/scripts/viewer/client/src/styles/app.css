@@ -1,0 +1,44 @@
+/* client/src/styles/app.css — layout/typography only, zero literal colours (spec §8.2/§12.6).
+ * Every value below is `var(--token)`, read verbatim from design/sea-salt/tokens.css (imported by
+ * ./index.css) — no design token, colour, font, radius, or spacing literal is invented here. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--size-14);
+  line-height: var(--leading-body);
+}
+
+#root {
+  min-height: 100vh;
+  padding: var(--space-16);
+}
+
+.app-shell {
+  background: var(--surface);
+  border: var(--card-stroke) var(--rule-style) var(--rule);
+  border-radius: var(--radius-8);
+  padding: var(--space-16);
+}
+
+.app-shell__title {
+  margin: 0 0 var(--space-8) 0;
+  color: var(--ink);
+  font-size: var(--size-20);
+}
+
+.app-shell__meta {
+  color: var(--ink-soft);
+  font-size: var(--size-13);
+}

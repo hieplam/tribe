@@ -1,0 +1,6 @@
+/* client/src/styles/index.css — the ONE file that imports the owner's design tokens (D18).
+ * Nothing copies tokens.css: Vite resolves this @import at build time, reading the owner's file
+ * directly, so there is exactly one copy of the tokens in the repo. Seven `../`, verified against
+ * the worktree from this directory (plan Task 22, Step 2) before this line was written:
+ *   client/src/styles -> src -> client -> viewer -> scripts -> tribe -> plugins -> repo root. */
+@import "../../../../../../../docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css";

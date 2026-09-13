@@ -6,11 +6,20 @@
   "description": "Read-only, refresh-based status viewer for tribe campaign runners (scans ~/.tribe, server-renders HTML; zero writes).",
   "scripts": {
     "test": "bun test",
-    "check": "tsc --noEmit && bun test"
+    "check": "tsc --noEmit && bun test",
+    "build": "vite build"
   },
-  "dependencies": {},
+  "dependencies": {
+    "react": "~19.2.0",
+    "react-dom": "~19.2.0"
+  },
   "devDependencies": {
     "@types/bun": "^1.3.14",
-    "typescript": "^7.0.2"
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "playwright-core": "1.63.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
   }
 }
