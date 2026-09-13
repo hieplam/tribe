@@ -1,122 +1,255 @@
 # Campaign viewer
 
-A **stateless, read-only** local HTTP server for a machine's `~/.tribe/` tree, with two surfaces:
-
-- **Status page** (`GET /`) — a refresh-based snapshot of every campaign found under
-  `--tribe-root`: liveness, cards, escalations, worker reports, the session log tail. Every GET
-  re-scans from scratch; the refresh IS the poll, nothing is cached (unchanged from before this
-  package grew a second surface).
-- **Live view** (`GET /live`) — while a campaign's session is running, one page listing every
-  process the runner spawned for the currently running card (the executor session and every
-  subagent) and tailing each transcript live, over Server-Sent Events, within ~2s of a new
-  message. See
-  [`docs/superpowers/specs/2026-09-02-campaign-live-viewer-design.md`](../../../../docs/superpowers/specs/2026-09-02-campaign-live-viewer-design.md)
-  for the full design.
+A **stateless, read-only** local HTTP server, **one surface**: every Claude Code session
+transcript on the machine (`~/.claude/projects/`), listed, rendered, and followed live. Campaign
+facts are a small badge read from exactly two files under `~/.tribe` — never a second surface, and
+never a store (D7).
 
 This file documents what the code in this directory **actually does** — verified against the
-code, not asserted from memory.
+code, not asserted from memory. It is written against
+[`docs/tribe/planning/viewer-consolidation/spec.md`](../../../../docs/tribe/planning/viewer-consolidation/spec.md)
+§3.2 (routes), §5 (discovery), §6 (the SSE contract), §10.3 (the build step) and §13 (the
+fail-closed table); see the spec for the full rationale behind each rule below, and
+[`.c3/adr/adr-20260911-viewer-consolidation.md`](../../../../.c3/adr/adr-20260911-viewer-consolidation.md)
+for why the pre-consolidation two-surface design (a `~/.tribe`-scanning status page plus a
+separate `/live` runner-log tail) was retired.
 
 ## Read-only, by construction
 
 Nothing in this package ever writes, renames, deletes, locks, or executes anything, anywhere; it
 never calls `git`, `gh`, or any network endpoint; it binds `127.0.0.1` only. Every filesystem
-access — for both surfaces — goes through `adapters/scan.adapter.ts` (status page) or
-`adapters/transcript.adapter.ts` (live view); the poller
-(`adapters/poller.adapter.ts`) is the only clock owner. Nothing under `core/` touches the
-filesystem, the clock, or the network directly — `structure.test.ts` enforces this mechanically
-on every `bun test` run.
+access goes through one of two adapters — `adapters/fs.adapter.ts` (every transcript read: stat,
+readdir, ranged read, realpath) or `adapters/campaign.adapter.ts` (the *only* two `~/.tribe` reads
+— `campaign-state.json` and `run.json` — plus the pid liveness probe). `adapters/poller.adapter.ts`
+is the only clock owner (one 250 ms poll loop per open `/events` stream). Nothing under `core/`
+touches the filesystem, the clock, the network, or `process.env`/`process.argv` directly —
+`structure.test.ts` enforces this mechanically on every `bun test` run.
 
 ## Run it
 
 ```sh
-bun serve.ts --tribe-root ~/.tribe --port 4321
+bun serve.ts --port 4321
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--tribe-root` | `$HOME/.tribe` | Root directory to scan for `<repoKey>/campaigns/<slug>/` trees. |
-| `--port` | `4321` | HTTP port, bound to `127.0.0.1` only. |
+| `--port` | `4321` | HTTP port, bound to `127.0.0.1` only. `1-65535`; `--port abc`, `--port 0`, `--port 70000`, or an unknown flag each refuse with one stderr line and exit `2` (never a stack trace, never a random port). A port already in use refuses with one stderr line and exit `1`. |
+
+`--tribe-root` is gone. Both roots the server needs are resolved from the environment alone, once
+at boot, and printed on the startup line:
+
+- **Projects root** (spec §5): `$CLAUDE_CONFIG_DIR/projects` when `CLAUDE_CONFIG_DIR` is set and
+  non-empty, else `$HOME/.claude/projects`. An empty `CLAUDE_CONFIG_DIR=` is treated as unset. A
+  **set but unreadable** `CLAUDE_CONFIG_DIR` (missing, not a directory, or `EACCES`) is a typed
+  refusal at start — one stderr line, exit `2` — never a silent fall back to `~/.claude`, because
+  that would hand a user who deliberately sandboxed their config someone else's sessions.
+- **Tribe root**: `$HOME/.tribe`, for the two-file badge read described below.
+
+`HOME` and `CLAUDE_CONFIG_DIR` are the only environment values this package reads, and only in
+`serve.ts` — the composition root, and the only file that reads `process.env` or `process.argv`.
 
 ## Routes
 
-| Route | Response |
-| --- | --- |
-| `GET /` | The status page (unchanged renderer), plus one "watch live" link per campaign section. |
-| `GET /live?repo=<repoKey>&slug=<slug>[&process=<id>]` | The live page shell — content arrives over `/events`. |
-| `GET /events?repo=…&slug=…[&process=…]` | SSE stream: `processes`, `snapshot`, `append`, `ping`, `error`. Capped at 8 concurrent streams; the 9th connection gets `503`. |
-| `GET /api/processes?repo=…&slug=…` | `{ processes }` JSON — the machine-readable process list (also the e2e's assertion surface). |
-| `GET /app.js`, `GET /app.css` | The two static browser client files, served from memory from a fixed allowlist — never resolved from the request path. |
-| `GET /healthz` | `{ ok: true, viewer: "tribe-live-viewer", v: 1 }` — the runner's "is a viewer already serving this port" reuse probe. |
-| anything else | `404` |
+One route table, two families: everything under `/api` and `/events` is JSON or SSE; everything
+else that is not a built asset returns the SPA shell, so the React client owns the address bar.
 
-`repo` and `slug` are separate query parameters (never one slash-joined value) and must each
-match `^[A-Za-z0-9._-]+$`; anything else is `400` before a single path is built.
+| Method + path | Response | Notes |
+| --- | --- | --- |
+| `GET /` | `dist/index.html` | list view; `?campaign=<repoKey>/<slug>` pre-fills the filter (the pair, never the slug alone); `?all=1` shows projects older than the 30-day window |
+| `GET /p/<encodedProjectDir>` | `dist/index.html` | one project |
+| `GET /s/<sessionId>` | `dist/index.html` | one session; project resolved by scanning, never by joining the id into a path |
+| `GET /s/<sessionId>/a/<agentId>` | `dist/index.html` | one subagent tab |
+| `GET /index.html` | `dist/index.html` | the same bytes as `GET /` |
+| `GET /assets/<name>` | the built file | a fixed allowlist read from `dist/` into memory once at boot — never a path join at request time |
+| `GET /healthz` | `{"ok":true,"viewer":"tribe-viewer","v":2}` | **deliberately not** the pre-consolidation `{"ok":true,"viewer":"tribe-live-viewer","v":1}` body — an already-running old viewer must be unrecognisable to the runner's reuse probe |
+| `GET /api/projects?all=1` | `{"projects":[...],"olderCount":n,"skippedBadges":n}` | without `all=1`, `projects` is the 30-day window and `olderCount` is the remainder |
+| `GET /api/sessions?project=<dir>` | `{"project":...,"sessions":[...]}` | |
+| `GET /api/session/<sessionId>` | `{"session":...,"subagents":[...],"badges":[...]}` | metadata only — rows never come from here, only from `/events` or `/api/rows` |
+| `GET /api/rows?session=&agent=&before=&limit=&orphans=` | `{"nodes":[...],"patches":[...],"from":n,"to":n,"truncatedBefore":bool}` | see below |
+| `GET /api/block?session=&agent=&at=&i=` | `{"block":...}` | one elided payload addressed by row byte offset + block index |
+| `GET /api/spill?session=&name=` | `text/plain` | a persisted-output file, name- and containment-checked |
+| `GET /events?session=&agent=` | `text/event-stream` | see "Tail and the SSE contract" below |
+| anything else | see the one rule below | never a stack trace |
 
-An `/events` connection sends a `ping` frame every 15s (`PING_INTERVAL_MS`,
-`adapters/poller.adapter.ts`) to keep it alive across quiet periods. `Bun.serve()` is started
-with `idleTimeout: SSE_IDLE_TIMEOUT_SECONDS` (`core/live/model.ts`, currently 60s) — comfortably
-above the ping interval — so Bun's own connection-idle timeout never races the keepalive and
-closes a quiet stream first (F55).
+**`/api/rows` in full.** `before` is a **row byte offset** — pass back the `from` you currently
+hold and the response is exactly the window immediately preceding it; omitted, it returns the tail
+window (the same backward algorithm `hello` runs). `orphans` is a comma-separated list of
+`tool_use_id`s the client currently holds without a result; for each one whose call lies in the
+returned range, the response carries a `Patch`. `limit` is the number of **pre-pairing candidate
+nodes** to gather — default 500, maximum 2000, clamped rather than refused. The response's `from`
+is the first retained row's byte offset (pass it back as the next `before`); `to` is one past the
+last complete row, never `EOF`; `truncatedBefore` says whether any row precedes `from`.
 
-## How the live view finds a campaign's transcripts
+**The one rule for a path not in the table above:** a path that is client-routed — `/`,
+`/index.html`, or anything under `/p/` or `/s/` — returns the SPA shell with `200`, because the
+React router owns those addresses and the server cannot know which of them is meaningful.
+Everything else returns `404` with a JSON body `{"error":"not found","path":"<path>"}`. So
+`/s/does-not-exist` returns the shell (the client renders "no session with that id") while
+`/api/session/does-not-exist` returns a `404` — the split is by prefix, not by existence, which is
+also what keeps the routing layer free of a traversal surface: the server never probes the
+filesystem to decide a status code.
 
-Given `repo` + `slug` alone (no new persisted field — nothing under `~/.tribe` gained a new
-field for this feature):
+Every `sessionId`/`agentId`/`project` value is validated and contained **before any path is
+joined**. Every request is also gated on `Host`/`Origin` — `127.0.0.1[:port]` or
+`localhost[:port]` only, `403` otherwise (DNS-rebinding defense) — and every response carries a
+Content-Security-Policy plus `X-Content-Type-Options: nosniff`.
 
-1. Read the campaign's newest `runs/<id>/run.json` for the target repo's `cwd` and the
-   `campaign-state.json` path.
-2. Read that state file's `sequence`/`cards`; pick the newest-in-sequence card whose status is
-   `running` (falling back to the last card in `sequence` if none is currently running, e.g. the
-   run already ended) — that card's `sessionId` names the session to watch.
-3. Encode the repo `cwd` the same way Claude Code does
-   (`core/live/paths.ts:sanitizeProjectDirName`, ported from Kanna) to find
-   `~/.claude/projects/<encoded>/<sessionId>.jsonl` (the parent transcript) and
-   `~/.claude/projects/<encoded>/<sessionId>/subagents/agent-*.jsonl` (+ `.meta.json` sidecars,
-   for every subagent).
+## On-disk discovery
+
+Given the resolved projects root, `serve.ts` walks it two levels deep and never any deeper — no
+path component is ever taken from a file's contents, a query parameter, or a JSON field:
+
+1. `readdir(projectsRoot)` → candidate project directory names; skip anything that is not a
+   directory.
+2. For each project directory: `readdir` it. Every `*.jsonl` is a session id (the basename minus
+   `.jsonl`); every `<sessionId>/` directory is that session's sidecar home.
+3. For each session: `stat` for size/mtime; a **head read** (first 64 KiB) and a **tail read**
+   (last 256 KiB) — never the whole file — for its title and `cwd`; `readdir` its
+   `subagents/` directory, keeping entries matching `^agent-(.+)\.jsonl$`, for its subagent count
+   and (per match) the sibling `agent-<id>.meta.json`.
+4. A project's `cwd` is the first non-null `cwd` field seen across its sessions' head reads.
+
+**Title rule**, in order: last `custom-title`, else last `ai-title`, else `last-prompt`, else the
+first user message, else the session id.
+
+**Ordering** is display ordering of files, not of rows: projects by `newestMtimeIso` descending,
+sessions within a project by `mtimeIso` descending. Rows inside a transcript are always shown in
+file order, never timestamp order.
+
+**Resolving `/s/<sessionId>` without a project in the URL:** the id is validated
+(`^[0-9a-fA-F-]{8,64}$`, no dots, no separators) and then never joined — the scan index is asked
+for a session with that id, and the caller uses the `projectDir` the scan itself produced from
+`readdir`. Two sessions with the same id in two project dirs resolve to the newest by mtime, and
+the response carries every encoded project directory that holds the id.
+
+**Liveness**: `live = (sizeBytes grew since the previous scan) || (now - mtime <= 10 min)`. No pid,
+no campaign state, no lock file.
+
+**The default project window**: the sidebar shows by default only projects whose newest session is
+within 30 days; `?all=1` reveals the rest. Sessions inside a shown project are never hidden by this
+window, and a session named by a campaign badge is reachable by its own URL regardless of its
+project's age.
+
+**The session read cache** is keyed on `path + sizeBytes + mtimeMs + inode`, bounded to 500
+entries, LRU — a miss is always a correct re-read, so this holds derived summaries only and does
+not violate the "no store" rule.
+
+**Campaign badges**: `adapters/campaign.adapter.ts` is the *only* code that reads `~/.tribe`, and
+it reads exactly two files per campaign — `campaign-state.json` and `run.json` — never a third. A
+malformed or unreadable state file degrades that campaign's badges to `[]`, per-campaign fault
+isolated; other campaigns are unaffected. `~/.tribe` missing entirely degrades every session's
+`badges` to `[]` (never `null`). A `sessionId` in a state file that is not a valid id is dropped
+from the index and counted in `skippedBadges`.
+
+## Tail and the SSE contract
+
+`GET /events?session=<sessionId>[&agent=<agentId>]` opens one stream for one **focused**
+transcript view — the parent session, or one subagent tab. Switching tabs navigates to a new URL,
+which closes the old `EventSource` and opens a new one. Capped at **8 concurrent streams**; a 9th
+connection gets `503 too many live streams`.
+
+| `event:` | `data` | Emitted |
+| --- | --- | --- |
+| `hello` | `{"generation":...,"session":...,"agents":[...],"badges":[...],"from":n,"to":n,"truncatedBefore":bool}` | once, on connect; `generation` is new per connection |
+| `rows` | `{"nodes":[...],"from":n,"to":n}` | the initial window, then on every growth tick — append-only |
+| `patch` | `{"patches":[...]}` | a later-arriving fact about a node already sent (e.g. a tool result whose call was sent earlier) |
+| `meta` | `{"agents":[...],"badges":[...],"live":bool}` | whenever the agent set, badges, or liveness change — including a new sidecar appearing mid-stream |
+| `reset` | `{"reason":"truncated"\|"rotated"}` | the file was truncated or replaced; the server then streams the normal tail window, never the file from byte 0 |
+| `ping` | `{"t":"<iso>"}` | every 15 s |
+| `gone` | `{"reason":"deleted"}` | the focused file disappeared; the client stops retrying |
+
+**`id:` is a per-stream monotonic sequence number**, starting at 1 on `hello` and incrementing by
+one per frame of any type — the client's rule is to ignore a frame whose `id` it has already
+processed. The server never reads `Last-Event-ID`: a reconnect is treated as a brand-new client,
+with a **new `generation`**, a fresh snapshot read from the file as it now is, and pairing state
+rebuilt by a forward pass over that snapshot. Nothing is "resumed". A client whose `generation`
+changes clears its store before applying the new snapshot; dedupe by row id only ever applies
+within one generation.
+
+**On connect, the window is the last 500 nodes** — `core/window.ts#findWindow`, a pure function
+with the read injected, walks the file *backwards*, one row at a time by newline search, until it
+has gathered at least 500 pre-pairing candidate nodes or reached the start of the file. The window
+always ends at the last **complete** row (never mid-row, since a live file is very often cut
+mid-write); the trailing partial bytes become the forward tail's initial carry. The same function
+serves `/api/rows`' back-fill — one algorithm, two entry points.
+
+**The row cap is 8 MiB (`ROW_CAP`)**, the same constant in both the forward tail
+(`core/tail.ts#advanceTail`) and the backward window reader — a row of *exactly* `ROW_CAP` bytes is
+valid and parses; only a strictly longer one is oversized. An oversized row is skipped to its next
+newline and rendered as exactly one `raw` node ("row too large (`N` bytes)"), anchored at the
+row's own true start; the row after it parses normally.
+
+**Poll interval**: 250 ms, capped at reading 4 MiB per tick — the remainder arrives next tick, and
+no byte is skipped or double-counted, because the tail's offset advances only by bytes actually
+consumed (never `fileSize`, never a decoded character count). **Frame size** is bounded at 1 MiB:
+`core/sse.ts#batchFrames` splits a tick's nodes across as many `rows` frames as needed, each with
+its own `id:`.
 
 ## Package layout
 
-The consolidation collapses the two former surfaces into one package (spec §3.1). Every module
-under `core/` is PURE — no filesystem, clock, env, or network — and reaches the outside world only
-through the abstractions the three `adapters/` construct; `serve.ts` is the composition root that
-wires them (`pure-core.md`). The `core/live/` tree of the pre-consolidation viewer is gone: its
-contract, path math, tail state machine, records/markdown/normalize parsing, process derivation,
-and routes now live as the peer `core/` modules named below.
+Three layers, one process (spec §3). Every module under `core/` is PURE — no filesystem, clock,
+env, or network — and reaches the outside world only through the abstractions the two adapters
+construct; `serve.ts` is the composition root that wires them (`pure-core.md`).
 
 ```
-serve.ts                 composition root: routes + wiring
+serve.ts                 composition root: argument parsing, Host/Origin gate, dist/ allowlist,
+                          route dispatch, fail-closed startup
 core/                    PURE — no fs, no clock, no env, no network
   model.ts               the wire contract: RenderNode, MdToken, SessionSummary, Frame, Route
   paths.ts               cwd encoding, containment, fixed-layout joins
-  window.ts              complete-line selection over supplied raw bytes; findWindow backward reader
+  window.ts              complete-line selection over supplied raw bytes; findWindow, the
+                          backward reader, pure, with the read injected
+  cache.ts               pure cache/eviction policy over a supplied clock reading
+  scan.ts                the project/session index + the 30-day partition
   tail.ts                pure tail transition: offset, ackOffset, carry, inode reset
   records.ts             tolerant JSONL row parse
-  markdown.ts            markdown -> MdToken[]
-  normalize.ts           rows -> RenderNode[] (spec §7 is its contract)
+  markdown.ts            markdown -> MdToken[] (a token tree, never an HTML string)
+  normalize.ts           rows -> RenderNode[]
   pair.ts                single forward pass tool_use/tool_result
-  title.ts               title selection (spec §5.3)
+  title.ts               title selection
   liveness.ts            live = grew or mtime within 10 min
-  subagents.ts           sidecar tree (from the former core/live/processes.ts)
+  subagents.ts           sidecar tree
   badge.ts               badge derivation + campaign selection/cap (pure over already-read JSON)
-  routes.ts              URL -> Route (spec §3.2)
+  routes.ts              URL -> Route
   sse.ts                 frame encode/decode, sequence ids, 1 MiB frame batching
 adapters/                the only impure edges — thin, fail-closed
   fs.adapter.ts          every transcript read (stat, readdir, ranged read, realpath)
   campaign.adapter.ts    the ONLY two ~/.tribe reads + the pid liveness probe
   poller.adapter.ts      the only clock owner: one poll loop per SSE stream
 client/                  the browser SPA (React + Vite; built to dist/)
-fixtures/build.ts        builds a whole ~/.claude/projects tree FROM NOTHING (spec §16.2)
+fixtures/build.ts        builds a whole ~/.claude/projects tree FROM NOTHING
 tools/                   one-off corpus measurement scripts; NOT core, never in a request path
 structure.test.ts        the executable purity + safety wall for this package
-e2e/                     opt-in, real end-to-end proofs (spec §14) — see e2e/README.md
+e2e/                     opt-in, real end-to-end proofs — see e2e/README.md
 ```
 
-Some `core/` and `adapters/` modules of the target tree land in the consolidation's later phases;
-until then the pre-consolidation `serve.ts`, `core/derive.ts`, `core/render.ts`, and the
-`scan.adapter.ts`/`transcript.adapter.ts`/`poller.adapter.ts` trio remain in the tree, PENDING
-DELETION, and their broken imports are the only red in the suite (they are removed in phases 2–4).
+`core/derive.ts`, `core/render.ts` and `client/app.js`/`client/app.css`/`client/app.test.ts` are
+the pre-consolidation status-page/live-view modules: no longer imported by `serve.ts`, and pending
+outright deletion by later tasks in the consolidation plan (they are not part of this package's
+current request path).
 
 Check command: `bun run check` (`tsc --noEmit && bun test`).
+
+## Build step
+
+The client under `client/` is a React 19 + Vite app built to `dist/`, which is **git-ignored** —
+committing a build artifact into a symlink-installed plugin would make every client change a
+binary-ish diff. `serve.ts` reads `dist/` once at boot into an in-memory allowlist; there is no
+`--dist` override flag.
+
+`serve.ts` fails closed when `dist/index.html` is absent: one stderr line —
+
+```
+viewer: client not built — run ./install.sh (or: cd plugins/tribe/scripts/viewer && bun run build)
+```
+
+— and exit code `2`. Never a blank page, never a stack trace. The plugin-level install hook
+(`plugins/tribe/install.sh`) is what runs the build (`bun install --frozen-lockfile && bun run
+build`) as part of a normal install, warning and continuing rather than failing the whole install
+if it fails or `bun` is absent; `plugins/tribe/scripts/doctor.sh` checks that `dist/index.html`
+exists. That wiring is landed by a later task in the consolidation plan; until it lands, `dist/`
+must be built by hand (`bun install && bun run build` in this directory) before `bun serve.ts`
+will start.
 
 ## Opt-in end-to-end proof
 
@@ -124,32 +257,42 @@ Check command: `bun run check` (`tsc --noEmit && bun test`).
 this viewer — with a real (billed) Claude session. It never runs as part of `bun test`; see
 [`e2e/README.md`](e2e/README.md) for the opt-in gate, cost, and what it writes.
 
----
+## Failure modes
 
-## Viewer consolidation (`docs/tribe/planning/viewer-consolidation/spec.md`)
+Every row is what the user sees; no row is a stack trace. Every one of these is a named case in
+`serve.security.test.ts`, `serve.api.test.ts`, `serve.reads.test.ts`, `serve.events.test.ts`,
+`core/*.test.ts`, or `adapters/*.test.ts`.
 
-The sections above describe the pre-consolidation, two-surface package. They are being replaced,
-in place, by the sections below as the consolidation plan's later tasks land — see
-`.c3/adr/adr-20260911-viewer-consolidation.md` for the decision record. Do not delete the
-sections above until the section replacing them is filled in.
-
-### Routes
-
-_Filled in by Task 21 (the route table of spec §3.2)._
-
-### On-disk discovery
-
-_Filled in by Task 21 (the discovery algorithm of spec §5)._
-
-### Tail and the SSE contract
-
-_Filled in by Task 21 (spec §6)._
-
-### Build step
-
-_Filled in by Task 21 (spec §10.3); refined by Task 26 once `install.sh` and `doctor.sh` build
-the client._
-
-### Failure modes
-
-_Filled in by Task 21 (the fail-closed table of spec §13)._
+| Input / condition | Behaviour |
+| --- | --- |
+| `--port abc`, `--port 0`, `--port 70000` | one stderr line `viewer: --port expects an integer 1-65535, got "abc"`, exit 2 |
+| unknown flag | one stderr line naming it, exit 2 |
+| port already in use | one stderr line `viewer: port 4321 is already in use`, exit 1 |
+| `dist/index.html` missing | one stderr line + exit 2 (see "Build step" above) |
+| the projects root is missing or unreadable | the scan degrades to an empty project list — never a crash; the resolved root is printed on the startup line |
+| `CLAUDE_CONFIG_DIR` set to a path that does not exist, is not a directory, or cannot be read | typed refusal at start: one stderr line, exit 2 — never a silent fall back to `~/.claude` |
+| `CLAUDE_CONFIG_DIR=` (set but empty) | treated as unset; the root is `~/.claude/projects` |
+| `~/.tribe` missing entirely | every session's `badges` is `[]` (never `null`); nothing else changes |
+| `campaign-state.json` malformed or wrong shape | that campaign contributes no badges; other campaigns unaffected |
+| `run.json` malformed | `runnerAlive: false`, `runId: null` |
+| a `sessionId` in a state file is not a valid id | dropped from the index; counted in `skippedBadges` |
+| a transcript line fails `JSON.parse`, or is a JSON array or bare scalar | counted; the window emits one `unreadable` node; never a throw |
+| transcript deleted while streamed | `gone` frame, stream closed, client stops retrying |
+| transcript truncated or replaced while streamed | `reset` frame, then the normal tail window — never byte 0 |
+| transcript truncated or replaced while disconnected | nothing special: a reconnect is a fresh snapshot under a new `generation` |
+| a single row exceeds `ROW_CAP` (8 MiB) | one `raw` node, `rowType: "oversized"`, the rest of the row skipped to the next newline |
+| `/api/spill` name fails the charset check | `400 spill name refused: unsafe shape` |
+| `/api/spill` name is shaped fine but fails containment or does not resolve | `404 spill name refused` / `404 spill not found` |
+| `/api/block` names an `at`/`i` that does not resolve to a block | `404` |
+| 9th concurrent SSE stream | `503 too many live streams` |
+| `Host`/`Origin` mismatch | `403` |
+| a path is not in the route table | the SPA shell for `/`, `/index.html`, `/p/*` and `/s/*`; JSON `404` for everything else |
+| `process.kill(pid, 0)` throws `EPERM` | `runnerAlive: true` (alive, not ours) |
+| a spill/preview/session/asset path escapes its root lexically | refused before anything is opened |
+| the path is lexically fine but resolves outside `~/.claude/projects` (a symlink) | refused |
+| a symlink resolves to a sibling session inside the projects root | served — a real shape Claude Code writes |
+| a project directory is a symlink pointing outside the root | refused during discovery, before any file in it is opened |
+| a state file is unreadable (`EACCES`, `ENOENT`) | degrades to `null`, reported as absent, never as malformed |
+| the browser sends `Last-Event-ID` on reconnect | ignored by the server; the client gets a fresh snapshot |
+| a `patch` names a row id the client has evicted | dropped silently; not an error |
+| a v1 (pre-consolidation) viewer holds the port | the runner prints one stale-viewer stderr line and does not spawn (its own README, not this one) |

@@ -1661,7 +1661,7 @@ and no viewer-only test can see it.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing check.** Run the C3 gate before touching anything and record its
+- [x] **Step 1: Write the failing check.** Run the C3 gate before touching anything and record its
       output:
 
       ```sh
@@ -1671,19 +1671,19 @@ Model: **Sonnet**.
 
       Expected before the change: the lookup reports the c3-215 Contract row describing a
       two-surface viewer with `--tribe-root`, which is now false.
-- [ ] **Step 2: Rewrite** `V/README.md` in full against spec §3.2, §5, §6, §10.3 and §13: one
+- [x] **Step 2: Rewrite** `V/README.md` in full against spec §3.2, §5, §6, §10.3 and §13: one
       surface, the route table, the discovery algorithm, the SSE contract, the build step, the
       failure table. Delete the status-page and `/live` sections and the `--tribe-root` row.
-- [ ] **Step 3: Author the change unit and apply it** to c3-215 row 76. Every literal `|` inside
+- [x] **Step 3: Author the change unit and apply it** to c3-215 row 76. Every literal `|` inside
       the row is escaped as `\|` (`rule-c3-table-cell-no-pipe` — three prior incidents).
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
       ```sh
       bunx @c3x/cli@11.6.3 check </dev/null
       ```
       Expected: clean, and `bunx @c3x/cli@11.6.3 lookup plugins/tribe/scripts/viewer/serve.ts` now returns the new
       row. Paste both.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): run `bunx @c3x/cli@11.6.3 check` yourself and read the new row against the code. A
 Contract row that claims a route, a flag or a guarantee the code does not have is a Critical
