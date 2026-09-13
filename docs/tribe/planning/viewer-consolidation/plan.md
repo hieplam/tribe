@@ -1596,7 +1596,7 @@ confirm the slot counter returns to zero.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** `V/serve.security.test.ts`, one case per row of spec §13
+- [x] **Step 1: Write the failing test** `V/serve.security.test.ts`, one case per row of spec §13
       that the server owns: `--port abc`, `--port 0`, `--port 70000`, an unknown flag, a port
       already in use, `dist/index.html` missing — each producing one stderr line and the stated
       exit code, never a stack trace. Plus: a `Host` header of `evil.example.com` gets 403; a
@@ -1637,15 +1637,15 @@ Model: **Sonnet**.
 
       Carry over the idle-timeout case. Expected: most cases fail; `--port abc` currently yields a
       random port and `/healthz` still returns the v1 body.
-- [ ] **Step 2: Implement.** `HOME` and `process.argv` are read here and nowhere else. `dist/` is
+- [x] **Step 2: Implement.** `HOME` and `process.argv` are read here and nowhere else. `dist/` is
       loaded into a `Map` at boot (spec §12.4).
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bunx tsc --noEmit && bun test
       ```
       Expected: the whole package green; `/healthz` byte-identical.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): curl the running server with a spoofed `Host`, with a path-traversing
 asset name, and with 9 simultaneous streams. Then check `/healthz` against spec §10.4's table: the

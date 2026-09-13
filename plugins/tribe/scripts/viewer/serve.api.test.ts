@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -55,11 +56,35 @@ afterEach(() => {
   while (cleanups.length > 0) cleanups.pop()!();
 });
 
-/** Spawns the REAL `serve.ts` as a genuinely separate process (`bun run serve.ts --port 0`), with
- * `env` overriding exactly `HOME`/`CLAUDE_CONFIG_DIR` on top of the current environment (never the
- * whole `.env` — this repo's own toolchain-discipline rule). Waits for its real startup line. */
+/** A real OS-assigned free port on `127.0.0.1`, released immediately before the real server binds
+ * it. Task 20's `serve.ts` now REFUSES `--port 0` (spec §13 groups it with `--port abc`/`--port
+ * 70000` under the same refusal — the runner integration needs a stable, known port across
+ * restarts, spec §10.1), so this replaces the `--port 0` shortcut this helper used before that
+ * validation existed; the test's own intent (an ephemeral port, chosen by the OS, for isolation
+ * between test runs) and every assertion below are unchanged. */
+function getFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const address = srv.address();
+      if (address === null || typeof address === 'string') {
+        reject(new Error('could not determine a free port'));
+        return;
+      }
+      const { port } = address;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
+/** Spawns the REAL `serve.ts` as a genuinely separate process (`bun run serve.ts --port <n>`),
+ * with `env` overriding exactly `HOME`/`CLAUDE_CONFIG_DIR` on top of the current environment
+ * (never the whole `.env` — this repo's own toolchain-discipline rule). Waits for its real
+ * startup line. */
 async function startServer(env: Record<string, string | undefined>): Promise<RunningServer> {
-  const child = spawn('bun', ['run', SERVE_TS, '--port', '0'], {
+  const freePort = await getFreePort();
+  const child = spawn('bun', ['run', SERVE_TS, '--port', String(freePort)], {
     env: { ...process.env, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

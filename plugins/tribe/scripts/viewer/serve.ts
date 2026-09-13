@@ -6,19 +6,29 @@
 // `core/derive.ts`/`core/render.ts` are NOT deleted (Task 28 owns that); this file simply stops
 // importing them.
 //
-// This task (17) establishes the minimal BOOTABLE shape: resolve the projects root (D32), wire the
-// real `fs.adapter`/`campaign.adapter` + pure `core/scan.ts` to serve exactly three routes
+// Task 17 established the minimal BOOTABLE shape: resolve the projects root (D32), wire the real
+// `fs.adapter`/`campaign.adapter` + pure `core/scan.ts` to serve exactly three routes
 // (`/api/projects`, `/api/sessions`, `/api/session/<id>`), one-line-body JSON 404 for everything
-// else. Argument-parsing hardening, `Host`/CSP checks, `/healthz`, the SPA shell routes, and
-// `/events` are OUT of this task's scope — Task 20 (composition root) and Task 19 (the poller) own
-// those.
+// else. Task 18 added `/api/rows`, `/api/block`, `/api/spill` (spec §3.2, §6.3, §7.6): every path
+// joined for those routes goes through `containedJoin` + the resolved check of D14
+// (`resolveContained`, used by every route below), and the only DECISION logic — the backward
+// window walk, the per-row candidate conversion, in-window pairing, and the D27 orphans wire
+// operation — lives in `core/window.ts`/`core/pair.ts` (`pure-core.md`); this file performs
+// exactly the reads those pure functions ask for. Task 19 added `/events` (one poll loop per
+// stream, `adapters/poller.adapter.ts` the only clock owner).
 //
-// Task 18 adds `/api/rows`, `/api/block`, `/api/spill` (spec §3.2, §6.3, §7.6): every path this
-// file joins for the three routes goes through `containedJoin` + the resolved check of D14
-// (`resolveContained`, already used by every other route below), and the only DECISION logic —
-// the backward window walk, the per-row candidate conversion, in-window pairing, and the D27
-// orphans wire operation — lives in `core/window.ts`/`core/pair.ts` (`pure-core.md`); this file
-// performs exactly the reads those pure functions ask for.
+// Task 20 (this task) finishes the composition root: strict argument parsing (no flag ever
+// consumes a following flag's own name as its value, `fail-closed-edges` obligation 1), the
+// `Host`/`Origin` DNS-rebinding gate (spec §12.5), CSP + `X-Content-Type-Options: nosniff` on
+// every response, the `dist/` static-asset allowlist loaded into a `Map` once at boot (spec
+// §12.4), fail-closed startup (a bad `--port`, an unknown flag, a port already bound, or a
+// missing `dist/index.html` all refuse with one stderr line and the table's exit code — spec
+// §13 — never a stack trace), `CLAUDE_CONFIG_DIR` validated and resolved exactly once at boot
+// (D32a), the v2 `/healthz` body (spec §10.4), and the one routing rule for a path outside the
+// table (spec §3.2's closing paragraph: the SPA shell for `/`, `/index.html`, `/p/*`, `/s/*`;
+// JSON 404 — `{"error":"not found","path":"<path>"}` — for everything else). `HOME` and
+// `process.argv` are read ONLY in this file (spec §12.3/§12.6.5, `pure-core.md`).
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   discoverCampaignCandidates,
@@ -37,21 +47,90 @@ import { buildScanIndex, partitionProjects, sessionCacheKey, type ScannedSession
 import { deriveAgents, type SubagentEntry } from './core/subagents.ts';
 import { applyInWindowPairing, candidatesFromRows, completeLines, findWindow, orphanPatches, type ReadBack } from './core/window.ts';
 
-function arg(flag: string): string | undefined {
-  const i = process.argv.indexOf(flag);
-  return i >= 0 ? process.argv[i + 1] : undefined;
+// --- Argument parsing (spec §13, `fail-closed-edges` obligation 1) ---------------------------
+// `--tribe-root` is deleted (spec §10.2): the viewer resolves both roots from `HOME`/
+// `CLAUDE_CONFIG_DIR` alone, so `--port` is the only flag left to parse.
+const KNOWN_FLAGS = new Set(['--port']);
+
+/** Prints exactly one stderr line and exits — every refusal in this file's boot sequence goes
+ * through this one function, so "one line, never a stack trace" (spec §13) is enforced in one
+ * place rather than at each call site. */
+function fail(exitCode: number, message: string): never {
+  console.error(message);
+  process.exit(exitCode);
 }
 
-// D32: `CLAUDE_CONFIG_DIR` when set and non-empty, else `<HOME>/.claude` — `HOME`/`CLAUDE_CONFIG_DIR`
-// are the only environment values this file reads (spec §12.3), and only here.
+/** Walks `process.argv` (skipping the interpreter and script path) recognizing only `--port`.
+ * Never lets a flag's value be another flag's name — `--port --foo` is a MISSING value, not
+ * `--port` reading `"--foo"` as its argument (the exact class of bug `fail-closed-edges`
+ * obligation 1 names: `--card --base <sha>` reading `--base` as the card's name, campaign
+ * gap-gate-2026-09-10). An unrecognized token — flag-shaped or not — is refused by name. */
+function parseArgv(argv: string[]): string | undefined {
+  const args = argv.slice(2);
+  let portRaw: string | undefined;
+  let i = 0;
+  while (i < args.length) {
+    const token = args[i]!;
+    if (!KNOWN_FLAGS.has(token)) fail(2, `viewer: unknown flag ${token}`);
+    const value = args[i + 1];
+    if (value === undefined || KNOWN_FLAGS.has(value) || value.startsWith('--')) {
+      fail(2, `viewer: --port expects an integer 1-65535, got ${JSON.stringify(value ?? '')}`);
+    }
+    portRaw = value;
+    i += 2;
+  }
+  return portRaw;
+}
+
+/** `--port abc`, `--port 0`, `--port 70000` all refuse with the SAME message (spec §13) — today
+ * (B14) `Number('abc')` is `NaN`, which `Bun.serve` silently turns into a random port; this
+ * refuses all three before `Bun.serve` is ever called. */
+function parsePort(raw: string | undefined): number {
+  if (raw === undefined) return 4321;
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)) || Number(raw) < 1 || Number(raw) > 65535) {
+    fail(2, `viewer: --port expects an integer 1-65535, got ${JSON.stringify(raw)}`);
+  }
+  return Number(raw);
+}
+
+const port = parsePort(parseArgv(process.argv));
+
+/** `readdirSync` directly (not `fs.adapter.ts#listDirOrEmpty`), and deliberately so: that
+ * adapter's `*OrEmpty` primitives fold `ENOENT` and `EACCES` into an empty result on purpose —
+ * correct for scanning `~/.claude/projects`, where "missing" and "unreadable" both degrade to "no
+ * sessions found" (spec §13). Validating the raw `CLAUDE_CONFIG_DIR` VALUE at boot needs the
+ * opposite: missing, not-a-directory (`ENOTDIR`), and unreadable (`EACCES`) must ALL be refused
+ * rather than silently treated as "empty" — a silent fallback to `~/.claude` would hand a user who
+ * deliberately sandboxed their config someone else's sessions (D32a), which is worse than an
+ * error. One `readdirSync` call distinguishes all three from "valid, readable directory" in a
+ * single syscall; the narrow catch re-throws anything that is not a real filesystem error
+ * (`fail-closed-edges` obligation 1). */
+function claudeConfigDirIsReadable(path: string): boolean {
+  try {
+    readdirSync(path);
+    return true;
+  } catch (err) {
+    if (typeof err === 'object' && err !== null && 'code' in err) return false;
+    throw err;
+  }
+}
+
+// D32a: `CLAUDE_CONFIG_DIR` when set and non-empty, else `<HOME>/.claude` — `HOME`/
+// `CLAUDE_CONFIG_DIR` are the only environment values this file reads (spec §12.3), and only
+// here. An empty string is treated as unset (spec §13); a SET, non-empty, invalid value is a
+// typed refusal, never a silent fall back to `~/.claude` (D32a).
 function resolveProjectsRootLexical(): string {
   const configDir = process.env.CLAUDE_CONFIG_DIR;
-  const base = configDir !== undefined && configDir.length > 0 ? configDir : join(process.env.HOME ?? '', '.claude');
-  return join(base, 'projects');
+  if (configDir !== undefined && configDir.length > 0) {
+    if (!claudeConfigDirIsReadable(configDir)) {
+      fail(2, `viewer: CLAUDE_CONFIG_DIR=${configDir} is not a readable directory`);
+    }
+    return join(configDir, 'projects');
+  }
+  return join(process.env.HOME ?? '', '.claude', 'projects');
 }
 
-const port = Number(arg('--port') ?? '4321');
-const tribeRootLexical = arg('--tribe-root') ?? join(process.env.HOME ?? '', '.tribe');
+const tribeRootLexical = join(process.env.HOME ?? '', '.tribe');
 const projectsRootLexical = resolveProjectsRootLexical();
 // The containment root and the scan root are always the SAME resolved value (D14/D32, spec
 // §12.2) — a missing/unreadable `.claude` (no `CLAUDE_CONFIG_DIR` and no `~/.claude`) resolves to
@@ -380,20 +459,152 @@ function jsonNotFound(message: string): Response {
   return Response.json({ error: message }, { status: 404 });
 }
 
-const server = Bun.serve({
-  hostname: '127.0.0.1',
-  port,
-  // An SSE stream is idle between the 15 s pings; Bun's ~10 s default would close it first. 255 s
-  // (Bun's max) keeps `/events` alive between pings. (F55 — the idle-timeout contract is refined in
-  // task 20; this is the minimum this task's stream needs to survive.)
-  idleTimeout: 255,
-  fetch(req) {
-    const route = parseRoute(req.url);
-    const nowMs = Date.now();
-    const nowIso = new Date(nowMs).toISOString();
+function routeNotFound(path: string): Response {
+  // spec §3.2 closing rule's exact body — distinct from `jsonNotFound` above (used by the API
+  // routes' own messages, already asserted by `serve.api.test.ts`/`serve.reads.test.ts`): a path
+  // outside the whole route table carries the path that missed, not a route-specific message.
+  return Response.json({ error: 'not found', path }, { status: 404 });
+}
 
-    switch (route.kind) {
-      case 'api_projects': {
+// --- Static assets (spec §12.4) ----------------------------------------------------------------
+// `dist/` is read into memory ONCE at boot into a `Map<name, {body, contentType}>` — a request for
+// `/assets/<name>` is a map lookup, never a path join (no traversal surface at this route at all).
+// `dist/` has no override flag (no `--dist`): an overridable asset root is a security surface for
+// a read-only viewer that a fixed, boot-time-loaded location is not.
+const DIST_DIR = join(import.meta.dir, 'dist');
+
+const ASSET_CONTENT_TYPES: Record<string, string> = {
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.woff2': 'font/woff2',
+  '.png': 'image/png',
+};
+
+interface DistAsset {
+  body: Uint8Array;
+  contentType: string;
+}
+
+/** A whole small file's bytes, or `null` if it is absent — built from the already-imported
+ * `statOrNull`/`readRange` (task 17/18's own primitives), so no new adapter export is needed for
+ * this bounded, boot-time read. */
+function readWholeFileOrNull(path: string): Uint8Array | null {
+  const obs = statOrNull(path);
+  if (obs === null) return null;
+  return readRange(path, 0, obs.sizeBytes);
+}
+
+/** Builds the boot-time `dist/` map (spec §12.4). `null` means `dist/index.html` is absent — the
+ * caller refuses to start (spec §10.3): never a blank page, never a stack trace. An unknown
+ * extension in `dist/assets/` is silently excluded from the map (spec §12.4: "an unknown extension
+ * is not served"), and a file that vanishes between the `readdir` and the read is skipped rather
+ * than crashing the boot sequence over a single stale entry. */
+function loadDistOrNull(): { indexHtml: Uint8Array; assets: Map<string, DistAsset> } | null {
+  const indexHtml = readWholeFileOrNull(join(DIST_DIR, 'index.html'));
+  if (indexHtml === null) return null;
+  const assets = new Map<string, DistAsset>();
+  for (const name of listDirOrEmpty(join(DIST_DIR, 'assets'))) {
+    const ext = name.slice(name.lastIndexOf('.'));
+    const contentType = ASSET_CONTENT_TYPES[ext];
+    if (contentType === undefined) continue;
+    const body = readWholeFileOrNull(join(DIST_DIR, 'assets', name));
+    if (body === null) continue;
+    assets.set(name, { body, contentType });
+  }
+  return { indexHtml, assets };
+}
+
+const distOrNull = loadDistOrNull();
+if (distOrNull === null) {
+  fail(2, 'viewer: client not built — run ./install.sh (or: cd plugins/tribe/scripts/viewer && bun run build)');
+}
+const dist = distOrNull;
+
+function shellResponse(): Response {
+  // spec §12.5: the CSP applies to the SPA shell; `X-Content-Type-Options` is added to every
+  // response uniformly by `withNosniff`, below.
+  return new Response(dist.indexHtml, {
+    status: 200,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'content-security-policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'",
+    },
+  });
+}
+
+function assetResponse(name: string): Response {
+  const entry = dist.assets.get(name);
+  if (entry === undefined) return jsonNotFound('asset not found');
+  return new Response(entry.body, { status: 200, headers: { 'content-type': entry.contentType } });
+}
+
+// --- Host/Origin (spec §12.5, DNS rebinding, B16) ----------------------------------------------
+const ALLOWED_HOST_RE = /^(127\.0\.0\.1|localhost)(:\d+)?$/;
+
+/** `new URL(origin).host` — or `null` if `origin` does not parse as a URL at all, which is itself
+ * a mismatch (never a match by accident). `URL`'s constructor throws only `TypeError` on a
+ * malformed input; that is the one exception this narrows on, re-throwing anything else
+ * (`fail-closed-edges` obligation 1). */
+function originHostOrNull(origin: string): string | null {
+  try {
+    return new URL(origin).host;
+  } catch (err) {
+    if (err instanceof TypeError) return null;
+    throw err;
+  }
+}
+
+/** `true` when the request must be refused with `403`, BEFORE routing (spec §12.5): `Host` must
+ * be `127.0.0.1[:port]` or `localhost[:port]`; when `Origin` is present it is held to the same
+ * set. A DNS-rebinding attacker controls neither. */
+function hostOrOriginRefused(req: Request): boolean {
+  const host = req.headers.get('host');
+  if (host === null || !ALLOWED_HOST_RE.test(host)) return true;
+  const origin = req.headers.get('origin');
+  if (origin === null) return false;
+  const originHost = originHostOrNull(origin);
+  return originHost === null || !ALLOWED_HOST_RE.test(originHost);
+}
+
+/** Every response leaves this file through here (spec §12.5: "on every response"). */
+function withNosniff(res: Response): Response {
+  res.headers.set('x-content-type-options', 'nosniff');
+  return res;
+}
+
+/** The full route table (spec §3.2), everything AFTER the `Host`/`Origin` gate above. Extracted
+ * from `fetch` so `withNosniff` wraps every outcome from ONE call site rather than each `case`
+ * needing its own wrapping — the same "one seam" discipline `withNosniff` itself follows. */
+function routeResponse(req: Request): Response {
+  const route = parseRoute(req.url);
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+
+  switch (route.kind) {
+    case 'shell':
+    case 'shell_project':
+    case 'shell_session':
+    case 'shell_session_agent':
+      // spec §3.2 closing rule: the React router owns these addresses; the server never probes
+      // the filesystem to decide between them, so all four addresses get the same shell.
+      return shellResponse();
+
+    case 'health':
+      // spec §10.4: deliberately NOT the pre-consolidation `{"ok":true,"viewer":"tribe-live-viewer","v":1}` —
+      // an already-running old viewer must be unrecognisable to the new runner probe.
+      return Response.json({ ok: true, viewer: 'tribe-viewer', v: 2 });
+
+    case 'asset':
+      return assetResponse(route.name);
+
+    case 'not_found':
+      return routeNotFound(route.path);
+
+    case 'bad_request':
+      return Response.json({ error: route.reason }, { status: 400 });
+
+    case 'api_projects': {
         const { projectDirs, sessions } = scanProjectsAndSessions(nowMs);
         const { bySessionId, skippedBadges } = computeBadgeIndex(nowMs);
         const index = buildScanIndex(projectDirs, sessions, bySessionId, nowIso);
@@ -530,15 +741,32 @@ const server = Bun.serve({
         });
       }
 
-      case 'bad_request':
-        return Response.json({ error: route.reason }, { status: 400 });
-
       default:
-        // Everything else (the SPA shell, `/healthz`, `/assets/*`) is out of THIS task's scope
-        // (Task 20 owns it) — a flat, one-line-body JSON 404, never a crash (`fail-closed-edges`).
+        // Unreachable: every `Route` kind is handled above (a closed union, `core/routes.ts`).
+        // Kept as a fail-closed safety net rather than removed outright — never a crash.
         return jsonNotFound('not found');
     }
-  },
-});
+}
+
+let server: ReturnType<typeof Bun.serve>;
+try {
+  server = Bun.serve({
+    hostname: '127.0.0.1',
+    port,
+    // An SSE stream is idle between the 15 s pings; Bun's ~10 s default would close it first. 255 s
+    // (Bun's max) keeps `/events` alive between pings (F55; carried over from task 17, verified by
+    // this task's own `serve.security.test.ts`).
+    idleTimeout: 255,
+    fetch(req) {
+      if (hostOrOriginRefused(req)) return withNosniff(new Response('forbidden', { status: 403 }));
+      return withNosniff(routeResponse(req));
+    },
+  });
+} catch (err) {
+  if (err instanceof Error && (err as { code?: unknown }).code === 'EADDRINUSE') {
+    fail(1, `viewer: port ${port} is already in use`);
+  }
+  throw err;
+}
 
 console.log(`tribe viewer: http://127.0.0.1:${server.port} (projects root: ${projectsRootResolved}) — read-only, refresh to update`);

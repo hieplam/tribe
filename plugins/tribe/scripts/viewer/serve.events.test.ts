@@ -11,6 +11,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -67,8 +68,28 @@ afterEach(() => {
   while (cleanups.length > 0) cleanups.pop()!();
 });
 
+/** A real OS-assigned free port on `127.0.0.1`, released immediately before the real server binds
+ * it. Task 20's `serve.ts` now REFUSES `--port 0` (spec §13), so this replaces the `--port 0`
+ * shortcut this helper used before that validation existed — same test intent, same assertions. */
+function getFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.on('error', reject);
+    srv.listen(0, '127.0.0.1', () => {
+      const address = srv.address();
+      if (address === null || typeof address === 'string') {
+        reject(new Error('could not determine a free port'));
+        return;
+      }
+      const { port } = address;
+      srv.close(() => resolve(port));
+    });
+  });
+}
+
 async function startServer(env: Record<string, string | undefined>): Promise<RunningServer> {
-  const child = spawn('bun', ['run', SERVE_TS, '--port', '0'], {
+  const freePort = await getFreePort();
+  const child = spawn('bun', ['run', SERVE_TS, '--port', String(freePort)], {
     env: { ...process.env, ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
