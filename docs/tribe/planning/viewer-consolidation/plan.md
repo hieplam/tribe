@@ -2205,7 +2205,7 @@ runner *log* — that is D6, and it is a different claim.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** per spec §16.2 and §16.5. These are **DOM** proofs in real
+- [x] **Step 1: Write the failing test** per spec §16.2 and §16.5. These are **DOM** proofs in real
       headless Chromium via `e2e/browser.ts`, not API-shape assertions — G1, G4 and G6 are claims
       about what a person sees, so that is where they are observed.
 
@@ -2301,12 +2301,12 @@ Model: **Sonnet**.
       1 MiB).
 
       Expected: the e2e files do not exist and the old harness still does.
-- [ ] **Step 2: Implement,** carrying the current harness's proven parts: the bounded deadline
+- [x] **Step 2: Implement,** carrying the current harness's proven parts: the bounded deadline
       loops, the shell-metacharacter quoting for `commands.md` (F54), and the "a screenshot that
       cannot be captured is recorded, never faked" rule. Screenshots are still taken — they are how
       a human reviews the result — but **no assertion rests on one**. If no browser resolves, these
       suites **fail** with `bunx playwright install chromium`; they never skip.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test e2e/dom-kinds.e2e.test.ts e2e/url-refusals.e2e.test.ts e2e/served-build.e2e.test.ts
@@ -2318,7 +2318,7 @@ Model: **Sonnet**.
       no token — only the Haiku suites in tasks 31 and 32 are gated); the opt-in run additionally
       produces `perf.json` and the screenshots, each a real non-trivial PNG. Every budget in spec §14 is met or the shortfall is
       recorded verbatim — never widened to make the test pass.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the DOM suites yourself with `HOME` set to a directory that has no
 `.claude` and no `.tribe` at all, and confirm they pass — that is G1's actual claim. Then delete one
