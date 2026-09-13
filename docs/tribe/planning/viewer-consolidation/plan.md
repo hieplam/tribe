@@ -2086,7 +2086,7 @@ body) on the probe port and confirm the runner neither reuses nor spawns, and pr
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** `V/deletion-guard.test.ts`, implementing spec §11.4's rules
+- [x] **Step 1: Write the failing test** `V/deletion-guard.test.ts`, implementing spec §11.4's rules
       exactly — **six** rules now, because the old rule 3 split into 3 (absent) and 4 (present with
       a content marker), renumbering what follows.
 
@@ -2098,9 +2098,9 @@ Model: **Sonnet**.
       distinguishes them — `core/model.ts` must **export `RENDER_NODE_KINDS`**, which the old file
       could not have. A replaced file is proved by what it now contains, never by its absence. Expected on first run: rules 1–3 fail, because `derive.ts` and
       `render.ts` still exist and still name the status page.
-- [ ] **Step 2: Delete** everything remaining in spec §11.1 and fix the resulting import errors —
+- [x] **Step 2: Delete** everything remaining in spec §11.1 and fix the resulting import errors —
       there should be none, because nothing in the new tree imports them.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bunx tsc --noEmit && bun test
@@ -2109,7 +2109,7 @@ Model: **Sonnet**.
 
       Expected: the suite green; the `diff --stat` shows the deleted line count, which goes into
       the PR body as G5's measurement. Paste it into the task report.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the grep guard's **six** rules yourself, by hand, with your own
 `grep`. A guard that passes because its pattern is subtly wrong is worse than no guard — check rule
