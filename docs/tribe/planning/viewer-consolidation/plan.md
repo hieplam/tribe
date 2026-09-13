@@ -1987,14 +1987,14 @@ to `ls` of its `subagents/` directory. A sidecar with no tab is under-rendering.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** `plugins/tribe/scripts/tests/test-install-viewer-build.sh`,
+- [x] **Step 1: Write the failing test** `plugins/tribe/scripts/tests/test-install-viewer-build.sh`,
       in the repo's existing test-script style with `set -euo pipefail`
       (`rule-bash-strict-mode`). It runs the plugin hook against a temporary `CLAUDE_DIR`, asserts
       `dist/index.html` exists afterwards, then re-runs it with `bun` masked out of `PATH` and
       asserts the hook still exits 0 and prints the warning. Expected on first run: the hook does
       not build anything, so the first assertion fails.
-- [ ] **Step 2: Implement** the build block and the `doctor.sh` check.
-- [ ] **Step 3: Run.**
+- [x] **Step 2: Implement** the build block and the `doctor.sh` check.
+- [x] **Step 3: Run.**
 
       ```sh
       bash plugins/tribe/scripts/tests/test-install-viewer-build.sh
@@ -2003,7 +2003,7 @@ Model: **Sonnet**.
       ```
 
       Expected: the first two pass; `doctor.sh` reports the viewer client as built.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run `install.sh` on a machine state where `dist/` does not exist and
 confirm the viewer then starts. Then delete `dist/` and confirm `serve.ts` refuses with the

@@ -249,12 +249,13 @@ viewer: client not built — run ./install.sh (or: cd plugins/tribe/scripts/view
 ```
 
 — and exit code `2`. Never a blank page, never a stack trace. The plugin-level install hook
-(`plugins/tribe/install.sh`) is what runs the build (`bun install --frozen-lockfile && bun run
-build`) as part of a normal install, warning and continuing rather than failing the whole install
-if it fails or `bun` is absent; `plugins/tribe/scripts/doctor.sh` checks that `dist/index.html`
-exists. That wiring is landed by a later task in the consolidation plan; until it lands, `dist/`
-must be built by hand (`bun install && bun run build` in this directory) before `bun serve.ts`
-will start.
+(`plugins/tribe/install.sh`) runs the build (`bun install --frozen-lockfile && bun run build`) as
+part of a normal install, warning and continuing — never failing the whole install, which also
+links agents/rules/canvases and must keep working on a machine with no bun — if the build itself
+fails or `bun` is absent from `PATH`; `plugins/tribe/scripts/doctor.sh` reports
+`viewer client built (dist/index.html)` or names the exact fix if it is missing. On a machine
+with no bun (or before the hook has ever run), `dist/` can still be built by hand:
+`bun install && bun run build` in this directory, then `bun serve.ts`.
 
 ## Opt-in end-to-end proof
 

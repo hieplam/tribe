@@ -87,6 +87,17 @@ else
   fix "install bun first, then: (cd '$RUNNER' && bun install)"
 fi
 
+# --- viewer client built: install.sh's build step must have produced dist/index.html ------
+# spec §10.3: serve.ts refuses to start (one stderr line, exit 2) when this is absent — never
+# a blank page — so this check names the exact fix rather than letting a run discover it cold.
+VIEWER_DIR="$HERE/viewer"
+if [ -f "$VIEWER_DIR/dist/index.html" ]; then
+  ok "viewer client built (dist/index.html)"
+else
+  gap "viewer client built (dist/index.html) — the campaign viewer will refuse to start"
+  fix "run: ./install.sh    (or: cd '$VIEWER_DIR' && bun run build)"
+fi
+
 printf '\n'
 if [ "$MISSING" -eq 0 ]; then
   printf 'all prerequisites present\n'
