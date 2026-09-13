@@ -10,8 +10,15 @@
 // real `fs.adapter`/`campaign.adapter` + pure `core/scan.ts` to serve exactly three routes
 // (`/api/projects`, `/api/sessions`, `/api/session/<id>`), one-line-body JSON 404 for everything
 // else. Argument-parsing hardening, `Host`/CSP checks, `/healthz`, the SPA shell routes, and
-// `/api/rows`/`/api/block`/`/api/spill`/`/events` are explicitly OUT of this task's scope — Task 20
-// (composition root) and Task 18/19 (row back-fill, the poller) own those.
+// `/events` are OUT of this task's scope — Task 20 (composition root) and Task 19 (the poller) own
+// those.
+//
+// Task 18 adds `/api/rows`, `/api/block`, `/api/spill` (spec §3.2, §6.3, §7.6): every path this
+// file joins for the three routes goes through `containedJoin` + the resolved check of D14
+// (`resolveContained`, already used by every other route below), and the only DECISION logic —
+// the backward window walk, the per-row candidate conversion, in-window pairing, and the D27
+// orphans wire operation — lives in `core/window.ts`/`core/pair.ts` (`pure-core.md`); this file
+// performs exactly the reads those pure functions ask for.
 import { join } from 'node:path';
 import {
   discoverCampaignCandidates,
@@ -19,15 +26,15 @@ import {
   readSelectedCampaigns,
   type CampaignSelector,
 } from './adapters/campaign.adapter.ts';
-import { listDirOrEmpty, readHead, readTail, readTextCapped, realpathOrNull, statOrNull } from './adapters/fs.adapter.ts';
+import { listDirOrEmpty, readHead, readRange, readTail, readTextCapped, realpathOrNull, statOrNull } from './adapters/fs.adapter.ts';
 import { buildBadgeIndex, selectCampaigns } from './core/badge.ts';
 import { type CacheEntry, decideCache, evictionVictim } from './core/cache.ts';
-import type { Agent, Badge } from './core/model.ts';
-import { containedJoin, isContainedResolved } from './core/paths.ts';
+import type { Agent, Badge, Patch } from './core/model.ts';
+import { containedJoin, isContainedResolved, subagentsDirOf, toolResultsDirOf, transcriptPathOf } from './core/paths.ts';
 import { parseRoute } from './core/routes.ts';
 import { buildScanIndex, partitionProjects, sessionCacheKey, type ScannedSessionInput } from './core/scan.ts';
 import { deriveAgents, type SubagentEntry } from './core/subagents.ts';
-import { completeLines } from './core/window.ts';
+import { applyInWindowPairing, candidatesFromRows, completeLines, findWindow, orphanPatches, type ReadBack } from './core/window.ts';
 
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
@@ -62,6 +69,8 @@ const TAIL_BYTES = 256 * 1024; // spec §5.3
 const CAMPAIGN_CAP = 200; // spec §9
 const AGENT_FILE_RE = /^agent-(.+)\.jsonl$/;
 const META_CAP_BYTES = 64 * 1024;
+const ROW_READ_CAP = 8 * 1024 * 1024 + 1; // ROW_CAP + 1 (task 18): enough to hold any VALID row plus its terminator
+const SPILL_READ_CAP = 2 * 1024 * 1024; // spec §7.6
 
 function warnRefused(path: string): void {
   console.error(`serve: refused path outside the projects root: ${path}`);
@@ -96,6 +105,88 @@ function resolveContained(root: string, joined: string): string | null {
     return null;
   }
   return resolved;
+}
+
+/** Resolves the real, contained transcript file for `sessionId` (+ optional `agentId`) — the
+ * MAIN session `.jsonl` when `agentId` is `null`, or its `subagents/agent-<id>.jsonl` sidecar
+ * otherwise (spec §5.5, §12.2). `null` means "no such session/agent" — the caller turns that into
+ * a 404, never a crash. Shared by `/api/rows`, `/api/block` and `/api/spill` (task 18). */
+function resolveTranscriptFile(sessionId: string, agentId: string | null, nowMs: number, nowIso: string): string | null {
+  const { projectDirs, sessions } = scanProjectsAndSessions(nowMs);
+  const index = buildScanIndex(projectDirs, sessions, new Map(), nowIso);
+  const session = index.sessionIndex.get(sessionId);
+  if (session === undefined) return null;
+  const projectDirAbs = containedJoin(projectsRootResolved, session.projectDir);
+  if (projectDirAbs === null) return null;
+
+  let target: string | null;
+  if (agentId === null) {
+    target = transcriptPathOf(projectDirAbs, sessionId);
+  } else {
+    const subDir = subagentsDirOf(projectDirAbs, sessionId);
+    target = subDir === null ? null : containedJoin(subDir, `agent-${agentId}.jsonl`);
+  }
+  if (target === null) return null;
+  return resolveContained(projectsRootResolved, target);
+}
+
+/** Resolves the real, contained `tool-results/` directory for `sessionId` — `/api/spill`'s
+ * containment root (spec §7.6, D14). `null` means "no such session", turned into a 404. */
+function resolveToolResultsDir(sessionId: string, nowMs: number, nowIso: string): string | null {
+  const { projectDirs, sessions } = scanProjectsAndSessions(nowMs);
+  const index = buildScanIndex(projectDirs, sessions, new Map(), nowIso);
+  const session = index.sessionIndex.get(sessionId);
+  if (session === undefined) return null;
+  const projectDirAbs = containedJoin(projectsRootResolved, session.projectDir);
+  if (projectDirAbs === null) return null;
+  const dir = toolResultsDirOf(projectDirAbs, sessionId);
+  if (dir === null) return null;
+  return resolveContained(projectsRootResolved, dir);
+}
+
+/** Reads the row starting at the byte offset `at` in `path` (sized `fileSize`) — `null` means
+ * refused: `at` is not a real row boundary (the byte before it is not `0x0A`, and `at` is not 0),
+ * `at` is past EOF, or the row is not a COMPLETE, parseable one within `ROW_READ_CAP` (an
+ * oversized row has `expandable: false` and is never reached here). Never throws
+ * (`fail-closed-edges` obligation 1): a malformed row degrades to `null`, turned into a 404. */
+function readRowAt(path: string, at: number, fileSize: number): Record<string, unknown> | null {
+  if (at < 0 || at >= fileSize) return null;
+  if (at > 0) {
+    const prevByte = readRange(path, at - 1, at);
+    if (prevByte.length !== 1 || prevByte[0] !== 0x0a) return null; // not a row boundary
+  }
+  const readLen = Math.min(fileSize - at, ROW_READ_CAP);
+  const chunk = readRange(path, at, at + readLen);
+  const nlIdx = chunk.indexOf(0x0a);
+  if (nlIdx === -1) return null; // no complete row within the cap (oversized, or a genuine tail carry)
+  const text = new TextDecoder('utf-8').decode(chunk.subarray(0, nlIdx));
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch (e) {
+    if (e instanceof SyntaxError) return null;
+    throw e;
+  }
+}
+
+/** The row's `i`-th content block, addressed exactly as spec §4 defines `at`+`i` (task 18's
+ * `/api/block`): `message.content[i]` for a message row (bucket A), or the row itself (`i` must be
+ * `0`) for every other row shape — an `attachment` row's own `attachment` object, or the whole
+ * parsed row for anything else. `undefined` means `i` is out of bounds — the caller's 404. */
+function blockAt(row: Record<string, unknown>, i: number): unknown {
+  const message = row.message;
+  if (typeof message === 'object' && message !== null && !Array.isArray(message)) {
+    const content = (message as Record<string, unknown>).content;
+    if (Array.isArray(content)) {
+      return i >= 0 && i < content.length ? content[i] : undefined;
+    }
+  }
+  if (i !== 0) return undefined;
+  if (row.type === 'attachment') {
+    const attachment = row.attachment;
+    return typeof attachment === 'object' && attachment !== null ? attachment : {};
+  }
+  return row;
 }
 
 // --- The session read cache (spec §5.3: "bounded to 500 entries, LRU, with a 60 s absolute
@@ -296,10 +387,57 @@ const server = Bun.serve({
         return Response.json({ session, subagents, badges: session.badges });
       }
 
+      case 'api_rows': {
+        const path = resolveTranscriptFile(route.sessionId, route.agentId, nowMs, nowIso);
+        const obs = path === null ? null : statOrNull(path);
+        if (path === null || obs === null) return jsonNotFound(`no session ${route.sessionId} under ~/.claude/projects`);
+        if (route.before !== null && route.before > obs.sizeBytes) {
+          return Response.json({ error: 'before is past EOF' }, { status: 400 });
+        }
+        const eofParam = route.before ?? obs.sizeBytes;
+        const readBack: ReadBack = (end, len) => readRange(path, end - len, end);
+        const result = findWindow(readBack, eofParam, route.limit);
+        const nodes = applyInWindowPairing(candidatesFromRows(result.rows, result.from));
+        let patches: Patch[] = [];
+        if (route.orphans.length > 0 && result.to < obs.sizeBytes) {
+          // D27: the range the client already holds — genuinely outside our own [from, to) by
+          // construction — is exactly `[to, eof)`.
+          const tailBytes = readRange(path, result.to, obs.sizeBytes);
+          patches = orphanPatches(tailBytes, result.to, nodes, route.orphans);
+        }
+        return Response.json({ nodes, patches, from: result.from, to: result.to, truncatedBefore: result.truncatedBefore });
+      }
+
+      case 'api_block': {
+        const path = resolveTranscriptFile(route.sessionId, route.agentId, nowMs, nowIso);
+        const obs = path === null ? null : statOrNull(path);
+        if (path === null || obs === null) return jsonNotFound(`no session ${route.sessionId} under ~/.claude/projects`);
+        const row = readRowAt(path, route.at, obs.sizeBytes);
+        if (row === null) return jsonNotFound('at is not a row boundary');
+        const block = blockAt(row, route.i);
+        if (block === undefined) return jsonNotFound("i is past the row's block count");
+        return Response.json({ block });
+      }
+
+      case 'api_spill': {
+        const dir = resolveToolResultsDir(route.sessionId, nowMs, nowIso);
+        if (dir === null) return jsonNotFound(`no session ${route.sessionId} under ~/.claude/projects`);
+        const joined = containedJoin(dir, route.name);
+        if (joined === null) return jsonNotFound('spill name refused');
+        const resolved = resolveContained(projectsRootResolved, joined);
+        if (resolved === null) return jsonNotFound('spill not found');
+        const obs = statOrNull(resolved);
+        if (obs === null) return jsonNotFound('spill not found');
+        const text = new TextDecoder('utf-8').decode(readRange(resolved, 0, Math.min(obs.sizeBytes, SPILL_READ_CAP)));
+        return new Response(text, { headers: { 'content-type': 'text/plain' } });
+      }
+
+      case 'bad_request':
+        return Response.json({ error: route.reason }, { status: 400 });
+
       default:
-        // Everything else (the SPA shell, `/healthz`, `/assets/*`, `/api/rows` and friends,
-        // `bad_request` shapes) is out of THIS task's scope (Tasks 18-20 own it) — a flat,
-        // one-line-body JSON 404, never a crash (`fail-closed-edges`).
+        // Everything else (the SPA shell, `/healthz`, `/assets/*`) is out of THIS task's scope
+        // (Task 20 owns it) — a flat, one-line-body JSON 404, never a crash (`fail-closed-edges`).
         return jsonNotFound('not found');
     }
   },

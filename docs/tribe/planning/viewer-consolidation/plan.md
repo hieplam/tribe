@@ -1373,7 +1373,7 @@ the cache key includes both size and mtime — a size-only key silently serves a
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.**
+- [x] **Step 1: Write the failing test.**
 
       **`/api/rows`'s full contract (spec §3.2), because "back-fill on scroll-up" is not one.**
       `limit` counts **pre-pairing candidate nodes** (D21's unit — the same one the window boundary
@@ -1500,9 +1500,9 @@ Model: **Sonnet**.
 
       `/api/spill` returns the fixture's spill file, refuses `../etc/passwd`, refuses a name with a
       slash, refuses a name failing the charset, and caps the read at 2 MiB. Expected: routes 404.
-- [ ] **Step 2: Implement** per spec §3.2, §6.3 and §7.6, routing every path through
+- [x] **Step 2: Implement** per spec §3.2, §6.3 and §7.6, routing every path through
       `containedJoin` and the resolved check of D14.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test serve.reads.test.ts
@@ -1510,7 +1510,7 @@ Model: **Sonnet**.
 
       Expected: all pass, including the four spill refusals, the fewer-than-500-rows node assertion,
       and the uuid-less attachment expansion.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): attempt the traversal yourself, with at least these encodings: `..%2f`,
 `%2e%2e/`, a NUL byte, a UTF-8 overlong `..`, and an absolute path. Any that reads a file outside the
