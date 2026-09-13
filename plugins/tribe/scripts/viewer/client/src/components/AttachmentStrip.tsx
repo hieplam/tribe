@@ -5,6 +5,7 @@
 // all — never a button that would return nothing on click.
 import { useState } from 'react';
 import type { RenderNode } from '../../../core/model.ts';
+import { fetchJson, isBlockResponse } from '../http.ts';
 import { blockUrl } from './ImageCard.tsx';
 
 export type AttachmentNode = Extract<RenderNode, { k: 'attachment' }>;
@@ -37,6 +38,7 @@ export function groupAttachments(nodes: readonly RenderNode[]): (RenderNode | At
 function AttachmentEntry({ node, sessionId, agentId }: { node: AttachmentNode; sessionId?: string; agentId?: string | null }) {
   const [expanded, setExpanded] = useState(false);
   const [block, setBlock] = useState<unknown>(null);
+  const [failed, setFailed] = useState(false);
 
   async function expand(): Promise<void> {
     if (expanded) {
@@ -44,15 +46,22 @@ function AttachmentEntry({ node, sessionId, agentId }: { node: AttachmentNode; s
       return;
     }
     if (block === null) {
-      const res = await fetch(blockUrl({ sessionId, agentId, at: node.at, i: node.i }));
-      const body = (await res.json()) as { block: unknown };
-      setBlock(body.block);
+      // Fail closed (fail-closed-edges): a failed expand shows a note, never an unhandled rejection.
+      try {
+        const body = await fetchJson(blockUrl({ sessionId, agentId, at: node.at, i: node.i }), isBlockResponse);
+        setBlock(body.block);
+      } catch {
+        setFailed(true);
+        return;
+      }
     }
     setExpanded(true);
   }
 
+  // Each inner entry carries its OWN `data-row-id` (§12.6.6): the strip wrapper carries the run's
+  // first id, but every entry is an addressable row in its own right.
   return (
-    <div className="attachment-strip__entry" data-attachment-label={node.label}>
+    <div className="attachment-strip__entry" data-row-id={node.id} data-attachment-label={node.label}>
       {node.expandable ? (
         <button type="button" data-testid="attachment-expand" onClick={expand} style={{ color: 'var(--ink-soft)' }}>
           {node.label}
@@ -60,6 +69,7 @@ function AttachmentEntry({ node, sessionId, agentId }: { node: AttachmentNode; s
       ) : (
         <span style={{ color: 'var(--ink-soft)' }}>{node.label}</span>
       )}
+      {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load attachment</span>}
       {expanded && block !== null && (
         <pre className="attachment-strip__body" style={{ fontFamily: 'var(--font-mono)' }}>{JSON.stringify(block)}</pre>
       )}

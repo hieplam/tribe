@@ -15,6 +15,7 @@
 // address `AgentTabs` itself navigates to.
 import { useState } from 'react';
 import type { RenderNode, ToolResult } from '../../../core/model.ts';
+import { fetchJson, fetchText, isBlockResponse } from '../http.ts';
 import { navigate, type HistoryLike } from '../routes.ts';
 import { blockUrl } from './ImageCard.tsx';
 import { Markdown } from './Markdown.tsx';
@@ -62,6 +63,7 @@ export function ToolCard({ node, sessionId, agentId, history }: ToolCardProps) {
   const [resultExpanded, setResultExpanded] = useState(false);
   const [resultBlock, setResultBlock] = useState<unknown>(null);
   const [resultText, setResultText] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   async function expandInput(): Promise<void> {
     if (inputExpanded) {
@@ -69,9 +71,14 @@ export function ToolCard({ node, sessionId, agentId, history }: ToolCardProps) {
       return;
     }
     if (inputBlock === null) {
-      const res = await fetch(blockUrl({ sessionId, agentId, at: node.call.at, i: node.call.i }));
-      const body = (await res.json()) as { block: unknown };
-      setInputBlock(body.block);
+      // Fail closed (fail-closed-edges): a failed expand shows a note, never an unhandled rejection.
+      try {
+        const body = await fetchJson(blockUrl({ sessionId, agentId, at: node.call.at, i: node.call.i }), isBlockResponse);
+        setInputBlock(body.block);
+      } catch {
+        setFailed(true);
+        return;
+      }
     }
     setInputExpanded(true);
   }
@@ -82,15 +89,18 @@ export function ToolCard({ node, sessionId, agentId, history }: ToolCardProps) {
       setResultExpanded(false);
       return;
     }
-    if (node.result.r === 'spill') {
-      if (resultText === null) {
-        const res = await fetch(spillUrl({ sessionId, agentId, name: node.result.name }));
-        setResultText(await res.text());
+    try {
+      if (node.result.r === 'spill') {
+        if (resultText === null) {
+          setResultText(await fetchText(spillUrl({ sessionId, agentId, name: node.result.name })));
+        }
+      } else if (resultBlock === null) {
+        const body = await fetchJson(blockUrl({ sessionId, agentId, at: node.resultAnchor.at, i: node.resultAnchor.i }), isBlockResponse);
+        setResultBlock(body.block);
       }
-    } else if (resultBlock === null) {
-      const res = await fetch(blockUrl({ sessionId, agentId, at: node.resultAnchor.at, i: node.resultAnchor.i }));
-      const body = (await res.json()) as { block: unknown };
-      setResultBlock(body.block);
+    } catch {
+      setFailed(true);
+      return;
     }
     setResultExpanded(true);
   }
@@ -121,6 +131,7 @@ export function ToolCard({ node, sessionId, agentId, history }: ToolCardProps) {
           </button>
         )}
       </div>
+      {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load payload</span>}
       {inputExpanded && inputBlock !== null && (
         <pre className="tool__input" style={{ fontFamily: 'var(--font-mono)' }}>{JSON.stringify(inputBlock)}</pre>
       )}

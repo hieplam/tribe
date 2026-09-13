@@ -58,6 +58,7 @@ export function SessionView({ sessionId, agentId, session = null }: SessionViewP
   const { store, fetchRows } = useEventStream(sessionId, activeAgentId, onMeta, setConnection);
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const agents: Agent[] = meta?.agents ?? [];
   const badges: Badge[] = meta?.badges ?? [];
@@ -69,11 +70,13 @@ export function SessionView({ sessionId, agentId, session = null }: SessionViewP
   async function loadEarlier(): Promise<void> {
     if (busy) return;
     setBusy(true);
+    setLoadError(null);
     try {
       await store.loadEarlier(fetchRows);
     } catch {
       // Fail closed (fail-closed-edges.md at the browser edge): a failed back-fill leaves the
-      // current window intact rather than crashing the view; `busy` is cleared in `finally`.
+      // current window intact AND surfaces a visible note instead of swallowing the failure.
+      setLoadError('could not load earlier history');
     } finally {
       setBusy(false);
     }
@@ -81,8 +84,10 @@ export function SessionView({ sessionId, agentId, session = null }: SessionViewP
 
   function reloadTail(): void {
     // §6.3: "N new below" → replace the window with a fresh tail fetch (distinct from RowList's
-    // local scroll-to-bottom). Errors fail closed, leaving the counted window as-is.
-    store.reloadTail(fetchRows).catch(() => {});
+    // local scroll-to-bottom). A failure fails closed with a visible note, leaving the counted
+    // window as-is rather than silently swallowing the rejection.
+    setLoadError(null);
+    store.reloadTail(fetchRows).catch(() => setLoadError('could not reload the tail'));
   }
 
   return (
@@ -105,6 +110,11 @@ export function SessionView({ sessionId, agentId, session = null }: SessionViewP
             <CampaignBadge key={`${badge.repoKey}/${badge.slug}`} badge={badge} />
           ))}
         </div>
+      )}
+      {loadError !== null && (
+        <p className="session-view__load-error" data-testid="session-load-error" style={{ color: 'var(--warn)' }}>
+          {loadError}
+        </p>
       )}
       {snap.truncatedBefore && <LoadEarlier onLoad={loadEarlier} busy={busy} />}
       <RowList nodes={snap.nodes} sessionId={sessionId} agentId={activeAgentId} />

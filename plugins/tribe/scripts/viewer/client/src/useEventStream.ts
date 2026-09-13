@@ -15,6 +15,7 @@
 // a reconnect's window overlap invisible; the generation makes a stale window discardable.
 import { useEffect, useRef } from 'react';
 import type { Agent, Badge, Patch, RenderNode, SessionSummary } from '../../core/model.ts';
+import { fetchJson } from './http.ts';
 import { createRowStore, type FetchRows, type RowsPage, type RowStore } from './rowStore.ts';
 
 /** The three members the client publishes on `window` (spec §8.4). Read-only with respect to
@@ -258,6 +259,13 @@ export function createStreamController(store: RowStore, deps: StreamDeps): Strea
 /** The edge that performs the real `GET /api/rows` for back-fill and tail reload (spec §3.2). The
  * store's `loadEarlier`/`reloadTail` take this as their injected `FetchRows` seam; it is the ONE
  * side effect, with no decision-making (`pure-core.md`). */
+/** The `/api/rows` response shape — nodes + patches (§3.2). The shape gate for the fail-closed
+ * boundary below. */
+function isRowsPage(v: unknown): v is RowsPage {
+  return typeof v === 'object' && v !== null
+    && Array.isArray((v as RowsPage).nodes) && Array.isArray((v as RowsPage).patches);
+}
+
 export function makeFetchRows(sessionId: string, agentId: string | null): FetchRows {
   return async ({ before, orphans }) => {
     const params = new URLSearchParams({ session: sessionId });
@@ -267,8 +275,9 @@ export function makeFetchRows(sessionId: string, agentId: string | null): FetchR
     // comma-separated value — so the ids are comma-joined into a SINGLE `orphans=` param, never one
     // param per id (which would deliver only the first).
     if (orphans.length > 0) params.set('orphans', orphans.join(','));
-    const res = await fetch(`/api/rows?${params.toString()}`);
-    return (await res.json()) as RowsPage;
+    // Fails closed through the `http.ts` boundary (§13): a non-2xx or malformed body rejects with a
+    // typed error rather than resolving as an unusable page.
+    return fetchJson<RowsPage>(`/api/rows?${params.toString()}`, isRowsPage);
   };
 }
 

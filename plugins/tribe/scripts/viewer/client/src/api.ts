@@ -11,6 +11,7 @@
 // are erased at compile time, so importing them costs nothing at runtime and the structural wall
 // stays clean.
 import type { Agent, Badge, Project, SessionSummary } from '../../core/model.ts';
+import { fetchJson } from './http.ts';
 
 export interface ProjectsResponse {
   projects: Project[];
@@ -29,28 +30,35 @@ export interface SessionResponse {
   badges: Badge[];
 }
 
+// Shape validators (fail-closed-edges): every read goes through the `http.ts` boundary, which
+// checks `res.ok` and refuses a non-2xx (a 500's `{error}` body must never reach `projects.map`).
+// These predicates gate the 2xx body's SHAPE — the minimum each caller depends on.
+function isProjectsResponse(v: unknown): v is ProjectsResponse {
+  return typeof v === 'object' && v !== null && Array.isArray((v as ProjectsResponse).projects);
+}
+function isSessionsResponse(v: unknown): v is SessionsResponse {
+  return typeof v === 'object' && v !== null && Array.isArray((v as SessionsResponse).sessions);
+}
+function isSessionResponse(v: unknown): v is SessionResponse {
+  return typeof v === 'object' && v !== null && (v as SessionResponse).session !== undefined;
+}
+
 /** `GET /api/projects` (spec §5.6, D10). `all=true` requests every project — the response's
  * `olderCount` comes back `0` in that case; `false` (the default) requests the 30-day window plus
- * the real `olderCount` for the rest. */
+ * the real `olderCount` for the rest. Fails closed through the `http.ts` boundary. */
 export async function fetchProjects(all: boolean = false): Promise<ProjectsResponse> {
-  const res = await fetch(all ? '/api/projects?all=1' : '/api/projects');
-  // `Response#json()` returns `Promise<unknown>` — this function's OWN contract is the shape
-  // (no runtime re-validation here, matching every other call in this file); serve.ts is the
-  // producer of this exact wire shape (spec §4).
-  return (await res.json()) as ProjectsResponse;
+  return fetchJson(all ? '/api/projects?all=1' : '/api/projects', isProjectsResponse);
 }
 
 /** `GET /api/sessions?project=<encodedProjectDir>` (spec §3.2). `projectDir` is the on-disk
  * encoded directory name (`Project.dir`), percent-encoded here exactly once — the same shape
  * `client/src/routes.ts#routeToPath` already uses for `/p/<encodedProjectDir>`. */
 export async function fetchSessions(projectDir: string): Promise<SessionsResponse> {
-  const res = await fetch(`/api/sessions?project=${encodeURIComponent(projectDir)}`);
-  return (await res.json()) as SessionsResponse;
+  return fetchJson(`/api/sessions?project=${encodeURIComponent(projectDir)}`, isSessionsResponse);
 }
 
 /** `GET /api/session/<sessionId>` (spec §5.2). `sessionId` is validated server-side; this
  * function only shapes the request URL. */
 export async function fetchSession(sessionId: string): Promise<SessionResponse> {
-  const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}`);
-  return (await res.json()) as SessionResponse;
+  return fetchJson(`/api/session/${encodeURIComponent(sessionId)}`, isSessionResponse);
 }

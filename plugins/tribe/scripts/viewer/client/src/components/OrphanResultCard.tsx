@@ -6,6 +6,7 @@
 // path serves both `tool` and `orphan_result`).
 import { useState } from 'react';
 import type { RenderNode } from '../../../core/model.ts';
+import { fetchJson, isBlockResponse } from '../http.ts';
 import { blockUrl } from './ImageCard.tsx';
 
 export interface OrphanResultCardProps {
@@ -17,6 +18,7 @@ export interface OrphanResultCardProps {
 export function OrphanResultCard({ node, sessionId, agentId }: OrphanResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [block, setBlock] = useState<unknown>(null);
+  const [failed, setFailed] = useState(false);
 
   async function expand(): Promise<void> {
     if (expanded) {
@@ -24,9 +26,14 @@ export function OrphanResultCard({ node, sessionId, agentId }: OrphanResultCardP
       return;
     }
     if (block === null) {
-      const res = await fetch(blockUrl({ sessionId, agentId, at: node.resultAnchor.at, i: node.resultAnchor.i }));
-      const body = (await res.json()) as { block: unknown };
-      setBlock(body.block);
+      // Fail closed (fail-closed-edges): a failed expand shows a note, never an unhandled rejection.
+      try {
+        const body = await fetchJson(blockUrl({ sessionId, agentId, at: node.resultAnchor.at, i: node.resultAnchor.i }), isBlockResponse);
+        setBlock(body.block);
+      } catch {
+        setFailed(true);
+        return;
+      }
     }
     setExpanded(true);
   }
@@ -36,6 +43,7 @@ export function OrphanResultCard({ node, sessionId, agentId }: OrphanResultCardP
       <button type="button" data-testid="orphan-expand" onClick={expand} style={{ color: 'var(--warn)' }}>
         tool result — call is above the window
       </button>
+      {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load result</span>}
       {expanded && block !== null && (
         <pre className="orphan-result__body" style={{ fontFamily: 'var(--font-mono)' }}>{JSON.stringify(block)}</pre>
       )}

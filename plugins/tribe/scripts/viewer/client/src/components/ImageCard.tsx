@@ -4,6 +4,7 @@
 // row can carry none (spec §4). Collapsed by default: nothing is fetched until the user asks.
 import { useState } from 'react';
 import type { RenderNode } from '../../../core/model.ts';
+import { fetchJson, isBlockResponse } from '../http.ts';
 
 /** `GET /api/block?session=&agent=&at=&i=` (spec §4) — the ONE address every elided payload uses,
  * shared by every expandable card in this file family (`ToolCard`, `OrphanResultCard`,
@@ -33,6 +34,7 @@ export interface ImageCardProps {
 export function ImageCard({ node, sessionId, agentId }: ImageCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   async function expand(): Promise<void> {
     if (expanded) {
@@ -40,11 +42,18 @@ export function ImageCard({ node, sessionId, agentId }: ImageCardProps) {
       return;
     }
     if (src === null) {
-      const res = await fetch(blockUrl({ sessionId, agentId, at: node.at, i: node.i }));
-      const body = (await res.json()) as { block: ImageBlock };
-      const mediaType = body.block.source?.media_type ?? node.mediaType;
-      const data = body.block.source?.data ?? '';
-      setSrc(`data:${mediaType};base64,${data}`);
+      // Fail closed (fail-closed-edges): the expand-fetch rejection must NOT escape this click
+      // handler as an unhandled rejection — a failure shows a note, the card keeps its affordance.
+      try {
+        const body = await fetchJson(blockUrl({ sessionId, agentId, at: node.at, i: node.i }), isBlockResponse);
+        const block = body.block as ImageBlock;
+        const mediaType = block.source?.media_type ?? node.mediaType;
+        const data = block.source?.data ?? '';
+        setSrc(`data:${mediaType};base64,${data}`);
+      } catch {
+        setFailed(true);
+        return;
+      }
     }
     setExpanded(true);
   }
@@ -56,6 +65,7 @@ export function ImageCard({ node, sessionId, agentId }: ImageCardProps) {
           image ({node.mediaType})
         </button>
       )}
+      {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load image</span>}
       {expanded && src !== null && <img className="image__full" src={src} alt={node.mediaType} />}
     </div>
   );

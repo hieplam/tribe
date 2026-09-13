@@ -380,6 +380,21 @@ describe('the browser fetch edge fails closed (FIX 4 — fail-closed-edges.md ap
     expect((container.textContent ?? '').length).toBeGreaterThan(0);
     cleanup(container, root);
   });
+
+  test('at "/" a RESOLVED non-2xx response fails closed — a visible note, never projects.map on an error body (R15.1)', async () => {
+    // The gap the existing test above misses: the fetch RESOLVES (a 500 with a JSON body), so the
+    // old `(await res.json()) as ProjectsResponse` cast let `{error}` through and `projects.map`
+    // threw later. The typed boundary must reject on the non-2xx status instead.
+    window.history.pushState(null, '', '/');
+    const fetched = installFetch(() => new Response(JSON.stringify({ error: 'boom' }), { status: 500 }));
+    restoreFetch = fetched.restore;
+    const { container, root } = renderInto(<App />);
+    await act(async () => {
+      for (let i = 0; i < 4; i++) await flush();
+    });
+    expect(container.querySelector('[data-testid="load-error"]')).not.toBeNull();
+    cleanup(container, root);
+  });
 });
 
 describe('NewBelowPill is wired to §6.3 (FIX 3)', () => {
