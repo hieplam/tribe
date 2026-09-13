@@ -2128,7 +2128,7 @@ Audit lens (skinner, contract): run the grep guard's **six** rules yourself, by 
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing check.** The D9 sweep's gate is a grep, run before and after:
+- [x] **Step 1: Write the failing check.** The D9 sweep's gate is a grep, run before and after:
 
       ```sh
       grep -rn -i 'supervisor' plugins/tribe .c3/
@@ -2155,7 +2155,7 @@ Model: **Sonnet**.
 
       The `Monitor` and `ScheduleWakeup` tool names and the `artifact-comment-monitor` row type are
       **not** in scope and must still be present afterwards — assert that too.
-- [ ] **Step 2: Apply the eight renames** of spec §15 and rewrite the two README sections against
+- [x] **Step 2: Apply the eight renames** of spec §15 and rewrite the two README sections against
       the new single surface and the two stdout lines of spec §10.2.
 
       **D9 retires only the PROCESS NAMES, and sites 3–4 are where that distinction bites.** D9 says
@@ -2170,9 +2170,9 @@ Model: **Sonnet**.
       Sites 4 and 5 (`runner/README.md:76`, `:129`) fall inside ranges being rewritten anyway — they
       still have to be in the inventory, because the gate is "the grep returned exactly this set
       before, and returns empty after".
-- [ ] **Step 3: Author and apply** the c3-215 row 72 change unit (the runner's viewer sentences),
+- [x] **Step 3: Author and apply** the c3-215 row 72 change unit (the runner's viewer sentences),
       escaping every literal `|` as `\|`.
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
       ```sh
       bunx @c3x/cli@11.6.3 check </dev/null
@@ -2183,7 +2183,7 @@ Model: **Sonnet**.
 
       Expected: `bunx @c3x/cli@11.6.3 check` clean; the runner suite green; the supervisor grep empty; `Monitor`
       still present in `session.ts`. This closes follow-up card **FU2** (STATE.md `F2`).
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): run both greps yourself. Then confirm the D9 rename did **not** touch a
 Claude Code tool name or a transcript row type — an over-eager sweep here breaks the wait-tool denial

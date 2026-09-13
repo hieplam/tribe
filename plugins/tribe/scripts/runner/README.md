@@ -73,9 +73,10 @@ those three values are no longer environment-specific. Any flag `parseArgs` does
 ## Run record
 
 Every non-`--dry-run` invocation records itself under `--home` the moment the single-instance
-lock (below) is acquired — this is the machine-local audit trail the status viewer
-(`plugins/tribe/scripts/viewer/`) reads to answer "is this campaign's runner actually alive right
-now?" without any shell forensics.
+lock (below) is acquired — this is the machine-local audit trail the viewer
+(`plugins/tribe/scripts/viewer/`) reads for the badge's runner-alive fact (§9), and the watchdog
+reads to decide whether to relaunch — the viewer **does** read `run.json`; what it never reads is
+the runner *log* (D6).
 
 ```
 <home>/
@@ -126,14 +127,21 @@ anything. `argv` is the raw `process.argv.slice(2)` this invocation was started 
 
 On every real (non-`--dry-run`) invocation, before the first card's executor session spawns,
 the runner starts (or reuses) a **read-only** local web page for watching this campaign's
-sessions live — the same package as the [status viewer](../viewer/README.md), grown a second
-surface (`GET /live`). It prints its URL on this process's own stdout:
+sessions live — one surface, the same package documented in full at
+[`scripts/viewer/README.md`](../viewer/README.md); there is no separate status page any more.
+It prints two lines on this process's own stdout:
 
 ```
-campaign viewer: http://127.0.0.1:4321/live?repo=<repo-key>&slug=<campaign-slug> (read-only)
+campaign viewer: http://127.0.0.1:4321/?campaign=<repoKey>/<slug> (read-only)
+card <cardId>: http://127.0.0.1:4321/s/<sessionId>
 ```
 
-- **Auto-started, not owned.** The URL is derived from `--home` alone (repo key + campaign
+Line 1 is printed once, before the first card's session, and carries the pair
+`<repoKey>/<slug>` (§9: a slug alone does not identify a campaign on this machine) — a campaign
+filter pre-fills the list view. Line 2 is printed once per card, the instant the SDK assigns
+that card's session id, and opens straight to that session's own tab.
+
+- **Auto-started, not owned.** The root URL is derived from `--home` alone (repo key + campaign
   slug) — nothing new is written to disk or to `campaign-state.json` for this. If a viewer is
   already answering `/healthz` on the target port, the runner reuses it instead of spawning a
   second one.
@@ -154,8 +162,9 @@ campaign viewer: http://127.0.0.1:4321/live?repo=<repo-key>&slug=<campaign-slug>
   a different `--viewer-port`. Either way this is observability exhaust, never a gate.
   `--dry-run` skips this step entirely (zero side effects stays a hard contract).
 
-See [`scripts/viewer/README.md`](../viewer/README.md) for what the live page actually shows
-(the process tree, tailed transcripts) and its full route/route-contract.
+See [`scripts/viewer/README.md`](../viewer/README.md) for what the page actually shows (every
+Claude Code session transcript on the machine, tailed live, with campaign badges) and its full
+route contract.
 
 ## State file schema
 
@@ -811,7 +820,7 @@ The watchdog writes **nowhere else** in the campaign home — never `campaign-st
 `answers.md`, or an escalation file:
 
 - **`status.json`** — rewritten atomically (write-to-temp then rename) on every state
-  transition; the shape a Monitor/`until` loop or the status viewer polls.
+  transition; the shape a Monitor/`until` loop or the watchdog polls.
 - **`events.jsonl`** — append-only, one JSON line per action, each carrying its own ISO
   timestamp (`at`) — a plain audit trail, never truncated or rewritten.
 - **`runner-stdout/attempt-<N>.log`** — the stdout+stderr of the `N`th runner process this
@@ -857,7 +866,7 @@ outranks an overload signal (a quota wall has a known reset instant; a 529 is tr
 ### Known limitations (watchdog)
 
 - **A crash of the watchdog itself is not resumed automatically.** `status.json` is left with
-  `terminal: null` and a dead `pid` — exactly the shape the status viewer uses to detect a dead
+  `terminal: null` and a dead `pid` — exactly the shape the watchdog uses to detect a dead
   runner. Relaunching the watchdog is safe and is the intended recovery: adopt-on-start (D74-7)
   attaches to a live runner instead of starting a second one.
 - **A runner that dies with NO `answers.md` in the campaign home exits `4`, not `2`.** Measured

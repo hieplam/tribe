@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Read-only, refresh-based status viewer for tribe campaign runners (scans ~/.tribe, server-renders HTML; zero writes).",
+  "description": "Read-only local transcript viewer for Claude Code sessions (reads ~/.claude/projects; campaign badges from two files under ~/.tribe; zero writes at runtime)",
   "scripts": {
     "test": "bun test",
     "check": "tsc --noEmit && bun test",

@@ -222,7 +222,8 @@ semantics, escalation workflow, and known limitations. `--repo`, `--model`, and 
 only required flags — every campaign operational artifact (state, answers, escalations, reports,
 lock, STOP) resolves to a fixed name under `--home` and is never committed to the target repo.
 Every real (non-`--dry-run`) invocation records a `run.json` under `--home` too (see that
-README's "Run record" section) — this is what the status viewer below reads.
+README's "Run record" section) — this is what the viewer reads for a session's campaign badge,
+and the watchdog reads to decide whether a run is alive.
 
 **The one committed exception: the harness-gap ledger.** Everything above is *campaign
 operational state* and stays under `--home`. The gap registry is not that: `gap-gate.ts` — the
@@ -246,7 +247,7 @@ PR whose body carries no valid stamp for its card is reported **not shipped**.
 
 ## Campaign watchdog
 
-A **zero-token supervisor script** (card i74, issue #74) — not an LLM session — that launches
+A **zero-token watchdog script** (card i74, issue #74) — not an LLM session — that launches
 or adopts a runner pass, waits out an account-limit death until the log's own reset time, backs
 off an upstream overload, relaunches a crash once, and exits **only** when a human must act. The
 harness's own "background command exited" notification IS the heartbeat, so
@@ -275,30 +276,27 @@ flag table, exit codes and the frozen action table — this section is only a po
 
 ---
 
-## Status viewer
+## Viewer
 
 [`scripts/viewer/`](scripts/viewer/) is a read-only local web page — a sibling capability to the
-runner, same stack (bun + TS) — that scans `~/.tribe` and answers at a glance: which campaigns
-exist, is each runner's process actually alive right now, per-card status, pending escalations,
-and the current session's log tail. It never writes anything (no lock, no state, no `gh`/`git`);
-it binds `127.0.0.1` only. It has two surfaces:
-
-- **Status page** (`GET /`) — refresh-based, zero client JS: every "refresh" in a browser is
-  simply a fresh scan.
-- **Live view** (`GET /live`) — while a campaign's session is running, tails the executor's and
-  every subagent's transcript over Server-Sent Events, rendered by a small browser client
-  (`client/app.js`). The campaign runner starts this surface automatically alongside a real run
-  and prints its URL — see [`scripts/runner/README.md`](scripts/runner/README.md#live-viewer).
+runner, same stack (bun + TS) — with **one surface**: every Claude Code session transcript on the
+machine (`~/.claude/projects/`), listed, rendered, and followed live. Campaign facts are a small
+badge read from exactly two files under `~/.tribe` (`campaign-state.json` and `run.json`) — never
+a second surface, and never a store. It never writes anything (no lock, no state, no `gh`/`git`);
+it binds `127.0.0.1` only. The campaign runner starts it automatically alongside a real run and
+prints its URL and a per-card session URL — see
+[`scripts/runner/README.md`](scripts/runner/README.md#live-viewer).
 
 Start the server by hand with:
 
 ```sh
-bun plugins/tribe/scripts/viewer/serve.ts [--tribe-root <dir>] [--port <n>]
+bun plugins/tribe/scripts/viewer/serve.ts [--port <n>]
 ```
 
-`--tribe-root` defaults to `$HOME/.tribe`; `--port` defaults to `4321`. Then open
-`http://127.0.0.1:<port>` (or `curl` it). See [`scripts/viewer/README.md`](scripts/viewer/README.md)
-for the full route contract.
+`--port` defaults to `4321`. Both roots the server needs (the transcripts root and `~/.tribe`)
+resolve from the environment alone (`CLAUDE_CONFIG_DIR`/`HOME`) — there is no `--tribe-root` flag.
+Then open `http://127.0.0.1:<port>` (or `curl` it). See
+[`scripts/viewer/README.md`](scripts/viewer/README.md) for the full route contract.
 
 ## Migrating pre-existing worker reports
 
