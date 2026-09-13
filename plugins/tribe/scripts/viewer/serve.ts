@@ -27,9 +27,10 @@ import {
   type CampaignSelector,
 } from './adapters/campaign.adapter.ts';
 import { listDirOrEmpty, readHead, readRange, readTail, readTextCapped, realpathOrNull, statOrNull } from './adapters/fs.adapter.ts';
+import { createPoller, POLL_INTERVAL_MS, type PollerIo, type PollerMeta } from './adapters/poller.adapter.ts';
 import { buildBadgeIndex, selectCampaigns } from './core/badge.ts';
 import { type CacheEntry, decideCache, evictionVictim } from './core/cache.ts';
-import type { Agent, Badge, Patch } from './core/model.ts';
+import type { Agent, Badge, Patch, SessionSummary } from './core/model.ts';
 import { containedJoin, isContainedResolved, subagentsDirOf, toolResultsDirOf, transcriptPathOf } from './core/paths.ts';
 import { parseRoute } from './core/routes.ts';
 import { buildScanIndex, partitionProjects, sessionCacheKey, type ScannedSessionInput } from './core/scan.ts';
@@ -71,6 +72,16 @@ const AGENT_FILE_RE = /^agent-(.+)\.jsonl$/;
 const META_CAP_BYTES = 64 * 1024;
 const ROW_READ_CAP = 8 * 1024 * 1024 + 1; // ROW_CAP + 1 (task 18): enough to hold any VALID row plus its terminator
 const SPILL_READ_CAP = 2 * 1024 * 1024; // spec §7.6
+
+// spec §6.2/§6.5: at most 8 concurrent SSE streams; the 9th is refused. This counter is the ONLY
+// per-stream bound `serve.ts` owns — every other bound lives in the poller/core (§6.5). Bun.serve
+// runs the fetch handler to completion on a single thread, so incrementing here (before the
+// Response returns) and decrementing exactly once on stream cancel is race-free.
+const MAX_STREAMS = 8;
+let openStreams = 0;
+// D12: a fresh, opaque `generation` per connection so the client knows a reconnect's snapshot
+// REPLACES rather than extends what it holds. A monotonic counter satisfies "opaque + fresh".
+let eventGeneration = 0;
 
 function warnRefused(path: string): void {
   console.error(`serve: refused path outside the projects root: ${path}`);
@@ -342,6 +353,29 @@ function computeBadgeIndex(nowMs: number): { bySessionId: Map<string, Badge[]>; 
   return { bySessionId: index, skippedBadges: adapterSkipped + badgeSkipped };
 }
 
+/** A well-formed placeholder for the vanishingly-rare window between a stream opening (its file
+ * confirmed present) and a `readMeta` tick finding the session gone from the index. The poller's
+ * own `stat` sees the deletion first and emits `gone`, so this keeps `PollerMeta` total without
+ * ever surfacing to a live client. */
+function minimalSummary(sessionId: string): SessionSummary {
+  return { id: sessionId, projectDir: '', title: sessionId, titleSource: 'session-id', sizeBytes: 0, mtimeIso: new Date(0).toISOString(), live: false, subagentCount: 0, badges: [], projects: [] };
+}
+
+/** The `PollerMeta` snapshot for one focused session view (spec §6.2) — the composition root's
+ * scan, scoped to a single session. Called on connect (for `hello`) and once per poll tick (so a
+ * new sidecar, a badge change, or a liveness flip becomes a `meta` frame); the poller decides
+ * whether it CHANGED, this only reads it. `nowMs`/`nowIso` drive the liveness computation exactly
+ * as the `/api/session` route's do. */
+function readEventMeta(sessionId: string, nowMs: number, nowIso: string): PollerMeta {
+  const { projectDirs, sessions } = scanProjectsAndSessions(nowMs);
+  const { bySessionId } = computeBadgeIndex(nowMs);
+  const index = buildScanIndex(projectDirs, sessions, bySessionId, nowIso);
+  const session = index.sessionIndex.get(sessionId);
+  if (session === undefined) return { session: minimalSummary(sessionId), agents: [], badges: [], live: false };
+  const agents = readSubagentsFor(session.projectDir, session.id, nowIso);
+  return { session, agents, badges: session.badges, live: session.live };
+}
+
 function jsonNotFound(message: string): Response {
   return Response.json({ error: message }, { status: 404 });
 }
@@ -349,6 +383,10 @@ function jsonNotFound(message: string): Response {
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port,
+  // An SSE stream is idle between the 15 s pings; Bun's ~10 s default would close it first. 255 s
+  // (Bun's max) keeps `/events` alive between pings. (F55 — the idle-timeout contract is refined in
+  // task 20; this is the minimum this task's stream needs to survive.)
+  idleTimeout: 255,
   fetch(req) {
     const route = parseRoute(req.url);
     const nowMs = Date.now();
@@ -430,6 +468,66 @@ const server = Bun.serve({
         if (obs === null) return jsonNotFound('spill not found');
         const text = new TextDecoder('utf-8').decode(readRange(resolved, 0, Math.min(obs.sizeBytes, SPILL_READ_CAP)));
         return new Response(text, { headers: { 'content-type': 'text/plain' } });
+      }
+
+      case 'events': {
+        // spec §6.2: one poll loop per open session view. `serve.ts` owns ONLY the socket, the
+        // stream-slot count, and the fresh generation; every tail/window/normalize/pair/encode
+        // DECISION belongs to the poller + core (`pure-core.md`). This handler stays synchronous,
+        // so the slot check/increment is race-free against a concurrent 9th request.
+        const path = resolveTranscriptFile(route.sessionId, route.agentId, nowMs, nowIso);
+        const obs = path === null ? null : statOrNull(path);
+        if (path === null || obs === null) return jsonNotFound(`no session ${route.sessionId} under ~/.claude/projects`);
+        if (openStreams >= MAX_STREAMS) return new Response('too many live streams', { status: 503 });
+
+        openStreams += 1;
+        eventGeneration += 1;
+        const generation = String(eventGeneration);
+        const resolvedPath = path;
+        const sessionId = route.sessionId;
+
+        let poller: { stop: () => void } | null = null;
+        let released = false;
+        // Releases the slot EXACTLY once (spec §6.5) and stops the poll loop — on client
+        // disconnect (`cancel`) or a failed enqueue. Idempotent so a double-signal cannot
+        // double-decrement the counter.
+        const release = (): void => {
+          if (released) return;
+          released = true;
+          openStreams -= 1;
+          poller?.stop();
+        };
+
+        // D6/D12/D32: the poller reads ONLY through these injected primitives. `readMeta` re-scans
+        // per tick so a sidecar appearing mid-stream is detected; the containment root the scan
+        // uses is already resolved from `CLAUDE_CONFIG_DIR` at boot (D32).
+        const pollerIo: PollerIo = {
+          stat: (p) => statOrNull(p),
+          readRange: (p, s, e) => readRange(p, s, e),
+          readMeta: () => readEventMeta(sessionId, Date.now(), new Date().toISOString()),
+        };
+
+        const encoder = new TextEncoder();
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            const emit = (encoded: string): void => {
+              try {
+                controller.enqueue(encoder.encode(encoded));
+              } catch {
+                // The only throw here is enqueueing onto a controller the client already closed —
+                // that IS the disconnect signal, so release the slot and stop polling.
+                release();
+              }
+            };
+            poller = createPoller({ io: pollerIo, path: resolvedPath, intervalMs: POLL_INTERVAL_MS, generation, emit });
+          },
+          cancel() {
+            release();
+          },
+        });
+        return new Response(body, {
+          headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' },
+        });
       }
 
       case 'bad_request':

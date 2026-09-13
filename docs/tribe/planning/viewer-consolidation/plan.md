@@ -1529,7 +1529,7 @@ and a subtle error here is invisible until a live campaign — which is precisel
 survived 804 tests. (**There is no resume to get wrong**: D12 removed byte-offset resume entirely,
 and a reconnect is a fresh snapshot.)
 
-- [ ] **Step 1: Write the failing test.** `poller.adapter.test.ts` with an injected clock. The
+- [x] **Step 1: Write the failing test.** `poller.adapter.test.ts` with an injected clock. The
       adapter **observes and emits; it decides nothing** — every branch under test is a call into
       `core/tail.ts` or `core/normalize.ts`, and the test asserts the adapter forwards what core
       returned rather than re-deriving it (`pure-core.md`).
@@ -1569,15 +1569,15 @@ and a reconnect is a fresh snapshot.)
       disconnect arrives **already paired** rather than as an orphan; the 9th concurrent stream gets 503; closing a connection
       releases its slot (assert by opening, closing and reopening 9 times). Expected: the poller
       module is missing and `/events` 404s.
-- [ ] **Step 2: Implement** per spec §6. The clock is injected; this adapter is the package's only
+- [x] **Step 2: Implement** per spec §6. The clock is injected; this adapter is the package's only
       clock owner.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test adapters/poller.adapter.test.ts serve.events.test.ts
       ```
       Expected: all pass, including the stream-slot accounting.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run a real stream against a file you append to yourself and kill the
 connection **between a `tool_use` row and its `tool_result`**; reconnect and confirm the tool card
