@@ -4,9 +4,10 @@
 // and the "found in N projects" collision count (§5.2) relocated here from the list's SessionRow.
 import { useEffect, useSyncExternalStore, useState } from 'react';
 import type { Agent, Badge, SessionSummary } from '../../../core/model.ts';
-import { useEventStream, type MetaUpdate } from '../useEventStream.ts';
+import { useEventStream, type ConnectionStatus, type MetaUpdate } from '../useEventStream.ts';
 import { AgentTabs } from './AgentTabs.tsx';
 import { CampaignBadge } from './CampaignBadge.tsx';
+import { ConnectionNote } from './ConnectionNote.tsx';
 import { LoadEarlier } from './LoadEarlier.tsx';
 import { NewBelowPill } from './NewBelowPill.tsx';
 import { RowList } from './RowList.tsx';
@@ -51,7 +52,10 @@ export function SessionView({ sessionId, agentId, session = null }: SessionViewP
   useEffect(() => {
     setActiveAgentId(agentId);
   }, [agentId]);
-  const { store, fetchRows } = useEventStream(sessionId, activeAgentId, onMeta);
+  // The SSE connection state `<ConnectionNote>` renders (§8.1, §8.4, §13; R13). Tracked here because
+  // this view owns the one stream (§8.4); the note itself never triggers a reconnect.
+  const [connection, setConnection] = useState<ConnectionStatus | null>(null);
+  const { store, fetchRows } = useEventStream(sessionId, activeAgentId, onMeta, setConnection);
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   const [busy, setBusy] = useState(false);
 
@@ -83,6 +87,9 @@ export function SessionView({ sessionId, agentId, session = null }: SessionViewP
 
   return (
     <div className="session-view">
+      {/* §8.1's top-level connection note — silent while open, a warn note while reconnecting, a
+          persistent note when the stream is gone (§13) or sent an undecodable frame (R15.6). */}
+      <ConnectionNote status={connection} />
       <SessionHeader session={headerSession} />
       {agents.length > 0 && (
         <AgentTabs

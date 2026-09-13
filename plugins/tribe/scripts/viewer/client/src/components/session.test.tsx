@@ -16,6 +16,7 @@ import { act, type ReactElement } from 'react';
 import type { Root } from 'react-dom/client';
 const { createRoot } = await import('react-dom/client');
 import { RENDER_NODE_KINDS, type MdToken, type RenderNode } from '../../../core/model.ts';
+import { ConnectionNote } from './ConnectionNote.tsx';
 import { ChipRow } from './ChipRow.tsx';
 import { ErrorCard } from './ErrorCard.tsx';
 import { Markdown } from './Markdown.tsx';
@@ -187,6 +188,41 @@ describe('session view — one node per kind, the DOM contract, follow-the-tail'
     // the label still renders; the dangerous href is dropped, never emitted as an attribute.
     expect(container.textContent).toContain('x');
     expect(a?.getAttribute('href') ?? null).toBeNull();
+    cleanup(container, root);
+  });
+
+  // --- ConnectionNote (§8.1, §8.4, §13; R13) ------------------------------------------------
+  test('ConnectionNote renders NOTHING while the stream is open or connecting (never a note in the happy path)', () => {
+    for (const status of [null, { phase: 'connecting' } as const, { phase: 'open' } as const]) {
+      const { container, root } = renderInto(<ConnectionNote status={status} />);
+      expect(container.querySelector('[data-testid="connection-note"]')).toBeNull();
+      cleanup(container, root);
+    }
+  });
+
+  test('ConnectionNote shows a warn-token "reconnecting" note while reconnecting (no stack, no raw error)', () => {
+    const { container, root } = renderInto(<ConnectionNote status={{ phase: 'reconnecting' }} />);
+    const note = container.querySelector('[data-testid="connection-note"]');
+    expect(note).not.toBeNull();
+    expect(note!.getAttribute('data-note')).toBe('reconnecting');
+    expect(container.textContent?.toLowerCase()).toContain('reconnect');
+    cleanup(container, root);
+  });
+
+  test('ConnectionNote shows a PERSISTENT note when the stream is gone (§13 transcript deletion)', () => {
+    const { container, root } = renderInto(<ConnectionNote status={{ phase: 'gone' }} />);
+    const note = container.querySelector('[data-testid="connection-note"]');
+    expect(note).not.toBeNull();
+    expect(note!.getAttribute('data-note')).toBe('gone');
+    expect(container.textContent?.toLowerCase()).toContain('gone');
+    cleanup(container, root);
+  });
+
+  test('ConnectionNote shows a PERSISTENT note on a decode-error terminal state (R15.6)', () => {
+    const { container, root } = renderInto(<ConnectionNote status={{ phase: 'decode-error' }} />);
+    const note = container.querySelector('[data-testid="connection-note"]');
+    expect(note).not.toBeNull();
+    expect(note!.getAttribute('data-note')).toBe('decode-error');
     cleanup(container, root);
   });
 

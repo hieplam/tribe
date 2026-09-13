@@ -1816,7 +1816,9 @@ own definition, one level up from rows.
   `V/client/src/components/SessionView.tsx`,
   `RowList.tsx`, `Markdown.tsx`, `PromptCard.tsx`, `AssistantCard.tsx`, `ThinkingCard.tsx`,
   `ToolCard.tsx`, `Divider.tsx`, `ChipRow.tsx`, `ErrorCard.tsx`, `FollowTail.tsx`,
-  `LoadEarlier.tsx`
+  `LoadEarlier.tsx`,
+  `ConnectionNote.tsx` (R13: §8.1's top-level `<ConnectionNote>` — a plan gap, built in the
+  phase-3 fix round; renders the SSE connection state `useEventStream` tracks)
 - Create: `V/client/src/components/session.test.tsx`, `V/client/src/useEventStream.test.ts`,
   `V/client/src/rowStore.test.ts`
 

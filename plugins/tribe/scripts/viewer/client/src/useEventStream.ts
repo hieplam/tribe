@@ -39,14 +39,29 @@ export interface MetaUpdate {
   session: SessionSummary | null;
 }
 
+/** The connection state `<ConnectionNote>` renders (spec §8.1, §8.4, §13). `connecting`/`open` are
+ * the silent happy path; `reconnecting` is a pending reopen (a `warn` note); `gone` and
+ * `decode-error` are TERMINAL — the stream is closed and will not retry itself. */
+export type ConnectionStatus =
+  | { phase: 'connecting' }
+  | { phase: 'open' }
+  | { phase: 'reconnecting' }
+  | { phase: 'gone' }          // a terminal `gone` server frame (§13: the transcript was deleted)
+  | { phase: 'decode-error' }; // a frame the client could not JSON-decode (fail-closed, R15.6)
+
 export interface StreamDeps {
   EventSourceCtor: typeof EventSource;
   win: ViewerWindow;
   url: string;
   onMeta?: (m: MetaUpdate) => void;
-  /** How a reconnect is delayed (spec `retry: 2000`). Injected so a test runs it synchronously;
-   * production schedules it on the real timer. */
-  schedule?: (fn: () => void, ms: number) => void;
+  /** Surfaces the connection state for `<ConnectionNote>` (§8.1). The controller never renders — it
+   * only reports; the React edge holds the state. */
+  onStatus?: (s: ConnectionStatus) => void;
+  /** How a reconnect is delayed (spec `retry: 2000`). A REQUIRED injected input (`pure-core.md`):
+   * the controller constructs no timer of its own. Returns a canceller so a pending reconnect can
+   * be cancelled on stop/gone/reconnect and never more than one is outstanding at a time. The React
+   * edge (the hook) is the ONLY place that wires the real timer. */
+  schedule: (fn: () => void, ms: number) => () => void;
   retryMs?: number;
 }
 
@@ -74,11 +89,21 @@ const DEFAULT_RETRY_MS = 2000;
 /** The stream controller (spec §6.2, §8.4). Framework-free and fully injected, so it drives a
  * real browser `EventSource` in production and a fake in a unit test with identical logic. */
 export function createStreamController(store: RowStore, deps: StreamDeps): StreamController {
-  const schedule = deps.schedule ?? ((fn, ms) => setTimeout(fn, ms));
+  const schedule = deps.schedule;
   const retryMs = deps.retryMs ?? DEFAULT_RETRY_MS;
   let es: EventSource | null = null;
-  let stopped = false;         // `gone`/`stop` — the browser must not retry
+  let stopped = false;         // `gone`/`stop`/decode-error — the browser must not retry
   let lastSeq = 0;             // the per-connection sequence watermark; cleared on every `open`
+  let cancelPending: (() => void) | null = null; // canceller for the ONE outstanding reconnect, if any
+
+  /** Cancel the outstanding reconnect (if any), so at most one is ever pending and a stop/gone/
+   * reconnect leaves no zombie timer that reopens a stream the caller ended (R15.5). */
+  function clearPending(): void {
+    if (cancelPending) {
+      cancelPending();
+      cancelPending = null;
+    }
+  }
 
   /** True iff this frame has not been processed on THIS connection. The watermark restarts at 0 on
    * each `open` (spec §6.2), so a fresh `hello` (id 1) after a reconnect is always accepted — a
@@ -103,8 +128,35 @@ export function createStreamController(store: RowStore, deps: StreamDeps): Strea
   // wall was never meant to govern. This is the D18-compliant form task 22 originally used.
   const CLOSE_METHOD = 'close' as const;
 
+  /** The decode boundary for one SSE frame (fail-closed-edges obligation 1, R15.6). Advances the
+   * watermark, then JSON-decodes the frame body catching `SyntaxError` NARROWLY: a malformed frame
+   * becomes a typed terminal `decode-error` state and stops the stream, never an uncaught throw out
+   * of the DOM callback. A frame already processed on this connection is skipped (returns null). */
+  function decode<T>(ev: MessageEvent): T | null {
+    if (!accept(ev)) return null;
+    try {
+      return JSON.parse(ev.data) as T;
+    } catch (err) {
+      if (err instanceof SyntaxError) {
+        failTerminal({ phase: 'decode-error' });
+        return null;
+      }
+      throw err; // an unrecognised failure is not this boundary's to swallow
+    }
+  }
+
+  /** Enter a TERMINAL state: stop retrying, cancel any pending reconnect, close the source, and
+   * report the status (`gone`, §13; `decode-error`, R15.6). */
+  function failTerminal(status: ConnectionStatus): void {
+    stopped = true;
+    clearPending();
+    shutStream();
+    deps.onStatus?.(status);
+  }
+
   function openStream(): void {
     shutStream();
+    deps.onStatus?.({ phase: 'connecting' });
     const source = new deps.EventSourceCtor(deps.url);
     es = source;
     deps.win.__viewerEventSource = source;
@@ -112,31 +164,32 @@ export function createStreamController(store: RowStore, deps: StreamDeps): Strea
 
     source.addEventListener('open', () => {
       lastSeq = 0; // clear the watermark — frame ids restart at 1 per connection (§6.2, §8.4)
+      deps.onStatus?.({ phase: 'open' });
     });
 
     source.addEventListener('hello', (ev) => {
-      if (!accept(ev as MessageEvent)) return;
-      const d = JSON.parse((ev as MessageEvent).data) as HelloData;
+      const d = decode<HelloData>(ev as MessageEvent);
+      if (d === null) return;
       store.hello({ generation: d.generation, from: d.from, to: d.to, truncatedBefore: d.truncatedBefore });
       deps.win.__viewerGeneration = d.generation;
       deps.onMeta?.({ agents: d.agents ?? [], badges: d.badges ?? [], live: d.session?.live ?? false, session: d.session ?? null });
     });
 
     source.addEventListener('rows', (ev) => {
-      if (!accept(ev as MessageEvent)) return;
-      const d = JSON.parse((ev as MessageEvent).data) as RowsData;
+      const d = decode<RowsData>(ev as MessageEvent);
+      if (d === null) return;
       store.applyRows({ nodes: d.nodes, from: d.from, to: d.to });
     });
 
     source.addEventListener('patch', (ev) => {
-      if (!accept(ev as MessageEvent)) return;
-      const d = JSON.parse((ev as MessageEvent).data) as PatchData;
+      const d = decode<PatchData>(ev as MessageEvent);
+      if (d === null) return;
       store.applyPatches(d.patches);
     });
 
     source.addEventListener('meta', (ev) => {
-      if (!accept(ev as MessageEvent)) return;
-      const d = JSON.parse((ev as MessageEvent).data) as MetaData;
+      const d = decode<MetaData>(ev as MessageEvent);
+      if (d === null) return;
       deps.onMeta?.({ agents: d.agents ?? [], badges: d.badges ?? [], live: d.live ?? false, session: null });
     });
 
@@ -151,15 +204,21 @@ export function createStreamController(store: RowStore, deps: StreamDeps): Strea
 
     source.addEventListener('gone', (ev) => {
       if (!accept(ev as MessageEvent)) return;
-      stopped = true; // the focused file is gone — stop retrying (spec §6.2)
-      shutStream();
+      failTerminal({ phase: 'gone' }); // the focused file is gone — stop retrying (spec §6.2, §13)
     });
 
     source.addEventListener('error', () => {
       // A dropped connection (trigger 1, spec §8.4): reopen after the retry interval, unless the
-      // stream was deliberately ended (`gone`/`stop`), which fires no retry.
+      // stream was deliberately ended (`gone`/`stop`/decode-error), which fires no retry. Close the
+      // failed source immediately and allow AT MOST ONE pending reconnect (R15.5): a second `error`
+      // cancels the first's pending timer before scheduling its own, so two errors never open two
+      // streams and the original is never left open.
       if (stopped) return;
-      schedule(() => {
+      shutStream();
+      clearPending();
+      deps.onStatus?.({ phase: 'reconnecting' });
+      cancelPending = schedule(() => {
+        cancelPending = null;
         if (!stopped) openStream();
       }, retryMs);
     });
@@ -174,17 +233,22 @@ export function createStreamController(store: RowStore, deps: StreamDeps): Strea
 
   function reconnect(): void {
     // Trigger 2 (spec §8.4): open a NEW stream by the error path's own route, after a deliberate
-    // teardown that fired no `error`.
+    // teardown that fired no `error`. Cancel any pending error-path reconnect first so the two
+    // triggers never race into two streams (R15.5).
+    stopped = false;
+    clearPending();
     openStream();
   }
 
   return {
     start() {
       stopped = false;
+      clearPending();
       openStream();
     },
     stop() {
       stopped = true;
+      clearPending(); // a pending reconnect must NOT reopen a stream the caller ended (R15.5)
       shutStream();
     },
     reconnect,
@@ -221,12 +285,16 @@ export interface UseEventStream {
 }
 
 /** The React wrapper (spec §8.4): one stream per open session view, opened on mount and closed on
- * unmount or when the focused transcript changes. Supplies the real `EventSource`, `window`, and
- * timer; the controller owns everything else. */
+ * unmount or when the focused transcript changes. This is the ONLY place the real timer is wired
+ * (`pure-core.md`, R15.3): `schedule` runs `fn` on `setTimeout` and returns a canceller that clears
+ * it, so the controller stays free of a timer of its own. Also supplies the real `EventSource` and
+ * `window`; the controller owns everything else. `onStatus` surfaces the connection state for
+ * `<ConnectionNote>` (§8.1). */
 export function useEventStream(
   sessionId: string,
   agentId: string | null,
   onMeta?: (m: MetaUpdate) => void,
+  onStatus?: (s: ConnectionStatus) => void,
 ): UseEventStream {
   const storeRef = useRef<RowStore | null>(null);
   if (storeRef.current === null) storeRef.current = createRowStore();
@@ -234,6 +302,8 @@ export function useEventStream(
   const fetchRows = makeFetchRows(sessionId, agentId);
   const onMetaRef = useRef(onMeta);
   onMetaRef.current = onMeta;
+  const onStatusRef = useRef(onStatus);
+  onStatusRef.current = onStatus;
 
   useEffect(() => {
     const controller = createStreamController(store, {
@@ -241,6 +311,11 @@ export function useEventStream(
       win: window as ViewerWindow,
       url: eventsUrl(sessionId, agentId),
       onMeta: (m) => onMetaRef.current?.(m),
+      onStatus: (s) => onStatusRef.current?.(s),
+      schedule: (fn, ms) => {
+        const handle = setTimeout(fn, ms);
+        return () => clearTimeout(handle);
+      },
     });
     controller.start();
     return () => controller.stop();

@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import type { Agent, Badge, RenderNode } from '../../core/model.ts';
 import { createRowStore } from './rowStore.ts';
-import { createStreamController, makeFetchRows, type ViewerWindow } from './useEventStream.ts';
+import { createStreamController, makeFetchRows, type ConnectionStatus, type ViewerWindow } from './useEventStream.ts';
 
 // --- fake EventSource ----------------------------------------------------------------------
 
@@ -44,6 +44,12 @@ class FakeEventSource {
     const ev = { data: JSON.stringify(data), lastEventId: id ?? '' };
     for (const cb of this.listeners[type] || []) cb(ev);
   }
+  /** Deliver a frame whose `data` is a RAW string (not JSON-encoded) — the shape a malformed
+   * server frame has on the wire, used to prove the decode boundary catches `JSON.parse` (R15.6). */
+  emitRaw(type: string, raw: string, id?: string): void {
+    const ev = { data: raw, lastEventId: id ?? '' };
+    for (const cb of this.listeners[type] || []) cb(ev);
+  }
 }
 
 function freshWindow(): ViewerWindow {
@@ -57,14 +63,33 @@ function harness() {
   const store = createRowStore();
   const win = freshWindow();
   const metas: Array<{ agents: Agent[]; badges: Badge[]; live: boolean }> = [];
+  const statuses: ConnectionStatus[] = [];
   const controller = createStreamController(store, {
     EventSourceCtor: FakeEventSource as unknown as typeof EventSource,
     win,
     url: '/events?session=abc',
     onMeta: (m) => metas.push(m),
-    schedule: (fn) => fn(),
+    onStatus: (s) => statuses.push(s),
+    schedule: (fn) => { fn(); return () => {}; },
   });
-  return { store, win, metas, controller, current: () => FakeEventSource.instances[FakeEventSource.instances.length - 1]! };
+  return { store, win, metas, statuses, controller, current: () => FakeEventSource.instances[FakeEventSource.instances.length - 1]! };
+}
+
+/** A scheduler whose pending reconnects are fired (or cancelled) under the test's control — the
+ * synchronous `harness()` scheduler masks the R15.5 lifecycle (a fired reconnect hides whether a
+ * second was queued or the failed source was left open). */
+function controllableSchedule() {
+  const pending: Array<{ fn: () => void; cancelled: boolean }> = [];
+  const schedule = (fn: () => void): (() => void) => {
+    const entry = { fn, cancelled: false };
+    pending.push(entry);
+    return () => { entry.cancelled = true; };
+  };
+  return {
+    schedule,
+    activeCount: () => pending.filter((e) => !e.cancelled).length,
+    runAll: () => { for (const e of pending) if (!e.cancelled) e.fn(); },
+  };
 }
 
 function node(at: number): RenderNode {
@@ -283,6 +308,89 @@ describe('useEventStream — the SSE stream controller (spec §6.2, §8.4)', () 
     const url = calls[0]!;
     expect(url.match(/orphans=/g)?.length).toBe(1);       // exactly ONE orphans= param, never one-per-id
     expect(decodeURIComponent(url.split('orphans=')[1]!)).toBe('tu-a,tu-b'); // the comma-joined value
+  });
+
+  test('createStreamController constructs NO timer of its own — the scheduler is a REQUIRED input (R15.3, pure-core)', () => {
+    const src = readFileSync(join(import.meta.dir, 'useEventStream.ts'), 'utf8');
+    const start = src.indexOf('export function createStreamController');
+    const afterFn = src.indexOf('\nexport function', start + 1);
+    const controllerSrc = src.slice(start, afterFn === -1 ? undefined : afterFn);
+    expect(controllerSrc.includes('setTimeout')).toBe(false);     // no timer built inside the controller
+    expect(controllerSrc.includes('deps.schedule ??')).toBe(false); // no default fallback for the injected scheduler
+  });
+
+  test('two errors schedule AT MOST ONE reconnect, and the failed source is closed immediately (R15.5)', () => {
+    FakeEventSource.instances = [];
+    const store = createRowStore();
+    const sched = controllableSchedule();
+    const controller = createStreamController(store, {
+      EventSourceCtor: FakeEventSource as unknown as typeof EventSource,
+      win: freshWindow(),
+      url: '/events?session=abc',
+      schedule: sched.schedule,
+    });
+    controller.start();
+    const es1 = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    es1.fireOpen();
+    es1.fireError();
+    expect(es1.closed).toBe(true);            // the failed source is closed immediately, not left open
+    es1.fireError();                          // a SECOND error before the first reconnect fires
+    expect(sched.activeCount()).toBe(1);      // at most ONE pending reconnect (the first is cancelled)
+    const before = FakeEventSource.instances.length;
+    sched.runAll();                           // fire the pending reconnect
+    expect(FakeEventSource.instances.length).toBe(before + 1); // exactly one new stream opened
+  });
+
+  test('stop() cancels a pending reconnect (a scheduled reopen never fires after stop, R15.5)', () => {
+    FakeEventSource.instances = [];
+    const store = createRowStore();
+    const sched = controllableSchedule();
+    const controller = createStreamController(store, {
+      EventSourceCtor: FakeEventSource as unknown as typeof EventSource,
+      win: freshWindow(),
+      url: '/events?session=abc',
+      schedule: sched.schedule,
+    });
+    controller.start();
+    const es1 = FakeEventSource.instances[FakeEventSource.instances.length - 1]!;
+    es1.fireOpen();
+    es1.fireError();                          // schedules a reconnect
+    controller.stop();                        // must cancel it
+    expect(sched.activeCount()).toBe(0);
+    const before = FakeEventSource.instances.length;
+    sched.runAll();
+    expect(FakeEventSource.instances.length).toBe(before); // no reopen after stop
+  });
+
+  test('a malformed frame does not throw out of the callback — it reaches a typed decode-error terminal state and stops (R15.6)', () => {
+    const h = harness();
+    h.controller.start();
+    const es = h.current();
+    es.fireOpen();
+    // emit a `rows` frame whose data is NOT valid JSON — an unguarded JSON.parse would throw out of
+    // the callback with no typed state. The decode boundary must catch it (SyntaxError, narrowly).
+    let threw = false;
+    try {
+      es.emitRaw('rows', '{ this is : not json');
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(false);
+    expect(h.statuses[h.statuses.length - 1]).toEqual({ phase: 'decode-error' });
+    // terminal: a following error must NOT reopen
+    const count = FakeEventSource.instances.length;
+    es.fireError();
+    expect(FakeEventSource.instances.length).toBe(count);
+  });
+
+  test('a `gone` frame surfaces a terminal gone status (R15.2, §13)', () => {
+    const h = harness();
+    h.controller.start();
+    const es = h.current();
+    es.fireOpen();
+    es.emit('hello', HELLO, '1');
+    es.emit('gone', { reason: 'deleted' }, '2');
+    expect(h.statuses[h.statuses.length - 1]).toEqual({ phase: 'gone' });
   });
 
   test('makeFetchRows omits orphans= entirely when there are none', async () => {
