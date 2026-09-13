@@ -1950,7 +1950,7 @@ built bundle.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Tabs render from `Agent[]` in tree order with depth
+- [x] **Step 1: Write the failing test.** Tabs render from `Agent[]` in tree order with depth
       indentation; selecting a tab navigates to `/s/<id>/a/<agentId>` and opens a new stream; a
       `Task` tool card whose node carries an `agentId` links to that tab; `ImageCard` fetches
       `/api/block?at=<RowAnchor.at>&i=<RowAnchor.i>` only on expand — **addressed by the node's own
@@ -1966,14 +1966,14 @@ Model: **Sonnet**.
       `attachment` node with `expandable: false` renders **no** affordance rather than one that
       would return nothing; `RawCard` renders collapsed with the row type
       visible; `UnreadableNote` shows the count. Expected: components missing.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: Run.**
+- [x] **Step 2: Implement.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test client/
       ```
       Expected: all pass, including the two lazy-fetch assertions (nothing fetched before expand).
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): open a real session with subagents in a browser and compare the tab set
 to `ls` of its `subagents/` directory. A sidecar with no tab is under-rendering.

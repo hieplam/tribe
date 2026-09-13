@@ -17,7 +17,13 @@
 // the failure with a static import first (`onChange` silently never fires) and confirming this
 // dynamic form fixes it, before writing a single test below.
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
-GlobalRegistrator.register({ url: 'http://localhost/' });
+// Guard against double-registration: `bun test` runs every file in one process, and another
+// component test file (alphabetically before this one — task 25 adds `agents.test.tsx`) may
+// already have registered happy-dom — a second `register()` throws "already registered".
+// Register only if no DOM is present yet (the same guard `session.test.tsx` already carries).
+if (!(globalThis as { happyDOM?: unknown }).happyDOM) {
+  GlobalRegistrator.register({ url: 'http://localhost/' });
+}
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 import { beforeEach, describe, expect, test } from 'bun:test';
