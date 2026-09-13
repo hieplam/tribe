@@ -199,7 +199,10 @@ export function makeFetchRows(sessionId: string, agentId: string | null): FetchR
     const params = new URLSearchParams({ session: sessionId });
     if (agentId !== null) params.set('agent', agentId);
     if (before !== null) params.set('before', String(before));
-    for (const id of orphans) params.append('orphans', id);
+    // D27 wire shape (§3.2): `core/routes.ts` reads `searchParams.get('orphans')` and splits ONE
+    // comma-separated value — so the ids are comma-joined into a SINGLE `orphans=` param, never one
+    // param per id (which would deliver only the first).
+    if (orphans.length > 0) params.set('orphans', orphans.join(','));
     const res = await fetch(`/api/rows?${params.toString()}`);
     return (await res.json()) as RowsPage;
   };

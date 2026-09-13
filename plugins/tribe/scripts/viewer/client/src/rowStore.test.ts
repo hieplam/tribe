@@ -79,6 +79,42 @@ describe('rowStore — one contiguous window, keyed by RowAnchor.id', () => {
     expect(isContiguous(store.getSnapshot().nodes)).toBe(true);
   });
 
+  test('applyRows dedupes DUPLICATE ids WITHIN one frame (§6.3 dedupe is per-frame, not only against prior state)', () => {
+    // R14.3(a): `present` was built from the PRE-frame state, so two equal ids inside ONE frame
+    // both passed the filter and both survived — breaking the one-contiguous-window invariant.
+    const store = createRowStore();
+    store.hello({ generation: 'g', from: 1000, to: 1100, truncatedBefore: false });
+    store.applyRows({ nodes: [assistantNode(1000), assistantNode(1000)], from: 1000, to: 1100 });
+    const snap = store.getSnapshot();
+    expect(snap.nodes.map((n) => n.id)).toEqual(['1000:0']); // the in-frame duplicate is dropped
+    expect(isContiguous(snap.nodes)).toBe(true);
+  });
+
+  test('live append while FOLLOWING enforces WINDOW_CAP unconditionally — head-evicted, newest tail kept (§6.3)', () => {
+    // R14.3(b): a live `rows` frame appended while following never enforced the cap, so the window
+    // grew past 2,000 (2,001 observed). The cap is unconditional; following keeps the NEWEST tail.
+    const store = createRowStore();
+    const initial: RenderNode[] = [];
+    for (let k = 0; k < WINDOW_CAP - 1; k++) initial.push(assistantNode(100000 + k));
+    store.hello({ generation: 'gen-1', from: initial[0]!.at, to: 0, truncatedBefore: false });
+    store.applyRows({ nodes: initial, from: initial[0]!.at, to: initial[initial.length - 1]!.at + 100 });
+    expect(store.getSnapshot().nodes.length).toBe(WINDOW_CAP - 1);
+    expect(store.getSnapshot().following).toBe(true);
+
+    // Append 5 more live nodes while following: 1999 + 5 = 2004 would exceed the cap.
+    const more: RenderNode[] = [];
+    for (let k = 0; k < 5; k++) more.push(assistantNode(200000 + k));
+    store.applyRows({ nodes: more, from: 200000, to: 200100 });
+    const snap = store.getSnapshot();
+    expect(snap.nodes.length).toBe(WINDOW_CAP);                       // capped at 2,000, not 2,004
+    expect(snap.following).toBe(true);                               // still following the tail
+    expect(snap.nodes[snap.nodes.length - 1]!.id).toBe('200004:0');  // newest live node retained
+    expect(snap.nodes[0]!.id).not.toBe('100000:0');                  // oldest head node evicted
+    expect(snap.first).toBe(snap.nodes[0]!.at);                      // first tracks the new head
+    expect(snap.truncatedBefore).toBe(true);                        // history now precedes the window
+    expect(isContiguous(snap.nodes)).toBe(true);
+  });
+
   test('a rows node whose id is already present is IGNORED, not appended (D12 overlap dropped)', () => {
     const store = seeded();
     const before = store.getSnapshot().nodes.length;

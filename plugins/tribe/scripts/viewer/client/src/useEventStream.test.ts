@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
 import type { Agent, Badge, RenderNode } from '../../core/model.ts';
 import { createRowStore } from './rowStore.ts';
-import { createStreamController, type ViewerWindow } from './useEventStream.ts';
+import { createStreamController, makeFetchRows, type ViewerWindow } from './useEventStream.ts';
 
 // --- fake EventSource ----------------------------------------------------------------------
 
@@ -263,5 +263,40 @@ describe('useEventStream — the SSE stream controller (spec §6.2, §8.4)', () 
   test('the three __viewer* members are NOT gated on import.meta.env.DEV (D25 — they ship in prod)', () => {
     const src = readFileSync(join(import.meta.dir, 'useEventStream.ts'), 'utf8');
     expect(src.includes('import.meta.env')).toBe(false);
+  });
+
+  test('makeFetchRows comma-joins orphan ids into ONE orphans= param (D27 wire shape §3.2)', async () => {
+    // core/routes.ts reads searchParams.get('orphans') and splits ONE comma-separated value, so a
+    // client appending orphans=a&orphans=b would deliver only 'a'. The client must comma-join.
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return new Response(JSON.stringify({ nodes: [], patches: [], from: 0, to: 0, truncatedBefore: false }));
+    }) as typeof fetch;
+    try {
+      const fetchRows = makeFetchRows('sess-1', null);
+      await fetchRows({ before: 1000, orphans: ['tu-a', 'tu-b'] });
+    } finally {
+      globalThis.fetch = original;
+    }
+    const url = calls[0]!;
+    expect(url.match(/orphans=/g)?.length).toBe(1);       // exactly ONE orphans= param, never one-per-id
+    expect(decodeURIComponent(url.split('orphans=')[1]!)).toBe('tu-a,tu-b'); // the comma-joined value
+  });
+
+  test('makeFetchRows omits orphans= entirely when there are none', async () => {
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return new Response(JSON.stringify({ nodes: [], patches: [], from: 0, to: 0, truncatedBefore: false }));
+    }) as typeof fetch;
+    try {
+      await makeFetchRows('sess-1', null)({ before: null, orphans: [] });
+    } finally {
+      globalThis.fetch = original;
+    }
+    expect(calls[0]!.includes('orphans=')).toBe(false);
   });
 });

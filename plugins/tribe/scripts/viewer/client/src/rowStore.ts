@@ -139,7 +139,15 @@ export function createRowStore(): RowStore {
 
   function applyRows(r: { nodes: RenderNode[]; from: number; to: number }): void {
     const present = idSet(state.nodes);
-    const fresh = r.nodes.filter((n) => !present.has(n.id));
+    // Dedupe against prior state AND WITHIN this one frame (§6.3): two equal ids in a single frame
+    // must not both survive — `present` alone (pre-frame) let an in-frame duplicate through.
+    const seenInFrame = new Set<string>();
+    const fresh: RenderNode[] = [];
+    for (const n of r.nodes) {
+      if (present.has(n.id) || seenInFrame.has(n.id)) continue;
+      seenInFrame.add(n.id);
+      fresh.push(n);
+    }
 
     // At the cap with follow off, an incoming frame is COUNTED, not appended (§6.3): appending
     // while the tail is frozen would put a hole in the middle of the window.
@@ -150,9 +158,18 @@ export function createRowStore(): RowStore {
     }
 
     if (fresh.length === 0) return;
-    const nodes = state.nodes.concat(fresh);
-    const first = state.nodes.length === 0 ? r.from : state.first;
-    commit({ ...state, nodes, first, last: r.to });
+    let nodes = state.nodes.concat(fresh);
+    let first = state.nodes.length === 0 ? r.from : state.first;
+    let truncatedBefore = state.truncatedBefore;
+    // §6.3: the window cap is UNCONDITIONAL. A live append while following the tail must not grow
+    // the window past the cap — evict from the HEAD so the NEWEST rows survive (back-fill evicts
+    // the other way, keeping the requested history — see `prependPage`).
+    if (nodes.length > WINDOW_CAP) {
+      nodes = nodes.slice(nodes.length - WINDOW_CAP);
+      first = nodes[0]!.at;
+      truncatedBefore = true;
+    }
+    commit({ ...state, nodes, first, last: r.to, truncatedBefore });
   }
 
   function applyPatches(patches: Patch[]): void {
