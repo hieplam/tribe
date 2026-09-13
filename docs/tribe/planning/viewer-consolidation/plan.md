@@ -1824,7 +1824,7 @@ Model: **Opus.** Follow-the-tail, windowed back-fill and incoming frames all mut
 container; this is the one client task with real state-machine risk, and B7 is the evidence that
 getting it wrong is easy and silent.
 
-- [ ] **Step 1: Write the failing test.** `rowStore.test.ts` first, because it is the contract the
+- [x] **Step 1: Write the failing test.** `rowStore.test.ts` first, because it is the contract the
       other two rest on (spec §8.4). The store holds **one contiguous window** of nodes,
       `[first, last]` in byte offsets — never a sparse set of ranges:
       - nodes are keyed by `RowAnchor.id` and held in file order;
@@ -1921,16 +1921,16 @@ getting it wrong is easy and silent.
       token; follow-the-tail scrolls on new rows while within 32 px of the bottom, does **not**
       scroll when outside it, shows the pill, and resumes on click (spec §8.3). Expected: modules
       missing.
-- [ ] **Step 2: Implement.** `Markdown.tsx` maps `MdToken[]` to elements — there is no HTML string
+- [x] **Step 2: Implement.** `Markdown.tsx` maps `MdToken[]` to elements — there is no HTML string
       anywhere in the client. `rowStore.ts` is the single owner of row identity, dedupe and
       eviction; components read from it and never keep their own copy of a row.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test client/ && bun run build
       ```
       Expected: all pass; the build succeeds.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): drive the scroll state machine yourself through the sequence bottom, new
 nodes, scroll up, new nodes, click pill, new nodes — and assert the viewport moves only in states 2
