@@ -1777,7 +1777,7 @@ proves the import resolved rather than silently failing. Finally check every
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** using `@happy-dom/global-registrator` under `bun test`:
+- [x] **Step 1: Write the failing test** using `@happy-dom/global-registrator` under `bun test`:
       a project list renders one row per project with its `cwd` label and falls back to the encoded
       directory name when `cwd` is null; a session row shows title, short id, size, relative age,
       subagent count; `LiveDot` renders only when `live`; `CampaignBadge` renders slug, card,
@@ -1796,15 +1796,15 @@ Model: **Sonnet**.
       href is `?all=1`; with `olderCount: 0` it renders nothing; and **a project's session list is
       never filtered by age** — assert an old project opened directly shows every session it has.
       Expected: components missing.
-- [ ] **Step 2: Implement.** Every visual value is `var(--token)` (spec §8.1 names the token per
+- [x] **Step 2: Implement.** Every visual value is `var(--token)` (spec §8.1 names the token per
       component).
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test client/
       ```
       Expected: all pass; `structure.test.ts` still green (no literal slipped in).
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): render the list against the real server and count the rows against
 `ls ~/.claude/projects`. A project silently missing from the list is under-rendering by the oracle's
