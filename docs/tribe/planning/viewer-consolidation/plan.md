@@ -1279,7 +1279,7 @@ task 19's rotation test is worthless if it is.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Against a fixture `~/.tribe` built in a `mkdtemp`: the
+- [x] **Step 1: Write the failing test.** Against a fixture `~/.tribe` built in a `mkdtemp`: the
       fixed-depth walk finds campaigns; a campaign with no `runs/` directory yields
       `runnerAlive: false`; a malformed `campaign-state.json` is isolated to its own campaign and is
       reported as **malformed**, while an unreadable one is reported as **absent** (the two-outcome
@@ -1310,17 +1310,17 @@ Model: **Sonnet**.
       the 500-entry bound — and have the adapter hold the `Map` and obey it. Assert the module's source
       contains neither `logsDir` nor `statePath` (a source-level assertion, deliberately, because
       this is a D6 boundary and not merely behaviour). Expected: module missing.
-- [ ] **Step 2: Implement** per spec §9. `process.kill(pid, 0)` lives here, wrapped so `ESRCH` is
+- [x] **Step 2: Implement** per spec §9. `process.kill(pid, 0)` lives here, wrapped so `ESRCH` is
       false and `EPERM` is true; it is exposed as the `processAlive` the pure `core/badge.ts`
       receives.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test adapters/campaign.adapter.test.ts structure.test.ts
       ```
       Expected: both pass — including the `structure.test.ts` `.tribe` rule from task 14, which now
       has exactly one file to point at.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run this adapter against the real `~/.tribe` on this machine (17
 campaigns exist) and print every path it opens, by instrumenting the adapter temporarily or by
