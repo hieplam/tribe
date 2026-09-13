@@ -491,6 +491,27 @@ describe('the browser fetch edge fails closed (FIX 4 — fail-closed-edges.md ap
     expect(container.querySelector('[data-testid="load-error"]')).not.toBeNull();
     cleanup(container, root);
   });
+
+  test('at "/s/<id>" a rejected fetchProjects is STILL visible in the sidebar — a session route is not silent about it (Item D)', async () => {
+    // Before the fix, `projectsError` was rendered only in the non-session branch of `<main>`, so a
+    // sidebar projects-fetch failure on a SESSION route was silently swallowed — the sidebar just
+    // showed an empty project list with no indication anything failed.
+    window.history.pushState(null, '', '/s/sess-degraded');
+    installEventSource();
+    const fetched = installFetch((url) => {
+      if (url.includes('/api/projects')) throw new Error('server said 500');
+      return new Response('{}');
+    });
+    restoreFetch = fetched.restore;
+    const { container, root } = renderInto(<App />);
+    await act(async () => {
+      for (let i = 0; i < 4; i++) await flush();
+    });
+    expect(container.querySelector('.sidebar')).not.toBeNull();           // still the composed shell
+    expect(container.querySelector('.session-view')).not.toBeNull();      // session route mounted
+    expect(container.querySelector('[data-testid="sidebar-projects-error"]')).not.toBeNull(); // visible in the sidebar
+    cleanup(container, root);
+  });
 });
 
 describe('NewBelowPill is wired to §6.3 (FIX 3)', () => {

@@ -17,6 +17,7 @@ import type { MdToken, RenderNode, Agent } from '../../../core/model.ts';
 import { AgentTabs, treeOrder } from './AgentTabs.tsx';
 import { AssistantCard } from './AssistantCard.tsx';
 import { AttachmentStrip, groupAttachments, type AttachmentNode } from './AttachmentStrip.tsx';
+import { BlockExpander } from './BlockExpander.tsx';
 import { ImageCard } from './ImageCard.tsx';
 import { NewBelowPill } from './NewBelowPill.tsx';
 import { OrphanResultCard } from './OrphanResultCard.tsx';
@@ -362,6 +363,74 @@ describe('ImageCard — fetches /api/block?at=&i= only on expand, addressed by t
     // clicking again does not re-fetch (cached after the first expand)
     const stillNode = container.querySelector('[data-testid="image-expand"]');
     expect(stillNode).toBeNull(); // the button is replaced by the <img> once expanded
+    cleanup(container, root);
+  });
+
+  // Item A+E (phase-3 audit fix): the error note must reflect only the MOST RECENT attempt — a
+  // successful retry must clear a stale "could not load…" note, never leave it stuck forever.
+  test('a first expand REJECTS -> expand-error shown; a second attempt RESOLVES -> the note is gone and the <img> shows (Item A+E)', async () => {
+    const node = imageNode();
+    let attempt = 0;
+    activeFetch = installFetch(() => {
+      attempt += 1;
+      if (attempt === 1) throw new Error('network down');
+      return new Response(JSON.stringify({ block: { source: { media_type: 'image/png', data: 'BBBB' } } }));
+    });
+    const { container, root } = renderInto(<ImageCard node={node} sessionId="sess-1" />);
+    const btn = () => container.querySelector('[data-testid="image-expand"]') as HTMLElement;
+
+    await clickAndFlush(btn());
+    expect(container.querySelector('[data-testid="expand-error"]')).not.toBeNull(); // (a) first attempt failed
+    expect(container.querySelector('img')).toBeNull();
+    expect(btn()).not.toBeNull(); // still collapsed — the retry affordance is still there
+
+    await clickAndFlush(btn()); // (b) a second attempt — same button, this time it resolves
+    expect(container.querySelector('[data-testid="expand-error"]')).toBeNull(); // stale note is GONE
+    const img = container.querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img!.getAttribute('src')).toBe('data:image/png;base64,BBBB');
+    expect(activeFetch.calls).toHaveLength(2); // exactly one request per attempt — never more
+    cleanup(container, root);
+  });
+});
+
+// --- BlockExpander — the shared /api/block affordance (Item A+E, phase-3 audit fix) -----------
+
+describe('BlockExpander — the error note reflects only the MOST RECENT attempt; `loaded` (not the payload) gates refetch', () => {
+  test('(a) a first fetch REJECTS -> expand-error shown; (b) a second attempt RESOLVES -> the note is gone and the payload shows', async () => {
+    let attempt = 0;
+    activeFetch = installFetch(() => {
+      attempt += 1;
+      if (attempt === 1) throw new Error('network down');
+      return new Response(JSON.stringify({ block: { full: 'payload after retry' } }));
+    });
+    const { container, root } = renderInto(<BlockExpander at={70} i={0} sessionId="sess-1" />);
+    const btn = container.querySelector('[data-testid="block-expand"]') as HTMLElement;
+
+    await clickAndFlush(btn);
+    expect(container.querySelector('[data-testid="expand-error"]')).not.toBeNull(); // (a)
+    expect(container.textContent).not.toContain('payload after retry');
+    expect(btn.textContent).toBe('expand'); // still collapsed, button unchanged
+
+    await clickAndFlush(btn); // (b) retry — same toggle, still collapsed, this attempt resolves
+    expect(container.querySelector('[data-testid="expand-error"]')).toBeNull(); // stale note is GONE
+    expect(container.textContent).toContain('payload after retry');
+    expect(activeFetch.calls).toHaveLength(2); // one request per attempt
+    cleanup(container, root);
+  });
+
+  test('(c) a resolved-null payload does not re-issue a fetch on a second expand toggle', async () => {
+    activeFetch = installFetch(() => new Response(JSON.stringify({ block: null })));
+    const { container, root } = renderInto(<BlockExpander at={80} i={0} sessionId="sess-1" />);
+    const btn = container.querySelector('[data-testid="block-expand"]') as HTMLElement;
+
+    await clickAndFlush(btn); // expand: fetches once, resolves to a legitimately-null payload
+    expect(activeFetch.calls).toHaveLength(1);
+    expect(container.querySelector('[data-testid="expand-error"]')).toBeNull(); // a null payload is NOT a failure
+
+    await clickAndFlush(btn); // collapse
+    await clickAndFlush(btn); // expand again — already loaded, must NOT refetch
+    expect(activeFetch.calls).toHaveLength(1); // no second request issued
     cleanup(container, root);
   });
 });

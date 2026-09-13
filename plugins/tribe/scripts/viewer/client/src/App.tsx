@@ -132,6 +132,7 @@ export function App() {
         olderCount={projects?.olderCount ?? 0}
         campaignFilter={campaignFilter}
         onCampaignFilterChange={setCampaignFilter}
+        projectsError={projectsError}
       />
       <main className="app-main">
         {isSession && (route.kind === 'session' || route.kind === 'session_agent') ? (

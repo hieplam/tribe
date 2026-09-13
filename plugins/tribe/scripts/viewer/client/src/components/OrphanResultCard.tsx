@@ -18,6 +18,8 @@ export interface OrphanResultCardProps {
 export function OrphanResultCard({ node, sessionId, agentId }: OrphanResultCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [block, setBlock] = useState<unknown>(null);
+  // `loaded` — not `block === null` — is the "already fetched?" gate (Item A+E, phase-3 audit fix).
+  const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
 
   async function expand(): Promise<void> {
@@ -25,11 +27,14 @@ export function OrphanResultCard({ node, sessionId, agentId }: OrphanResultCardP
       setExpanded(false);
       return;
     }
-    if (block === null) {
+    if (!loaded) {
+      // Reset BEFORE awaiting: the error note must reflect only the MOST RECENT attempt.
+      setFailed(false);
       // Fail closed (fail-closed-edges): a failed expand shows a note, never an unhandled rejection.
       try {
         const body = await fetchJson(blockUrl({ sessionId, agentId, at: node.resultAnchor.at, i: node.resultAnchor.i }), isBlockResponse);
         setBlock(body.block);
+        setLoaded(true);
       } catch {
         setFailed(true);
         return;
@@ -44,7 +49,7 @@ export function OrphanResultCard({ node, sessionId, agentId }: OrphanResultCardP
         tool result — call is above the window
       </button>
       {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load result</span>}
-      {expanded && block !== null && (
+      {expanded && loaded && (
         <pre className="orphan-result__body" style={{ fontFamily: 'var(--font-mono)' }}>{JSON.stringify(block)}</pre>
       )}
     </div>

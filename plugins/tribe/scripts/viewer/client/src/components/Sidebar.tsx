@@ -11,11 +11,21 @@ export interface SidebarProps {
   olderCount: number;
   campaignFilter: string;
   onCampaignFilterChange: (value: string) => void;
+  /** A failed sidebar projects fetch (spec §8.1). Surfaced HERE, inside the sidebar itself, so it
+   * is visible on EVERY route the shell renders — including a session route, whose `<main>` never
+   * shares the list route's error branch (Item D, phase-3 audit fix). `null`/omitted renders
+   * nothing, same as every other optional degraded note in this file family. */
+  projectsError?: string | null;
 }
 
-export function Sidebar({ projects, olderCount, campaignFilter, onCampaignFilterChange }: SidebarProps) {
+export function Sidebar({ projects, olderCount, campaignFilter, onCampaignFilterChange, projectsError }: SidebarProps) {
   return (
     <aside className="sidebar" style={{ background: 'var(--surface)', borderColor: 'var(--rule)' }}>
+      {projectsError != null && (
+        <p className="sidebar-error" data-testid="sidebar-projects-error" style={{ color: 'var(--warn)' }}>
+          {projectsError}
+        </p>
+      )}
       <ProjectList projects={projects} />
       <CampaignFilter value={campaignFilter} onChange={onCampaignFilterChange} />
       <ShowOlderProjects olderCount={olderCount} />

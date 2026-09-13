@@ -41,9 +41,21 @@ function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
 
 /** `true` only for the two codes that mean "not there to read" — missing (`ENOENT`) or present
  * but unreadable (`EACCES`). Anything else is a genuine, unexpected failure and must propagate
- * (`fail-closed-edges` obligation 1). */
+ * (`fail-closed-edges` obligation 1). Used by `listDirOrEmpty`, where a THIRD code — `ELOOP` —
+ * must still throw: a symlink-looped directory is not "absent", so a caller listing it should see
+ * the failure rather than silently getting `[]`. */
 function isAbsent(err: unknown): boolean {
   return isErrnoException(err) && (err.code === 'ENOENT' || err.code === 'EACCES');
+}
+
+/** Every `realpath` errno that means "not a real, reachable target" — mirrors
+ * `fs.adapter.ts#REALPATH_FAILURE_CODES` exactly. Deliberately a SEPARATE set from `isAbsent`
+ * above: `realpathOrNull` (below) must also degrade on `ELOOP`/`ENOTDIR`/`ENAMETOOLONG`, which
+ * `isAbsent` intentionally excludes for `listDirOrEmpty`'s different contract. Any OTHER errno is
+ * still a genuine, unexpected failure and propagates (`fail-closed-edges` obligation 1). */
+const REALPATH_FAILURE_CODES = new Set(['ENOENT', 'ELOOP', 'ENOTDIR', 'EACCES', 'ENAMETOOLONG']);
+function isRealpathFailure(err: unknown): boolean {
+  return isErrnoException(err) && typeof err.code === 'string' && REALPATH_FAILURE_CODES.has(err.code);
 }
 
 /** Missing/unreadable directory -> `[]` (the normal "nothing here yet" case). Any other read
@@ -57,13 +69,16 @@ function listDirOrEmpty(dir: string): string[] {
   }
 }
 
-/** Resolves `path` to its real, canonical form. `null` for a broken symlink or a path that does
- * not exist — refused WITHOUT a read, before any containment check runs (D14). */
+/** Resolves `path` to its real, canonical form. `null` for EVERY errno that means "not a real
+ * reachable target" — missing, a broken symlink, a symlink LOOP, a non-directory path component,
+ * or a name too long (`REALPATH_FAILURE_CODES`, mirroring `fs.adapter.ts`) — refused WITHOUT a
+ * read, before any containment check runs (D14). Any other errno is unexpected and propagates
+ * (`fail-closed-edges` obligation 1). */
 function realpathOrNull(path: string): string | null {
   try {
     return realpathSync(path);
   } catch (err) {
-    if (isAbsent(err)) return null;
+    if (isRealpathFailure(err)) return null;
     throw err;
   }
 }

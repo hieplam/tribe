@@ -19,6 +19,9 @@ export interface BlockExpanderProps {
 export function BlockExpander({ at, i, sessionId, agentId }: BlockExpanderProps) {
   const [expanded, setExpanded] = useState(false);
   const [block, setBlock] = useState<unknown>(null);
+  // `loaded` — not `block === null` — is the "already fetched?" gate: a legitimately-null payload
+  // must not be indistinguishable from "never fetched" (Item A+E, phase-3 audit fix).
+  const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
 
   async function toggle(): Promise<void> {
@@ -26,10 +29,14 @@ export function BlockExpander({ at, i, sessionId, agentId }: BlockExpanderProps)
       setExpanded(false);
       return;
     }
-    if (block === null) {
+    if (!loaded) {
+      // Reset BEFORE awaiting: the error note must reflect only the MOST RECENT attempt, so a
+      // retry that is about to succeed must not still show the prior attempt's stale note.
+      setFailed(false);
       try {
         const body = await fetchJson(blockUrl({ sessionId, agentId, at, i }), isBlockResponse);
         setBlock(body.block);
+        setLoaded(true);
       } catch {
         setFailed(true);
         return;
@@ -44,7 +51,7 @@ export function BlockExpander({ at, i, sessionId, agentId }: BlockExpanderProps)
         {expanded ? 'hide' : 'expand'}
       </button>
       {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load the full payload</span>}
-      {expanded && block !== null && (
+      {expanded && loaded && (
         <pre className="block-expander__body" style={{ fontFamily: 'var(--font-mono)' }}>{JSON.stringify(block)}</pre>
       )}
     </>

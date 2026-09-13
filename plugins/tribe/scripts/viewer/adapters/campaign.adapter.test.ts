@@ -358,6 +358,62 @@ describe('readSelectedCampaigns — reads exactly what the selection names (spec
     });
   });
 
+  describe('realpathOrNull fails closed on EVERY realpath errno that means "not a real reachable target" (fail-closed-edges obligation 1 & 4; D14/C1)', () => {
+    test('a symlink LOOP as a repoKey directory does not crash discoverCampaignCandidates — it is silently skipped, and real campaigns are still found', () => {
+      const { root, cleanup } = makeTribeRoot();
+      try {
+        // a -> b -> a: resolving either raises ELOOP. Before the fix, realpathOrNull (via
+        // resolveContained) rethrew ELOOP, so a hostile/broken symlink loop crashed the whole
+        // discovery walk with a stack trace instead of degrading to "not a real target".
+        const a = join(root, 'loop-a');
+        const b = join(root, 'loop-b');
+        symlinkSync(b, a);
+        symlinkSync(a, b);
+        writeCampaign(root, 'real-repo', 'real-slug', { state: { sequence: [], cards: {} } });
+
+        const entries = discoverCampaignCandidates(root);
+        const identities = entries.map((e) => `${e.repoKey}/${e.slug}`).sort();
+        expect(identities).toEqual(['real-repo/real-slug']); // no throw; the loop contributed nothing
+      } finally {
+        cleanup();
+      }
+    });
+
+    test('a symlink LOOP as a repoKey directory does not crash readSelectedCampaigns — it degrades to the ordinary "missing" outcome (no throw, no 500, not counted)', () => {
+      const { root, cleanup } = makeTribeRoot();
+      try {
+        const a = join(root, 'loop-a');
+        const b = join(root, 'loop-b');
+        symlinkSync(b, a);
+        symlinkSync(a, b);
+
+        const selection: CampaignSelector[] = [{ repoKey: 'loop-a', slug: 'whatever' }];
+        const { result, lines } = withCapturedStderr(() => readSelectedCampaigns(root, selection, 0));
+        expect(result.scans).toEqual([]);        // no scan for an unreachable repoKey — never opened
+        expect(result.skippedBadges).toBe(0);    // "missing" (never a real target) is not a security refusal
+        expect(lines).toHaveLength(0);            // and nothing warned — this was never "escaped", just absent
+      } finally {
+        cleanup();
+      }
+    });
+
+    test('an UNEXPECTED realpath errno (outside the fail-closed set) still propagates — the fail-closed set is not a catch-all', () => {
+      const { root, cleanup } = makeTribeRoot();
+      try {
+        // A NUL byte in a path makes Node's fs raise TypeError [ERR_INVALID_ARG_VALUE] — a REAL,
+        // unexpected failure from the real filesystem binding, never ENOENT/ELOOP/ENOTDIR/EACCES/
+        // ENAMETOOLONG. `readSelectedCampaigns` takes `selection` directly from its caller (never
+        // filtered through `readdirSync`, which could never itself produce a NUL byte), so this is
+        // a legitimate way to drive an unrecognised errno through the real realpath call.
+        const evilRepoKey = `evil${String.fromCharCode(0)}key`;
+        const selection: CampaignSelector[] = [{ repoKey: evilRepoKey, slug: 'x' }];
+        expect(() => readSelectedCampaigns(root, selection, 1_000_000)).toThrow();
+      } finally {
+        cleanup();
+      }
+    });
+  });
+
   describe('the whole-scan cache (spec §9: "cached for 5 s"; `pure-core.md`: the adapter obeys core/cache.ts, decides nothing itself)', () => {
     test('a repeat call inside the 5 s window returns the SAME result even though the underlying file changed; past the window, a fresh scan is served', () => {
       const { root, cleanup } = makeTribeRoot();

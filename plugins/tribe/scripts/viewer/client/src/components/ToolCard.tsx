@@ -64,9 +64,14 @@ export function ToolCard({ node, sessionId, agentId, history, onSelectAgent }: T
 
   const [inputExpanded, setInputExpanded] = useState(false);
   const [inputBlock, setInputBlock] = useState<unknown>(null);
+  // `inputLoaded`/`resultLoaded` — not `inputBlock === null`/`resultBlock === null` — are the
+  // "already fetched?" gates (Item A+E, phase-3 audit fix): a legitimately-null payload must not
+  // be indistinguishable from "never fetched".
+  const [inputLoaded, setInputLoaded] = useState(false);
   const [resultExpanded, setResultExpanded] = useState(false);
   const [resultBlock, setResultBlock] = useState<unknown>(null);
   const [resultText, setResultText] = useState<string | null>(null);
+  const [resultLoaded, setResultLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
 
   async function expandInput(): Promise<void> {
@@ -74,11 +79,14 @@ export function ToolCard({ node, sessionId, agentId, history, onSelectAgent }: T
       setInputExpanded(false);
       return;
     }
-    if (inputBlock === null) {
+    if (!inputLoaded) {
+      // Reset BEFORE awaiting: the error note must reflect only the MOST RECENT attempt.
+      setFailed(false);
       // Fail closed (fail-closed-edges): a failed expand shows a note, never an unhandled rejection.
       try {
         const body = await fetchJson(blockUrl({ sessionId, agentId, at: node.call.at, i: node.call.i }), isBlockResponse);
         setInputBlock(body.block);
+        setInputLoaded(true);
       } catch {
         setFailed(true);
         return;
@@ -93,18 +101,21 @@ export function ToolCard({ node, sessionId, agentId, history, onSelectAgent }: T
       setResultExpanded(false);
       return;
     }
-    try {
-      if (node.result.r === 'spill') {
-        if (resultText === null) {
+    if (!resultLoaded) {
+      // Reset BEFORE awaiting: the error note must reflect only the MOST RECENT attempt.
+      setFailed(false);
+      try {
+        if (node.result.r === 'spill') {
           setResultText(await fetchText(spillUrl({ sessionId, agentId, name: node.result.name })));
+        } else {
+          const body = await fetchJson(blockUrl({ sessionId, agentId, at: node.resultAnchor.at, i: node.resultAnchor.i }), isBlockResponse);
+          setResultBlock(body.block);
         }
-      } else if (resultBlock === null) {
-        const body = await fetchJson(blockUrl({ sessionId, agentId, at: node.resultAnchor.at, i: node.resultAnchor.i }), isBlockResponse);
-        setResultBlock(body.block);
+        setResultLoaded(true);
+      } catch {
+        setFailed(true);
+        return;
       }
-    } catch {
-      setFailed(true);
-      return;
     }
     setResultExpanded(true);
   }
@@ -139,7 +150,7 @@ export function ToolCard({ node, sessionId, agentId, history, onSelectAgent }: T
         )}
       </div>
       {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load payload</span>}
-      {inputExpanded && inputBlock !== null && (
+      {inputExpanded && inputLoaded && (
         <pre className="tool__input" style={{ fontFamily: 'var(--font-mono)' }}>{JSON.stringify(inputBlock)}</pre>
       )}
       {node.result !== null && (
@@ -156,10 +167,10 @@ export function ToolCard({ node, sessionId, agentId, history, onSelectAgent }: T
               {resultExpanded ? 'hide result' : 'expand result'}
             </button>
           )}
-          {resultExpanded && resultText !== null && (
+          {resultExpanded && resultLoaded && resultText !== null && (
             <pre className="tool__spill-full" style={{ fontFamily: 'var(--font-mono)' }}>{resultText}</pre>
           )}
-          {resultExpanded && resultBlock !== null && (
+          {resultExpanded && resultLoaded && resultBlock !== null && (
             <pre className="tool__result-full" style={{ fontFamily: 'var(--font-mono)' }}>{JSON.stringify(resultBlock)}</pre>
           )}
         </>

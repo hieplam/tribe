@@ -34,6 +34,8 @@ export interface ImageCardProps {
 export function ImageCard({ node, sessionId, agentId }: ImageCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [src, setSrc] = useState<string | null>(null);
+  // `loaded` — not `src === null` — is the "already fetched?" gate (Item A+E, phase-3 audit fix).
+  const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
 
   async function expand(): Promise<void> {
@@ -41,7 +43,10 @@ export function ImageCard({ node, sessionId, agentId }: ImageCardProps) {
       setExpanded(false);
       return;
     }
-    if (src === null) {
+    if (!loaded) {
+      // Reset BEFORE awaiting: the error note must reflect only the MOST RECENT attempt, so a
+      // retry that is about to succeed must not still show the prior attempt's stale note.
+      setFailed(false);
       // Fail closed (fail-closed-edges): the expand-fetch rejection must NOT escape this click
       // handler as an unhandled rejection — a failure shows a note, the card keeps its affordance.
       try {
@@ -50,6 +55,7 @@ export function ImageCard({ node, sessionId, agentId }: ImageCardProps) {
         const mediaType = block.source?.media_type ?? node.mediaType;
         const data = block.source?.data ?? '';
         setSrc(`data:${mediaType};base64,${data}`);
+        setLoaded(true);
       } catch {
         setFailed(true);
         return;
@@ -66,7 +72,7 @@ export function ImageCard({ node, sessionId, agentId }: ImageCardProps) {
         </button>
       )}
       {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load image</span>}
-      {expanded && src !== null && <img className="image__full" src={src} alt={node.mediaType} />}
+      {expanded && loaded && src !== null && <img className="image__full" src={src} alt={node.mediaType} />}
     </div>
   );
 }
