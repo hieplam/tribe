@@ -11,8 +11,8 @@ export type AttachmentNode = Extract<RenderNode, { k: 'attachment' }>;
 
 /** Groups a node list into runs of consecutive `attachment` nodes vs. everything else, so a caller
  * can render one `<AttachmentStrip>` per run instead of one row per node. Pure — a data
- * transformation, no side effect (`pure-core.md`); wiring this into the live row list is a later
- * task, the same deferral `client/src/api.ts` already documents for its own request functions. */
+ * transformation, no side effect (`pure-core.md`). Wired into the live row list by
+ * `client/src/components/RowList.tsx` (the phase-3 assembly): each returned run becomes one strip. */
 export function groupAttachments(nodes: readonly RenderNode[]): (RenderNode | AttachmentNode[])[] {
   const out: (RenderNode | AttachmentNode[])[] = [];
   let run: AttachmentNode[] = [];

@@ -2,9 +2,10 @@
 // function performs exactly one `fetch` + `.json()` and returns the wire shape `serve.ts` sends
 // (`core/model.ts`'s `Project`/`SessionSummary`/`Badge`/`Agent`); it decides nothing
 // (`pure-core.md`: the network call is the one and only side effect here, and no branching or
-// derivation of business meaning happens in this file). Wiring these into the route/component
-// tree at runtime is a later task (plan Task 30 — the end-to-end wiring); this task only needs
-// importable, individually-testable request functions with the right shape.
+// derivation of business meaning happens in this file). These are wired into the running route/
+// component tree by `client/src/App.tsx` (the phase-3 assembly): `fetchProjects` feeds the sidebar
+// and, aggregated with `fetchSessions` per in-window project, the `/` route's session list;
+// `fetchSessions` feeds the `/p/<dir>` route directly.
 //
 // Type-only import: `client/src/**` never VALUE-imports from `core/` (§12.6.1) — these interfaces
 // are erased at compile time, so importing them costs nothing at runtime and the structural wall

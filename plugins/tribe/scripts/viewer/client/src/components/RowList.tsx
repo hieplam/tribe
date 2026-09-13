@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import type { RenderNode } from '../../../core/model.ts';
 import { AssistantCard } from './AssistantCard.tsx';
-import { AttachmentStrip } from './AttachmentStrip.tsx';
+import { AttachmentStrip, groupAttachments } from './AttachmentStrip.tsx';
 import { ChipRow } from './ChipRow.tsx';
 import { Divider } from './Divider.tsx';
 import { ErrorCard } from './ErrorCard.tsx';
@@ -55,6 +55,8 @@ function CardBody({ node, sessionId, agentId }: { node: RenderNode; sessionId: s
     case 'image':
       return <ImageCard node={node} sessionId={sessionId} agentId={agentId} />;
     case 'attachment':
+      // A lone attachment (never grouped with a neighbour) still renders through the strip; a RUN
+      // of consecutive attachments is collapsed by `RowList` below before it reaches here.
       return <AttachmentStrip nodes={[node]} sessionId={sessionId} agentId={agentId} />;
     case 'raw':
       return <RawCard node={node} />;
@@ -112,9 +114,18 @@ export function RowList({ nodes, sessionId, agentId }: RowListProps) {
   return (
     <>
       <div ref={ref} data-scroll="rows" className="rows" onScroll={onScroll} style={{ overflowY: 'auto' }}>
-        {nodes.map((node) => (
-          <Row key={node.id} node={node} sessionId={sessionId} agentId={agentId} />
-        ))}
+        {groupAttachments(nodes).map((item) =>
+          Array.isArray(item) ? (
+            // A run of consecutive attachment nodes → ONE strip (spec §8.1). The row wrapper keeps
+            // the §16.2 coverage/addressing contract: `data-kind="attachment"` and a `data-row-id`
+            // of the run's first node, so every rendered row stays addressable.
+            <div key={item[0]!.id} className="row" data-kind="attachment" data-row-id={item[0]!.id}>
+              <AttachmentStrip nodes={item} sessionId={sessionId} agentId={agentId} />
+            </div>
+          ) : (
+            <Row key={item.id} node={item} sessionId={sessionId} agentId={agentId} />
+          ),
+        )}
       </div>
       {!following && <FollowTail onResume={resume} />}
     </>

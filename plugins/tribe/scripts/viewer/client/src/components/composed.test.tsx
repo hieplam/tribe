@@ -20,9 +20,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, type ReactElement } from 'react';
 import type { Root } from 'react-dom/client';
 const { createRoot } = await import('react-dom/client');
-import { RENDER_NODE_KINDS, type MdToken, type Project, type RenderNode } from '../../../core/model.ts';
+import { RENDER_NODE_KINDS, type MdToken, type Project, type RenderNode, type SessionSummary } from '../../../core/model.ts';
 import { App } from '../App.tsx';
 import { RowList } from './RowList.tsx';
+import { shortSessionId } from './SessionRow.tsx';
 
 function renderInto(node: ReactElement): { container: HTMLDivElement; root: Root } {
   const container = document.createElement('div');
@@ -122,9 +123,29 @@ function makeProject(overrides: Partial<Project> = {}): Project {
   };
 }
 
+function makeSession(overrides: Partial<SessionSummary> = {}): SessionSummary {
+  return {
+    id: 'a1b2c3d4e5f6789000000000',
+    projectDir: '-Users-hip-repo-tribe',
+    title: 'a session',
+    titleSource: 'ai-title',
+    sizeBytes: 2048,
+    mtimeIso: '2026-09-13T08:00:00.000Z',
+    live: false,
+    subagentCount: 0,
+    badges: [],
+    projects: ['-Users-hip-repo-tribe'],
+    ...overrides,
+  };
+}
+
 // A valid RenderNode of every kind (§4) — the same construction session.test.tsx uses.
 const BASE = { uuid: null, ts: null, elided: false, expandable: false } as const;
 const TEXT: MdToken[] = [{ t: 'text', v: 'hello world' }];
+
+function attachmentNode(id: string, at: number, label: string): Extract<RenderNode, { k: 'attachment' }> {
+  return { ...BASE, id, at, i: 0, k: 'attachment', label, detail: null };
+}
 
 function nodeOfKind(k: RenderNode['k'], at: number): RenderNode {
   const id = `${at}:0`;
@@ -152,12 +173,15 @@ describe('the ASSEMBLED client — App routes to real composed views (B1, B4)', 
       if (url.includes('/api/projects')) {
         return new Response(JSON.stringify({ projects: [makeProject()], olderCount: 0, skippedBadges: 0 }));
       }
+      if (url.includes('/api/sessions')) {
+        return new Response(JSON.stringify({ project: makeProject(), sessions: [] }));
+      }
       throw new Error(`unexpected fetch: ${url}`);
     });
     restoreFetch = fetched.restore;
     const { container, root } = renderInto(<App />);
     await act(async () => {
-      await flush();
+      for (let i = 0; i < 6; i++) await flush();
     });
     // the real ProjectList mounts one .project-row per project, with the real cwd label
     expect(container.querySelector('.project-row')).not.toBeNull();
@@ -240,6 +264,62 @@ describe('per-kind coverage THROUGH the composed RowList — every kind dispatch
     const row = container.querySelector('[data-kind="raw"]')!;
     expect(row.querySelector('.raw__type')).not.toBeNull();
     expect(row.querySelector('span.raw')).toBeNull();
+    cleanup(container, root);
+  });
+});
+
+describe('the "/" list route aggregates in-window sessions across every project (spec §8.1 — <SessionList> on route /)', () => {
+  test('the rendered .session-row id SET equals the union of every in-window project\'s sessions (both directions)', async () => {
+    window.history.pushState(null, '', '/');
+    const p1 = makeProject({ dir: '-proj-a', cwd: '/proj/a' });
+    const p2 = makeProject({ dir: '-proj-b', cwd: '/proj/b' });
+    const s1 = makeSession({ id: 'aaaaaaaa11111111', projectDir: '-proj-a', title: 'A-one' });
+    const s2 = makeSession({ id: 'bbbbbbbb22222222', projectDir: '-proj-a', title: 'A-two' });
+    const s3 = makeSession({ id: 'cccccccc33333333', projectDir: '-proj-b', title: 'B-one' });
+    const fetched = installFetch((url) => {
+      if (url.includes('/api/projects')) {
+        return new Response(JSON.stringify({ projects: [p1, p2], olderCount: 0, skippedBadges: 0 }));
+      }
+      if (url.includes('project=-proj-a')) return new Response(JSON.stringify({ project: p1, sessions: [s1, s2] }));
+      if (url.includes('project=-proj-b')) return new Response(JSON.stringify({ project: p2, sessions: [s3] }));
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    restoreFetch = fetched.restore;
+    const { container, root } = renderInto(<App />);
+    await act(async () => {
+      // projects resolve → aggregate fetches fire → sessions resolve; a handful of macrotasks
+      // covers the two-stage fetch chain regardless of exact tick count.
+      for (let i = 0; i < 6; i++) await flush();
+    });
+    const renderedShortIds = Array.from(container.querySelectorAll('.session-row .session-row__id')).map((e) => e.textContent);
+    const expectedShortIds = [s1, s2, s3].map((s) => shortSessionId(s.id));
+    expect(new Set(renderedShortIds)).toEqual(new Set(expectedShortIds)); // set equality: no missing id, no extra id
+    expect(renderedShortIds.length).toBe(3);                              // and no duplicates rendered
+    // the sidebar's project list is present alongside the aggregated session list
+    expect(container.querySelectorAll('.project-row').length).toBe(2);
+    cleanup(container, root);
+  });
+});
+
+describe('consecutive attachments collapse into ONE strip through RowList (spec §8.1 — <AttachmentStrip> consecutive k=attachment)', () => {
+  test('three consecutive attachment nodes render as exactly ONE .attachment-strip, still addressable via data-kind="attachment"', () => {
+    const nodes = [attachmentNode('10:0', 10, 'a.txt'), attachmentNode('11:0', 11, 'b.txt'), attachmentNode('12:0', 12, 'c.txt')];
+    const { container, root } = renderInto(<RowList nodes={nodes} sessionId="sess-1" agentId={null} />);
+    expect(container.querySelectorAll('.attachment-strip').length).toBe(1); // the run collapsed into one strip
+    const row = container.querySelector('[data-kind="attachment"]');
+    expect(row).not.toBeNull();                                             // §16.2 coverage address preserved
+    expect(row!.getAttribute('data-row-id')).toBe('10:0');                  // the run's first node id
+    expect(row!.querySelector('.attachment-strip')).not.toBeNull();
+    // all three entries live inside the single strip
+    expect(container.querySelectorAll('[data-attachment-label]').length).toBe(3);
+    cleanup(container, root);
+  });
+
+  test('a non-attachment node between two attachments splits them into TWO strips', () => {
+    const nodes = [attachmentNode('10:0', 10, 'a.txt'), nodeOfKind('assistant', 20), attachmentNode('30:0', 30, 'c.txt')];
+    const { container, root } = renderInto(<RowList nodes={nodes} sessionId="sess-1" agentId={null} />);
+    expect(container.querySelectorAll('.attachment-strip').length).toBe(2); // not collapsed across the assistant row
+    expect(container.querySelector('[data-kind="assistant"]')).not.toBeNull();
     cleanup(container, root);
   });
 });
