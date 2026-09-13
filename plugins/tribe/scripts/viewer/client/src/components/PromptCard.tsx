@@ -3,6 +3,7 @@
 // as a data attribute (§7.6). A chip with `detail: null` renders no detail line — the label is the
 // whole of it.
 import type { Chip, RenderNode } from '../../../core/model.ts';
+import { BlockExpander } from './BlockExpander.tsx';
 import { Markdown } from './Markdown.tsx';
 
 function ChipMarker({ chip }: { chip: Chip }) {
@@ -17,7 +18,13 @@ function ChipMarker({ chip }: { chip: Chip }) {
   );
 }
 
-export function PromptCard({ node }: { node: Extract<RenderNode, { k: 'prompt' }> }) {
+export interface PromptCardProps {
+  node: Extract<RenderNode, { k: 'prompt' }>;
+  sessionId?: string;
+  agentId?: string | null;
+}
+
+export function PromptCard({ node, sessionId, agentId }: PromptCardProps) {
   return (
     <div className="prompt" style={{ background: 'var(--surface)', color: 'var(--ink)' }}>
       {node.chips.length > 0 && (
@@ -28,6 +35,7 @@ export function PromptCard({ node }: { node: Extract<RenderNode, { k: 'prompt' }
         </div>
       )}
       <Markdown tokens={node.body} />
+      {node.expandable && <BlockExpander at={node.at} i={node.i} sessionId={sessionId} agentId={agentId} />}
     </div>
   );
 }

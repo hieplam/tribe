@@ -13,8 +13,9 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, type ReactElement } from 'react';
 import type { Root } from 'react-dom/client';
 const { createRoot } = await import('react-dom/client');
-import type { Agent, RenderNode } from '../../../core/model.ts';
+import type { MdToken, RenderNode, Agent } from '../../../core/model.ts';
 import { AgentTabs, treeOrder } from './AgentTabs.tsx';
+import { AssistantCard } from './AssistantCard.tsx';
 import { AttachmentStrip, groupAttachments, type AttachmentNode } from './AttachmentStrip.tsx';
 import { ImageCard } from './ImageCard.tsx';
 import { NewBelowPill } from './NewBelowPill.tsx';
@@ -206,6 +207,23 @@ describe('ToolCard — a Task tool card with agentId links to that subagent tab'
     const node = toolNode({ agentId: null });
     const { container, root } = renderInto(<ToolCard node={node} sessionId="sess-1" />);
     expect(container.querySelector('[data-agent-link]')).toBeNull();
+    cleanup(container, root);
+  });
+
+  test('the subagent link switches the stream via onSelect (not only pushState), so the parent stream is replaced (R14.8)', () => {
+    const node = toolNode({ name: 'Task', agentId: 'agent-9', state: 'ok' });
+    const pushes: string[] = [];
+    const history = { pushState: (_d: unknown, _t: string, url?: unknown) => pushes.push(String(url)) };
+    const selected: Array<string | null> = [];
+    const { container, root } = renderInto(
+      <ToolCard node={node} sessionId="sess-1" history={history} onSelectAgent={(id) => selected.push(id)} />,
+    );
+    const link = container.querySelector('[data-agent-link="agent-9"]') as HTMLElement;
+    act(() => {
+      link.click();
+    });
+    expect(pushes).toEqual(['/s/sess-1/a/agent-9']); // URL still updated
+    expect(selected).toEqual(['agent-9']);           // AND the stream-switch signal fired (was missing)
     cleanup(container, root);
   });
 });
@@ -401,6 +419,59 @@ describe('RawCard — collapsed, with the row type visible', () => {
     expect(container.textContent).toContain('summary');
     expect(container.textContent).not.toContain('secret');
     cleanup(container, root);
+  });
+
+  test('when expandable, an affordance fetches the FULL block at the row\'s own at+i, only on expand (§7.1, R14.6)', async () => {
+    const node: Extract<RenderNode, { k: 'raw' }> = {
+      ...BASE, id: '40:0', at: 40, i: 0, expandable: true, k: 'raw', rowType: 'summary', json: '{}', bytes: 20, text: null,
+    };
+    activeFetch = installFetch((url) => {
+      expect(url).toContain('at=40');
+      expect(url).toContain('i=0');
+      return new Response(JSON.stringify({ block: { full: 'expanded-raw' } }));
+    });
+    const { container, root } = renderInto(<RawCard node={node} sessionId="sess-1" />);
+    expect(activeFetch.calls).toHaveLength(0);                       // collapsed by default, no fetch
+    const btn = container.querySelector('[data-testid="block-expand"]') as HTMLElement;
+    expect(btn).not.toBeNull();
+    await clickAndFlush(btn);
+    expect(activeFetch.calls).toHaveLength(1);
+    expect(container.textContent).toContain('expanded-raw');        // the full block, shown on expand
+    cleanup(container, root);
+  });
+
+  test('a NON-expandable raw card offers no expand affordance', () => {
+    const node: Extract<RenderNode, { k: 'raw' }> = {
+      ...BASE, id: '41:0', at: 41, i: 0, expandable: false, k: 'raw', rowType: 'summary', json: '{}', bytes: 20, text: null,
+    };
+    const { container, root } = renderInto(<RawCard node={node} sessionId="sess-1" />);
+    expect(container.querySelector('[data-testid="block-expand"]')).toBeNull();
+    cleanup(container, root);
+  });
+});
+
+describe('body cards expose /api/block expansion when expandable (§7, R14.6)', () => {
+  const TOKENS: MdToken[] = [{ t: 'text', v: 'body preview' }];
+  test('an EXPANDABLE AssistantCard fetches its full block at at+i on expand; a non-expandable one has no affordance', async () => {
+    const expandable: Extract<RenderNode, { k: 'assistant' }> = {
+      ...BASE, id: '70:0', at: 70, i: 0, expandable: true, k: 'assistant', body: TOKENS, model: null,
+    };
+    activeFetch = installFetch((url) => {
+      expect(url).toContain('at=70');
+      return new Response(JSON.stringify({ block: { text: 'full assistant body' } }));
+    });
+    const { container, root } = renderInto(<AssistantCard node={expandable} sessionId="sess-1" />);
+    const btn = container.querySelector('[data-testid="block-expand"]') as HTMLElement;
+    expect(btn).not.toBeNull();
+    await clickAndFlush(btn);
+    expect(activeFetch.calls).toHaveLength(1);
+    expect(container.textContent).toContain('full assistant body');
+    cleanup(container, root);
+
+    const plain: Extract<RenderNode, { k: 'assistant' }> = { ...expandable, expandable: false };
+    const r2 = renderInto(<AssistantCard node={plain} sessionId="sess-1" />);
+    expect(r2.container.querySelector('[data-testid="block-expand"]')).toBeNull();
+    cleanup(r2.container, r2.root);
   });
 });
 

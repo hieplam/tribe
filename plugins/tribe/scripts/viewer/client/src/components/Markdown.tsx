@@ -9,7 +9,7 @@ import type { MdToken } from '../../../core/model.ts';
  * (§4: "href gated exactly as today"), but the client refuses to emit an `href` attribute it cannot
  * itself prove safe — a `javascript:`/`data:` URL renders as its label text with no link. Absolute
  * `http(s)`/`mailto:` and same-document relative (`/`, `#`, `./`, `../`) references pass. */
-function safeHref(href: string): string | null {
+export function safeHref(href: string): string | null {
   const h = href.trim();
   if (/^(https?:|mailto:)/i.test(h)) return h;
   if (/^(\/|#|\.\/|\.\.\/)/.test(h)) return h;
@@ -40,7 +40,7 @@ function renderToken(token: MdToken, key: number): ReactNode {
       const href = safeHref(token.href);
       if (href === null) return <span key={key}>{renderTokens(token.c)}</span>;
       return (
-        <a key={key} href={href} style={{ color: 'var(--accent)' }}>
+        <a key={key} href={href} rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>
           {renderTokens(token.c)}
         </a>
       );

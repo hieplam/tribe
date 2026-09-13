@@ -11,6 +11,8 @@ if (!(globalThis as { happyDOM?: unknown }).happyDOM) {
 }
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { act, type ReactElement } from 'react';
 import type { Root } from 'react-dom/client';
@@ -148,6 +150,27 @@ describe('session view — one node per kind, the DOM contract, follow-the-tail'
     cleanup(container, root);
   });
 
+  test('ChipRow renders its href as a safe link when present, with rel="noopener noreferrer" (§7.6, R14.6)', () => {
+    const chip = nodeOfKind('chip', 1000) as Extract<RenderNode, { k: 'chip' }>;
+    const linked: RenderNode = { ...chip, href: 'https://example.com/x' };
+    const { container, root } = renderInto(<ChipRow node={linked as Extract<RenderNode, { k: 'chip' }>} />);
+    const a = container.querySelector('a');
+    expect(a?.getAttribute('href')).toBe('https://example.com/x'); // the href was DROPPED before
+    expect(a?.getAttribute('rel')).toBe('noopener noreferrer');
+    cleanup(container, root);
+  });
+
+  test('ChipRow with href: null renders no link (and a javascript: href is refused)', () => {
+    const chip = nodeOfKind('chip', 1000) as Extract<RenderNode, { k: 'chip' }>;
+    const none = renderInto(<ChipRow node={{ ...chip, href: null } as Extract<RenderNode, { k: 'chip' }>} />);
+    expect(none.container.querySelector('a')).toBeNull();
+    cleanup(none.container, none.root);
+
+    const danger = renderInto(<ChipRow node={{ ...chip, href: 'javascript:alert(1)' } as Extract<RenderNode, { k: 'chip' }>} />);
+    expect(danger.container.querySelector('a')).toBeNull(); // fail-closed href gate, same as Markdown
+    cleanup(danger.container, danger.root);
+  });
+
   test('a chip with detail: null renders no detail line; a chip with detail renders one', () => {
     const withDetail = renderInto(<ChipRow node={nodeOfKind('chip', 1000) as Extract<RenderNode, { k: 'chip' }>} />);
     // the base `chip` node has detail: null
@@ -178,6 +201,13 @@ describe('session view — one node per kind, the DOM contract, follow-the-tail'
     expect(a?.getAttribute('href')).toBe('https://example.com/a');
     expect(container.querySelector('strong')?.textContent).toBe('bold');
     expect(container.querySelector('code')).not.toBeNull();
+    cleanup(container, root);
+  });
+
+  test('Markdown link carries rel="noopener noreferrer" (§12.5 literal rule)', () => {
+    const tokens: MdToken[] = [{ t: 'link', href: 'https://example.com/a', c: [{ t: 'text', v: 'a' }] }];
+    const { container, root } = renderInto(<Markdown tokens={tokens} />);
+    expect(container.querySelector('a')?.getAttribute('rel')).toBe('noopener noreferrer');
     cleanup(container, root);
   });
 
@@ -267,6 +297,40 @@ describe('session view — one node per kind, the DOM contract, follow-the-tail'
       root.render(<RowList nodes={[...nodes, nodeOfKind('assistant', 1100)]} sessionId="sess-1" agentId={null} />);
     });
     expect(el.scrollTop).toBe(frozen); // new rows arrived, viewport did NOT move
+    cleanup(container, root);
+  });
+
+  test('app.css makes .rows the bounded scroll container, not the document (§8.3, R14.5a)', () => {
+    // B7: the root forced `min-height: 100vh` and `.rows` had no constrained height, so the whole
+    // DOCUMENT scrolled and §8.3's `[data-scroll="rows"]` scrollTop proof was a no-op. The row list
+    // must be the bounded, independently-scrolling container.
+    const css = readFileSync(join(import.meta.dir, '../styles/app.css'), 'utf8');
+    const rowsRule = css.match(/\.rows\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(rowsRule).toContain('overflow-y');            // the list scrolls
+    expect(rowsRule).toMatch(/flex|max-height|(?<!min-)height/); // ...within a bounded height
+    const rootRule = css.match(/#root\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(rootRule).not.toContain('min-height: 100vh'); // the document is no longer the scroll driver
+  });
+
+  test('scroll-to-bottom reloads the tail when the store has counted rows below (§6.3, R14.5c)', () => {
+    // When the store is capped with follow off (newBelow > 0), a local scroll cannot reveal rows
+    // that were COUNTED-not-appended — clicking the follow pill must call reloadTail to fetch them.
+    let reloaded = 0;
+    const nodes = [nodeOfKind('assistant', 1000)];
+    const { container, root } = renderInto(
+      <RowList nodes={nodes} sessionId="s" agentId={null} newBelow={3} onReloadTail={() => (reloaded += 1)} />,
+    );
+    const el = container.querySelector('[data-scroll="rows"]') as HTMLElement;
+    mockGeom(el, 1000);
+    act(() => {
+      el.scrollTop = 100;
+      el.dispatchEvent(new Event('scroll'));
+    });
+    const pill = container.querySelector('[data-testid="follow-pill"]') as HTMLElement;
+    act(() => {
+      pill.click();
+    });
+    expect(reloaded).toBe(1); // reloadTail called, not just a local scroll
     cleanup(container, root);
   });
 

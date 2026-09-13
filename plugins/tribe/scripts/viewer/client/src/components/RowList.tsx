@@ -34,22 +34,22 @@ export function isAtBottom(m: { scrollHeight: number; scrollTop: number; clientH
  * `sessionId`/`agentId` so their lazy `/api/block`/`/api/spill` expand-fetch is session-scoped
  * (§4). The `data-kind`/`data-row-id` wrapper (added by `Row`) is what §16.2's coverage proof and
  * §12.6 require of every kind. */
-function CardBody({ node, sessionId, agentId }: { node: RenderNode; sessionId: string; agentId: string | null }): ReactElement {
+function CardBody({ node, sessionId, agentId, onSelectAgent }: { node: RenderNode; sessionId: string; agentId: string | null; onSelectAgent?: (agentId: string) => void }): ReactElement {
   switch (node.k) {
     case 'prompt':
-      return <PromptCard node={node} />;
+      return <PromptCard node={node} sessionId={sessionId} agentId={agentId} />;
     case 'assistant':
-      return <AssistantCard node={node} />;
+      return <AssistantCard node={node} sessionId={sessionId} agentId={agentId} />;
     case 'thinking':
-      return <ThinkingCard node={node} />;
+      return <ThinkingCard node={node} sessionId={sessionId} agentId={agentId} />;
     case 'tool':
-      return <ToolCard node={node} sessionId={sessionId} agentId={agentId} />;
+      return <ToolCard node={node} sessionId={sessionId} agentId={agentId} onSelectAgent={onSelectAgent} />;
     case 'chip':
       return <ChipRow node={node} />;
     case 'divider':
       return <Divider node={node} />;
     case 'error':
-      return <ErrorCard node={node} />;
+      return <ErrorCard node={node} sessionId={sessionId} agentId={agentId} />;
     case 'orphan_result':
       return <OrphanResultCard node={node} sessionId={sessionId} agentId={agentId} />;
     case 'image':
@@ -67,7 +67,7 @@ function CardBody({ node, sessionId, agentId }: { node: RenderNode; sessionId: s
   }
 }
 
-function Row({ node, sessionId, agentId }: { node: RenderNode; sessionId: string; agentId: string | null }) {
+function Row({ node, sessionId, agentId, onSelectAgent }: { node: RenderNode; sessionId: string; agentId: string | null; onSelectAgent?: (agentId: string) => void }) {
   return (
     <div
       className="row"
@@ -75,7 +75,7 @@ function Row({ node, sessionId, agentId }: { node: RenderNode; sessionId: string
       data-row-id={node.id}
       data-state={node.k === 'tool' ? node.state : undefined}
     >
-      <CardBody node={node} sessionId={sessionId} agentId={agentId} />
+      <CardBody node={node} sessionId={sessionId} agentId={agentId} onSelectAgent={onSelectAgent} />
     </div>
   );
 }
@@ -84,9 +84,17 @@ export interface RowListProps {
   nodes: readonly RenderNode[];
   sessionId: string;
   agentId: string | null;
+  /** The store's "N new below" count (§6.3): while > 0 the store holds rows it COUNTED but did not
+   * append (at the cap, follow off). A local scroll cannot reveal them, so scroll-to-bottom must
+   * reload the tail instead (R14.5c). */
+  newBelow?: number;
+  /** Fetch a fresh tail window (`store.reloadTail`), wired from `SessionView` (R14.5c). */
+  onReloadTail?: () => void;
+  /** Switch the open stream to a subagent (the ToolCard subagent link, R14.8). */
+  onSelectAgent?: (agentId: string) => void;
 }
 
-export function RowList({ nodes, sessionId, agentId }: RowListProps) {
+export function RowList({ nodes, sessionId, agentId, newBelow = 0, onReloadTail, onSelectAgent }: RowListProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [following, setFollowing] = useState(true);
   const followingRef = useRef(following);
@@ -110,7 +118,13 @@ export function RowList({ nodes, sessionId, agentId }: RowListProps) {
 
   function resume(): void {
     setFollowing(true);
-    scrollToBottom();
+    // If the store COUNTED rows below the window (§6.3 cap, follow off), a local scroll cannot show
+    // them — reload the tail so they actually arrive (R14.5c). Otherwise just scroll to the bottom.
+    if (newBelow > 0 && onReloadTail) {
+      onReloadTail();
+    } else {
+      scrollToBottom();
+    }
   }
 
   return (
@@ -125,7 +139,7 @@ export function RowList({ nodes, sessionId, agentId }: RowListProps) {
               <AttachmentStrip nodes={item} sessionId={sessionId} agentId={agentId} />
             </div>
           ) : (
-            <Row key={item.id} node={item} sessionId={sessionId} agentId={agentId} />
+            <Row key={item.id} node={item} sessionId={sessionId} agentId={agentId} onSelectAgent={onSelectAgent} />
           ),
         )}
       </div>

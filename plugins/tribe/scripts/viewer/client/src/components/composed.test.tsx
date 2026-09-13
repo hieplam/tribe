@@ -313,6 +313,102 @@ describe('the "/" list route aggregates in-window sessions across every project 
   });
 });
 
+describe('session routes mount the §8.1 composed shell around SessionView (FIX R14.1)', () => {
+  test('at "/s/<id>" the session view is mounted INSIDE the shell WITH the Sidebar (not a bare SessionView)', async () => {
+    window.history.pushState(null, '', '/s/sess-3');
+    installEventSource();
+    const fetched = installFetch((url) => {
+      if (url.includes('/api/projects')) {
+        return new Response(JSON.stringify({ projects: [makeProject()], olderCount: 0, skippedBadges: 0 }));
+      }
+      return new Response('{}');
+    });
+    restoreFetch = fetched.restore;
+    const { container, root } = renderInto(<App />);
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => {
+      es.emit('open');
+      es.emit('hello', { generation: 'g1', session: makeSession({ id: 'sess-3', title: 'Composed session' }), agents: [], badges: [], from: 1000, to: 1100, truncatedBefore: false });
+      es.emit('rows', { nodes: [nodeOfKind('assistant', 1000)], from: 1000, to: 1100 });
+      for (let i = 0; i < 4; i++) await flush();
+    });
+    expect(container.querySelector('.app-shell')).not.toBeNull();   // the two-column shell frame
+    expect(container.querySelector('.sidebar')).not.toBeNull();     // Sidebar around the session view
+    expect(container.querySelector('.session-view')).not.toBeNull();// SessionView inside Main
+    expect(container.querySelector('.project-row')).not.toBeNull(); // the sidebar's project list rendered
+    expect(FakeEventSource.instances).toHaveLength(1);              // still exactly one stream
+    cleanup(container, root);
+  });
+});
+
+describe('the "/" root list — allSettled union, newest-first sort, campaign pre-fill (FIX R14.2)', () => {
+  test('one FAILED project fetch does not blank the list — successful projects still render, with a degraded note', async () => {
+    window.history.pushState(null, '', '/');
+    const pOk = makeProject({ dir: '-proj-ok', cwd: '/ok' });
+    const pBad = makeProject({ dir: '-proj-bad', cwd: '/bad' });
+    const sOk = makeSession({ id: 'okokokok11110000', projectDir: '-proj-ok' });
+    const fetched = installFetch((url) => {
+      if (url.includes('/api/projects')) return new Response(JSON.stringify({ projects: [pOk, pBad], olderCount: 0, skippedBadges: 0 }));
+      if (url.includes('project=-proj-ok')) return new Response(JSON.stringify({ project: pOk, sessions: [sOk] }));
+      if (url.includes('project=-proj-bad')) return new Response('boom', { status: 500 });
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    restoreFetch = fetched.restore;
+    const { container, root } = renderInto(<App />);
+    await act(async () => {
+      for (let i = 0; i < 6; i++) await flush();
+    });
+    expect(container.querySelectorAll('.session-row').length).toBe(1);               // the good project still renders
+    expect(container.querySelector('[data-testid="degraded-note"]')).not.toBeNull(); // the failure is reported, not a blank page
+    cleanup(container, root);
+  });
+
+  test('the union is sorted NEWEST-FIRST by mtimeIso across projects (§5.3 ordering)', async () => {
+    window.history.pushState(null, '', '/');
+    const pa = makeProject({ dir: '-proj-a' });
+    const pb = makeProject({ dir: '-proj-b' });
+    const older = makeSession({ id: 'aaaaaaaa11110000', projectDir: '-proj-a', mtimeIso: '2026-09-10T00:00:00.000Z', title: 'older' });
+    const newer = makeSession({ id: 'bbbbbbbb22220000', projectDir: '-proj-b', mtimeIso: '2026-09-13T00:00:00.000Z', title: 'newer' });
+    const fetched = installFetch((url) => {
+      if (url.includes('/api/projects')) return new Response(JSON.stringify({ projects: [pa, pb], olderCount: 0, skippedBadges: 0 }));
+      if (url.includes('project=-proj-a')) return new Response(JSON.stringify({ project: pa, sessions: [older] }));
+      if (url.includes('project=-proj-b')) return new Response(JSON.stringify({ project: pb, sessions: [newer] }));
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    restoreFetch = fetched.restore;
+    const { container, root } = renderInto(<App />);
+    await act(async () => {
+      for (let i = 0; i < 6; i++) await flush();
+    });
+    const ids = Array.from(container.querySelectorAll('.session-row .session-row__id')).map((e) => e.textContent);
+    expect(ids).toEqual([shortSessionId(newer.id), shortSessionId(older.id)]); // newest first, across projects
+    cleanup(container, root);
+  });
+
+  test('?campaign=<repoKey>/<slug> PRE-FILLS the filter on load and narrows the list with no badge click (§3.2 GET /)', async () => {
+    const repoKey = '-Users-hip-repo-tribe';
+    window.history.pushState(null, '', `/?campaign=${encodeURIComponent(repoKey)}/mycamp`);
+    const pa = makeProject({ dir: '-proj-a', cwd: '/proj/a' });
+    const withBadge = makeSession({ id: 'matchmatch1111', projectDir: '-proj-a', title: 'has-badge', badges: [{ repoKey, slug: 'mycamp', cardId: 'c', cardStatus: 'x', runnerAlive: true, runId: null }] });
+    const without = makeSession({ id: 'otherother2222', projectDir: '-proj-a', title: 'no-badge', badges: [] });
+    const fetched = installFetch((url) => {
+      if (url.includes('/api/projects')) return new Response(JSON.stringify({ projects: [pa], olderCount: 0, skippedBadges: 0 }));
+      if (url.includes('/api/sessions')) return new Response(JSON.stringify({ project: pa, sessions: [withBadge, without] }));
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    restoreFetch = fetched.restore;
+    const { container, root } = renderInto(<App />);
+    await act(async () => {
+      for (let i = 0; i < 6; i++) await flush();
+    });
+    const input = container.querySelector('.campaign-filter') as HTMLInputElement;
+    expect(input.value).toBe(`${repoKey}/mycamp`);                    // pre-filled on load, not only on click
+    const ids = Array.from(container.querySelectorAll('.session-row .session-row__id')).map((e) => e.textContent);
+    expect(ids).toEqual([shortSessionId(withBadge.id)]);              // narrowed to the badge-carrying session
+    cleanup(container, root);
+  });
+});
+
 describe('consecutive attachments collapse into ONE strip through RowList (spec §8.1 — <AttachmentStrip> consecutive k=attachment)', () => {
   test('three consecutive attachment nodes render as exactly ONE .attachment-strip, still addressable via data-kind="attachment"', () => {
     const nodes = [attachmentNode('10:0', 10, 'a.txt'), attachmentNode('11:0', 11, 'b.txt'), attachmentNode('12:0', 12, 'c.txt')];

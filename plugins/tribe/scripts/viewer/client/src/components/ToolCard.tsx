@@ -53,9 +53,13 @@ export interface ToolCardProps {
   sessionId?: string;
   agentId?: string | null;
   history?: HistoryLike;
+  /** Switch the open stream to the subagent — the SAME signal `AgentTabs` fires on a tab select.
+   * Without it, the link only pushed the URL and `App` (which listens to `popstate`, not
+   * `pushState`) never re-pointed the stream, so the parent stream stayed active (R14.8). */
+  onSelectAgent?: (agentId: string) => void;
 }
 
-export function ToolCard({ node, sessionId, agentId, history }: ToolCardProps) {
+export function ToolCard({ node, sessionId, agentId, history, onSelectAgent }: ToolCardProps) {
   const isError = node.state === 'error' || (node.result?.r === 'text' && node.result.isError);
 
   const [inputExpanded, setInputExpanded] = useState(false);
@@ -109,6 +113,9 @@ export function ToolCard({ node, sessionId, agentId, history }: ToolCardProps) {
     if (node.agentId === null || sessionId === undefined) return;
     const h = history ?? window.history;
     navigate(h, { kind: 'session_agent', sessionId, agentId: node.agentId });
+    // Switch the stream too — the same `onSelect` path `AgentTabs` uses. A bare `pushState` left
+    // the parent stream active because `App` only listens to `popstate` (R14.8).
+    onSelectAgent?.(node.agentId);
   }
 
   return (

@@ -117,7 +117,14 @@ export function SessionView({ sessionId, agentId, session = null }: SessionViewP
         </p>
       )}
       {snap.truncatedBefore && <LoadEarlier onLoad={loadEarlier} busy={busy} />}
-      <RowList nodes={snap.nodes} sessionId={sessionId} agentId={activeAgentId} />
+      <RowList
+        nodes={snap.nodes}
+        sessionId={sessionId}
+        agentId={activeAgentId}
+        newBelow={snap.newBelow}
+        onReloadTail={reloadTail}
+        onSelectAgent={setActiveAgentId}
+      />
       {snap.newBelow > 0 && <NewBelowPill count={snap.newBelow} onClick={reloadTail} />}
     </div>
   );

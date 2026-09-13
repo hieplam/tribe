@@ -20,9 +20,40 @@ body {
   line-height: var(--leading-body);
 }
 
+/* The root is a fixed-height flex column so the ROW LIST — not the document — is the scroll
+ * container (§8.3, B7). The old `min-height: 100vh` let the whole document scroll, which made the
+ * `[data-scroll="rows"]` scrollTop proof a no-op. */
 #root {
-  min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
   padding: var(--space-16);
+}
+
+/* The two-column shell fills the remaining height; its children may shrink so the bounded `.rows`
+ * container can own the overflow rather than the page. */
+.app-shell {
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+  flex: 1;
+}
+
+/* Main and the session view are height-filling flex columns, so the row list beneath them can be
+ * the bounded scroll container. */
+.app-main,
+.session-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+/* The windowed row list is the ONE bounded, independently-scrolling container (§8.3). */
+.rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .app-shell {
