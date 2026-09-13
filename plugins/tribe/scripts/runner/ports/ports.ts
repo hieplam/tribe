@@ -56,14 +56,28 @@ export interface RunHomePort {
   writeFileAtomic(resolvedPath: string, content: string): void;
 }
 
+/** Task 27 (spec §10.4): the adapter's `/healthz` probe result — a typed report of WHAT the
+ * fetch observed, never the reuse/spawn/stale DECISION itself (`pure-core.md`: the adapter
+ * executes and reports facts; `core/viewer-launch.ts#decideViewerLaunch` is the only place
+ * that inspects `body`'s `viewer`/`v` fields against the v2 floor and decides). A connection
+ * failure/timeout is `no-response`; a non-JSON or non-object body is `unparseable`; anything
+ * else — including an old v1 body or an unrelated service's 200 — is `responded` with the
+ * parsed body, unclassified. */
+export type ProbeSignal =
+  | { kind: 'no-response' }
+  | { kind: 'unparseable' }
+  | { kind: 'responded'; body: Record<string, unknown> };
+
 /** Task 13 (spec D11/D12): the runner's live-viewer auto-start seam. Production wires this
  * to a `GET /healthz` fetch and a detached `node:child_process` spawn
  * (`adapters/viewer-launch.adapter.ts`, the only file naming `node:child_process` for this
- * feature); `core/viewer-launch.ts`'s `decideViewerLaunch` only ever sees the booleans this
- * port produces — it never touches the network or a process itself. */
+ * feature); `core/viewer-launch.ts`'s `decideViewerLaunch` only ever sees the `ProbeSignal`
+ * this port produces — it never touches the network or a process itself. */
 export interface ViewerPort {
-  /** Read-only reuse probe against `http://127.0.0.1:<port>/healthz` (card D6). */
-  probeViewer(port: number): Promise<boolean>;
+  /** Read-only reuse probe against `http://127.0.0.1:<port>/healthz` (card D6). Never
+   * throws (fail-closed-edges.md): every fetch/parse failure degrades to a typed `ProbeSignal`
+   * member instead. */
+  probeViewer(port: number): Promise<ProbeSignal>;
   /** Detached, `stdio: 'ignore'`, `unref()`ed — cannot hold the runner open, cannot pollute
    * its stdout, cannot fail it (D12: "observability exhaust never kills a run"). */
   spawnDetached(argv: string[]): void;
@@ -231,7 +245,8 @@ export interface LoopIO
     ProcessPort,
     LockStorePort,
     SessionSpawnPort,
-    RunHomePort {}
+    RunHomePort,
+    LinePort {}
 
 // ---------------------------------------------------------------------------------------
 // Campaign watchdog seams (card i74). Type declarations only, same as the rest of this file.

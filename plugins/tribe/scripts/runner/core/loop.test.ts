@@ -618,6 +618,9 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
     isProcessAlive: mock(() => opts.processAlive ?? false),
     currentPid: mock(() => 4242),
     now: mock(() => '2026-07-16T12:00:00Z'),
+    // Task 27: LoopIO gained printLine (LinePort) for the viewer's per-card session line —
+    // this fixture predates that feature and has nothing to assert about it.
+    printLine: mock(() => {}),
     spawnSession: mock((params: SpawnSessionParams) => {
       spawnBriefs.push(params.prompt);
       const next = spawnQueue.shift();

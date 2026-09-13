@@ -598,6 +598,9 @@ describe('writeReport — W-F5: last-tick blocked reconciliation reaches the rep
       isProcessAlive: () => false,
       currentPid: () => 4321,
       now: () => '2026-07-17T00:00:00Z',
+      // Task 27: LoopIO gained printLine (LinePort) — this fixture has nothing to assert
+      // about the viewer's session line.
+      printLine: () => {},
       spawnSession: () => {
         throw new Error('no session should ever be spawned in this test — B is only reconciled, never attempted');
       },

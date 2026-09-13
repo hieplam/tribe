@@ -2022,11 +2022,17 @@ with phase 1 or 3 in its own worktree.
   `R/ports/ports.ts`, `R/adapters/run-io.adapter.ts`, `R/core/loop/card-actions.ts`,
   `R/cli/main.ts`
 - Modify: `R/core/loop/card-actions.test.ts`, `R/cli/main.test.ts`
+- Modify: `R/adapters/viewer-launch.adapter.ts`, `R/adapters/viewer-launch.adapter.test.ts`
+  (R4 ruling, added during Task 27's own build: this file is the sole `ViewerPort`
+  implementer — it owns the `/healthz` probe fetch and the old `VIEWER_IDENTITY_MARKER` —
+  and Step 2's own accept-condition rewrite plus the audit lens's "stand up a real old-shape
+  responder" check both require editing it. The original list omitted it; this note plus the
+  two file names is the fix, made in the same commit as the code per the ruling.)
 
 Model: **Sonnet**. Mechanical against a precise brief; the risk is breadth (645 tests construct
 `LoopIO`), not depth, and `LinePort` already exists.
 
-- [ ] **Step 1: Write the failing test.** `viewer-launch.test.ts`:
+- [x] **Step 1: Write the failing test.** `viewer-launch.test.ts`:
       `viewerRootUrl(4321, 'my-repo', 'my-slug')` is exactly
       `http://127.0.0.1:4321/?campaign=my-repo/my-slug` — the **pair**, because a slug alone does
       not identify a campaign on this machine (spec §9); a repo key or slug containing `&`, a space
@@ -2048,11 +2054,11 @@ Model: **Sonnet**. Mechanical against a precise brief; the risk is breadth (645 
       when it is null. `main.test.ts`: the root line is printed once before the first card, and
       `--no-viewer` and `--dry-run` each print neither line. Expected: `viewerRootUrl` does not
       exist and `LoopIO` has no `printLine`.
-- [ ] **Step 2: Implement** per spec §10.2 and §10.4. `LinePort` is added to `LoopIO`'s composition;
+- [x] **Step 2: Implement** per spec §10.2 and §10.4. `LinePort` is added to `LoopIO`'s composition;
       the production wiring is one line in `run-io.adapter.ts`. The probe's accept condition becomes
       `viewer === 'tribe-viewer' && typeof v === 'number' && v >= 2` — a version floor, not an
       equality, so a future v3 viewer is still reusable.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/runner && bunx tsc --noEmit && bun test
@@ -2060,7 +2066,7 @@ Model: **Sonnet**. Mechanical against a precise brief; the risk is breadth (645 
       Expected: the full runner suite green (645 tests today), with the new cases added. Any
       existing test that fails to satisfy the widened `LoopIO` gets the one missing method, never a
       cast.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the runner on `--dry-run` and confirm zero viewer lines; then read
 every `LoopIO` mock changed by this task and confirm none was silenced with `as any` or a

@@ -58,6 +58,9 @@ export function buildRealIo(config: Pick<RunLoopConfig, 'homeDir'>): LoopIO {
   return {
     exec: realExec,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    // Task 27 (spec §2.1 "Stdout: one human line per action", reused from `LinePort` — same
+    // seam `adapters/watchdog-io.adapter.ts` already wires for the watchdog).
+    printLine: (line) => console.log(line),
 
     fileExists: (p) => existsSync(p),
     readFile: (p) => readFileSync(p, 'utf8'),
