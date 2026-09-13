@@ -39,6 +39,18 @@ function isAbsent(err: unknown): boolean {
   return isErrnoException(err) && (err.code === 'ENOENT' || err.code === 'EACCES');
 }
 
+/** The errno codes a `realpath` RESOLUTION can legitimately fail with when the path does not name a
+ * real, reachable target — a missing entry (`ENOENT`), a symlink loop (`ELOOP`), a non-directory
+ * component (`ENOTDIR`), an unreadable ancestor (`EACCES`), or an over-long name (`ENAMETOOLONG`).
+ * Every one of these means "this is not a real target to contain" and must FAIL CLOSED to `null`,
+ * never crash a request: a hostile symlink loop under a session directory would otherwise throw a
+ * traceback straight through the HTTP handler (C1, `fail-closed-edges` obligation 4). The catch
+ * stays NARROW (obligation 1): a code outside this set is genuinely unexpected and still propagates. */
+const REALPATH_FAILURE_CODES = new Set(['ENOENT', 'ELOOP', 'ENOTDIR', 'EACCES', 'ENAMETOOLONG']);
+function isRealpathFailure(err: unknown): boolean {
+  return isErrnoException(err) && typeof err.code === 'string' && REALPATH_FAILURE_CODES.has(err.code);
+}
+
 /** Missing -> `null`. Real file -> a `FileObservation` whose `inode` is genuinely `st.ino` (never
  * a fabricated stand-in — the rotation trigger of `core/tail.ts#advanceTail` is unsound without
  * the real value). */
@@ -64,6 +76,24 @@ export function listDirOrEmpty(dir: string): string[] {
     return readdirSync(dir);
   } catch (err) {
     if (isAbsent(err)) return [];
+    throw err;
+  }
+}
+
+/** `true` iff `path` is a readable directory. A single `readdir` distinguishes a valid, readable
+ * directory (`true`) from missing / not-a-directory (`ENOTDIR`) / unreadable (`EACCES`) — all
+ * `false`. This is the DELIBERATE OPPOSITE of `listDirOrEmpty`, which folds missing/unreadable into
+ * an empty result: validating a user-supplied config root at boot (D32a) must REFUSE all three
+ * failure modes rather than silently treat them as "empty" and hand a sandboxed user someone else's
+ * sessions. Lives in the adapter (never in `serve.ts`) so the composition root names no `node:fs`
+ * import of its own (D16). The catch stays narrow (obligation 1): only a real filesystem errno is
+ * `false`; anything else propagates. */
+export function isReadableDir(path: string): boolean {
+  try {
+    readdirSync(path);
+    return true;
+  } catch (err) {
+    if (isErrnoException(err)) return false;
     throw err;
   }
 }
@@ -127,14 +157,18 @@ export function readTextCapped(path: string, capBytes: number): string | null {
   }
 }
 
-/** Resolves a symlink — or an ordinary path — to its real, canonical form. `null` for a broken
- * symlink or a path that does not exist — refused WITHOUT a read, before any containment check
- * runs (D14). */
+/** Resolves a symlink — or an ordinary path — to its real, canonical form. `null` for any
+ * resolution failure that means "not a real, reachable target": a broken symlink or missing path
+ * (`ENOENT`), a symlink LOOP (`ELOOP`), a non-directory component (`ENOTDIR`), an unreadable
+ * ancestor (`EACCES`), or an over-long name (`ENAMETOOLONG`) — refused WITHOUT a read, before any
+ * containment check runs (D14). Failing closed here is what keeps a hostile symlink loop from
+ * throwing a traceback through the HTTP handler (C1). The catch stays narrow (obligation 1): a code
+ * outside `REALPATH_FAILURE_CODES` is genuinely unexpected and propagates. */
 export function realpathOrNull(path: string): string | null {
   try {
     return realpathSync(path);
   } catch (err) {
-    if (isAbsent(err)) return null;
+    if (isRealpathFailure(err)) return null;
     throw err;
   }
 }

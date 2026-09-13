@@ -175,6 +175,22 @@ async function openStream(
   return { status: res.status, frames, close };
 }
 
+// A separate single-row session whose file is DELETED mid-stream, to prove a `gone` stream releases
+// its slot server-side (I1). Kept distinct from the paired session so deleting it never disturbs the
+// LIVE streams opened against the paired session.
+const GONE_SESSION_ID = 'feedface-3333-4000-8000-000000000001';
+const GONE_PROJECT_DIR = '-Users-fixture-repo-gone';
+
+/** Writes the gone session's transcript and returns its absolute path, so the test can delete it. */
+function buildGoneFixture(root: string): string {
+  const dir = join(root, 'cfg', 'projects', GONE_PROJECT_DIR);
+  mkdirSync(dir, { recursive: true });
+  const row = { type: 'assistant', uuid: 'gone-1', timestamp: 't0', message: { role: 'assistant', model: 'm', content: [{ type: 'text', text: 'about to vanish' }] } };
+  const path = join(dir, `${GONE_SESSION_ID}.jsonl`);
+  writeFileSync(path, JSON.stringify(row) + '\n');
+  return path;
+}
+
 const EVENTS = `/events?session=${PAIRED_SESSION_ID}`;
 
 describe('GET /events — hello then rows (spec §6.2)', () => {
@@ -240,6 +256,36 @@ describe('GET /events — the §6.2 stream cap of 8', () => {
     expect(body).toBe('too many live streams');
 
     for (const c of held) c.close();
+  });
+
+  test('a `gone` stream (its file deleted mid-stream) releases its slot SERVER-SIDE, so 8 fresh streams still all connect (I1 — no leak)', async () => {
+    const root = tmpRoot();
+    buildPairedFixture(root);
+    const gonePath = buildGoneFixture(root);
+    const server = await startServer({ HOME: root, CLAUDE_CONFIG_DIR: join(root, 'cfg') });
+
+    // 1) Open a stream to the GONE session and read its hello, so its slot is definitely live. The
+    //    connection is NOT aborted here (only in the afterEach cleanup), so the ONLY way its slot is
+    //    freed before then is the server's own terminal `onClose` path — never a client cancel.
+    const goneConn = await openStream(server.port, `/events?session=${GONE_SESSION_ID}`, 1);
+    expect(goneConn.status).toBe(200);
+    expect(goneConn.frames[0]!.event).toBe('hello');
+
+    // 2) Delete the file; wait past two poll ticks (250 ms each) so the poller observes ENOENT,
+    //    emits `gone`, closes the stream, and releases the slot.
+    rmSync(gonePath, { force: true });
+    await new Promise((r) => setTimeout(r, 800));
+
+    // 3) All 8 fresh LIVE streams must connect. Before the fix, the gone stream leaked its slot
+    //    (the poller stopped but serve.ts never released it), so only 7 fit and the 8th got 503.
+    const held: OpenConnection[] = [];
+    for (let i = 0; i < 8; i++) {
+      const conn = await openStream(server.port, EVENTS, 1);
+      expect({ i, status: conn.status }).toEqual({ i, status: 200 });
+      held.push(conn);
+    }
+    for (const c of held) c.close();
+    goneConn.close();
   });
 
   test('closing a connection releases its slot — proven by opening, closing and reopening 9 times', async () => {

@@ -1,6 +1,6 @@
 // core/cache.test.ts — spec §5.3/§9 (the pure cache/eviction policy), `pure-core.md`.
 import { describe, expect, test } from 'bun:test';
-import { CACHE_CAPACITY, CACHE_TTL_MS, decideCache, evictionVictim, type CacheEntry } from './cache.ts';
+import { boundedInsert, CACHE_CAPACITY, CACHE_TTL_MS, decideCache, evictionVictim, SESSION_CACHE_TTL_MS, type CacheEntry } from './cache.ts';
 
 function entry<T>(value: T, insertedAtMs: number, lastAccessMs: number = insertedAtMs): CacheEntry<T> {
   return { value, insertedAtMs, lastAccessMs };
@@ -41,6 +41,58 @@ describe('decideCache', () => {
     const first = decideCache('k', existing, 1500);
     const second = decideCache('k', existing, 1500);
     expect(first).toEqual(second);
+  });
+
+  // The two distinct TTLs the composition root uses (spec §5.3 vs §9). `decideCache` takes the
+  // window as a parameter so the SAME pure function serves both the 60 s session read cache and the
+  // 5 s badge scan — the badge cache passing nothing (the 5 s default), the session cache passing
+  // SESSION_CACHE_TTL_MS explicitly. Before this, both were pinned to the single 5 s CACHE_TTL_MS
+  // and the session cache knowingly served a shorter-than-spec window (the I2 finding).
+  test('the two TTL constants: 5 s for the badge scan (§9), 60 s for the session read cache (§5.3)', () => {
+    expect(CACHE_TTL_MS).toBe(5000);
+    expect(SESSION_CACHE_TTL_MS).toBe(60000);
+  });
+
+  test('default ttl (badge scan, §9): stale exactly at 5 s, unchanged by the new parameter', () => {
+    const existing = new Map<string, CacheEntry<string>>([['k', entry('v1', 0)]]);
+    expect(decideCache('k', existing, 4999)).toEqual({ kind: 'hit', value: 'v1' });
+    expect(decideCache('k', existing, 5000)).toEqual({ kind: 'stale' });
+  });
+
+  test('session ttl (§5.3): a hit at 59 999 ms — where the 5 s default would already be stale — and stale exactly at 60 s', () => {
+    const existing = new Map<string, CacheEntry<string>>([['k', entry('v1', 0)]]);
+    // The whole point of the 60 s window: an entry the 5 s default calls stale is still a hit here.
+    expect(decideCache('k', existing, 5000, SESSION_CACHE_TTL_MS)).toEqual({ kind: 'hit', value: 'v1' });
+    expect(decideCache('k', existing, 59_999, SESSION_CACHE_TTL_MS)).toEqual({ kind: 'hit', value: 'v1' });
+    expect(decideCache('k', existing, SESSION_CACHE_TTL_MS, SESSION_CACHE_TTL_MS)).toEqual({ kind: 'stale' });
+  });
+});
+
+// boundedInsert — the write half of the bounded lifecycle (spec §5.3/§5.4). Used by BOTH the
+// session read cache and the previousSizeByPath map in serve.ts, so neither can grow without bound
+// (the I3 finding: previousSizeByPath was an unbounded Map).
+describe('boundedInsert', () => {
+  test('never grows the map past CACHE_CAPACITY: a fresh key at the bound evicts the LRU victim first', () => {
+    const map = new Map<string, CacheEntry<number>>();
+    for (let i = 0; i < CACHE_CAPACITY; i++) boundedInsert(map, `key-${i}`, i, i * 10);
+    expect(map.size).toBe(CACHE_CAPACITY);
+    // key-0 is the least-recently inserted/used; inserting a brand-new key evicts it, keeping the
+    // size pinned at the bound.
+    boundedInsert(map, 'fresh', 999, CACHE_CAPACITY * 10);
+    expect(map.size).toBe(CACHE_CAPACITY);
+    expect(map.has('key-0')).toBe(false); // the LRU victim was evicted
+    expect(map.get('fresh')!.value).toBe(999);
+  });
+
+  test('updating an EXISTING key at the bound evicts nothing (the map does not grow, so nothing is thrown out)', () => {
+    const map = new Map<string, CacheEntry<number>>();
+    for (let i = 0; i < CACHE_CAPACITY; i++) boundedInsert(map, `key-${i}`, i, i * 10);
+    expect(map.size).toBe(CACHE_CAPACITY);
+    // Re-writing key-0 (already present) must NOT evict some other entry — the map isn't growing.
+    boundedInsert(map, 'key-0', 4242, 999_999);
+    expect(map.size).toBe(CACHE_CAPACITY);
+    expect(map.get('key-0')!.value).toBe(4242);
+    expect(map.has('key-250')).toBe(true); // no innocent bystander evicted
   });
 });
 

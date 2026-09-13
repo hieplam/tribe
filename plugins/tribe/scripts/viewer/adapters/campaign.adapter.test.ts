@@ -88,6 +88,49 @@ describe('discoverCampaignCandidates — the fixed-depth walk finds campaigns (s
   test('a nonexistent tribe root yields [], never a throw', () => {
     expect(discoverCampaignCandidates('/nonexistent/tribe/root/path')).toEqual([]);
   });
+
+  test('a repoKey that is a symlink OUT of the tribe root contributes no candidate (D14, plan task 16): discovery contains before it stats/lists', () => {
+    const { root, cleanup } = makeTribeRoot();
+    const outside = mkdtempSync(join(tmpdir(), 'tribe-viewer-outside-discover-'));
+    try {
+      // A legitimate, contained campaign — proof the containment check is not merely refusing all.
+      writeCampaign(root, 'real-repo', 'real-slug', { state: { sequence: [], cards: {} } });
+
+      // A hostile repoKey symlink whose target (with its own campaigns/<slug>) lives OUTSIDE the
+      // tribe root. Before the fix, discovery statSync/listDirOrEmpty'd through the symlink and
+      // leaked the out-of-root directory entry + its mtime as a candidate.
+      mkdirSync(join(outside, 'campaigns', 'leaked-slug'), { recursive: true });
+      symlinkSync(outside, join(root, 'evil-repo'));
+
+      const entries = discoverCampaignCandidates(root);
+      const identities = entries.map((e) => `${e.repoKey}/${e.slug}`).sort();
+      expect(identities).toEqual(['real-repo/real-slug']); // the escaping repoKey contributes nothing
+      expect(identities).not.toContain('evil-repo/leaked-slug');
+    } finally {
+      cleanup();
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('a campaigns/<slug> that is a symlink OUT of the tribe root contributes no candidate (D14): each level is contained', () => {
+    const { root, cleanup } = makeTribeRoot();
+    const outside = mkdtempSync(join(tmpdir(), 'tribe-viewer-outside-discover-slug-'));
+    try {
+      writeCampaign(root, 'repo', 'contained-slug', { state: { sequence: [], cards: {} } });
+      // An escaping <slug> under a legitimate, contained campaigns/ directory.
+      mkdirSync(outside, { recursive: true });
+      mkdirSync(join(root, 'repo', 'campaigns'), { recursive: true });
+      symlinkSync(outside, join(root, 'repo', 'campaigns', 'escaping-slug'));
+
+      const entries = discoverCampaignCandidates(root);
+      const identities = entries.map((e) => `${e.repoKey}/${e.slug}`).sort();
+      expect(identities).toEqual(['repo/contained-slug']);
+      expect(identities).not.toContain('repo/escaping-slug');
+    } finally {
+      cleanup();
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('readSelectedCampaigns — reads exactly what the selection names (spec §9 steps 3-4), and nothing else', () => {

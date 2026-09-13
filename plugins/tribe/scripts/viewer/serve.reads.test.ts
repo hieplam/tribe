@@ -7,7 +7,7 @@
 // proof that `serve.ts` composes it correctly, end to end, over real bytes on disk.
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -299,6 +299,70 @@ describe('/api/block — at + i, never uuid', () => {
     };
     expect(status).toBe(200);
     expect(body.block.extra).toEqual({ a: 1, b: 2 });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// C1 — subagents-directory / sidecar containment (D14, fail-closed obligation 4): a symlinked
+// `<session>/subagents` (or a symlink LOOP) must never be listed or read THROUGH — its outside
+// content never surfaces, and a loop never throws a traceback through the HTTP handler.
+// ---------------------------------------------------------------------------------------------
+const ESCAPE_SESSION_ID = 'cabba9e5-1111-4000-8000-000000000001';
+const LOOP_SESSION_ID = 'cabba9e5-2222-4000-8000-000000000002';
+const CONTAINMENT_PROJECT_DIR = '-Users-fixture-repo-containment';
+const OUTSIDE_LEAK_MARKER = 'OUTSIDE-SUBAGENT-LEAK-MARKER';
+
+function buildSubagentContainmentFixture(root: string): void {
+  const projectDir = join(root, 'cfg', 'projects', CONTAINMENT_PROJECT_DIR);
+  mkdirSync(projectDir, { recursive: true });
+
+  const transcript = (id: string): string =>
+    JSON.stringify({ type: 'assistant', uuid: `${id}-r1`, timestamp: 't0', message: { role: 'assistant', model: 'm', content: [{ type: 'text', text: 'hello' }] } }) + '\n';
+
+  // Session 1: its `<session>/subagents` is a symlink to an OUTSIDE directory (outside cfg/projects,
+  // inside the fixture root) that holds a real-looking agent sidecar with a recognizable marker.
+  writeFileSync(join(projectDir, `${ESCAPE_SESSION_ID}.jsonl`), transcript(ESCAPE_SESSION_ID));
+  const outsideSubagents = join(root, 'outside-subagents');
+  mkdirSync(outsideSubagents, { recursive: true });
+  writeFileSync(join(outsideSubagents, 'agent-leak.jsonl'), transcript('leak'));
+  writeFileSync(join(outsideSubagents, 'agent-leak.meta.json'), JSON.stringify({ label: OUTSIDE_LEAK_MARKER, agentType: OUTSIDE_LEAK_MARKER }));
+  const escapeSessionDir = join(projectDir, ESCAPE_SESSION_ID);
+  mkdirSync(escapeSessionDir, { recursive: true });
+  symlinkSync(outsideSubagents, join(escapeSessionDir, 'subagents'));
+
+  // Session 2: its `<session>/subagents` is a self-referential symlink LOOP — resolving it raises
+  // ELOOP. The request must degrade to an empty subagents list, never a thrown traceback.
+  writeFileSync(join(projectDir, `${LOOP_SESSION_ID}.jsonl`), transcript(LOOP_SESSION_ID));
+  const loopSessionDir = join(projectDir, LOOP_SESSION_ID);
+  mkdirSync(loopSessionDir, { recursive: true });
+  symlinkSync('subagents', join(loopSessionDir, 'subagents')); // relative self-link -> ELOOP
+}
+
+async function startContainmentServer(): Promise<RunningServer> {
+  const root = tmpRoot();
+  buildHomeA(root);
+  buildSubagentContainmentFixture(root);
+  return startServer({ HOME: root, CLAUDE_CONFIG_DIR: join(root, 'cfg') });
+}
+
+describe('C1 — a symlinked <session>/subagents directory or sidecar is contained before it is read', () => {
+  test('an escaping subagents symlink: subagentCount is 0, subagents is [], and no outside content surfaces', async () => {
+    const server = await startContainmentServer();
+    const { status, body, rawText } = await getJson(server.port, `/api/session/${ESCAPE_SESSION_ID}`);
+    expect(status).toBe(200);
+    const b = body as { session: { subagentCount: number }; subagents: unknown[] };
+    expect(b.session.subagentCount).toBe(0); // the out-of-root agent-leak.jsonl is never counted
+    expect(b.subagents).toEqual([]); // and its sidecar is never read
+    expect(rawText).not.toContain(OUTSIDE_LEAK_MARKER); // the outside meta content never leaks out
+  });
+
+  test('a symlink LOOP under the session dir: the request returns 200 with an empty subagents list, NOT a thrown ELOOP (fail-closed)', async () => {
+    const server = await startContainmentServer();
+    const { status, body } = await getJson(server.port, `/api/session/${LOOP_SESSION_ID}`);
+    expect(status).toBe(200); // never a 500 crash from a rethrown ELOOP
+    const b = body as { session: { subagentCount: number }; subagents: unknown[] };
+    expect(b.session.subagentCount).toBe(0);
+    expect(b.subagents).toEqual([]);
   });
 });
 

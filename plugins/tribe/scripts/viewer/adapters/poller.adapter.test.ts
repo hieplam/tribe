@@ -63,7 +63,7 @@ function baseSummary(): SessionSummary {
 const PATH = '/root/projects/proj/sess.jsonl';
 
 interface Fake {
-  io: { stat(p: string): FileObservation | null; readRange(p: string, s: number, e: number): Uint8Array; readMeta(): PollerMeta };
+  io: { statFile(p: string): FileObservation | null; readRange(p: string, s: number, e: number): Uint8Array; readMeta(): PollerMeta };
   set(s: string | Uint8Array): void;
   append(s: string): void;
   rotate(s: string | Uint8Array): void; // new inode (replacement)
@@ -80,7 +80,7 @@ function makeFake(): Fake {
   let meta: PollerMeta = { session: baseSummary(), agents: [], badges: [], live: true };
   return {
     io: {
-      stat() {
+      statFile() {
         if (!present) return null;
         return { sizeBytes: content.length, mtimeMs: 1000, inode, birthtimeMs: 500 };
       },
@@ -165,6 +165,7 @@ interface StartOpts {
   intervalMs?: number;
   generation?: string;
   limit?: number;
+  onClose?: () => void;
 }
 function start(fake: Fake, ctrl: Controllable, sink: Sink, opts: StartOpts = {}): { stop: () => void } {
   return createPoller({
@@ -176,6 +177,7 @@ function start(fake: Fake, ctrl: Controllable, sink: Sink, opts: StartOpts = {})
     now: ctrl.now,
     schedule: ctrl.schedule,
     limit: opts.limit,
+    onClose: opts.onClose,
   });
 }
 
@@ -410,6 +412,59 @@ describe('createPoller — meta, gone, ping', () => {
     const gone = sink.frames().filter((f) => f.event === 'gone');
     expect(gone).toHaveLength(1);
     expect(gone[0]!.data.reason).toBe('deleted');
+  });
+
+  test('a deletion is TERMINAL: it emits `gone`, then invokes onClose EXACTLY once so serve.ts can close the stream and release the slot (I1)', () => {
+    const fake = makeFake();
+    fake.set(`${textRow('x', 'u1')}\n`);
+    const ctrl = makeControllable();
+    const sink = makeSink();
+    let closeCount = 0;
+    start(fake, ctrl, sink, { onClose: () => (closeCount += 1) });
+    sink.clear();
+
+    fake.remove();
+    ctrl.tick();
+
+    // The contracted terminal frame is still emitted...
+    expect(sink.frames().filter((f) => f.event === 'gone')).toHaveLength(1);
+    // ...and the terminal callback fires exactly once, so the 8-stream slot is not leaked.
+    expect(closeCount).toBe(1);
+
+    // A further tick must NOT invoke onClose again (the loop is stopped; release stays once-only).
+    ctrl.tick();
+    expect(closeCount).toBe(1);
+  });
+
+  test('a filesystem error mid-stream is TERMINAL: the poll loop stops and onClose fires exactly once (I1, fail-closed lifecycle)', () => {
+    // A poller io whose stat throws an errno error on the tick after connect — the shape a mid-stream
+    // read failure takes. Before the fix, the poller swallowed it and stopped, but never signalled
+    // serve.ts, so the stream's slot was consumed forever.
+    let statCalls = 0;
+    const throwingIo: Fake['io'] = {
+      statFile(_p: string) {
+        statCalls += 1;
+        if (statCalls === 1) return { sizeBytes: 0, mtimeMs: 1000, inode: 1, birthtimeMs: 500 };
+        const err = new Error('EIO: i/o error') as NodeJS.ErrnoException;
+        err.code = 'EIO';
+        throw err;
+      },
+      readRange() {
+        return new Uint8Array(0);
+      },
+      readMeta(): PollerMeta {
+        return { session: baseSummary(), agents: [], badges: [], live: true };
+      },
+    };
+    const ctrl = makeControllable();
+    const sink = makeSink();
+    let closeCount = 0;
+    createPoller({ io: throwingIo, path: PATH, intervalMs: 250, generation: 'G1', emit: sink.emit, now: ctrl.now, schedule: ctrl.schedule, onClose: () => (closeCount += 1) });
+
+    ctrl.tick(); // the stat now throws
+    expect(closeCount).toBe(1);
+    ctrl.tick(); // stopped — no second close
+    expect(closeCount).toBe(1);
   });
 
   test('`ping` fires at 15 s of elapsed clock', () => {

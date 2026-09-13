@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { completeLines, candidatesFromRows, findWindow, orphanPatches, type ReadBack } from './window.ts';
+import { ROW_CAP } from './tail.ts';
 import { buildHomeA, PROJECT_A_DIR, SESSION_4_ID, SESSION_CUT_ID, SESSION_4_MARKERS } from '../fixtures/build.ts';
 
 const enc = new TextEncoder();
@@ -196,6 +197,47 @@ describe('findWindow — session-4 (2,400 rows, D20/D21/D22/D26 fixture)', () =>
     const result = findWindow(readBack, buffer.length, 1);
     expect(result.rows.length).toBeGreaterThanOrEqual(1);
     expect(buffer[result.from - 1]).toBe(0x0a);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Bounded windowing (spec §6.5 "rows of any size"; D26 scan-past-cap-but-don't-retain). A single
+// degenerate row larger than ROW_CAP with no terminating newline must not make findWindow allocate
+// a buffer proportional to the FILE SIZE — neither the backward newline scan nor the retained
+// carrySeed may grow past a fixed bound. `fixtures-mirror-reality.md`: this is the shape a writer
+// mid-append leaves on disk when one row is pathologically large.
+// ---------------------------------------------------------------------------------------------
+describe('findWindow — a >ROW_CAP row with no newline is bounded (spec §6.5, D26)', () => {
+  /** A readBack over a virtual file of `fileLen` bytes, none of them 0x0A, that records the LARGEST
+   * single `len` it is ever asked for — the memory footprint of one allocation. It fills a real
+   * buffer of exactly the requested length, so the newline scan sees genuine (newline-free) bytes,
+   * but never materializes the whole virtual file at once. */
+  function boundedProbe(fileLen: number): { readBack: ReadBack; maxLen: () => number } {
+    let maxLen = 0;
+    const readBack: ReadBack = (end, len) => {
+      maxLen = Math.max(maxLen, len);
+      // A real buffer of the requested size, all 'a' (0x61) — never a 0x0A anywhere.
+      return new Uint8Array(len).fill(0x61);
+    };
+    return { readBack, maxLen: () => maxLen };
+  }
+
+  test('no single read exceeds ROW_CAP, the retained carrySeed is capped at ROW_CAP, and the window is sane (to=0, no rows)', () => {
+    const fileLen = ROW_CAP + 1024 * 1024; // 9 MiB: strictly larger than the cap
+    const { readBack, maxLen } = boundedProbe(fileLen);
+    const result = findWindow(readBack, fileLen, 500);
+
+    // The whole point: no allocation is proportional to the file. Every single read is at most
+    // ROW_CAP, which is INDEPENDENT of fileLen — a 900 MiB file would read no more per call.
+    expect(maxLen()).toBeLessThanOrEqual(ROW_CAP);
+    expect(maxLen()).toBeLessThan(fileLen); // proves it never read the whole file in one buffer
+
+    // A sane window over a single unterminated giant row: no complete row, so `to` is 0, nothing is
+    // retained as a row, and the carry — the forward tail — is bounded to at most ROW_CAP.
+    expect(result.to).toBe(0);
+    expect(result.rows).toEqual([]);
+    expect(result.truncatedBefore).toBe(false);
+    expect(result.carrySeed.length).toBeLessThanOrEqual(ROW_CAP);
   });
 });
 

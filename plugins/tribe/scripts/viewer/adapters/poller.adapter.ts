@@ -48,9 +48,12 @@ export interface PollerMeta {
 }
 
 /** The injected world contact — every read the poller makes, and nothing else. `serve.ts` wires
- * the real `fs.adapter` reads and the real scan behind it; a test supplies an in-memory fake. */
+ * the real `fs.adapter` reads and the real scan behind it; a test supplies an in-memory fake. The
+ * observe method is named `statFile` (not `stat`) so the structural wall's `node:fs` universe scan
+ * — which refuses a bare async `stat` call on any receiver (§12.6 (7c)) — never mistakes this
+ * injected abstraction for the async filesystem observe. */
 export interface PollerIo {
-  stat(path: string): FileObservation | null;
+  statFile(path: string): FileObservation | null;
   readRange(path: string, start: number, end: number): Uint8Array;
   readMeta(): PollerMeta;
 }
@@ -64,6 +67,12 @@ export interface CreatePollerInput {
   generation: string;
   /** Receives each already-encoded SSE wire record. `serve.ts` enqueues it onto the response. */
   emit: (encoded: string) => void;
+  /** Invoked EXACTLY once when the poller reaches a terminal state — a `gone` (the file was
+   * deleted), a connect failure, or a mid-stream filesystem error. `serve.ts` uses it to close the
+   * `ReadableStream` and release the stream slot (spec §6.5: "a closed connection releases its slot
+   * exactly once") so a dead/errored stream never permanently consumes one of the 8. Optional so the
+   * unit tests (which observe frames, not the socket) can omit it; defaults to a no-op. */
+  onClose?: () => void;
   /** Injected clock (epoch ms). Defaults to the real one — this adapter is the only clock owner. */
   now?: () => number;
   /** Injected scheduler. Defaults to `setInterval`; a test captures the callback to tick by hand. */
@@ -75,6 +84,13 @@ export interface CreatePollerInput {
 function defaultSchedule(fn: () => void, ms: number): { stop: () => void } {
   const handle = setInterval(fn, ms);
   return { stop: () => clearInterval(handle) };
+}
+
+/** A narrow guard for a genuine filesystem error (a Node errno) — the only failure class a live
+ * poll loop should fail CLOSED on (`fail-closed-edges` obligation 1). Anything else is an
+ * unexpected bug that must propagate, never be silently swallowed by a broad `catch (err)`. */
+function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
+  return err instanceof Error && 'code' in err;
 }
 
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -116,6 +132,7 @@ export function createPoller(input: CreatePollerInput): { stop: () => void } {
   const now = input.now ?? (() => Date.now());
   const schedule = input.schedule ?? defaultSchedule;
   const limit = input.limit ?? DEFAULT_WINDOW_LIMIT;
+  const onClose = input.onClose ?? (() => {});
 
   const readBack: ReadBack = (end, len) => io.readRange(path, end - len, end);
 
@@ -128,12 +145,25 @@ export function createPoller(input: CreatePollerInput): { stop: () => void } {
   let lastMetaKey = '';
   let lastPingAtMs = now();
   let stopped = false;
+  let closed = false;
   let scheduled: { stop: () => void } | null = null;
 
   function stopInternal(): void {
     if (stopped) return;
     stopped = true;
     scheduled?.stop();
+  }
+
+  /** Every TERMINAL poller path funnels through here: it stops the poll loop and invokes `onClose`
+   * EXACTLY once (spec §6.5), so `serve.ts` closes the stream and releases the slot a single time
+   * however many terminal signals arrive. `stop()` (the public handle) intentionally does NOT call
+   * this — a client-initiated cancel releases its own slot in `serve.ts`, so calling `onClose` there
+   * too would double-release. */
+  function terminate(): void {
+    stopInternal();
+    if (closed) return;
+    closed = true;
+    onClose();
   }
 
   function emitFrame(frame: SseFrame): void {
@@ -154,12 +184,16 @@ export function createPoller(input: CreatePollerInput): { stop: () => void } {
     }
   }
 
-  /** Seeds the forward tail from `findWindow`'s result (D30): `ackOffset := to`, `carry :=
-   * carrySeed`, `offset := eof` — so the invariant `offset == ackOffset + carry.length` holds from
-   * tick one and the next read starts at `eof`, never re-reading the carry. */
+  /** Seeds the forward tail from `findWindow`'s result (D30): `carry := carrySeed`, `offset := eof`,
+   * and `ackOffset := eof - carrySeed.length` — so the invariant `offset == ackOffset + carry.length`
+   * holds from tick one and the next read starts at `eof`, never re-reading the carry. Deriving
+   * `ackOffset` from the carry's own length (rather than a bare `win.to`) keeps the invariant exact
+   * even when `findWindow` CAPPED an oversized carry at `ROW_CAP` (spec §6.5): for the common small
+   * carry, `eof - carrySeed.length` is exactly `win.to`. */
   function seedFromWindow(obs: FileObservation): FindWindowResult {
     const win = findWindow(readBack, obs.sizeBytes, limit);
-    state = { offset: obs.sizeBytes, carry: win.carrySeed, ackOffset: win.to, inode: obs.inode, skipping: false, rowStart: 0, skippedBytes: 0 };
+    const ackOffset = obs.sizeBytes - win.carrySeed.length;
+    state = { offset: obs.sizeBytes, carry: win.carrySeed, ackOffset, inode: obs.inode, skipping: false, rowStart: 0, skippedBytes: 0 };
     return win;
   }
 
@@ -197,10 +231,10 @@ export function createPoller(input: CreatePollerInput): { stop: () => void } {
   }
 
   function runConnect(): void {
-    const obs = io.stat(path);
+    const obs = io.statFile(path);
     if (obs === null) {
       emitFrame({ event: 'gone', data: { reason: 'deleted' } });
-      stopInternal();
+      terminate();
       return;
     }
     const win = seedFromWindow(obs);
@@ -215,11 +249,10 @@ export function createPoller(input: CreatePollerInput): { stop: () => void } {
     lastPingAtMs = now();
   }
 
-  function handleReset(obs: FileObservation, prevOffset: number): void {
-    // `advanceTail` already decided a reset fired (spec §6.1's two triggers); it does not expose
-    // WHICH, so the reason is re-derived from the same inputs it used: a shrink past the last read
-    // offset is a truncation, otherwise (same/larger size with a changed inode) a rotation.
-    const reason: 'truncated' | 'rotated' = obs.sizeBytes < prevOffset ? 'truncated' : 'rotated';
+  function handleReset(obs: FileObservation, reason: 'truncated' | 'rotated'): void {
+    // `advanceTail` decided BOTH that a reset fired and WHICH of §6.1's two triggers caused it; the
+    // poller forwards that decision rather than re-deriving it (`pure-core.md`: the adapter decides
+    // nothing).
     emitFrame({ event: 'reset', data: { reason } });
     // Drop tail + pairing state and stream the NORMAL tail window of the file as it now is (spec
     // §6.1) — never the file from byte 0.
@@ -229,10 +262,10 @@ export function createPoller(input: CreatePollerInput): { stop: () => void } {
   }
 
   function runTick(): void {
-    const obs = io.stat(path);
+    const obs = io.statFile(path);
     if (obs === null) {
       emitFrame({ event: 'gone', data: { reason: 'deleted' } });
-      stopInternal();
+      terminate();
       return;
     }
 
@@ -244,8 +277,8 @@ export function createPoller(input: CreatePollerInput): { stop: () => void } {
     const tick = advanceTail(state, chunk, obs);
     state = tick.state;
 
-    if (tick.reset) {
-      handleReset(obs, prevOffset);
+    if (tick.reset && tick.resetReason !== null) {
+      handleReset(obs, tick.resetReason);
       maybeMeta();
       maybePing();
       return;
@@ -288,20 +321,29 @@ export function createPoller(input: CreatePollerInput): { stop: () => void } {
     try {
       runTick();
     } catch (err) {
-      if (!(err instanceof Error)) throw err;
-      // A live poll loop that throws (an unexpected read failure) must neither spin every
-      // `intervalMs` nor leak a traceback into the event loop (`fail-closed-edges`): stop the
-      // stream. The SSE client reconnects on its own `retry:` and gets a fresh snapshot (D12).
-      stopInternal();
+      // A live poll loop that hits a filesystem error (a `readRange`/`stat` failure mid-stream)
+      // must neither spin every `intervalMs` nor leak a traceback into the event loop
+      // (`fail-closed-edges` obligation 1): TERMINATE — stop the loop and signal `serve.ts` to close
+      // the stream and release the slot (I1). The SSE client reconnects on its own `retry:` and gets
+      // a fresh snapshot (D12). The catch stays narrow: only an errno error is a filesystem failure;
+      // anything else is an unexpected bug and re-throws on the fall-through.
+      if (isErrnoException(err)) return terminate();
+      throw err;
     }
   }
 
-  try {
-    runConnect();
-  } catch (err) {
-    if (!(err instanceof Error)) throw err;
-    stopInternal();
+  function runConnectGuarded(): void {
+    try {
+      runConnect();
+    } catch (err) {
+      // Same fail-closed lifecycle at connect: an errno read failure terminates cleanly; a
+      // non-filesystem error re-throws on the fall-through (obligation 1).
+      if (isErrnoException(err)) return terminate();
+      throw err;
+    }
   }
+
+  runConnectGuarded();
   if (!stopped) scheduled = schedule(runTickGuarded, intervalMs);
 
   return { stop: stopInternal };

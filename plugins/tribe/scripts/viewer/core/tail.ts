@@ -75,6 +75,11 @@ export interface TailTick {
    * unparsable-JSON case (spec §13), a different failure with a different shape. */
   oversized: RenderNode[];
   reset: boolean;
+  /** WHICH of §6.1's two triggers fired, or `null` on a non-reset tick. `advanceTail` already
+   * distinguishes these to decide `reset`; returning the reason keeps the poller from re-deriving
+   * it from the same inputs (`pure-core.md`: the adapter forwards, it does not decide). A truncation
+   * (a shrink past the last read offset) takes precedence over a rotation when both are observable. */
+  resetReason: 'truncated' | 'rotated' | null;
 }
 
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
@@ -110,6 +115,9 @@ export function advanceTail(state: TailState, chunk: Uint8Array, obs: FileObserv
   // degrades to the truncation trigger, never a false reset (spec §6.1).
   const rotated = state.inode !== 0 && obs.inode !== state.inode;
   const reset = truncated || rotated;
+  // Truncation takes precedence when both are observable — a shrink past the last read offset is the
+  // stronger, size-visible signal, matching the poller's own prior re-derivation (§6.1).
+  const resetReason: 'truncated' | 'rotated' | null = truncated ? 'truncated' : rotated ? 'rotated' : null;
 
   const base = reset
     ? { offset: 0, carry: new Uint8Array(0), ackOffset: 0, skipping: false, rowStart: 0, skippedBytes: 0 }
@@ -198,5 +206,5 @@ export function advanceTail(state: TailState, chunk: Uint8Array, obs: FileObserv
     skippedBytes,
   };
 
-  return { state: newState, lines, oversized, reset };
+  return { state: newState, lines, oversized, reset, resetReason };
 }

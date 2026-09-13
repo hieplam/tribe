@@ -99,6 +99,32 @@ test('reset is false on steady ticks and true exactly when the truncation branch
   expect(truncated.reset).toBe(true);
 });
 
+// resetReason: advanceTail already computes truncated-vs-rotated internally (§6.1's two triggers);
+// it RETURNS which one so the poller forwards the decision rather than re-deriving it from the same
+// inputs (pure-core.md: the adapter decides nothing). null on a non-reset tick.
+test('resetReason names WHICH trigger fired — null on a steady tick, "truncated" on a shrink, "rotated" on an inode change', () => {
+  const first = advanceTail(initialTailState(), enc.encode('old\n'), obs(4, 7));
+  expect(first.resetReason).toBeNull();
+
+  const grown = advanceTail(first.state, enc.encode('new\n'), obs(8, 7));
+  expect(grown.resetReason).toBeNull();
+
+  // A shrink past the last read offset — truncation.
+  const truncated = advanceTail(grown.state, enc.encode('fresh\n'), obs(6, 7));
+  expect(truncated.reset).toBe(true);
+  expect(truncated.resetReason).toBe('truncated');
+
+  // Same size, changed inode — rotation (size alone cannot see it).
+  const base = advanceTail(initialTailState(), enc.encode('aa\n'), obs(3, 42));
+  const rotated = advanceTail(base.state, enc.encode('bb\n'), obs(3, 99));
+  expect(rotated.reset).toBe(true);
+  expect(rotated.resetReason).toBe('rotated');
+
+  // A larger replacement with a changed inode is still a rotation, not a truncation.
+  const largerRotated = advanceTail(base.state, enc.encode('bbbbbb\n'), obs(999, 99));
+  expect(largerRotated.resetReason).toBe('rotated');
+});
+
 test('an honest short read never advances offset past what was actually consumed, and the next tick recovers the missed bytes (F56)', () => {
   // stat reported the file already at 10 bytes ('abcdefghi\n'), but the read only returned 2
   // raw bytes this tick (a single read is not guaranteed to fill its buffer).

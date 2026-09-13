@@ -76,7 +76,12 @@ export interface FindWindowResult {
   carrySeed: Uint8Array;
 }
 
-const INITIAL_STEP = 256 * 1024; // D26: 256 KiB, doubling.
+// The backward newline scan walks the file in FIXED chunks of this size rather than one
+// ever-doubling slice: a row with no `0x0A` for millions of bytes must never make a single read
+// (and thus a single `Buffer.alloc` in the adapter) grow to the whole file (spec §6.5 "rows of any
+// size"). The result is identical — the largest offset `< end` carrying a `0x0A` — only the memory
+// footprint per read is now bounded and independent of the remaining transcript size.
+const SCAN_CHUNK = 256 * 1024; // 256 KiB per backward step.
 const OVERSIZED_MARKER_BYTE = 0x00; // never the first byte of real transcript JSONL (always `{`).
 
 function encodeOversizedMarker(node: RenderNode): Uint8Array {
@@ -118,23 +123,22 @@ function buildOversizedNode(at: number, bytes: number): RenderNode {
   };
 }
 
-/** Finds the largest offset `k < end` with `byte[k] === 0x0A`, by reading doubling slices ending
- * at `end` (D26: 256 KiB, 512 KiB, …) until found or BOF. `null` means there is no such byte (BOF
+/** Finds the largest offset `k < end` with `byte[k] === 0x0A`, by walking backward from `end` in
+ * FIXED `SCAN_CHUNK`-sized slices until found or BOF. `null` means there is no such byte (BOF
  * reached with nothing found) — the caller's own row/BOF decision, never this function's. Bytes
- * past `ROW_CAP` are read (to find the boundary) but never retained beyond this call's own,
- * discarded buffer — the cap bounds what is KEPT, not what is SCANNED (D26). */
+ * past `ROW_CAP` are still SCANNED (to find the boundary) but each read allocates at most one
+ * `SCAN_CHUNK`, so the memory footprint is independent of how far back the newline is (spec §6.5):
+ * the cap bounds what is KEPT, and the chunk bounds what is scanned per read (D26). */
 function findNewlineBackward(readBack: ReadBack, end: number): number | null {
-  if (end <= 0) return null;
-  let step = INITIAL_STEP;
-  for (;;) {
-    const lo = Math.max(0, end - step);
-    const len = end - lo;
-    const buf = readBack(end, len);
+  let hi = end;
+  while (hi > 0) {
+    const lo = Math.max(0, hi - SCAN_CHUNK);
+    const buf = readBack(hi, hi - lo); // the slice [lo, hi), read as bytes ending at `hi`.
     const idx = buf.lastIndexOf(0x0a);
     if (idx !== -1) return lo + idx;
-    if (lo === 0) return null;
-    step *= 2;
+    hi = lo;
   }
+  return null;
 }
 
 /** D21's pre-pairing candidate count for ONE already-read row's text. An unparsable row (never
@@ -154,10 +158,17 @@ function countCandidatesForRowText(text: string): number {
  */
 export function findWindow(readBack: ReadBack, eof: number, limit: number): FindWindowResult {
   // D30: the file may end mid-row. `to` is one past the LAST `0x0A`, never EOF; `[to, eof)` is the
-  // forward tail's carry, never parsed as a row here.
+  // forward tail's carry, never parsed as a row here. The carry is BOUNDED at `ROW_CAP` (spec §6.5):
+  // a partial trailing row larger than the cap is already an oversized row-in-progress, so only its
+  // last `ROW_CAP` bytes are retained — the poller seeds its forward tail with `ackOffset := eof -
+  // carrySeed.length` (never a bare `to`), which keeps §6.1's `offset == ackOffset + carry.length`
+  // invariant exact whether the carry was capped or not (for the common small carry, `eof -
+  // carrySeed.length` is exactly `to`). Reading only the last `ROW_CAP` bytes keeps the allocation
+  // independent of how large the unterminated row is.
   const lastNl = findNewlineBackward(readBack, eof);
   const to = lastNl === null ? 0 : lastNl + 1;
-  const carrySeed = eof > to ? readBack(eof, eof - to) : new Uint8Array(0);
+  const carryLen = eof - to;
+  const carrySeed = carryLen > 0 ? readBack(eof, Math.min(carryLen, ROW_CAP)) : new Uint8Array(0);
 
   interface Entry {
     at: number;

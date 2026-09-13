@@ -220,29 +220,38 @@ function readOneCampaign(root: string, repoKey: string, slug: string): { scan: C
 
 /** Discovers every `(repoKey, slug)` candidate under `tribeRoot` (spec §9 steps 1–2), with the
  * `campaigns/<slug>` directory's own mtime — the input `core/badge.ts#selectCampaigns` needs to
- * pick the newest-first 200 (task 12). No containment decision is made here: this is informational
- * discovery only (an mtime, nothing opened); `readSelectedCampaigns` below independently re-proves
- * containment for every directory and file it actually reads, regardless of how a candidate was
- * found. Non-directory entries at either level are skipped; a missing/unreadable `tribeRoot`
- * yields `[]`, never a throw. */
+ * pick the newest-first 200 (task 12).
+ *
+ * Containment BEFORE any stat/list (D14, plan task 16): a `readdir` entry cannot spell `..`, but it
+ * CAN be a symlink pointing anywhere, so every `repoKey`, `campaigns`, and `<slug>` DIRECTORY is
+ * realpath-resolved and proven inside `tribeRoot` before it is `statSync`'d or listed — otherwise a
+ * symlinked `repoKey` (or `<slug>`) leaks out-of-root directory entries and mtimes into the
+ * candidate list. Discovery counts nothing, so an escape is silently skipped here; the security
+ * accounting (`skippedBadges`, one stderr line) is `readSelectedCampaigns`'s, which independently
+ * re-proves containment for everything it actually reads. Non-directory entries at either level are
+ * skipped; a missing/unreadable `tribeRoot` yields `[]`, never a throw. */
 export function discoverCampaignCandidates(tribeRoot: string): CampaignDirEntry[] {
   const entries: CampaignDirEntry[] = [];
   for (const repoKey of listDirOrEmpty(tribeRoot)) {
+    const repoKeyC = resolveContained(tribeRoot, join(tribeRoot, repoKey));
+    if (repoKeyC.kind !== 'ok') continue; // missing, broken, or escaping — never a candidate
     let repoKeyIsDir = false;
     try {
-      repoKeyIsDir = statSync(join(tribeRoot, repoKey)).isDirectory();
+      repoKeyIsDir = statSync(repoKeyC.resolved).isDirectory();
     } catch (err) {
       if (isAbsent(err)) continue;
       throw err;
     }
     if (!repoKeyIsDir) continue;
 
-    const campaignsDir = join(tribeRoot, repoKey, 'campaigns');
-    for (const slug of listDirOrEmpty(campaignsDir)) {
-      const slugPath = join(campaignsDir, slug);
+    const campaignsC = resolveContained(tribeRoot, join(repoKeyC.resolved, 'campaigns'));
+    if (campaignsC.kind !== 'ok') continue;
+    for (const slug of listDirOrEmpty(campaignsC.resolved)) {
+      const slugC = resolveContained(tribeRoot, join(campaignsC.resolved, slug));
+      if (slugC.kind !== 'ok') continue;
       let st: Stats;
       try {
-        st = statSync(slugPath);
+        st = statSync(slugC.resolved);
       } catch (err) {
         if (isAbsent(err)) continue;
         throw err;
@@ -252,6 +261,14 @@ export function discoverCampaignCandidates(tribeRoot: string): CampaignDirEntry[
     }
   }
   return entries;
+}
+
+/** The tribe root under a given HOME (`$HOME/.tribe`, spec §9/§11.4). The ONLY place in the package
+ * that spells `.tribe`: the composition root resolves the tribe root through here so the literal
+ * never leaks into `serve.ts` (structure.test.ts's `.tribe` rule keeps every `~/.tribe` fact inside
+ * this adapter). Pure string math over the supplied HOME — no filesystem access. */
+export function tribeRootUnder(home: string): string {
+  return join(home, '.tribe');
 }
 
 /** `process.kill(pid, 0)` (spec §9): signal 0 sends no signal, it only asks the kernel whether

@@ -19,8 +19,9 @@
 //
 // Task 20 (this task) finishes the composition root: strict argument parsing (no flag ever
 // consumes a following flag's own name as its value, `fail-closed-edges` obligation 1), the
-// `Host`/`Origin` DNS-rebinding gate (spec §12.5), CSP + `X-Content-Type-Options: nosniff` on
-// every response, the `dist/` static-asset allowlist loaded into a `Map` once at boot (spec
+// `Host`/`Origin` DNS-rebinding gate (spec §12.5), `X-Content-Type-Options: nosniff` on EVERY
+// response (via `withNosniff`) plus the CSP on the HTML document responses (the SPA shell), the
+// `dist/` static-asset allowlist loaded into a `Map` once at boot (spec
 // §12.4), fail-closed startup (a bad `--port`, an unknown flag, a port already bound, or a
 // missing `dist/index.html` all refuse with one stderr line and the table's exit code — spec
 // §13 — never a stack trace), `CLAUDE_CONFIG_DIR` validated and resolved exactly once at boot
@@ -28,18 +29,18 @@
 // table (spec §3.2's closing paragraph: the SPA shell for `/`, `/index.html`, `/p/*`, `/s/*`;
 // JSON 404 — `{"error":"not found","path":"<path>"}` — for everything else). `HOME` and
 // `process.argv` are read ONLY in this file (spec §12.3/§12.6.5, `pure-core.md`).
-import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   discoverCampaignCandidates,
   processAlive,
   readSelectedCampaigns,
+  tribeRootUnder,
   type CampaignSelector,
 } from './adapters/campaign.adapter.ts';
-import { listDirOrEmpty, readHead, readRange, readTail, readTextCapped, realpathOrNull, statOrNull } from './adapters/fs.adapter.ts';
+import { isReadableDir, listDirOrEmpty, readHead, readRange, readTail, readTextCapped, realpathOrNull, statOrNull } from './adapters/fs.adapter.ts';
 import { createPoller, POLL_INTERVAL_MS, type PollerIo, type PollerMeta } from './adapters/poller.adapter.ts';
 import { buildBadgeIndex, selectCampaigns } from './core/badge.ts';
-import { type CacheEntry, decideCache, evictionVictim } from './core/cache.ts';
+import { boundedInsert, type CacheEntry, decideCache, SESSION_CACHE_TTL_MS } from './core/cache.ts';
 import type { Agent, Badge, Patch, SessionSummary } from './core/model.ts';
 import { containedJoin, isContainedResolved, subagentsDirOf, toolResultsDirOf, transcriptPathOf } from './core/paths.ts';
 import { parseRoute } from './core/routes.ts';
@@ -95,34 +96,16 @@ function parsePort(raw: string | undefined): number {
 
 const port = parsePort(parseArgv(process.argv));
 
-/** `readdirSync` directly (not `fs.adapter.ts#listDirOrEmpty`), and deliberately so: that
- * adapter's `*OrEmpty` primitives fold `ENOENT` and `EACCES` into an empty result on purpose —
- * correct for scanning `~/.claude/projects`, where "missing" and "unreadable" both degrade to "no
- * sessions found" (spec §13). Validating the raw `CLAUDE_CONFIG_DIR` VALUE at boot needs the
- * opposite: missing, not-a-directory (`ENOTDIR`), and unreadable (`EACCES`) must ALL be refused
- * rather than silently treated as "empty" — a silent fallback to `~/.claude` would hand a user who
- * deliberately sandboxed their config someone else's sessions (D32a), which is worse than an
- * error. One `readdirSync` call distinguishes all three from "valid, readable directory" in a
- * single syscall; the narrow catch re-throws anything that is not a real filesystem error
- * (`fail-closed-edges` obligation 1). */
-function claudeConfigDirIsReadable(path: string): boolean {
-  try {
-    readdirSync(path);
-    return true;
-  } catch (err) {
-    if (typeof err === 'object' && err !== null && 'code' in err) return false;
-    throw err;
-  }
-}
-
 // D32a: `CLAUDE_CONFIG_DIR` when set and non-empty, else `<HOME>/.claude` — `HOME`/
 // `CLAUDE_CONFIG_DIR` are the only environment values this file reads (spec §12.3), and only
 // here. An empty string is treated as unset (spec §13); a SET, non-empty, invalid value is a
-// typed refusal, never a silent fall back to `~/.claude` (D32a).
+// typed refusal, never a silent fall back to `~/.claude` (D32a). The readable-directory check is
+// `fs.adapter.ts#isReadableDir` — the DELIBERATE opposite of `listDirOrEmpty`'s missing/unreadable
+// folding — so this composition root names no `node:fs` import of its own (D16).
 function resolveProjectsRootLexical(): string {
   const configDir = process.env.CLAUDE_CONFIG_DIR;
   if (configDir !== undefined && configDir.length > 0) {
-    if (!claudeConfigDirIsReadable(configDir)) {
+    if (!isReadableDir(configDir)) {
       fail(2, `viewer: CLAUDE_CONFIG_DIR=${configDir} is not a readable directory`);
     }
     return join(configDir, 'projects');
@@ -130,7 +113,10 @@ function resolveProjectsRootLexical(): string {
   return join(process.env.HOME ?? '', '.claude', 'projects');
 }
 
-const tribeRootLexical = join(process.env.HOME ?? '', '.tribe');
+// The tribe root under HOME is resolved through `campaign.adapter.ts#tribeRootUnder` — the one
+// place in the package that spells the tribe-root directory name (§9/§11.4), so this composition
+// root names no such literal itself (structure.test.ts keeps that fact inside the campaign adapter).
+const tribeRootLexical = tribeRootUnder(process.env.HOME ?? '');
 const projectsRootLexical = resolveProjectsRootLexical();
 // The containment root and the scan root are always the SAME resolved value (D14/D32, spec
 // §12.2) — a missing/unreadable `.claude` (no `CLAUDE_CONFIG_DIR` and no `~/.claude`) resolves to
@@ -151,6 +137,11 @@ const AGENT_FILE_RE = /^agent-(.+)\.jsonl$/;
 const META_CAP_BYTES = 64 * 1024;
 const ROW_READ_CAP = 8 * 1024 * 1024 + 1; // ROW_CAP + 1 (task 18): enough to hold any VALID row plus its terminator
 const SPILL_READ_CAP = 2 * 1024 * 1024; // spec §7.6
+// D27's forward orphan scan reads the range the client already holds — `[to, eof)` — to find a
+// specific orphan's result row. That range grows with the whole remaining transcript, so the read
+// is CAPPED (spec §6.5: nothing a request holds is proportional to transcript size): an orphan whose
+// result sits beyond the cap simply stays an orphan, exactly as one further back than the window does.
+const ORPHAN_SCAN_CAP = 4 * 1024 * 1024;
 
 // spec §6.2/§6.5: at most 8 concurrent SSE streams; the 9th is refused. This counter is the ONLY
 // per-stream bound `serve.ts` owns — every other bound lives in the poller/core (§6.5). Bun.serve
@@ -168,6 +159,12 @@ function warnRefused(path: string): void {
 
 function isEnotdirError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'code' in err && (err as { code?: unknown }).code === 'ENOTDIR';
+}
+
+/** A genuine Node filesystem error (an errno), the one class the request-level boundary fails
+ * closed on (`fail-closed-edges` obligation 1) — anything else propagates as an unexpected bug. */
+function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
+  return err instanceof Error && 'code' in err;
 }
 
 /** `listDirOrEmpty`, except a target that turns out to be a FILE (not a directory) — `ENOTDIR` —
@@ -283,26 +280,29 @@ function blockAt(row: Record<string, unknown>, i: number): unknown {
 // expiry") --- This file HOLDS the `Map`; every hit/stale/miss/eviction decision is
 // `core/cache.ts`'s, never computed here (`pure-core.md`). Keyed by
 // `core/scan.ts#sessionCacheKey` — path + size + mtime + inode, so a same-size rewrite within the
-// same millisecond can never serve a stale title forever. The 500-entry LRU bound
-// (`core/cache.ts#CACHE_CAPACITY`/`evictionVictim`) is honored exactly; the absolute-expiry
-// WINDOW is `core/cache.ts#decideCache`'s own `CACHE_TTL_MS` (5 s, shared with the badge-scan
-// cache §9 names) rather than a dedicated 60 s figure, because `decideCache` does not take a TTL
-// parameter — it is not this task's file to change (`core/cache.ts` is outside Task 17's
-// deliverables). Flagged here rather than silently claimed as spec-exact: a shorter expiry is the
-// SAFE direction (more re-reads, never a staler title than intended), so this does not weaken any
-// correctness guarantee, only the warm-cache HIT RATE the 60 s figure was meant to buy.
+// same millisecond can never serve a stale title forever. The 500-entry LRU bound and the
+// evict-then-insert are `core/cache.ts#boundedInsert`'s; the absolute-expiry WINDOW is the spec's
+// own 60 s (`SESSION_CACHE_TTL_MS`), passed explicitly to `decideCache` — DISTINCT from the §9
+// badge scan's 5 s.
 interface SessionWindows {
   headLines: string[];
   tailLines: string[];
 }
 const sessionReadCache = new Map<string, CacheEntry<SessionWindows>>();
-// D2's "grew since the previous scan" half needs the previous scan's size, held across requests in
-// this same bounded-by-nothing-but-practice map (keyed by the session's resolved absolute path).
-const previousSizeByPath = new Map<string, number>();
+// D2's "grew since the previous scan" half needs the previous scan's size, kept across requests
+// keyed by the session's resolved absolute path — with the SAME bounded/evicted lifecycle as the
+// session read cache (spec §5.4: "held in the same bounded map"), never an unbounded `Map`.
+const previousSizeByPath = new Map<string, CacheEntry<number>>();
+
+function rememberPreviousSize(path: string, sizeBytes: number, nowMs: number): number | null {
+  const previous = previousSizeByPath.get(path)?.value ?? null;
+  boundedInsert(previousSizeByPath, path, sizeBytes, nowMs);
+  return previous;
+}
 
 function readSessionWindows(path: string, obs: { sizeBytes: number; mtimeMs: number; inode: number }, nowMs: number): SessionWindows {
   const key = sessionCacheKey(path, obs);
-  const decision = decideCache(key, sessionReadCache, nowMs);
+  const decision = decideCache(key, sessionReadCache, nowMs, SESSION_CACHE_TTL_MS);
   if (decision.kind === 'hit') {
     const existing = sessionReadCache.get(key);
     if (existing !== undefined) sessionReadCache.set(key, { ...existing, lastAccessMs: nowMs });
@@ -311,9 +311,7 @@ function readSessionWindows(path: string, obs: { sizeBytes: number; mtimeMs: num
   const headLines = completeLines(readHead(path, HEAD_BYTES), false);
   const tailLines = completeLines(readTail(path, TAIL_BYTES), true);
   const value: SessionWindows = { headLines, tailLines };
-  const victim = evictionVictim(sessionReadCache);
-  if (victim !== null) sessionReadCache.delete(victim);
-  sessionReadCache.set(key, { value, insertedAtMs: nowMs, lastAccessMs: nowMs });
+  boundedInsert(sessionReadCache, key, value, nowMs);
   return value;
 }
 
@@ -349,15 +347,16 @@ function scanProjectsAndSessions(nowMs: number): { projectDirs: string[]; sessio
 
       const { headLines, tailLines } = readSessionWindows(resolvedSessionFile, obs, nowMs);
 
-      // subagentCount (spec §5.1 step 3): a plain readdir + regex count, never a content read —
-      // the session-id directory sits inside an already-contained project directory and its name
-      // (`sessionId`) is a slash-free basename captured from a real `readdir` entry above, so a
-      // plain join cannot escape lexically; no file content is opened to produce this number.
-      const subagentsDir = join(resolvedProjectDir, sessionId, 'subagents');
-      const subagentCount = listDirOrEmpty(subagentsDir).filter((n) => AGENT_FILE_RE.test(n)).length;
+      // subagentCount (spec §5.1 step 3): a regex count over the subagents directory listing, never
+      // a content read. The `sessionId` basename cannot escape lexically, but the `subagents`
+      // directory itself CAN be a symlink pointing outside the projects root (D14), so it is
+      // realpath-resolved and proven contained BEFORE it is listed — an escaping one counts 0, never
+      // leaks an out-of-root directory's entries (C1). `listDirOrEmpty` is called only on the
+      // already-resolved, already-contained real directory.
+      const resolvedSubagentsDir = resolveContainedSubagentsDir(resolvedProjectDir, sessionId);
+      const subagentCount = resolvedSubagentsDir === null ? 0 : listDirOrEmpty(resolvedSubagentsDir).filter((n) => AGENT_FILE_RE.test(n)).length;
 
-      const previousSizeBytes = previousSizeByPath.get(resolvedSessionFile) ?? null;
-      previousSizeByPath.set(resolvedSessionFile, obs.sizeBytes);
+      const previousSizeBytes = rememberPreviousSize(resolvedSessionFile, obs.sizeBytes, nowMs);
 
       sessions.push({
         id: sessionId,
@@ -389,26 +388,42 @@ function parseMetaOrNull(text: string): SubagentEntry['meta'] {
   }
 }
 
+/** Resolves the real, CONTAINED `<projectDir>/<sessionId>/subagents/` directory (D14, C1) — or
+ * `null` when it does not exist, is a broken/looping symlink, or resolves OUTSIDE the projects root.
+ * A hostile `subagents` symlink — or a symlink loop — must never be listed or read through: it is
+ * realpath-resolved and proven contained here first, and `realpathOrNull` (fixed to fail closed on
+ * `ELOOP`/`ENOTDIR`) turns a symlink loop into `null` rather than a thrown traceback. */
+function resolveContainedSubagentsDir(resolvedProjectDir: string, sessionId: string): string | null {
+  const joined = subagentsDirOf(resolvedProjectDir, sessionId);
+  if (joined === null) return null;
+  return resolveContained(projectsRootResolved, joined);
+}
+
 /** Reads every `agent-*.jsonl` sidecar under `<projectDir>/<sessionId>/subagents/` (spec §5.5) and
  * turns it into the `Agent[]` tree via `core/subagents.ts#deriveAgents` (pure). `meta.json` is
  * untrusted input: read as bounded text only, parsed tolerantly via `parseMetaOrNull` above (a
  * parse failure degrades to `meta: null`, never a crash), and NONE of its fields are ever joined
  * into a path — the only path-forming value is `agentId`, captured by the regex below from a real
- * `readdir` entry. */
+ * `readdir` entry. D14/C1: the `subagents` directory AND every `agent-<id>.jsonl` / `.meta.json`
+ * sidecar is realpath-resolved and proven contained BEFORE it is stat'd or read — a sidecar that is
+ * a symlink escaping the projects root contributes nothing, never surfaces its outside content. */
 function readSubagentsFor(projectDir: string, sessionId: string, nowIso: string): Agent[] {
   const resolvedProjectDir = containedJoin(projectsRootResolved, projectDir);
   if (resolvedProjectDir === null) return [];
-  const subagentsDir = join(resolvedProjectDir, sessionId, 'subagents');
+  const subagentsDir = resolveContainedSubagentsDir(resolvedProjectDir, sessionId);
+  if (subagentsDir === null) return [];
 
   const entries: SubagentEntry[] = [];
   for (const name of listDirOrEmpty(subagentsDir)) {
     const match = AGENT_FILE_RE.exec(name);
     if (!match) continue;
     const agentId = match[1]!;
-    const jsonlPath = join(subagentsDir, name);
-    const obs = statOrNull(jsonlPath);
-    const metaPath = join(subagentsDir, `agent-${agentId}.meta.json`);
-    const metaText = readTextCapped(metaPath, META_CAP_BYTES);
+    const jsonlJoined = containedJoin(subagentsDir, name);
+    const jsonlPath = jsonlJoined === null ? null : resolveContained(projectsRootResolved, jsonlJoined);
+    const obs = jsonlPath === null ? null : statOrNull(jsonlPath);
+    const metaJoined = containedJoin(subagentsDir, `agent-${agentId}.meta.json`);
+    const metaResolved = metaJoined === null ? null : resolveContained(projectsRootResolved, metaJoined);
+    const metaText = metaResolved === null ? null : readTextCapped(metaResolved, META_CAP_BYTES);
     const meta = metaText === null ? null : parseMetaOrNull(metaText);
     entries.push({
       agentId,
@@ -416,7 +431,7 @@ function readSubagentsFor(projectDir: string, sessionId: string, nowIso: string)
       sizeBytes: obs?.sizeBytes ?? 0,
       mtimeIso: obs === null ? null : new Date(obs.mtimeMs).toISOString(),
       birthtimeIso: obs === null ? null : new Date(obs.birthtimeMs).toISOString(),
-      previousSizeBytes: previousSizeByPath.get(jsonlPath) ?? null,
+      previousSizeBytes: jsonlPath === null ? null : previousSizeByPath.get(jsonlPath)?.value ?? null,
     });
   }
   return deriveAgents({ subagents: entries, nowIso });
@@ -650,8 +665,10 @@ function routeResponse(req: Request): Response {
         let patches: Patch[] = [];
         if (route.orphans.length > 0 && result.to < obs.sizeBytes) {
           // D27: the range the client already holds — genuinely outside our own [from, to) by
-          // construction — is exactly `[to, eof)`.
-          const tailBytes = readRange(path, result.to, obs.sizeBytes);
+          // construction — is `[to, eof)`, read here BOUNDED at `ORPHAN_SCAN_CAP` so this read is
+          // independent of how large the remaining transcript is (spec §6.5).
+          const orphanScanEnd = Math.min(obs.sizeBytes, result.to + ORPHAN_SCAN_CAP);
+          const tailBytes = readRange(path, result.to, orphanScanEnd);
           patches = orphanPatches(tailBytes, result.to, nodes, route.orphans);
         }
         return Response.json({ nodes, patches, from: result.from, to: result.to, truncatedBefore: result.truncatedBefore });
@@ -700,8 +717,8 @@ function routeResponse(req: Request): Response {
         let poller: { stop: () => void } | null = null;
         let released = false;
         // Releases the slot EXACTLY once (spec §6.5) and stops the poll loop — on client
-        // disconnect (`cancel`) or a failed enqueue. Idempotent so a double-signal cannot
-        // double-decrement the counter.
+        // disconnect (`cancel`), a failed enqueue, OR the poller's own terminal path (I1, below).
+        // Idempotent so a double-signal cannot double-decrement the counter.
         const release = (): void => {
           if (released) return;
           released = true;
@@ -709,11 +726,23 @@ function routeResponse(req: Request): Response {
           poller?.stop();
         };
 
+        // The poller's TERMINAL callback (I1): when the poll loop reaches a terminal state — the
+        // file was deleted (`gone`) or a mid-stream filesystem error — the slot MUST be released, or
+        // a dead/errored stream (which stopped polling but was previously only released on
+        // `cancel`/enqueue-failure) permanently consumes one of the 8, and eight such streams
+        // exhaust the allowance. `release` is that release, invoked exactly once. The producerless
+        // ReadableStream that remains is reaped by Bun's `idleTimeout` (255 s) — the composition root
+        // does NOT explicitly close the controller here, because the structural wall (§12.6 (7c))
+        // refuses a bare stream-close call on any receiver as a write-capability, exactly as it
+        // refuses a bare stream-write call; releasing the slot is the load-bearing guarantee the
+        // 8-stream cap actually rests on.
+        const onTerminal = release;
+
         // D6/D12/D32: the poller reads ONLY through these injected primitives. `readMeta` re-scans
         // per tick so a sidecar appearing mid-stream is detected; the containment root the scan
         // uses is already resolved from `CLAUDE_CONFIG_DIR` at boot (D32).
         const pollerIo: PollerIo = {
-          stat: (p) => statOrNull(p),
+          statFile: (p) => statOrNull(p),
           readRange: (p, s, e) => readRange(p, s, e),
           readMeta: () => readEventMeta(sessionId, Date.now(), new Date().toISOString()),
         };
@@ -730,7 +759,7 @@ function routeResponse(req: Request): Response {
                 release();
               }
             };
-            poller = createPoller({ io: pollerIo, path: resolvedPath, intervalMs: POLL_INTERVAL_MS, generation, emit });
+            poller = createPoller({ io: pollerIo, path: resolvedPath, intervalMs: POLL_INTERVAL_MS, generation, emit, onClose: onTerminal });
           },
           cancel() {
             release();
@@ -759,7 +788,20 @@ try {
     idleTimeout: 255,
     fetch(req) {
       if (hostOrOriginRefused(req)) return withNosniff(new Response('forbidden', { status: 403 }));
-      return withNosniff(routeResponse(req));
+      // Request-level fail-closed boundary (C1, `fail-closed-edges` obligation 1): a residual
+      // filesystem error from a synchronous route (a `realpath`/`stat`/`readRange` failure the
+      // per-read guards did not already absorb) becomes a typed 500 refusal with one stderr line —
+      // never a thrown stack escaping into the HTTP server. The catch stays NARROW: only an errno
+      // error is treated as a filesystem failure; anything else is an unexpected bug and re-throws.
+      try {
+        return withNosniff(routeResponse(req));
+      } catch (err) {
+        if (isErrnoException(err)) {
+          console.error(`serve: filesystem error handling ${req.url}: ${err.code ?? err.message}`);
+          return withNosniff(new Response('internal error', { status: 500 }));
+        }
+        throw err;
+      }
     },
   });
 } catch (err) {

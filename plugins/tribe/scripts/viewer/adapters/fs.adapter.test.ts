@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -148,6 +148,35 @@ describe('realpathOrNull', () => {
       expect(realpathOrNull(brokenLink)).toBeNull();
     } finally {
       rmSync(brokenDir, { recursive: true, force: true });
+    }
+  });
+
+  test('FAILS CLOSED on a symlink LOOP (ELOOP): returns null, never a thrown traceback through the HTTP handler (C1, fail-closed obligation 1)', () => {
+    const loopDir = mkdtempSync(join(tmpdir(), 'fs-adapter-loop-'));
+    const a = join(loopDir, 'a');
+    const b = join(loopDir, 'b');
+    // a -> b -> a: resolving either raises ELOOP. Before the fix, realpathOrNull rethrew ELOOP (only
+    // ENOENT/EACCES were caught), so a hostile symlink loop crashed the request with a stack trace
+    // instead of degrading to "not a real target".
+    symlinkSync(b, a);
+    symlinkSync(a, b);
+    try {
+      expect(realpathOrNull(a)).toBeNull();
+    } finally {
+      rmSync(loopDir, { recursive: true, force: true });
+    }
+  });
+
+  test('FAILS CLOSED when a path component is not a directory (ENOTDIR): returns null, never throws', () => {
+    const notDirRoot = mkdtempSync(join(tmpdir(), 'fs-adapter-notdir-'));
+    const file = join(notDirRoot, 'a-file');
+    writeFileSync(file, 'x');
+    // Treating the file as a directory prefix — realpath raises ENOTDIR, which must degrade to null.
+    const throughFile = join(file, 'child.jsonl');
+    try {
+      expect(realpathOrNull(throughFile)).toBeNull();
+    } finally {
+      rmSync(notDirRoot, { recursive: true, force: true });
     }
   });
 });

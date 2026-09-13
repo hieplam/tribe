@@ -58,25 +58,26 @@ function importsOf(file: string, loader: 'ts' | 'js'): string[] {
 
 // -------------------------------------------------------------------------------------------
 // PENDING_DELETION (Shaman Resolution B; plan Task 14 Step 4). Phase 1 cannot hard-green a rule
-// whose subject is legacy code a LATER, NAMED task deletes or rewrites — these six files are
-// exactly that, and each carries the task that ends its exception:
+// whose subject is legacy code a LATER, NAMED task deletes or rewrites — these files are exactly
+// that, and each carries the task that ends its exception. `serve.ts` (task 20) and
+// `adapters/poller.adapter.ts` (phase-2 rewrite) have now LANDED and are held to every wall like any
+// other covered file — the phase-2 audit fix round removed them from this list and cleared the
+// violations the walls then caught (serve.ts routes `node:fs` through the adapter and spells no
+// `.tribe` literal; the poller's catches narrow to a filesystem errno and re-throw on fall-through):
 const PENDING_DELETION: string[] = [
-  'serve.ts', // task 20 rewrite — becomes the Bun.serve composition root over fs.adapter/campaign.adapter
   'core/render.ts', // task 28 deletes the status-page renderer
   'core/derive.ts', // task 28 deletes the status-page renderer's decision core
   'adapters/scan.adapter.ts', // task 15 replaces with fs.adapter.ts + campaign.adapter.ts
-  'adapters/poller.adapter.ts', // phase 2 rewrite — one poll loop per SSE stream (spec §6.2)
   'adapters/transcript.adapter.ts', // task 15 replaces with fs.adapter.ts
 ];
 // The `.tribe` rule and the fs-allowlist wall exclude these files from their scan (the two rules
-// the plan names explicitly). The no-bare-catch rule below ALSO excludes them: every one of the
-// six already contains a bare `catch` predating this rule (`scan.adapter.ts` x4 — lines 67, 73,
-// 86, 270; `poller.adapter.ts` x5 — `catch (err)` with no `instanceof`/re-throw; `transcript.
-// adapter.ts` x4; `core/derive.ts` x1, line 65) — narrowing dead-end-in-weeks code that a NAMED
-// task is about to delete wholesale would be effort spent on code with no future, and is outside
-// this task's file scope besides. Every OTHER rule in this file (process.argv, process.env,
-// no-`.adapter`-import, no-tools-import) applies to these six exactly like any other COVERED
-// file — none of them currently violates any of those, so no further exception is needed.
+// the plan names explicitly). The no-bare-catch rule below ALSO excludes them: every one already
+// contains a bare `catch` predating this rule (`scan.adapter.ts` x4 — lines 67, 73, 86, 270;
+// `transcript.adapter.ts` x4; `core/derive.ts` x1, line 65) — narrowing dead-end-in-weeks code that
+// a NAMED task is about to delete wholesale would be effort spent on code with no future, and is
+// outside scope besides. Every OTHER rule in this file (process.argv, process.env,
+// no-`.adapter`-import, no-tools-import) applies to these exactly like any other COVERED file —
+// none of them currently violates any of those, so no further exception is needed.
 
 /** §12.6 (7a): the wall's own scope, written as data so it is inspectable rather than implied. A
  * trailing slash marks a directory (walked recursively, `.ts` non-test files only, matching

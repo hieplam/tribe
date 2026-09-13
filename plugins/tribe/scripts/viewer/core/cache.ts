@@ -22,29 +22,63 @@ export interface CacheEntry<T> {
 
 export type CacheDecision<T> = { readonly kind: 'hit'; readonly value: T } | { readonly kind: 'stale' } | { readonly kind: 'miss' };
 
-/** The whole-badge-scan cache (spec §9): "cached for 5 s". */
+/** The whole-badge-scan cache (spec §9): "cached for 5 s". Also `decideCache`'s DEFAULT window, so
+ * a caller that passes no TTL (the badge scan of §9) still gets exactly this. */
 export const CACHE_TTL_MS = 5000;
+
+/** The session read cache window (spec §5.3): "a 60 s absolute expiry". A DISTINCT figure from the
+ * §9 badge scan's 5 s — `decideCache` takes the window as a parameter precisely so the one pure
+ * function serves both without either silently inheriting the other's expiry (the I2 finding: the
+ * session cache was pinned to the 5 s `CACHE_TTL_MS`). */
+export const SESSION_CACHE_TTL_MS = 60000;
 
 /** The file-identity cache bound (spec §5.3): "bounded to 500 entries". Shared by every cache
  * instance this module serves — a single bound, named once. */
 export const CACHE_CAPACITY = 500;
 
 /**
- * `decideCache(key, existing, nowMs)` (spec §5.3): looks `key` up in the already-supplied
- * `existing` snapshot and returns:
+ * `decideCache(key, existing, nowMs, ttlMs?)` (spec §5.3, §9): looks `key` up in the
+ * already-supplied `existing` snapshot and returns:
  * - `miss` — `key` has no entry at all;
- * - `stale` — `key` has an entry, but `nowMs - insertedAtMs >= CACHE_TTL_MS`;
+ * - `stale` — `key` has an entry, but `nowMs - insertedAtMs >= ttlMs`;
  * - `hit`  — `key` has an entry within the TTL window; its value is returned.
  *
- * Pure: the same `(key, existing, nowMs)` triple yields the same decision on run 1 and run 100.
- * `existing` is read, never mutated — inserting, refreshing, and evicting are the adapter's own
- * `Map` mutations, made in response to this decision, never this function's job.
+ * `ttlMs` defaults to `CACHE_TTL_MS` (5 s, the badge scan of §9) — the session read cache passes
+ * `SESSION_CACHE_TTL_MS` (60 s, §5.3) explicitly, so one pure function serves both windows.
+ *
+ * Pure: the same `(key, existing, nowMs, ttlMs)` tuple yields the same decision on run 1 and run
+ * 100. `existing` is read, never mutated — inserting, refreshing, and evicting are the adapter's
+ * own `Map` mutations, made in response to this decision, never this function's job.
  */
-export function decideCache<T>(key: string, existing: ReadonlyMap<string, CacheEntry<T>>, nowMs: number): CacheDecision<T> {
+export function decideCache<T>(
+  key: string,
+  existing: ReadonlyMap<string, CacheEntry<T>>,
+  nowMs: number,
+  ttlMs: number = CACHE_TTL_MS,
+): CacheDecision<T> {
   const entry = existing.get(key);
   if (entry === undefined) return { kind: 'miss' };
-  if (nowMs - entry.insertedAtMs >= CACHE_TTL_MS) return { kind: 'stale' };
+  if (nowMs - entry.insertedAtMs >= ttlMs) return { kind: 'stale' };
   return { kind: 'hit', value: entry.value };
+}
+
+/**
+ * The WRITE half of the bounded lifecycle (spec §5.3, §5.4) — the counterpart to `evictionVictim`'s
+ * DECISION half. Inserts `value` for `key` into `map`, first evicting the LRU victim when (and only
+ * when) a genuinely NEW key would push `map` past `CACHE_CAPACITY`. Re-writing an EXISTING key never
+ * evicts, because updating an entry does not grow the map — a guard that also avoids the thrash a
+ * per-request re-scan would otherwise cause on a full map.
+ *
+ * The composition root holds the `Map`; this performs exactly the two mutations `evictionVictim`'s
+ * verdict authorizes, so no caller re-implements the evict-then-insert dance by hand (and none
+ * forgets the evict — the I3 defect, an unbounded `previousSizeByPath`).
+ */
+export function boundedInsert<T>(map: Map<string, CacheEntry<T>>, key: string, value: T, nowMs: number): void {
+  if (!map.has(key)) {
+    const victim = evictionVictim(map);
+    if (victim !== null) map.delete(victim);
+  }
+  map.set(key, { value, insertedAtMs: nowMs, lastAccessMs: nowMs });
 }
 
 /**

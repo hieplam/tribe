@@ -90,9 +90,12 @@ also what keeps the routing layer free of a traversal surface: the server never 
 filesystem to decide a status code.
 
 Every `sessionId`/`agentId`/`project` value is validated and contained **before any path is
-joined**. Every request is also gated on `Host`/`Origin` — `127.0.0.1[:port]` or
-`localhost[:port]` only, `403` otherwise (DNS-rebinding defense) — and every response carries a
-Content-Security-Policy plus `X-Content-Type-Options: nosniff`.
+joined** — both lexically and, after `realpath`, against the resolved projects root (a symlinked
+`subagents` directory, sidecar, or spill that escapes the root, or a symlink loop, is refused, not
+read). Every request is also gated on `Host`/`Origin` — `127.0.0.1[:port]` or `localhost[:port]`
+only, `403` otherwise (DNS-rebinding defense). Every response carries
+`X-Content-Type-Options: nosniff`; the HTML document responses (the SPA shell) additionally carry a
+Content-Security-Policy.
 
 ## On-disk discovery
 
@@ -216,7 +219,7 @@ adapters/                the only impure edges — thin, fail-closed
   fs.adapter.ts          every transcript read (stat, readdir, ranged read, realpath)
   campaign.adapter.ts    the ONLY two ~/.tribe reads + the pid liveness probe
   poller.adapter.ts      the only clock owner: one poll loop per SSE stream
-client/                  the browser SPA (React + Vite; built to dist/)
+client/                  the browser SPA source; the served bundle lives in dist/ (see "Build step")
 fixtures/build.ts        builds a whole ~/.claude/projects tree FROM NOTHING
 tools/                   one-off corpus measurement scripts; NOT core, never in a request path
 structure.test.ts        the executable purity + safety wall for this package
@@ -232,10 +235,12 @@ Check command: `bun run check` (`tsc --noEmit && bun test`).
 
 ## Build step
 
-The client under `client/` is a React 19 + Vite app built to `dist/`, which is **git-ignored** —
-committing a build artifact into a symlink-installed plugin would make every client change a
-binary-ish diff. `serve.ts` reads `dist/` once at boot into an in-memory allowlist; there is no
-`--dist` override flag.
+`serve.ts` serves whatever static bundle sits in `dist/` — it reads `dist/` once at boot into an
+in-memory allowlist, with no `--dist` override flag. `dist/` is **git-ignored** (committing a build
+artifact into a symlink-installed plugin would make every client change a binary-ish diff) and is
+produced by a build step, not checked in. The client toolchain under `client/` (React 19 + Vite) and
+the build script that emits `dist/` are landed by a later task in the consolidation plan (task 26);
+this phase serves the `dist/` bundle as it stands without asserting how it was built.
 
 `serve.ts` fails closed when `dist/index.html` is absent: one stderr line —
 
