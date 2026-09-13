@@ -44,14 +44,22 @@ function ListView({ route }: { route: Extract<ClientRoute, { kind: 'list' | 'pro
   const [projects, setProjects] = useState<ProjectsResponse | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [campaignFilter, setCampaignFilter] = useState('');
+  const [error, setError] = useState<string | null>(null);
   const all = new URLSearchParams(window.location.search).get('all') === '1';
   const projectDir = route.kind === 'project' ? route.projectDir : null;
 
   useEffect(() => {
     let alive = true;
-    fetchProjects(all).then((r) => {
-      if (alive) setProjects(r);
-    });
+    fetchProjects(all)
+      .then((r) => {
+        if (alive) setProjects(r);
+      })
+      .catch(() => {
+        // Fail closed (fail-closed-edges.md at the browser fetch edge): a 500, a dropped
+        // connection, or a non-JSON body must surface a clear note, never a blank pane and never
+        // an unhandled rejection.
+        if (alive) setError('could not load projects — the viewer could not reach the server');
+      });
     return () => {
       alive = false;
     };
@@ -59,16 +67,23 @@ function ListView({ route }: { route: Extract<ClientRoute, { kind: 'list' | 'pro
 
   useEffect(() => {
     let alive = true;
+    const onFail = () => {
+      if (alive) setError('could not load sessions — the viewer could not reach the server');
+    };
     if (projectDir !== null) {
       // project route: exactly that project's sessions.
-      fetchSessions(projectDir).then((r) => {
-        if (alive) setSessions(r.sessions);
-      });
+      fetchSessions(projectDir)
+        .then((r) => {
+          if (alive) setSessions(r.sessions);
+        })
+        .catch(onFail);
     } else if (projects !== null) {
       // list route: the union of every in-window project's sessions in one list.
-      Promise.all(projects.projects.map((p) => fetchSessions(p.dir))).then((pages) => {
-        if (alive) setSessions(uniqueById(pages.flatMap((page) => page.sessions)));
-      });
+      Promise.all(projects.projects.map((p) => fetchSessions(p.dir)))
+        .then((pages) => {
+          if (alive) setSessions(uniqueById(pages.flatMap((page) => page.sessions)));
+        })
+        .catch(onFail);
     }
     return () => {
       alive = false;
@@ -84,7 +99,13 @@ function ListView({ route }: { route: Extract<ClientRoute, { kind: 'list' | 'pro
         onCampaignFilterChange={setCampaignFilter}
       />
       <main className="app-main">
-        {sessions !== null && <SessionList sessions={sessions} campaignFilter={campaignFilter} />}
+        {error !== null ? (
+          <p className="app-error" data-testid="load-error" style={{ color: 'var(--warn)' }}>
+            {error}
+          </p>
+        ) : (
+          sessions !== null && <SessionList sessions={sessions} campaignFilter={campaignFilter} />
+        )}
       </main>
     </div>
   );

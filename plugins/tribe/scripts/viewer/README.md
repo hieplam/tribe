@@ -231,7 +231,17 @@ the pre-consolidation status-page/live-view modules: no longer imported by `serv
 outright deletion by later tasks in the consolidation plan (they are not part of this package's
 current request path).
 
-Check command: `bun run check` (`tsc --noEmit && bun test`).
+Check commands:
+
+- `bun run check` (`tsc --noEmit && bun test`) — the server/root typecheck plus the whole test
+  suite. Its `tsc` uses the root `tsconfig.json`, whose `include` **excludes `client/src/`** (the
+  browser code needs the DOM lib and JSX the root config does not carry), so `bun run check` does
+  **not** type-check the client. Its root typecheck still reports the pre-consolidation legacy
+  modules (`core/derive*`, `core/render*`, `e2e/harness*`) until they are deleted by later
+  consolidation tasks.
+- `bun run check:client` (`tsc -p tsconfig.client.json --noEmit`) — the **client typecheck gate**:
+  type-checks every `.ts`/`.tsx` under `client/src/**` (tests included) with the DOM lib, JSX, and
+  `bun` types. Run this alongside `bun run check` to cover the React client.
 
 ## Build step
 

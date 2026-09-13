@@ -55,8 +55,10 @@ function CardBody({ node, sessionId, agentId }: { node: RenderNode; sessionId: s
     case 'image':
       return <ImageCard node={node} sessionId={sessionId} agentId={agentId} />;
     case 'attachment':
-      // A lone attachment (never grouped with a neighbour) still renders through the strip; a RUN
-      // of consecutive attachments is collapsed by `RowList` below before it reaches here.
+      // Unreachable in practice: `RowList` runs `groupAttachments` first, which wraps EVERY
+      // attachment node (even a lone one) into the array branch rendered as an `<AttachmentStrip>`,
+      // so no attachment node ever reaches `CardBody`. Kept only for the switch's exhaustiveness
+      // over the `RenderNode` union.
       return <AttachmentStrip nodes={[node]} sessionId={sessionId} agentId={agentId} />;
     case 'raw':
       return <RawCard node={node} />;

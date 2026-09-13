@@ -112,20 +112,17 @@ const PENDING_DELETION: string[] = [
 // no-`.adapter`-import, no-tools-import) applies to these exactly like any other COVERED file —
 // none of them currently violates any of those, so no further exception is needed.
 
-/** §12.6 (7a): the fs/process side of the wall's scope, written as data so it is inspectable
+/** §12.6 (7a) / spec §1 D18 (LOCKED): the wall's own scope, written as data so it is inspectable
  * rather than implied. A trailing slash marks a directory (walked recursively, `.ts` non-test
- * files only, matching `walk()`'s existing semantics); no slash marks one top-level file.
- *
- * SCOPED TO RUNTIME SERVER CODE ONLY. The fs-write allowlist, `openSync`-flag, `process.kill`,
- * `process.argv`, `.tribe`, and no-`tools/`-import rules all key off this list, and every one of
- * them governs FILESYSTEM/PROCESS capability — which browser code (`client/src/**`) categorically
- * does not have. Scanning `client/src/**` here protected nothing and only imposed friction (a DOM
- * method whose name collides with a banned fs member, e.g. `EventSource.close`, tripped the
- * fs-member scan). The three §12.6 CLIENT rules that DO cover `client/src/**` —
- * `dangerouslySetInnerHTML`, the literal colour/font/px ban, and the value-import-from-`core/`/
- * `adapters/` ban — scope themselves independently via `walkClientFiles()` / `walkIfExists('client/src')`
- * below, so `client/src/**` remains fully walled by exactly the rules that apply to it. */
-const COVERED = ['core/', 'adapters/', 'serve.ts'];
+ * files only, matching `walk()`'s existing semantics); no slash marks one top-level file. The
+ * covered set is D18's, LITERALLY: *"The allowlist applies to `core/**`, `adapters/**`, `serve.ts`
+ * and `client/src/**` — runtime code."* `client/src/**` is inside the wall because the shipped
+ * viewer runs there too; a DOM method whose name collides with a banned fs member (e.g.
+ * `EventSource.close`) is reworded at the call site (a computed key), never removed from scope —
+ * the wall's own philosophy treats such collisions as false positives to reword (see
+ * `rawSourceOf`'s note), and D18 is a settled decision that outranks any Should-fix to the
+ * contrary. */
+const COVERED = ['core/', 'adapters/', 'serve.ts', 'client/src/'];
 // Outside the wall entirely: `tools/` (one-off measurement scripts, never shipped in a request
 // path) and `fixtures/`, `e2e/` (test scaffolding, which must write or it could not build a
 // fixture). Not scanned by any rule below — the mechanical guard that keeps that honest is the
@@ -773,6 +770,24 @@ describe('viewer structural contract', () => {
       for (const f of nonDoomed(coveredFiles())) {
         expect({ file: f, bad: allowlistViolations(f, rawSourceOf(f)) }).toEqual({ file: f, bad: [] });
       }
+    });
+
+    test('D18 (LOCKED): client/src/** is inside the wall — the covered set is core/, adapters/, serve.ts, client/src/, literally', () => {
+      // Spec §1 D18: "The allowlist applies to core/**, adapters/**, serve.ts and client/src/** —
+      // runtime code." A prior Should-fix narrowed this to server code only; a locked decision
+      // outranks it. This guards the exact regression: client/src/ must stay in COVERED, and real
+      // client files must actually be scanned by the allowlist run above.
+      expect(COVERED).toEqual(['core/', 'adapters/', 'serve.ts', 'client/src/']);
+      expect(coveredFiles().some((f) => f.startsWith('client/src/'))).toBe(true);
+    });
+
+    test('D18: the zero-write wall is LIVE on client code — a child_process import in a client file is refused', () => {
+      // Browser code has no filesystem/process capability, so any such import is a real violation.
+      expect(allowlistViolations('client/src/foo.ts', "import { spawn } from 'node:child_process';\nspawn('ls');\n")).not.toEqual([]);
+    });
+
+    test('D18: a Bun.write in a client file is refused', () => {
+      expect(allowlistViolations('client/src/foo.ts', "Bun.write('/tmp/x', 'y');\n")).not.toEqual([]);
     });
 
     test('process.kill(pid, 0) is permitted only in adapters/campaign.adapter.ts, and only with a literal 0', () => {

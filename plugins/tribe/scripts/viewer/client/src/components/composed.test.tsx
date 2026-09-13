@@ -49,6 +49,13 @@ async function flush(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
+async function clickAndFlush(el: HTMLElement): Promise<void> {
+  await act(async () => {
+    el.click();
+    await flush();
+  });
+}
+
 // --- a recording, scriptable fake `fetch` (the api.ts seam performs the real one) ------------
 function installFetch(handler: (url: string) => Response): { calls: string[]; restore: () => void } {
   const calls: string[] = [];
@@ -147,6 +154,11 @@ function attachmentNode(id: string, at: number, label: string): Extract<RenderNo
   return { ...BASE, id, at, i: 0, k: 'attachment', label, detail: null };
 }
 
+/** A plain assistant node as the wire delivers it (a `rows` frame payload). */
+function assistantWire(at: number): RenderNode {
+  return { ...BASE, id: `${at}:0`, at, i: 0, k: 'assistant', body: TEXT, model: null };
+}
+
 function nodeOfKind(k: RenderNode['k'], at: number): RenderNode {
   const id = `${at}:0`;
   const anchor = { id, at, i: 0, ...BASE };
@@ -204,7 +216,7 @@ describe('the ASSEMBLED client — App routes to real composed views (B1, B4)', 
 
     await act(async () => {
       es.emit('open');
-      es.emit('hello', { generation: 'g1', session: { live: false }, agents: [], badges: [], from: 1000, to: 1100, truncatedBefore: false });
+      es.emit('hello', { generation: 'g1', session: makeSession({ id: 'sess-1', live: false }), agents: [], badges: [], from: 1000, to: 1100, truncatedBefore: false });
       es.emit('rows', { nodes: [nodeOfKind('assistant', 1000)], from: 1000, to: 1100 });
       await flush();
     });
@@ -320,6 +332,99 @@ describe('consecutive attachments collapse into ONE strip through RowList (spec 
     const { container, root } = renderInto(<RowList nodes={nodes} sessionId="sess-1" agentId={null} />);
     expect(container.querySelectorAll('.attachment-strip').length).toBe(2); // not collapsed across the assistant row
     expect(container.querySelector('[data-kind="assistant"]')).not.toBeNull();
+    cleanup(container, root);
+  });
+});
+
+describe('SessionHeader is fed by the hello frame (FIX 2 — §5.2/§8.1)', () => {
+  test('at "/s/<id>" the header renders the hello session\'s title and the §5.2 "found in N projects" collision warning', async () => {
+    window.history.pushState(null, '', '/s/sess-2');
+    installEventSource();
+    const fetched = installFetch(() => new Response('{}'));
+    restoreFetch = fetched.restore;
+    const { container, root } = renderInto(<App />);
+    const es = FakeEventSource.instances[0]!;
+    await act(async () => {
+      es.emit('open');
+      es.emit('hello', {
+        generation: 'g1',
+        session: makeSession({ id: 'sess-2', title: 'Fix the flaky poller', projects: ['-a', '-b', '-c'] }),
+        agents: [],
+        badges: [],
+        from: 1000,
+        to: 1100,
+        truncatedBefore: false,
+      });
+      es.emit('rows', { nodes: [nodeOfKind('assistant', 1000)], from: 1000, to: 1100 });
+      await flush();
+    });
+    expect(container.textContent).toContain('Fix the flaky poller');  // title from the hello SessionSummary (was null)
+    expect(container.textContent).toContain('found in 3 projects');   // §5.2 collision warning, never silently one
+    cleanup(container, root);
+  });
+});
+
+describe('the browser fetch edge fails closed (FIX 4 — fail-closed-edges.md applied to the client)', () => {
+  test('at "/" a rejected fetchProjects renders a visible error note, not a blank pane (and no unhandled rejection)', async () => {
+    window.history.pushState(null, '', '/');
+    const fetched = installFetch(() => {
+      throw new Error('server said 500');
+    });
+    restoreFetch = fetched.restore;
+    const { container, root } = renderInto(<App />);
+    await act(async () => {
+      for (let i = 0; i < 4; i++) await flush();
+    });
+    const note = container.querySelector('[data-testid="load-error"]');
+    expect(note).not.toBeNull();                                   // a visible refusal, never a blank pane
+    expect((container.textContent ?? '').length).toBeGreaterThan(0);
+    cleanup(container, root);
+  });
+});
+
+describe('NewBelowPill is wired to §6.3 (FIX 3)', () => {
+  test('newBelow>0 renders the pill; clicking it reloads the tail window via /api/rows (reloadTail seam)', async () => {
+    window.history.pushState(null, '', '/s/sess-6');
+    installEventSource();
+    const rowsCalls: string[] = [];
+    const fetched = installFetch((url) => {
+      if (url.includes('/api/rows')) {
+        rowsCalls.push(url);
+        if (url.includes('before=')) {
+          // loadEarlier back-fill: one earlier node so the window tips past the 2,000 cap → follow off
+          return new Response(JSON.stringify({ nodes: [assistantWire(999)], patches: [], from: 999, to: 1000, truncatedBefore: false }));
+        }
+        // reloadTail: a fresh tail window (no `before`)
+        return new Response(JSON.stringify({ nodes: [assistantWire(9000)], patches: [], from: 9000, to: 9100, truncatedBefore: false }));
+      }
+      return new Response('{}');
+    });
+    restoreFetch = fetched.restore;
+    const { container, root } = renderInto(<App />);
+    const es = FakeEventSource.instances[0]!;
+    const many = Array.from({ length: 2000 }, (_, i) => assistantWire(1000 + i));
+    await act(async () => {
+      es.emit('open');
+      es.emit('hello', { generation: 'g1', session: makeSession({ id: 'sess-6' }), agents: [], badges: [], from: 1000, to: 2999, truncatedBefore: true });
+      es.emit('rows', { nodes: many, from: 1000, to: 2999 });
+      await flush();
+    });
+    // truncatedBefore → LoadEarlier shows; clicking pushes past the cap and turns follow-live off (§6.3)
+    const loadEarlier = container.querySelector('[data-testid="load-earlier"]') as HTMLElement;
+    expect(loadEarlier).not.toBeNull();
+    await clickAndFlush(loadEarlier);
+    // a new live rows frame is now COUNTED, not appended (§6.3), so newBelow becomes > 0
+    await act(async () => {
+      es.emit('rows', { nodes: [assistantWire(4000)], from: 4000, to: 4100 });
+      await flush();
+    });
+    const pill = container.querySelector('[data-testid="new-below-pill"]') as HTMLElement;
+    expect(pill).not.toBeNull();                 // the pill is wired and visible (was imported by nothing)
+    expect(pill.textContent).toContain('1');     // "1 new below"
+    rowsCalls.length = 0;
+    await clickAndFlush(pill);
+    // reloadTail fetched the tail window — a /api/rows request with NO `before` (distinct from loadEarlier)
+    expect(rowsCalls.some((u) => u.includes('/api/rows') && !u.includes('before='))).toBe(true);
     cleanup(container, root);
   });
 });
