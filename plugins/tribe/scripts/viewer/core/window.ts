@@ -123,6 +123,27 @@ function buildOversizedNode(at: number, bytes: number): RenderNode {
   };
 }
 
+/** Spec §13/D26: a COMPLETE row that fails JSON/record parsing becomes ONE `unreadable` node,
+ * anchored at the row's OWN offset — the reader's contract for the "not even parseable JSON"
+ * case, distinct from a malformed but PARSEABLE shape (which `normalize.ts` already turns into a
+ * visible `raw` card, never silent) and from an oversized row (`buildOversizedNode` above, a
+ * different rung entirely). `count` mirrors `countCandidatesForRowText`'s own "1" for this same
+ * case (D21), so the window boundary's candidate count and the node actually emitted never drift
+ * apart. */
+function buildUnreadableNode(at: number): RenderNode {
+  return {
+    id: `${at}:0`,
+    at,
+    i: 0,
+    uuid: null,
+    ts: null,
+    elided: false,
+    expandable: false,
+    k: 'unreadable',
+    count: 1,
+  };
+}
+
 /** Finds the largest offset `k < end` with `byte[k] === 0x0A`, by walking backward from `end` in
  * FIXED `SCAN_CHUNK`-sized slices until found or BOF. `null` means there is no such byte (BOF
  * reached with nothing found) — the caller's own row/BOF decision, never this function's. Bytes
@@ -141,10 +162,10 @@ function findNewlineBackward(readBack: ReadBack, end: number): number | null {
   return null;
 }
 
-/** D21's pre-pairing candidate count for ONE already-read row's text. An unparsable row (never
- * exercised by this task's fixtures — every planted row is valid JSON) is conservatively counted
- * as one candidate, matching rung 1's eventual single `unreadable` node (spec §13) rather than
- * silently undercounting the boundary. */
+/** D21's pre-pairing candidate count for ONE already-read row's text. An unparsable row is
+ * counted as exactly one candidate, matching `candidatesFromRows`'s own single `unreadable` node
+ * (spec §13) for that same row — the boundary decision and the node actually emitted never
+ * drift apart. */
 function countCandidatesForRowText(text: string): number {
   const { records } = parseRecordLines([text]);
   if (records.length !== 1) return 1;
@@ -243,6 +264,11 @@ export function candidatesFromRows(rows: Uint8Array[], from: number): RenderNode
     const { records } = parseRecordLines([text]);
     if (records.length === 1) {
       out.push(...normalize([{ record: records[0]!, at: offset }]));
+    } else {
+      // spec §13: a COMPLETE line that is not parseable JSON at all (bad syntax, a bare scalar/
+      // array, or missing `type`) is never silently dropped — it becomes the reader's own
+      // `unreadable` node, anchored at this row's own offset.
+      out.push(buildUnreadableNode(offset));
     }
     offset += rowBytes.length + 1;
   }

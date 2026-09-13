@@ -284,6 +284,56 @@ describe('candidatesFromRows', () => {
     expect(candidates[0]!.at).toBe(42);
     expect(candidates[0]!.i).toBe(0);
   });
+
+  // spec §13 / D26: a COMPLETE row that fails to parse must become exactly one `unreadable` node
+  // anchored at ITS OWN offset — never a silent drop (the oracle, spec §0: under-rendering is a
+  // bug). This is distinct from an oversized row (-> `raw`/`oversized`, tested elsewhere) and from
+  // a genuinely-partial trailing row (D30, never even reaches `candidatesFromRows`).
+  test('a complete row that fails to parse (unparsable JSON) becomes exactly one unreadable node, anchored at its own offset — never a silent drop', () => {
+    const goodRow = JSON.stringify({
+      type: 'assistant',
+      uuid: 'u1',
+      timestamp: 't',
+      message: { role: 'assistant', model: 'm', content: [{ type: 'text', text: 'hi' }] },
+    });
+    const malformedRow = '{ not json';
+    const rows = [new TextEncoder().encode(goodRow), new TextEncoder().encode(malformedRow)];
+    const candidates = candidatesFromRows(rows, 100);
+
+    expect(candidates).toHaveLength(2); // the malformed row is NEVER silently dropped
+    expect(candidates[0]!.k).toBe('assistant');
+    expect(candidates[1]!.k).toBe('unreadable');
+    expect((candidates[1] as { k: 'unreadable'; count: number }).count).toBe(1);
+    // Anchored at the MALFORMED row's own offset (after the first row + its stripped \n), not the
+    // preceding row's offset and not offset 0.
+    expect(candidates[1]!.at).toBe(100 + goodRow.length + 1);
+    expect(candidates[1]!.i).toBe(0);
+  });
+
+  // The pre-pairing candidate count `findWindow` uses to decide the window boundary (D21,
+  // `countCandidatesForRowText`) already counts an unparsable row as exactly 1 (matching "rung 1's
+  // eventual single `unreadable` node"). This pins that the ACTUAL emitted node count, once the
+  // window is built end to end, matches that count exactly — no drift between the boundary
+  // decision and what is actually rendered.
+  test('findWindow + candidatesFromRows over a file whose last complete row is unparsable: exactly one unreadable node is emitted, matching the boundary\'s own candidate count', () => {
+    const goodLine = JSON.stringify({
+      type: 'assistant',
+      uuid: 'a',
+      timestamp: 't',
+      message: { role: 'assistant', model: 'm', content: [{ type: 'text', text: 'row 1' }] },
+    });
+    const malformedLine = '{ this is not valid json at all';
+    const buffer = new TextEncoder().encode([goodLine, malformedLine].join('\n') + '\n');
+    const readBack: ReadBack = (end, len) => buffer.subarray(end - len, end);
+
+    const result = findWindow(readBack, buffer.length, 10);
+    const candidates = candidatesFromRows(result.rows, result.from);
+
+    expect(candidates).toHaveLength(2); // one real node + one unreadable node — no silent drop
+    const unreadable = candidates.filter((n) => n.k === 'unreadable');
+    expect(unreadable).toHaveLength(1);
+    expect((unreadable[0] as { count: number }).count).toBe(1);
+  });
 });
 
 describe('orphanPatches (D27)', () => {

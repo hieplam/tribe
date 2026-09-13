@@ -291,6 +291,13 @@ function buildSession1Lines(): string[] {
   objects.push({ type: 'artifact-comment-monitor', v: 1, sessionId: sid, artifacts: {} });
   // 40: fork-context-ref
   objects.push({ type: 'fork-context-ref', agentId: 'fixture-agent-fork01', parentSessionId: sid, parentLastUuid: uuid(1), contextLength: 10 });
+  // 41: apiErrorStatus (assistant) — the ErrorCard node (spec §8.1), measured shape: assistant
+  // row, status 429 (core/normalize.ts's `normalizeMessageRow`).
+  objects.push({
+    type: 'assistant', uuid: uuid(next()), parentUuid: uuid(n - 1), sessionId: sid, timestamp: ts(n),
+    apiErrorStatus: 429,
+    message: { role: 'assistant', model: 'claude-fixture', content: [{ type: 'text', text: 'Fixture API error: rate limited (429).' }] },
+  });
 
   return objects.map((o) => JSON.stringify(o));
 }
