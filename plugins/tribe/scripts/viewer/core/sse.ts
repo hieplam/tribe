@@ -4,8 +4,9 @@
 // ambient env (`pure-core.md`). D12: the server ignores the reconnecting browser's resume header
 // entirely, so this module carries no support for reading or parsing it — not even a stub.
 // `encodeFrame` bounds every emitted frame type at 1 MiB: `rows`/`patch` via the `batchFrames`/
-// `batchPatches` splitters below, `hello`/`meta` via a label-truncation fallback inside
-// `encodeFrame` itself (see `FRAME_MAX_BYTES`'s doc). `decodeFrame` is the production counterpart.
+// `batchPatches` splitters below, `hello`/`meta` via a label/model/agentType-truncation fallback
+// inside `encodeFrame` itself (see `FRAME_MAX_BYTES`'s doc). `decodeFrame` is the production
+// counterpart.
 
 import type { Agent, Badge, Patch, RenderNode, SessionSummary } from './model.ts';
 
@@ -69,22 +70,42 @@ function encodedByteLength(s: string): number {
  * (`batchFrames`/`batchPatches` below) because they carry an array the caller controls the size
  * of. `hello` and `meta` cannot be split the same way — `hello` is emitted exactly once per
  * connection and `meta` is a single point-in-time snapshot, so there is no "next frame" to
- * overflow into. The one field on both that can grow without bound is `Agent.label` (Phase-1
- * audit's probe: 20 agents x 60,000-char labels => 1,203,531 B unbounded), so an oversized
- * `hello`/`meta` is bounded there: every agent's label is truncated to a shared budget, halved
- * until the actual encoded frame fits — the same halve-until-it-fits shape `normalize.ts`'s
- * `elideToFit` uses for a single node, generalized here to the one array field both frame kinds
- * carry. */
+ * overflow into. The fields on both that can grow without bound are `Agent.label`,
+ * `Agent.model`, and `Agent.agentType` — all three are copied verbatim from `meta.json`, which
+ * spec §5.5 / `subagents.ts:11` declare UNTRUSTED input, so none of them can be assumed short
+ * (Phase-1 audit's probe: 20 agents x 60,000-char labels => 1,203,531 B unbounded; the final
+ * audit's probe: 18 agents x 60,000-byte `model` => 1,083,118 B, identical overflow via
+ * `agentType`). An oversized `hello`/`meta` is bounded by truncating all three fields on every
+ * agent to a shared budget, halved until the actual encoded frame fits — the same
+ * halve-until-it-fits shape `normalize.ts`'s `elideToFit` uses for a single node, generalized
+ * here to the three variable-length untrusted string fields both frame kinds carry. */
 const FRAME_MAX_BYTES = 1024 * 1024;
 
-function boundAgentLabels<T extends { agents: Agent[] }>(data: T, labelBudget: number): T {
-  if (labelBudget < 0) return data;
-  return { ...data, agents: data.agents.map((a) => (a.label.length > labelBudget ? { ...a, label: a.label.slice(0, labelBudget) } : a)) };
+/** Truncates one string field to `budget` — the SAME `.slice(0, budget)` truncation the `label`
+ * path always used, now shared across `label`, `model`, and `agentType` instead of hand-rolled
+ * per field. A `null` field (an absent `model`/`agentType`, per spec §5.5's `meta.json` shape)
+ * passes through untouched: `null` cannot overflow the frame. */
+function truncateField(value: string, budget: number): string {
+  return value.length > budget ? value.slice(0, budget) : value;
+}
+
+function boundAgentFields<T extends { agents: Agent[] }>(data: T, budget: number): T {
+  if (budget < 0) return data;
+  return {
+    ...data,
+    agents: data.agents.map((a) => ({
+      ...a,
+      label: truncateField(a.label, budget),
+      model: a.model === null ? null : truncateField(a.model, budget),
+      agentType: a.agentType === null ? null : truncateField(a.agentType, budget),
+    })),
+  };
 }
 
 /** Builds the wire text for one frame with `data` already resolved — shared by the fast path
  * (unbounded `frame.data`) and the fallback path (a `hello`/`meta` payload with truncated agent
- * labels) so both go through identical envelope logic (`retry:`/`event:`/`id:` lines). */
+ * label/model/agentType fields) so both go through identical envelope logic
+ * (`retry:`/`event:`/`id:` lines). */
 function frameText(event: SseFrame['event'], seq: number, data: unknown): string {
   const lines: string[] = [];
   if (event === 'hello' && seq === 1) lines.push(`retry: ${RETRY_MS}`);
@@ -102,20 +123,20 @@ function frameText(event: SseFrame['event'], seq: number, data: unknown): string
  * frame's own event kind together with `seq === 1`, never a bare seq check that would also fire
  * on an out-of-band `rows`/`ping` frame someone happens to encode at seq 1.
  *
- * `hello`/`meta` additionally never exceed `FRAME_MAX_BYTES`: the common case (labels well under
- * the cap) pays only the one extra length check below; only an oversized frame pays for the
- * label-truncation fallback. */
+ * `hello`/`meta` additionally never exceed `FRAME_MAX_BYTES`: the common case (label/model/
+ * agentType all well under the cap) pays only the one extra length check below; only an
+ * oversized frame pays for the field-truncation fallback. */
 export function encodeFrame(frame: SseFrame, seq: number): string {
   const unbounded = frameText(frame.event, seq, frame.data);
   if (frame.event !== 'hello' && frame.event !== 'meta') return unbounded;
   if (encodedByteLength(unbounded) <= FRAME_MAX_BYTES) return unbounded;
 
   const data = frame.data as { agents: Agent[] };
-  let budget = Math.max(0, ...data.agents.map((a) => a.label.length));
+  let budget = Math.max(0, ...data.agents.map((a) => Math.max(a.label.length, a.model?.length ?? 0, a.agentType?.length ?? 0)));
   let candidate = unbounded;
   while (encodedByteLength(candidate) > FRAME_MAX_BYTES && budget > 0) {
     budget = Math.floor(budget / 2);
-    candidate = frameText(frame.event, seq, boundAgentLabels(data, budget));
+    candidate = frameText(frame.event, seq, boundAgentFields(data, budget));
   }
   return candidate;
 }

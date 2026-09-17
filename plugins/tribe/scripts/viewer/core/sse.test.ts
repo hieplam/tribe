@@ -301,6 +301,53 @@ describe('hello/meta frames are bounded at 1 MiB too, not just rows/patch (Phase
     const out = encodeFrame(frame, 1);
     expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(MAX);
   });
+
+  // meta.json's `model`/`agentType` are UNTRUSTED (spec §5.5, subagents.ts:11) and are copied
+  // VERBATIM onto Agent (subagents.ts:100-107) -- unlike `label`, they were never routed through
+  // any truncation fallback. §6.5 is explicit that this cap is open-world: "'Bounded because our
+  // corpus is small today' is not a bound." A large `model` or `agentType` must be bounded the
+  // same way an oversized `label` already is.
+  function agentWithModel(seed: number, modelLen: number): Agent {
+    return { ...agent(), id: `a${seed}`, label: 'x', model: 'm'.repeat(modelLen) };
+  }
+
+  function agentWithAgentType(seed: number, agentTypeLen: number): Agent {
+    return { ...agent(), id: `a${seed}`, label: 'x', agentType: 't'.repeat(agentTypeLen) };
+  }
+
+  test('hello with many large agent `model` values (untrusted meta.json field) still encodes under 1 MiB', () => {
+    const agents = Array.from({ length: 18 }, (_, idx) => agentWithModel(idx, 60_000));
+    const frame: SseFrame = {
+      event: 'hello',
+      data: { generation: 'g', session: session(), agents, badges: [badge()], from: 0, to: 10, truncatedBefore: false },
+    };
+    const out = encodeFrame(frame, 1);
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(MAX);
+  });
+
+  test('meta with many large agent `model` values still encodes under 1 MiB', () => {
+    const agents = Array.from({ length: 18 }, (_, idx) => agentWithModel(idx, 60_000));
+    const frame: SseFrame = { event: 'meta', data: { agents, badges: [badge()], live: true } };
+    const out = encodeFrame(frame, 1);
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(MAX);
+  });
+
+  test('hello with many large agent `agentType` values (untrusted meta.json field) still encodes under 1 MiB', () => {
+    const agents = Array.from({ length: 18 }, (_, idx) => agentWithAgentType(idx, 60_000));
+    const frame: SseFrame = {
+      event: 'hello',
+      data: { generation: 'g', session: session(), agents, badges: [badge()], from: 0, to: 10, truncatedBefore: false },
+    };
+    const out = encodeFrame(frame, 1);
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(MAX);
+  });
+
+  test('meta with many large agent `agentType` values still encodes under 1 MiB', () => {
+    const agents = Array.from({ length: 18 }, (_, idx) => agentWithAgentType(idx, 60_000));
+    const frame: SseFrame = { event: 'meta', data: { agents, badges: [badge()], live: true } };
+    const out = encodeFrame(frame, 1);
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(MAX);
+  });
 });
 
 describe('D12 — no Last-Event-ID support of any kind', () => {
