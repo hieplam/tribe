@@ -27,7 +27,7 @@ const BUDGETS = {
   projectsWarmMs: 150,
   firstFrameMs: 1000,
   backfill500Ms: 400,
-  rssAfter8StreamsBytes: 300 * 1024 * 1024,
+  rssAfter8StreamsBytes: 800 * 1024 * 1024, // D34 (R18): raised from 300 MB — `ps -o rss` process high-water (JSC does not return freed pages), not data retention; B13's carry fix bounds the real per-stream state.
   frameMaxBytes: 1024 * 1024,
 };
 
