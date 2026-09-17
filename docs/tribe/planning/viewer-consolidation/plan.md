@@ -2528,8 +2528,10 @@ Should-fix at minimum, because it can kill a process this card never owned.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing check.** The gate is the full repo sweep; run it first and record
-      every failure:
+- [x] **Step 1: Write the failing check.** The gate is the full repo sweep; run it first and record
+      every failure: (run in full MINUS `pre-gate.sh` and `gap-gate.ts` — deferred to the Warchief's
+      own final Method-step-7 run per this task's hunter brief, to avoid double-appending to
+      `.tribe/harness-gaps.jsonl`; every other command run and green, see the hunter report)
 
       ```sh
       cd plugins/tribe/scripts/viewer && bunx tsc --noEmit && bun test
@@ -2586,18 +2588,21 @@ Model: **Sonnet**.
 
       Expected: everything green by this point; anything red here is a real regression and is fixed
       before the index is written.
-- [ ] **Step 2: Write the evidence index** — one table mapping each of G1–G6 to the artifact that
+- [x] **Step 2: Write the evidence index** — one table mapping each of G1–G6 to the artifact that
       proves it, with the real measured number beside it (latency, line counts, budgets, pass
       counts). No claim without an artifact path. For G1, G2, G4 and G6 the artifact must be the
       **DOM-level** one from spec §16 (`dom-kinds`, `latency.json` + the scroll readings,
       `paths.containment` + `readonly` + `serve.security`, `served-build`) — naming a unit test
       there would re-introduce exactly the proxy-proof gap this revision closed.
-- [ ] **Step 3: Reconcile the spec** with what was actually measured. The spec is the contract, so
+- [x] **Step 3: Reconcile the spec** with what was actually measured. The spec is the contract, so
       a constant that changed during the build is corrected here, in the same PR, with the
-      measurement cited.
-- [ ] **Step 4: Run.** The command block from step 1, again.
+      measurement cited. Re-ran `tools/title-window.ts --head 65536 --tail 262144`: 223/224 (99.6%)
+      ≥ the 99% threshold — the head/tail window constant is unchanged, and §14's RSS budget was
+      already reconciled by R18/D34 (commit 9e1b5bd). No-op: spec.md left untouched (a no-op is a
+      valid outcome per this step's own instruction; see the evidence index and hunter report).
+- [x] **Step 4: Run.** The command block from step 1, again (same deferral as Step 1).
       Expected: identical, all green, and the evidence index resolves every link it names.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): open every link in the evidence index and confirm it resolves. Then
 check each G1–G6 row against the card's own wording — a goal whose artifact proves something
