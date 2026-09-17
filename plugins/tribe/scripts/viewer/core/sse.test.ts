@@ -348,6 +348,129 @@ describe('hello/meta frames are bounded at 1 MiB too, not just rows/patch (Phase
     const out = encodeFrame(frame, 1);
     expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(MAX);
   });
+
+  // `truncateField`'s `.slice(0, budget)` truncation is a UTF-16 CODE-UNIT slice. An astral
+  // character (outside the BMP, e.g. an emoji) is encoded as a surrogate PAIR — two code units —
+  // so a budget that lands between the two halves of a pair leaves a LONE high surrogate at the
+  // end of the truncated field. `label`/`model`/`agentType` are copied verbatim from
+  // `meta.json` (spec §5.5, UNTRUSTED), so any of them can legally contain astral characters.
+  // 11 agents x a 195,000-codepoint emoji field is the smallest reproduction found by exhaustive
+  // search over (agent count, repeat count) against the pre-fix `.slice`: the overflow loop's
+  // halving sequence for THIS shape lands on an odd budget before the frame dips under the 1 MiB
+  // cap, splitting the last surrogate pair in the field.
+  const ASTRAL_AGENT_COUNT = 11;
+  const ASTRAL_REPEAT = 195_000;
+  const ASTRAL_CHAR = '\u{1F600}'; // U+1F600 GRINNING FACE — one surrogate pair (D83D DE00)
+
+  function agentWithAstralModel(seed: number): Agent {
+    return { ...agent(), id: `a${seed}`, label: 'x', model: ASTRAL_CHAR.repeat(ASTRAL_REPEAT) };
+  }
+
+  function agentWithAstralAgentType(seed: number): Agent {
+    return { ...agent(), id: `a${seed}`, label: 'x', agentType: ASTRAL_CHAR.repeat(ASTRAL_REPEAT) };
+  }
+
+  /** True iff `s` contains a UTF-16 surrogate code unit with no valid pairing partner: a high
+   * surrogate (0xD800-0xDBFF) not immediately followed by a low surrogate (0xDC00-0xDFFF), or a
+   * low surrogate not immediately preceded by one it was already paired with. A real wire
+   * (`TextEncoder`) silently replaces a lone surrogate with U+FFFD, and `[...s]` never throws on
+   * one either — both would mask the defect — so this walks UTF-16 code units directly, the same
+   * unit `truncateField`'s budget is measured in. */
+  function hasLoneSurrogate(s: string): boolean {
+    for (let i = 0; i < s.length; i++) {
+      const code = s.charCodeAt(i);
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const next = s.charCodeAt(i + 1);
+        if (Number.isNaN(next) || next < 0xdc00 || next > 0xdfff) return true;
+        i++; // valid pair — the low surrogate was just validated, skip it
+      } else if (code >= 0xdc00 && code <= 0xdfff) {
+        return true; // lone low surrogate: not reached via the high-surrogate branch above
+      }
+    }
+    return false;
+  }
+
+  /** Every element `[...s]` (code-point iteration) yields is either a full astral character (a
+   * two-code-unit pair combined into one element by the iterator) or an ordinary BMP character —
+   * never a bare code unit sitting alone in the surrogate range. `Array.from` uses the same
+   * code-point iterator as spread, so a lone surrogate that `.slice` left dangling shows up here
+   * as its OWN element whose single `codePointAt(0)` falls inside 0xD800-0xDFFF. */
+  function everyCodePointWellFormed(s: string): boolean {
+    return Array.from(s).every((ch) => {
+      const cp = ch.codePointAt(0) ?? 0;
+      return cp < 0xd800 || cp > 0xdfff;
+    });
+  }
+
+  test('hello with a large astral (surrogate-pair) agent `model` never emits a lone surrogate when truncated', () => {
+    const agents = Array.from({ length: ASTRAL_AGENT_COUNT }, (_, idx) => agentWithAstralModel(idx));
+    const frame: SseFrame = {
+      event: 'hello',
+      data: { generation: 'g', session: session(), agents, badges: [badge()], from: 0, to: 10, truncatedBefore: false },
+    };
+    const out = encodeFrame(frame, 1);
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(MAX);
+
+    const decoded = decodeFrame(out);
+    const decodedAgents = (decoded.data as { agents: Agent[] }).agents;
+    expect(decodedAgents.length).toBeGreaterThan(0);
+    for (const a of decodedAgents) {
+      expect(a.model).not.toBeNull();
+      expect(hasLoneSurrogate(a.model as string)).toBe(false);
+      expect(everyCodePointWellFormed(a.model as string)).toBe(true);
+    }
+  });
+
+  test('meta with a large astral (surrogate-pair) agent `model` never emits a lone surrogate when truncated', () => {
+    const agents = Array.from({ length: ASTRAL_AGENT_COUNT }, (_, idx) => agentWithAstralModel(idx));
+    const frame: SseFrame = { event: 'meta', data: { agents, badges: [badge()], live: true } };
+    const out = encodeFrame(frame, 1);
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(MAX);
+
+    const decoded = decodeFrame(out);
+    const decodedAgents = (decoded.data as { agents: Agent[] }).agents;
+    expect(decodedAgents.length).toBeGreaterThan(0);
+    for (const a of decodedAgents) {
+      expect(a.model).not.toBeNull();
+      expect(hasLoneSurrogate(a.model as string)).toBe(false);
+      expect(everyCodePointWellFormed(a.model as string)).toBe(true);
+    }
+  });
+
+  test('hello with a large astral (surrogate-pair) agent `agentType` never emits a lone surrogate when truncated', () => {
+    const agents = Array.from({ length: ASTRAL_AGENT_COUNT }, (_, idx) => agentWithAstralAgentType(idx));
+    const frame: SseFrame = {
+      event: 'hello',
+      data: { generation: 'g', session: session(), agents, badges: [badge()], from: 0, to: 10, truncatedBefore: false },
+    };
+    const out = encodeFrame(frame, 1);
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(MAX);
+
+    const decoded = decodeFrame(out);
+    const decodedAgents = (decoded.data as { agents: Agent[] }).agents;
+    expect(decodedAgents.length).toBeGreaterThan(0);
+    for (const a of decodedAgents) {
+      expect(a.agentType).not.toBeNull();
+      expect(hasLoneSurrogate(a.agentType as string)).toBe(false);
+      expect(everyCodePointWellFormed(a.agentType as string)).toBe(true);
+    }
+  });
+
+  test('meta with a large astral (surrogate-pair) agent `agentType` never emits a lone surrogate when truncated', () => {
+    const agents = Array.from({ length: ASTRAL_AGENT_COUNT }, (_, idx) => agentWithAstralAgentType(idx));
+    const frame: SseFrame = { event: 'meta', data: { agents, badges: [badge()], live: true } };
+    const out = encodeFrame(frame, 1);
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(MAX);
+
+    const decoded = decodeFrame(out);
+    const decodedAgents = (decoded.data as { agents: Agent[] }).agents;
+    expect(decodedAgents.length).toBeGreaterThan(0);
+    for (const a of decodedAgents) {
+      expect(a.agentType).not.toBeNull();
+      expect(hasLoneSurrogate(a.agentType as string)).toBe(false);
+      expect(everyCodePointWellFormed(a.agentType as string)).toBe(true);
+    }
+  });
 });
 
 describe('D12 — no Last-Event-ID support of any kind', () => {

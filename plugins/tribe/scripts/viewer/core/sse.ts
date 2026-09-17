@@ -81,12 +81,28 @@ function encodedByteLength(s: string): number {
  * here to the three variable-length untrusted string fields both frame kinds carry. */
 const FRAME_MAX_BYTES = 1024 * 1024;
 
-/** Truncates one string field to `budget` — the SAME `.slice(0, budget)` truncation the `label`
- * path always used, now shared across `label`, `model`, and `agentType` instead of hand-rolled
- * per field. A `null` field (an absent `model`/`agentType`, per spec §5.5's `meta.json` shape)
- * passes through untouched: `null` cannot overflow the frame. */
+/** Truncates one string field to at most `budget` UTF-16 code units — the SAME `.slice(0,
+ * budget)` truncation the `label` path always used, now shared across `label`, `model`, and
+ * `agentType` instead of hand-rolled per field. A `null` field (an absent `model`/`agentType`,
+ * per spec §5.5's `meta.json` shape) passes through untouched: `null` cannot overflow the frame.
+ *
+ * `value` is UNTRUSTED (spec §5.5), so it can legally contain an astral character (outside the
+ * BMP), which is encoded as a UTF-16 surrogate PAIR — two code units. `.slice(0, budget)` is a
+ * code-UNIT cut, so a `budget` landing between the two halves of a pair would leave a lone high
+ * surrogate dangling at the end of the result. This never splits a surrogate pair: a prefix slice
+ * of a well-formed string can only ever leave a dangling HIGH surrogate (0xD800-0xDBFF) at the
+ * very end — never a low one, since a low surrogate can only appear paired right after a high one
+ * that survived the same cut — so checking just the last code unit is sufficient (mirrors
+ * `normalize.ts`'s `truncateUtf8`, which gives the same guarantee for its byte-budget cut). The
+ * budget stays measured in code units, exactly as before: `encodeFrame`'s halve-until-it-fits
+ * fallback still terminates, since dropping at most one extra code unit cannot turn a
+ * strictly-decreasing halving sequence into a non-terminating one. */
 function truncateField(value: string, budget: number): string {
-  return value.length > budget ? value.slice(0, budget) : value;
+  if (value.length <= budget) return value;
+  const sliced = value.slice(0, budget);
+  const lastCode = sliced.charCodeAt(sliced.length - 1);
+  if (lastCode >= 0xd800 && lastCode <= 0xdbff) return sliced.slice(0, -1);
+  return sliced;
 }
 
 function boundAgentFields<T extends { agents: Agent[] }>(data: T, budget: number): T {
