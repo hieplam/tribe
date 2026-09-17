@@ -1,3 +1,38 @@
+# E2 — live tail (spec §16.3, G2)
+
+`live-tail.e2e.test.ts` is the live-tail proof for the viewer-consolidation card: a controlled
+writer the test itself owns appends rows to a real, growing transcript and measures
+append-to-arrival latency from ITS OWN `performance.now()` — never a transcript row's `timestamp`
+field (the model's clock, which can precede the write by seconds) and never a file mtime. 40
+samples at irregular intervals, worst sample budgeted at 1000ms, written unconditionally to
+`e2e/output/latency.json` (never clamped or discarded, even on a missed budget). In the same run it
+also proves: the subagent-append and subagent-appearing-mid-stream cases, the §8.3 follow/scroll
+contract on real `scrollTop` readings, the §6.4 live-patch case, reconnect (D12, `window.__viewer*`
+hooks) both between a row and its patch and between a call and its result, the >2,000-node window
+eviction + "N new below" pill, and same-size rotation. A real `claude -p` Haiku 4.5 session runs
+alongside purely as a realism check — no assertion depends on its content, and its absence
+(credentials/quota/network) never fails the suite.
+
+Opt-in behind `TRIBE_VIEWER_E2E=1` (`test.skipIf(!ENABLED)`, the same pattern `perf.test.ts` uses)
+so a plain `bun test` never spawns a session, writes a transcript, or spends a token:
+
+```sh
+cd plugins/tribe/scripts/viewer && bun test                              # skipped, no side effects
+cd plugins/tribe/scripts/viewer && TRIBE_VIEWER_E2E=1 bun test e2e/live-tail.e2e.test.ts
+```
+
+---
+
+## Stale section below — describes a DELETED file, pending a follow-up rewrite
+
+Everything from here down describes `live-viewer.e2e.test.ts`, a pre-viewer-consolidation harness
+that task 30 (`docs/tribe/planning/viewer-consolidation/plan.md`) already deleted along with
+`e2e/harness.ts`/`e2e/harness.test.ts` (`deletion-guard.test.ts`'s own `DEFERRED_TO_TASK_30` list
+names all three). It is left here rather than rewritten because rewriting it is outside this task's
+brief (task 31 authorizes adding the E2 entry above only) — a candidate for the campaign's
+governance sweep to replace with an index of the CURRENT `e2e/*.e2e.test.ts` files
+(`dom-kinds`, `real-transcript`, `served-build`, `url-refusals`, `live-tail`) and what each proves.
+
 # Opt-in end-to-end test (card D4/G5)
 
 `live-viewer.e2e.test.ts` is the only place in this package that proves the live viewer end to

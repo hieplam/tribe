@@ -2335,7 +2335,7 @@ that is G6's claim and the viewer-side half of the stale-viewer defect.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** per spec §16.3. The latency number comes from a
+- [x] **Step 1: Write the failing test** per spec §16.3. The latency number comes from a
       **controlled writer the test owns**, never from a transcript row's `timestamp` field — that is
       the model's clock, it can precede the write by seconds, and using it makes the measurement a
       proxy for the thing G2 actually claims.
@@ -2400,9 +2400,9 @@ Model: **Sonnet**.
       A real `claude -p` Haiku 4.5 session runs alongside as the realism check (it writes a real
       transcript the page renders), but **no assertion depends on its content** — that is what makes
       the measurement reproducible. Expected: the test file does not exist.
-- [ ] **Step 2: Implement,** gated behind `TRIBE_VIEWER_E2E=1` so a plain `bun test` never spawns a
+- [x] **Step 2: Implement,** gated behind `TRIBE_VIEWER_E2E=1` so a plain `bun test` never spawns a
       session or spends a token.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && TRIBE_VIEWER_E2E=1 bun test e2e/live-tail.e2e.test.ts
@@ -2412,7 +2412,7 @@ Model: **Sonnet**.
       real PNGs.
       If the budget is missed, record the real number — never widen the budget to make the test
       pass.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): re-run this yourself and read `latency.json`. Confirm every sample's
 start is the **writer's own** `performance.now()` — a sample derived from a row's `timestamp` field
