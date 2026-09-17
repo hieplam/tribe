@@ -140,6 +140,7 @@ Claude Code loads them by their frontmatter contract:
 | Rule | `paths:` glob | Loaded |
 |---|---|---|
 | [`rules/pure-core.md`](rules/pure-core.md) | none | **Every turn** — it governs all production source, so it is never scoped away |
+| [`rules/readable-code.md`](rules/readable-code.md) | none | **Every turn** — it governs how all source is written and reviewed, in any language |
 | [`rules/html-illustration.md`](rules/html-illustration.md) | `**/*.html`, `**/*.htm` | Only when an HTML file is in play — zero cost on every other turn |
 
 A rule with **no** `paths:` glob applies generally; a rule **with** one applies only when
@@ -155,6 +156,14 @@ side-effect-free — and every outside-world dependency (database, network, file
 clock, random) enters only through an abstraction injected from the edge. The canonical
 text, with the golden pattern and the reviewer severity guide, is
 [`rules/pure-core.md`](rules/pure-core.md).
+
+### `readable-code.md` — cognitive load as the measure of readability
+
+Code is hard to read when understanding a line requires knowledge that is not at that line.
+The rule lists ten symptoms (a sentinel value carrying domain meaning, three-state logic inside
+a two-state check, an extracted function the reader must still open, a precondition set
+elsewhere, …), each with its cause and fix across languages, plus a while-writing checklist and
+a reviewer severity guide. The canonical text is [`rules/readable-code.md`](rules/readable-code.md).
 
 ### `html-illustration.md` — the visual output house style
 
