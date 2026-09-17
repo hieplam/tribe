@@ -2429,7 +2429,7 @@ rebuilding pairing from the file.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** **Spec §16.4 states this harness in full** — the throwaway
+- [x] **Step 1: Write the failing test.** **Spec §16.4 states this harness in full** — the throwaway
       repo, the fake `HOME`, both campaign-home layouts, the card whose plan forces one `Task`-tool
       subagent dispatch, the exact runner invocation, every assertion and the teardown. Build it from
       that section; nothing here is "carried over" from a harness the reader cannot see.
@@ -2482,7 +2482,7 @@ Model: **Sonnet**.
       **Port ownership is a precondition, not a thing to clear**: if anything is already listening
       on 4399 at start, the test **refuses to run** with a clear message. Expected: the test file
       does not exist.
-- [ ] **Step 2: Implement.** Teardown kills **only the pids this test spawned** — the runner's
+- [x] **Step 2: Implement.** Teardown kills **only the pids this test spawned** — the runner's
       process group by the pid the test holds, and the viewer child by the pid the test holds. It
       never kills "whatever holds port 4399": that may be an unrelated process, and terminating one
       is outside this card's authority (the old harness did exactly that and it is being removed,
@@ -2499,14 +2499,14 @@ Model: **Sonnet**.
       `homeB` removes them. Delete the throwaway repo the same way. The evidence lives under
       `docs/tribe/planning/viewer-consolidation/evidence/`: the captured stdout lines, the assertion
       output and the screenshots — nothing needs to survive teardown.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && TRIBE_VIEWER_E2E=1 bun test e2e/campaign-badge.e2e.test.ts
       ```
       Expected: both stdout lines match spec §10.2 character for character; the badge assertions
       pass; `commands.md` records every command actually run.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): confirm the printed session URL actually opens that session in the
 running viewer — the test asserts it in the browser, so re-run it and watch. Then, **separately and read-only**, start the viewer with the
