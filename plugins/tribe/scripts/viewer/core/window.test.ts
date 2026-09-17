@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { completeLines, candidatesFromRows, findWindow, orphanPatches, type ReadBack } from './window.ts';
+import { completeLines, candidatesFromRows, completeBackfillOrphans, findWindow, type ReadBack } from './window.ts';
 import { ROW_CAP } from './tail.ts';
 import { buildHomeA, PROJECT_A_DIR, SESSION_4_ID, SESSION_CUT_ID, SESSION_4_MARKERS } from '../fixtures/build.ts';
 
@@ -266,7 +266,7 @@ describe('findWindow — <session-cut> (D30: a file that does not end in 0x0A)',
 });
 
 // ---------------------------------------------------------------------------------------------
-// candidatesFromRows / orphanPatches — small, targeted unit checks (the HTTP-level D27 proof lives
+// candidatesFromRows / completeBackfillOrphans — small, targeted unit checks (the HTTP-level D27 proof lives
 // in serve.reads.test.ts; these pin the pure decision in isolation).
 // ---------------------------------------------------------------------------------------------
 
@@ -336,7 +336,7 @@ describe('candidatesFromRows', () => {
   });
 });
 
-describe('orphanPatches (D27)', () => {
+describe('completeBackfillOrphans (D27 / §0 / §16)', () => {
   function toolUseRowBytes(id: string): Uint8Array {
     return new TextEncoder().encode(
       JSON.stringify({ type: 'assistant', uuid: 'u', timestamp: 't', message: { role: 'assistant', model: 'm', content: [{ type: 'tool_use', id, name: 'Bash', input: {} }] } }),
@@ -347,32 +347,64 @@ describe('orphanPatches (D27)', () => {
     return JSON.stringify({ type: 'user', uuid: 'u2', timestamp: 't', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok', is_error: false }] } });
   }
 
-  test('call-in-range: yields a remove patch for the orphan\'s own row-anchor id', () => {
+  // The load-bearing proof: when the call is in the returned range and its result is in the held
+  // tail range, the pending card must be COMPLETED (state ok/error, result set) at the call's own
+  // anchor AND the orphan removed. The pre-fix helper only emitted the remove, leaving the card
+  // `pending result:null` — the on-disk result vanished (spec §0 under-rendering / B1 regression).
+  test('call-in-range with result in the tail: completes the pending card AND removes the orphan (the result is never lost)', () => {
     const callRowBytes = toolUseRowBytes('toolu_x');
     const windowNodes = candidatesFromRows([callRowBytes], 0);
     expect(windowNodes).toHaveLength(1);
     expect(windowNodes[0]!.k).toBe('tool');
+    expect((windowNodes[0] as { state: string }).state).toBe('pending'); // pending before completion
 
     const resultText = toolResultRowText('toolu_x');
     const tailBytes = new TextEncoder().encode(`${resultText}\n`);
-    const patches = orphanPatches(tailBytes, 1000, windowNodes, ['toolu_x']);
+    const { nodes, patches } = completeBackfillOrphans(tailBytes, 1000, windowNodes, ['toolu_x']);
+
+    // the node stays at the call's anchor, but is now COMPLETE — not pending, result carried.
+    expect(nodes).toHaveLength(1);
+    const tool = nodes[0] as { k: string; id: string; state: string; result: { r: string; body: Array<{ t: string; v: string }> } | null };
+    expect(tool.k).toBe('tool');
+    expect(tool.id).toBe(windowNodes[0]!.id); // SAME id = the call's own anchor (identity rule §4)
+    expect(tool.state).toBe('ok');
+    expect(tool.result).not.toBeNull();
+    expect(tool.result!.r).toBe('text');
+    expect(tool.result!.body).toEqual([{ t: 'text', v: 'ok' }]);
+    // the orphan (anchored at the RESULT row, offset 1000) is removed.
     expect(patches).toEqual([{ op: 'remove', id: '1000:0' }]);
   });
 
-  test('call-further-back (never held in this window): yields no patch, stays an orphan', () => {
-    const windowNodes: never[] = [];
-    const tailBytes = new TextEncoder().encode(`${toolResultRowText('toolu_missing')}\n`);
-    expect(orphanPatches(tailBytes, 1000, windowNodes, ['toolu_missing'])).toEqual([]);
+  // Bounded-read edge (ORPHAN_SCAN_CAP): the result row sits beyond the held tail range, so it is
+  // NOT in `tailBytes`. The server cannot complete it this round: NO remove is emitted and the call
+  // stays pending, to be re-sent next back-fill (D27 "resolves when its call finally enters a
+  // returned range, or never"). The invariant: never a remove without the completed card.
+  test('result NOT in the tail (beyond the bounded read): call stays pending, no remove, no crash', () => {
+    const windowNodes = candidatesFromRows([toolUseRowBytes('toolu_x')], 0);
+    const tailBytes = new Uint8Array(0); // the held range does not contain the result row
+    const { nodes, patches } = completeBackfillOrphans(tailBytes, 1000, windowNodes, ['toolu_x']);
+    expect(patches).toEqual([]);                                   // no remove without a completed card
+    expect((nodes[0] as { state: string }).state).toBe('pending'); // call untouched, to be re-sent
   });
 
-  test('absent/empty orphans: patches: []', () => {
+  test('call-further-back (never held in this window): no patch and no node change, stays an orphan', () => {
+    const windowNodes: never[] = [];
+    const tailBytes = new TextEncoder().encode(`${toolResultRowText('toolu_missing')}\n`);
+    expect(completeBackfillOrphans(tailBytes, 1000, windowNodes, ['toolu_missing'])).toEqual({ nodes: [], patches: [] });
+  });
+
+  test('absent/empty orphans: no patch and the window nodes pass through unchanged', () => {
     const windowNodes = candidatesFromRows([toolUseRowBytes('toolu_y')], 0);
-    expect(orphanPatches(new Uint8Array(0), 0, windowNodes, [])).toEqual([]);
+    const { nodes, patches } = completeBackfillOrphans(new Uint8Array(0), 0, windowNodes, []);
+    expect(patches).toEqual([]);
+    expect(nodes).toEqual(windowNodes);
   });
 
   test('an id the client never held (no matching call in range) is ignored, not an error', () => {
     const windowNodes = candidatesFromRows([toolUseRowBytes('toolu_real')], 0);
     const tailBytes = new TextEncoder().encode(`${toolResultRowText('toolu_real')}\n`);
-    expect(orphanPatches(tailBytes, 1000, windowNodes, ['toolu_never_held'])).toEqual([]);
+    const { nodes, patches } = completeBackfillOrphans(tailBytes, 1000, windowNodes, ['toolu_never_held']);
+    expect(patches).toEqual([]);
+    expect((nodes[0] as { state: string }).state).toBe('pending'); // unmatched call untouched
   });
 });

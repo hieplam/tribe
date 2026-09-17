@@ -99,6 +99,7 @@ async function getText(port: number, path: string): Promise<{ status: number; te
 }
 
 interface RowAnchorLike { id: string; at: number; i: number; uuid: string | null; k: string }
+interface ToolNodeLike extends RowAnchorLike { state: string; result: { r: string; body: Array<{ t: string; v: string }> } | null }
 interface RowsResponse { nodes: RowAnchorLike[]; patches: Array<{ op: string; id: string; node?: unknown }>; from: number; to: number; truncatedBefore: boolean }
 
 // ---------------------------------------------------------------------------------------------
@@ -200,7 +201,7 @@ describe('/api/rows — tail window, back-fill, limit (spec §3.2, §6.3)', () =
   });
 
   describe('orphans= / patches (D27)', () => {
-    test('call-in-range: yields a `remove` patch for the orphan\'s own row-anchor id, and a tool node at the CALL\'s anchor arrives in `nodes`', async () => {
+    test('call-in-range: the tool card in `nodes` is COMPLETE (result carried from the held tail), and a `remove` deletes the orphan — the on-disk result is never lost', async () => {
       const { server } = await startFullFixtureServer();
       // 1) The tail window (limit=1) holds only the RESULT row — an orphan_result, since its call
       //    (row2) is not in range.
@@ -215,8 +216,15 @@ describe('/api/rows — tail window, back-fill, limit (spec §3.2, §6.3)', () =
         `/api/rows?session=${BLOCK_SESSION_ID}&before=${tail.from}&limit=9&orphans=${ORPHAN_TOOL_USE_ID},toolu_never_held`,
       )).body as RowsResponse;
 
-      const callNode = back.nodes.find((n) => n.k === 'tool');
+      // §0 / §16 / D27: the card must arrive COMPLETE at the call's anchor — NOT pending with a
+      // null result. The pre-fix bug returned `state:'pending' result:null` here while still
+      // removing the orphan, so the on-disk result vanished. Assert the result is carried.
+      const callNode = back.nodes.find((n) => n.k === 'tool') as ToolNodeLike | undefined;
       expect(callNode).toBeDefined();
+      expect(callNode!.state).toBe('ok');            // completed, not 'pending'
+      expect(callNode!.result).not.toBeNull();       // the result is present, not lost
+      expect(callNode!.result!.r).toBe('text');
+      expect(callNode!.result!.body).toEqual([{ t: 'text', v: 'orphan result text' }]); // the exact on-disk body
       expect(back.patches).toEqual([{ op: 'remove', id: orphanNode!.id }]);
     });
 

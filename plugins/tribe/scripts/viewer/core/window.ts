@@ -280,7 +280,7 @@ export function candidatesFromRows(rows: Uint8Array[], from: number): RenderNode
  * rows only") and merges every resulting `{op:'result'}` patch back into `nodes` in place, so a
  * freshly-built window (nothing yet rendered client-side) reports each in-window call+result pair
  * as ONE already-complete `tool` node rather than a pending node plus a wire patch the client never
- * asked to apply — patches are reserved for D27's orphans wire operation (`orphanPatches` below).
+ * asked to apply — patches are reserved for D27's orphans wire operation (`completeBackfillOrphans` below).
  */
 export function applyInWindowPairing(candidates: RenderNode[]): RenderNode[] {
   const { nodes, patches } = pair(candidates, createPairState());
@@ -297,8 +297,8 @@ export function applyInWindowPairing(candidates: RenderNode[]): RenderNode[] {
 
 /** Every complete row in `bytes` (which begins at file offset `startOffset`), decoded with its own
  * byte offset — the forward counterpart of the offset-walk `candidatesFromRows` does backward,
- * used by `orphanPatches` to scan the range the client already holds for a specific orphan's
- * result row. A trailing partial segment (no `0x0A`) is dropped, exactly like `completeLines`. */
+ * used by `completeBackfillOrphans` to scan the range the client already holds for a specific
+ * orphan's result row. A trailing partial segment (no `0x0A`) is dropped, exactly like `completeLines`. */
 function splitCompleteRowsWithOffsets(bytes: Uint8Array, startOffset: number): Array<{ text: string; at: number }> {
   const out: Array<{ text: string; at: number }> = [];
   let start = 0;
@@ -312,50 +312,84 @@ function splitCompleteRowsWithOffsets(bytes: Uint8Array, startOffset: number): A
   return out;
 }
 
+/** `completeBackfillOrphans`'s return: the window's `nodes` with each completable pending call
+ * REPLACED in place by its COMPLETE `tool` card (same id — the call's own anchor), and one
+ * `{op:'remove'}` per completed orphan (§4: a node's id IS its anchor, so the orphan at the RESULT
+ * row is deleted while the card is (re)created at the CALL row). The two always travel together —
+ * the caller sends `nodes` and `patches` unchanged. */
+export interface BackfillResult {
+  nodes: RenderNode[];
+  patches: Patch[];
+}
+
 /**
- * D27 — the orphans wire operation. `tailBytes` is `[tailOffset, eof)`, already read by the caller
- * (the range the client currently holds, which our OWN back-filled `[from, to)` window can never
- * include by construction). For every `orphanToolUseIds` entry whose CALL landed in `windowNodes`
- * as a still-`'pending'` `tool` node (i.e. its result is NOT in our own window — exactly the orphan
- * condition), this scans `tailBytes` forward for the matching `orphan_result` candidate and, when
- * found, emits `{op:'remove', id: <that candidate's own RowAnchor.id>}` — never `{op:'result'}`,
- * because a node's id IS its own anchor (D27/§4): the orphan is anchored at the RESULT's row, the
- * newly-arrived call at the CALL's row, and the two can never share an id. The pending call node
- * itself needs no further action here — it already "arrives in nodes like any other back-filled
- * node" simply by being part of `windowNodes`. An id whose call is not in `windowNodes` (still
- * further back, or never held) is silently skipped — never an error.
+ * D27 / §0 / §16 — the back-fill orphan completion. `tailBytes` is `[tailOffset, eof)`, already read
+ * by the caller (the range the client currently holds, which our OWN back-filled `[from, to)` window
+ * can never include by construction, BOUNDED at `ORPHAN_SCAN_CAP` by the caller). For every
+ * `orphanToolUseIds` entry whose CALL landed in `windowNodes` as a still-`'pending'` `tool` node
+ * (i.e. its result is NOT in our own window — exactly the orphan condition), this scans `tailBytes`
+ * forward for the matching `orphan_result` candidate and, when found:
+ *
+ *   - COMPLETES the card: it pairs the pending call with that result through the SAME `pair()` the
+ *     live path uses (`buildCompletedTool`/`fitCompletedTool`, D19's 64 KiB cap honoured identically)
+ *     — never a hand-rolled second completion — and replaces the pending node in `nodes` IN PLACE, at
+ *     the call's own anchor (its id is unchanged). Without this the card stayed `pending result:null`
+ *     while the orphan was removed, so the on-disk result vanished (spec §0 under-rendering / the B1
+ *     regression reintroduced through the back-fill door — the very bug this function closes).
+ *   - EMITS `{op:'remove', id: <the orphan candidate's own RowAnchor.id>}` — never `{op:'result'}`,
+ *     because the orphan is anchored at the RESULT's row and the completed card at the CALL's row,
+ *     and the two can never share an id (D27/§4).
+ *
+ * The invariant held here is: NEVER a `remove` without the completed card in `nodes`. When the
+ * result row is NOT in `tailBytes` (it sits beyond the caller's `ORPHAN_SCAN_CAP` bound), the call
+ * cannot be completed this round — so NO remove is emitted and the call is left pending, to be
+ * re-sent on the next back-fill (D27: "resolves when its call finally enters a returned range, or
+ * never"). An id whose call is not in `windowNodes` (still further back, or never held) is silently
+ * skipped — never an error. PURE (`pure-core.md`): all bytes arrive as arguments; no I/O here.
  */
-export function orphanPatches(
+export function completeBackfillOrphans(
   tailBytes: Uint8Array,
   tailOffset: number,
   windowNodes: readonly RenderNode[],
   orphanToolUseIds: readonly string[],
-): Patch[] {
-  if (orphanToolUseIds.length === 0) return [];
+): BackfillResult {
+  const nodes = windowNodes.slice();
+  if (orphanToolUseIds.length === 0) return { nodes, patches: [] };
   const wanted = new Set(orphanToolUseIds);
-  const callsInRange = new Set<string>();
-  for (const node of windowNodes) {
-    if (node.k === 'tool' && node.state === 'pending' && node.toolUseId !== null && wanted.has(node.toolUseId)) {
-      callsInRange.add(node.toolUseId);
-    }
-  }
-  if (callsInRange.size === 0) return [];
 
-  const idByToolUseId = new Map<string, string>();
+  // The still-pending calls in our own window whose id the client asked us to resolve, mapped to
+  // their position in `nodes` so we can replace each in place with its completed card.
+  const pendingIndexByToolUseId = new Map<string, number>();
+  nodes.forEach((node, i) => {
+    if (node.k === 'tool' && node.state === 'pending' && node.toolUseId !== null && wanted.has(node.toolUseId)) {
+      pendingIndexByToolUseId.set(node.toolUseId, i);
+    }
+  });
+  if (pendingIndexByToolUseId.size === 0) return { nodes, patches: [] };
+
+  // Scan the held tail range for each pending call's matching `orphan_result` candidate.
+  const orphanByToolUseId = new Map<string, Extract<RenderNode, { k: 'orphan_result' }>>();
   for (const { text, at } of splitCompleteRowsWithOffsets(tailBytes, tailOffset)) {
     const { records } = parseRecordLines([text]);
     if (records.length !== 1) continue;
     for (const node of normalize([{ record: records[0]!, at }])) {
-      if (node.k === 'orphan_result' && callsInRange.has(node.toolUseId) && !idByToolUseId.has(node.toolUseId)) {
-        idByToolUseId.set(node.toolUseId, node.id);
+      if (node.k === 'orphan_result' && pendingIndexByToolUseId.has(node.toolUseId) && !orphanByToolUseId.has(node.toolUseId)) {
+        orphanByToolUseId.set(node.toolUseId, node);
       }
     }
   }
 
   const patches: Patch[] = [];
-  for (const toolUseId of callsInRange) {
-    const id = idByToolUseId.get(toolUseId);
-    if (id !== undefined) patches.push({ op: 'remove', id });
+  for (const [toolUseId, index] of pendingIndexByToolUseId) {
+    const orphan = orphanByToolUseId.get(toolUseId);
+    if (orphan === undefined) continue; // beyond the caller's scan cap — leave pending, no remove.
+    // Reuse the LIVE completion path EXACTLY: pair the call with its found result. `pair()` consumes
+    // the orphan into a `{op:'result'}` patch whose `node` is the COMPLETE (D19-fitted) `tool` card.
+    const { patches: pairPatches } = pair([nodes[index]!, orphan], createPairState());
+    const completion = pairPatches.find((p) => p.op === 'result');
+    if (completion === undefined || completion.op !== 'result') continue;
+    nodes[index] = completion.node; // replace the pending call with the COMPLETE card (same id).
+    patches.push({ op: 'remove', id: orphan.id }); // delete the orphan at the RESULT's own anchor.
   }
-  return patches;
+  return { nodes, patches };
 }

@@ -8,6 +8,7 @@
 // it was handed and returns the page under test.
 import { describe, expect, test } from 'bun:test';
 import type { Patch, RenderNode } from '../../core/model.ts';
+import { completeBackfillOrphans } from '../../core/window.ts';
 import {
   createRowStore,
   isContiguous,
@@ -176,10 +177,26 @@ describe('rowStore — one contiguous window, keyed by RowAnchor.id', () => {
     // orphan's tool_use_id so the server can re-pair it; the returned patch REMOVES the orphan while
     // the paired tool card arrives in `nodes` at the CALL's earlier anchor.
     const store = seeded('gen-1', [orphanNode(1000, 'tu-1'), assistantNode(1100)]);
-    const backfill = page(
-      [assistantNode(700), toolNode(800, 'tu-1', 'ok'), assistantNode(900)],
-      [{ op: 'remove', id: '1000:0' }],
+    // Drive the back-fill page from the REAL server-side completion path, not a hand-fabricated
+    // complete node: a pending call in the returned range + the orphan's result row in the held
+    // tail range -> `completeBackfillOrphans` produces a COMPLETE tool card in `nodes` + a `remove`.
+    // If server completion ever regresses to a pending card (the §0/B1 back-fill bug), this input
+    // regresses with it and the assertions below fail — which a fabricated `toolNode(...,'ok')`
+    // could never catch.
+    const tailResultRow = JSON.stringify({
+      type: 'user', uuid: 'u', timestamp: 't',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu-1', content: 'out', is_error: false }] },
+    });
+    const tailBytes = new TextEncoder().encode(`${tailResultRow}\n`);
+    const { nodes: serverNodes, patches: serverPatches } = completeBackfillOrphans(
+      tailBytes, 1000,
+      [assistantNode(700), toolNode(800, 'tu-1', 'pending'), assistantNode(900)],
+      ['tu-1'],
     );
+    // Guard the fixture itself: the server-shaped page really did COMPLETE the card and remove the orphan.
+    expect((serverNodes.find((n) => n.k === 'tool') as { state: string }).state).toBe('ok');
+    expect(serverPatches).toEqual([{ op: 'remove', id: '1000:0' }]);
+    const backfill = page(serverNodes, serverPatches);
     const { fetch, calls } = fakeFetch(backfill);
     await store.loadEarlier(fetch);
     // the request carried before=first and the orphan's id
@@ -190,6 +207,7 @@ describe('rowStore — one contiguous window, keyed by RowAnchor.id', () => {
     expect(snap.nodes.find((n) => n.id === '1000:0')).toBeUndefined();
     const tool = snap.nodes.find((n) => n.k === 'tool');
     expect(tool?.id).toBe('800:0'); // the tool card's id IS its own call anchor (identity rule §4)
+    expect((tool as { state: string }).state).toBe('ok'); // COMPLETE — not the pending regression
     // no node ended up with an id that is not its own anchor
     for (const n of snap.nodes) expect(n.id).toBe(`${n.at}:${n.i}`);
     expect(isContiguous(snap.nodes)).toBe(true);

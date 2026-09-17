@@ -46,7 +46,7 @@ import { containedJoin, isContainedResolved, subagentsDirOf, toolResultsDirOf, t
 import { parseRoute } from './core/routes.ts';
 import { buildScanIndex, partitionProjects, sessionCacheKey, type ScannedSessionInput } from './core/scan.ts';
 import { deriveAgents, type SubagentEntry } from './core/subagents.ts';
-import { applyInWindowPairing, candidatesFromRows, completeLines, findWindow, orphanPatches, type ReadBack } from './core/window.ts';
+import { applyInWindowPairing, candidatesFromRows, completeBackfillOrphans, completeLines, findWindow, type ReadBack } from './core/window.ts';
 
 // --- Argument parsing (spec §13, `fail-closed-edges` obligation 1) ---------------------------
 // `--tribe-root` is deleted (spec §10.2): the viewer resolves both roots from `HOME`/
@@ -665,15 +665,18 @@ function routeResponse(req: Request): Response {
         const eofParam = route.before ?? obs.sizeBytes;
         const readBack: ReadBack = (end, len) => readRange(path, end - len, end);
         const result = findWindow(readBack, eofParam, route.limit);
-        const nodes = applyInWindowPairing(candidatesFromRows(result.rows, result.from));
+        let nodes = applyInWindowPairing(candidatesFromRows(result.rows, result.from));
         let patches: Patch[] = [];
         if (route.orphans.length > 0 && result.to < obs.sizeBytes) {
           // D27: the range the client already holds — genuinely outside our own [from, to) by
           // construction — is `[to, eof)`, read here BOUNDED at `ORPHAN_SCAN_CAP` so this read is
-          // independent of how large the remaining transcript is (spec §6.5).
+          // independent of how large the remaining transcript is (spec §6.5). The completion itself
+          // is a PURE decision over these bytes (`completeBackfillOrphans`) — this edge only reads.
           const orphanScanEnd = Math.min(obs.sizeBytes, result.to + ORPHAN_SCAN_CAP);
           const tailBytes = readRange(path, result.to, orphanScanEnd);
-          patches = orphanPatches(tailBytes, result.to, nodes, route.orphans);
+          const completed = completeBackfillOrphans(tailBytes, result.to, nodes, route.orphans);
+          nodes = completed.nodes; // pending back-fill calls now COMPLETE at the call's anchor (§0/§16)
+          patches = completed.patches;
         }
         return Response.json({ nodes, patches, from: result.from, to: result.to, truncatedBefore: result.truncatedBefore });
       }
