@@ -24,6 +24,14 @@ describe('classifyTrigger', () => {
     expect(classifyTrigger('<task-notification><event>Monitor expired</event></task-notification>'))
       .toBe('monitor-expiry');
   });
+
+  test('a bare "Monitor expired" substring OUTSIDE the <task-notification> wrapper is human (Fix 8)', () => {
+    expect(classifyTrigger('the deploy failed — Monitor expired earlier')).toBe('human');
+  });
+
+  test('a bare <event> element OUTSIDE the <task-notification> wrapper is human (Fix 8)', () => {
+    expect(classifyTrigger('<event>COMMIT: x</event>')).toBe('human');
+  });
 });
 
 describe('isToolResultCarrier', () => {

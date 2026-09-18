@@ -42,18 +42,23 @@ export function isToolResultCarrier(message: unknown): boolean {
 }
 
 /**
- * Classifies a turn's trigger text (Oracle, spec §15):
- * - text containing `Monitor expired` -> `monitor-expiry` (checked first: it beats
- *   the presence of an `<event>` element even when both are true of the same text).
- * - text containing an `<event>` element -> `monitor-event`.
- * - a `<task-notification>` with neither -> `task-notification` (the
+ * Classifies a turn's trigger text (Oracle, spec §15, plan Task 1 Oracle): a monitor class
+ * requires the `<task-notification>` wrapper — `Monitor expired` or `<event>` appearing OUTSIDE
+ * that wrapper is ordinary human prose that happens to contain those substrings, not a
+ * synthetic trigger (Fix 8).
+ * - no `<task-notification>` anywhere in the text -> `human`, regardless of what substrings
+ *   the text otherwise contains.
+ * - text containing `<task-notification>` AND `Monitor expired` -> `monitor-expiry` (checked
+ *   first: it beats the presence of an `<event>` element even when both are true of the same
+ *   text).
+ * - text containing `<task-notification>` AND an `<event>` element -> `monitor-event`.
+ * - text containing `<task-notification>` with neither -> `task-notification` (the
  *   background-command-completion shape).
- * - anything else -> `human`.
  */
 export function classifyTrigger(text: string): TriggerClass {
   if (typeof text !== 'string') return 'human';
+  if (!text.includes('<task-notification>')) return 'human';
   if (text.includes('Monitor expired')) return 'monitor-expiry';
   if (text.includes('<event>')) return 'monitor-event';
-  if (text.includes('<task-notification>')) return 'task-notification';
-  return 'human';
+  return 'task-notification';
 }

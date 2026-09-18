@@ -45,11 +45,26 @@ export interface CeilingRevisionRefused {
 export type CeilingRevision = CeilingRevisionAccepted | CeilingRevisionRefused;
 
 /**
- * S-P15: lowering (or leaving unchanged) a recorded ceiling is free. Raising one is refused
- * unless the caller supplies a `raisedBy` ruling id — the refusal names both the old and the
- * new value so the caller can surface it verbatim.
+ * S-P15 / R7: lowering (or leaving unchanged) a recorded ceiling is free. Raising a ceiling
+ * that has already been measured (`oldValue !== 0`) is refused unless the caller supplies a
+ * `raisedBy` ruling id — the refusal names both the old and the new value so the caller can
+ * surface it verbatim. `oldValue === 0` means "never yet measured" (S-P15): the FIRST proposal
+ * against an unmeasured ceiling is the INITIAL measurement, not a raise, and is accepted with
+ * no `raisedBy` required — a ruling only guards RAISING an already-measured number. A proposed
+ * value that is not a non-negative integer is refused unconditionally, checked first, so the
+ * initial-measurement exemption can never smuggle through a negative or fractional ceiling.
  */
 export function reviseCeiling(oldValue: number, proposed: number, raisedBy: string | null): CeilingRevision {
+  if (!Number.isInteger(proposed) || proposed < 0) {
+    return {
+      accepted: false,
+      ceiling: oldValue,
+      reason: `refusing a proposed ceiling of ${proposed}: a ceiling must be a non-negative integer`,
+    };
+  }
+  if (oldValue === 0) {
+    return { accepted: true, ceiling: proposed }; // initial measurement — not a raise
+  }
   if (proposed <= oldValue) {
     return { accepted: true, ceiling: proposed };
   }

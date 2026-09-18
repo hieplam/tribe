@@ -5,15 +5,21 @@
  * never a throw. A blank line is its own case, explicitly NOT a skip (Task 3's Oracle): it
  * carries no data to lose, so counting it as a defect would just be noise.
  *
+ * Fix 12: the skip `reason` is a CLOSED code (`SkipReason`), never the parser's own exception
+ * text or any transcript content — a `SyntaxError` message can echo back bytes from the line it
+ * failed to parse, and this reason is committed verbatim into the numbers-only baseline file.
+ * `line` is a plain line number, safe to carry as-is.
+ *
  * Pure: no imports, no I/O. Shared by `adapters/transcript-io.adapter.ts` (the plain
  * streaming reader) and `adapters/cut.ts` (the byte-cut reader) so the "is this line usable"
  * decision is made in exactly one place.
  */
+import type { SkipReason } from './model.ts';
 
 export type LineOutcome =
   | { kind: 'blank' }
   | { kind: 'row'; value: Record<string, unknown> }
-  | { kind: 'skip'; reason: string };
+  | { kind: 'skip'; reason: SkipReason; line: number };
 
 export function classifyLine(raw: string, lineNo: number): LineOutcome {
   if (raw.length === 0) return { kind: 'blank' };
@@ -21,13 +27,12 @@ export function classifyLine(raw: string, lineNo: number): LineOutcome {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch (err) {
-    const message = err instanceof SyntaxError ? err.message : 'invalid JSON';
-    return { kind: 'skip', reason: `line ${lineNo}: invalid JSON (${message})` };
+  } catch {
+    return { kind: 'skip', reason: 'invalid_json', line: lineNo };
   }
 
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { kind: 'skip', reason: `line ${lineNo}: not a JSON object` };
+    return { kind: 'skip', reason: 'not_object', line: lineNo };
   }
 
   return { kind: 'row', value: parsed as Record<string, unknown> };

@@ -28,8 +28,8 @@ describe('readTranscriptRows (Oracle: fail-closed-edges.md — counted and skipp
       expect(result!.rows.length).toBe(2);
       expect(result!.skippedLines).toBe(2);
       expect(result!.skippedReasons).toHaveLength(2);
-      expect(result!.skippedReasons.some((r) => /invalid JSON/i.test(r))).toBe(true);
-      expect(result!.skippedReasons.some((r) => /not a JSON object/i.test(r))).toBe(true);
+      expect(result!.skippedReasons.some((r) => r === 'invalid_json')).toBe(true);
+      expect(result!.skippedReasons.some((r) => r === 'not_object')).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
