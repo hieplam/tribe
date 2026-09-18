@@ -1078,7 +1078,7 @@ makes no decision; identical inputs render byte-identical output.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test.** Assert, for the `ruling` brief: it contains the escalation
+- [x] **Step 1: Write the failing test.** Assert, for the `ruling` brief: it contains the escalation
   file content verbatim; it contains the `ownerOnlyEscalations` entries verbatim; it contains the
   W3 and W7 quotes **byte-identical** to the strings in `SKILL.md` (the test reads `SKILL.md` and
   greps its own rendered output for those exact substrings — this is what makes a future
@@ -1087,11 +1087,11 @@ makes no decision; identical inputs render byte-identical output.
   Assert for the `ratify` brief that it names every unratified id. Assert for the `closing` brief
   that it contains Stage D's four numbered steps.
 
-- [ ] **Step 2: Write the templates and `core/supervisor/brief.ts`** — one exported
+- [x] **Step 2: Write the templates and `core/supervisor/brief.ts`** — one exported
   `renderBrief(kind, facts): string`. The governing quotes live in the template files as literal
   text; the test above is what keeps them honest against `SKILL.md`.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/brief.test.ts && bunx tsc --noEmit
@@ -1100,7 +1100,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/brief.test.ts && bun
 Expected: about 12 tests pass, including the byte-identical-quote checks against the real
 `SKILL.md`; `tsc` silent.
 
-- [ ] **Step 4: Commit** — `feat(supervisor): pure brief renderer for the three session kinds (task 9/24)`.
+- [x] **Step 4: Commit** — `feat(supervisor): pure brief renderer for the three session kinds (task 9/24)`.
 
 ---
 
