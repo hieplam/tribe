@@ -31,7 +31,7 @@ import { buildWatchdogIo, withHome } from '../adapters/watchdog-io.adapter.ts';
 import { WATCHDOG_EXIT_NEEDS_HUMAN, WATCHDOG_EXIT_USAGE } from '../core/watchdog/model.ts';
 import { parseTranscriptMetricsArgs, type TranscriptMetricsConfig } from '../core/metrics/args.ts';
 import { buildTranscriptIo } from '../adapters/transcript-io.adapter.ts';
-import { measureAtCut, verifyBaseline } from '../adapters/cut.ts';
+import { measureAtCut, validateBaselineFile, verifyBaseline } from '../adapters/cut.ts';
 import type { BaselineEntry, BaselineFile } from '../core/metrics/model.ts';
 import type { TranscriptIO } from '../ports/ports.ts';
 
@@ -536,10 +536,26 @@ export async function runTranscriptMetrics(config: TranscriptMetricsConfig, io: 
       console.error(`transcript-metrics: --verify file not found: ${config.verifyPath}`);
       return 1;
     }
-    let baseline: BaselineFile;
+
+    // Fix 4 (fail-closed-edges.md obligation 1): three DISTINCT typed diagnostics for three
+    // distinct failure classes — a raw fs read error, a JSON syntax error, and a structural
+    // validation error must never be confused with one another, and none of them may ever
+    // surface as a raw exception message (a `SyntaxError`/`TypeError` string can echo
+    // transcript bytes back at the user).
+    let raw: string;
     try {
-      const raw = [...io.readLines(config.verifyPath)].join('\n');
-      baseline = JSON.parse(raw) as BaselineFile;
+      raw = [...io.readLines(config.verifyPath)].join('\n');
+    } catch (err) {
+      console.error(
+        `transcript-metrics: --verify file ${config.verifyPath} could not be read: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      return 1;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
     } catch (err) {
       console.error(
         `transcript-metrics: --verify file ${config.verifyPath} is not valid JSON: ` +
@@ -547,7 +563,14 @@ export async function runTranscriptMetrics(config: TranscriptMetricsConfig, io: 
       );
       return 1;
     }
-    const results = verifyBaseline(baseline.sessions);
+
+    const validated = validateBaselineFile(parsed);
+    if ('error' in validated) {
+      console.error(`transcript-metrics: --verify file ${config.verifyPath} is invalid: ${validated.error}`);
+      return 1;
+    }
+
+    const results = verifyBaseline(validated.entries);
     console.log(JSON.stringify(results, null, 2));
     return results.every((r) => r.status === 'verified') ? 0 : 1;
   }
@@ -594,7 +617,13 @@ export async function main(): Promise<void> {
     }
     const io = buildTranscriptIo();
     const exitCode = await runTranscriptMetrics(parsed.config, io);
-    process.exit(exitCode);
+    // Fix 6: never call `process.exit()` synchronously right after printing a payload that
+    // may exceed a pipe's buffer — a piped stdout write is not guaranteed to have drained by
+    // the time `process.exit()` runs, and `process.exit()` does not wait for it. Setting
+    // `process.exitCode` and letting `main()` return lets the event loop drain stdout before
+    // the process exits on its own (this subcommand does no other async work, so nothing else
+    // keeps the process alive).
+    process.exitCode = exitCode;
     return;
   }
 

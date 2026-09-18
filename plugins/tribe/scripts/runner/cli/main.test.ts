@@ -884,6 +884,44 @@ describe('runTranscriptMetrics — the transcript-metrics subcommand (Task 3, fa
     }
   });
 
+  // Fix 4 (fail-closed-edges.md obligation 1): three DISTINCT typed messages for three
+  // distinct failure classes — a raw fs read error must never be confused with a JSON parse
+  // error, and neither with a structural validation error.
+  test('--verify against a file that cannot be read (fs error) is a typed refusal, distinct from the JSON/validation messages', async () => {
+    const io: TranscriptIO = {
+      ...buildTranscriptIo(),
+      fileExists: () => true,
+      readLines: () => { throw new Error('EACCES: permission denied'); },
+    };
+    const { result, errors } = await captureConsole(() =>
+      runTranscriptMetrics(baseTranscriptConfig({ verifyPath: '/some/baseline.json' }), io),
+    );
+    expect(result).toBe(1);
+    expect(errors.some((e) => e.includes('transcript-metrics') && e.includes('could not be read'))).toBe(true);
+    expect(errors.some((e) => e.includes('not valid JSON'))).toBe(false);
+    expect(errors.some((e) => e.includes('is invalid'))).toBe(false);
+  });
+
+  test('--verify against structurally invalid (but syntactically valid) JSON is a typed refusal, distinct from the read/JSON-syntax messages', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-verify-structural-'));
+    try {
+      const baselinePath = join(dir, 'baseline.json');
+      writeFileSync(baselinePath, JSON.stringify({ v: 2, tool: 'transcript-metrics', generatedAt: 'x', sessions: [] }));
+      const io = buildTranscriptIo();
+
+      const { result, errors } = await captureConsole(() =>
+        runTranscriptMetrics(baseTranscriptConfig({ verifyPath: baselinePath }), io),
+      );
+
+      expect(result).toBe(1);
+      expect(errors.some((e) => e.includes('transcript-metrics') && e.includes('is invalid'))).toBe(true);
+      expect(errors.some((e) => e.includes('not valid JSON'))).toBe(false);
+      expect(errors.some((e) => e.includes('could not be read'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('--verify re-measures every entry at its recorded cut and exits 0 only when all verify', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-verify-'));
     try {
@@ -911,4 +949,85 @@ describe('runTranscriptMetrics — the transcript-metrics subcommand (Task 3, fa
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+/** A structurally-valid baseline whose every entry points at a transcript that was never
+ * created — each re-measures to `absent`, so the emitted JSON result array is large (one
+ * entry's worth of message text per session) without needing a real, large transcript file. */
+function bogusAbsentBaseline(dir: string, count: number) {
+  const sessions = Array.from({ length: count }, (_, i) => ({
+    sessionId: `s${i}`,
+    path: join(dir, `never-created-${i}.jsonl`),
+    cut: { lines: 1, bytes: 1, sha256: '0'.repeat(64) },
+    metrics: {},
+  }));
+  return { v: 1, tool: 'transcript-metrics', generatedAt: 'x', sessions };
+}
+
+// Fix 6: `main()`'s transcript-metrics branch used to call `process.exit(exitCode)`
+// immediately after `console.log(...)`, which can truncate a large payload written to a pipe
+// (Node/Bun stdout writes to a PIPE are asynchronous; `process.exit()` does not wait for them
+// to flush). This is a real subprocess e2e test (CLAUDE.md: reproduce the way an end user
+// experiences it, over `bun run.ts ... | consumer`) because `main()` wires its own real
+// process.exit and is deliberately not unit-tested (this file's own top-of-file convention).
+describe('transcript-metrics subcommand: piped stdout is never truncated (Fix 6)', () => {
+  test('a >64KiB --verify JSON result array is captured in full through a pipe, with no entry lost', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-drain-'));
+    try {
+      const baselinePath = join(dir, 'baseline.json');
+      const ENTRY_COUNT = 900;
+      writeFileSync(baselinePath, JSON.stringify(bogusAbsentBaseline(dir, ENTRY_COUNT)));
+
+      const result = spawnSync(
+        'bun',
+        ['run.ts', 'transcript-metrics', '--verify', baselinePath],
+        { cwd: import.meta.dir + '/..', encoding: 'utf8', timeout: 600000, maxBuffer: 10 * 1024 * 1024 },
+      );
+
+      expect(result.stdout.length).toBeGreaterThan(64 * 1024); // the truncation this guards against
+      const parsed = JSON.parse(result.stdout); // truncated JSON would fail to parse at all
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed).toHaveLength(ENTRY_COUNT); // every entry present, none lost to truncation
+      expect(parsed.every((r: { status: string }) => r.status === 'absent')).toBe(true);
+      expect(result.status).toBe(1); // absent is a verify failure
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+// Fix 13 (fixtures-mirror-reality.md: the shape a person actually types — cd somewhere, name
+// the file bare). Paired with the absolute-path shape so both are exercised, matching that
+// rule's own golden pattern.
+describe('transcript-metrics subcommand: --verify accepts BOTH a relative and an absolute path (Fix 13)', () => {
+  test('a bare relative filename resolves against the process cwd (not a "file not found")', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-relative-'));
+    try {
+      const transcriptPath = join(dir, 'sess-rel.jsonl');
+      writeFileSync(transcriptPath, `${JSON.stringify({ type: 'assistant', message: { id: 'a' } })}\n`);
+      const { cut, metrics } = measureAtCut(transcriptPath, null);
+      metrics.sessionId = 'sess-rel';
+      const baseline = {
+        v: 1, tool: 'transcript-metrics', generatedAt: 'x',
+        sessions: [{ sessionId: 'sess-rel', path: transcriptPath, cut, metrics }],
+      };
+      const relativeName = 'baseline-rel.json';
+      writeFileSync(join(dir, relativeName), JSON.stringify(baseline));
+      const runnerEntry = join(import.meta.dir, '..', 'run.ts');
+
+      // The shape a person types: relative to their own cwd, not the runner's.
+      const relResult = spawnSync('bun', [runnerEntry, 'transcript-metrics', '--verify', relativeName],
+        { cwd: dir, encoding: 'utf8', timeout: 600000 });
+      expect(relResult.status).toBe(0);
+      expect(JSON.parse(relResult.stdout)).toEqual([{ sessionId: 'sess-rel', status: 'verified' }]);
+
+      // Paired absolute-path run — both shapes reach the same result.
+      const absResult = spawnSync('bun', [runnerEntry, 'transcript-metrics', '--verify', join(dir, relativeName)],
+        { cwd: dir, encoding: 'utf8', timeout: 600000 });
+      expect(absResult.status).toBe(0);
+      expect(JSON.parse(absResult.stdout)).toEqual([{ sessionId: 'sess-rel', status: 'verified' }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

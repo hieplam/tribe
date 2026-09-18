@@ -39,16 +39,11 @@ export interface SessionMetrics {
   sessionId: string;
   lines: number;
   skippedLines: number;
-  // NOT narrowed to `SkipReason[]` (brief Fix 12 literally asks for this): `adapters/cut.ts`
-  // (out of this fix round's scope fence — "Do NOT touch ... cut.ts") assigns a locally
-  // `string[]`-typed `skippedReasons` into this field at `measureAtCut` (cut.ts:112), and
-  // narrowing this field breaks `bunx tsc --noEmit` there (`Type 'string[]' is not assignable
-  // to type 'SkipReason[]'`) with no in-fence fix available. Every OBSERVABLE behavior Fix 12
-  // asks for — the closed 'invalid_json'/'not_object' codes, never parser/exception text or
-  // transcript bytes (fail-closed-edges.md) — already holds at runtime via `LineOutcome`'s
-  // `reason: SkipReason` below; only the static type of this specific field stays widened.
-  // See this Hunter's report for the reproduction and full reasoning.
-  skippedReasons: string[];
+  // Fix 12 cleanup (this fix round): narrowed from `string[]`. `adapters/cut.ts` is now IN
+  // this fix round's scope fence, so `measureWindow`/`measureAtCut` there were updated in the
+  // same commit to build this array as `SkipReason[]` from the start (each entry already comes
+  // from `LineOutcome.reason: SkipReason`, `core/metrics/parse.ts`) — no widening cast needed.
+  skippedReasons: SkipReason[];
   turns: number;
   tokens: TokenSums;
   perClass: Record<TriggerClass, ClassMetrics>;
@@ -86,8 +81,13 @@ export interface BaselineEntry {
   metrics: SessionMetrics;
 }
 
-/** `--verify`'s per-session outcome (spec §15's table) — never a silent difference. */
-export type VerifyStatus = 'verified' | 'prefix_mismatch' | 'truncated' | 'absent';
+/** `--verify`'s per-session outcome (spec §15's table) — never a silent difference.
+ * `metrics_mismatch` (Fix 3): the prefix hash matched but a re-measured metric differs from
+ * the recorded baseline — the hash-only check alone cannot catch a hand-edited metrics field.
+ * `unreadable` (Fix 4): a real fs failure mid-verify (EISDIR, EACCES, an ENOENT race after the
+ * exists-check, ELOOP) — reported per-entry, never an escaping traceback
+ * (`fail-closed-edges.md` obligation 1). */
+export type VerifyStatus = 'verified' | 'prefix_mismatch' | 'truncated' | 'absent' | 'metrics_mismatch' | 'unreadable';
 
 export interface VerifyResult {
   sessionId: string;

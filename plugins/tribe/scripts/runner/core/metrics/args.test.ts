@@ -86,4 +86,33 @@ describe('parseTranscriptMetricsArgs', () => {
     const got = parseTranscriptMetricsArgs(['--session', 'a', 'stray']);
     expect('error' in got && got.error).toBe('unexpected argument: stray');
   });
+
+  // Fix 5 (fail-closed-edges.md obligation 4): `join(dir, sessionId + '.jsonl')` must never be
+  // able to escape a project dir, and `--project` must never be bypassable by a crafted id.
+  describe('containment: --session refuses a path-shaped value', () => {
+    test('a path-traversal session id is rejected', () => {
+      const got = parseTranscriptMetricsArgs(['--session', '../../etc/passwd']);
+      expect('error' in got).toBe(true);
+      expect('error' in got && got.error.startsWith('--session:')).toBe(true);
+    });
+
+    test('a session id containing a path separator is rejected', () => {
+      const got = parseTranscriptMetricsArgs(['--session', 'a/b']);
+      expect('error' in got).toBe(true);
+      expect('error' in got && got.error.startsWith('--session:')).toBe(true);
+    });
+
+    test('a plain uuid session id is accepted', () => {
+      const got = parseTranscriptMetricsArgs(['--session', '6a8a8fe4-f716-43f2-936f-0da47662d9d9']);
+      expect('error' in got).toBe(false);
+    });
+  });
+
+  describe('containment: --project refuses a path-shaped value', () => {
+    test('a --project value containing a path separator is rejected', () => {
+      const got = parseTranscriptMetricsArgs(['--session', 'a', '--project', 'foo/bar']);
+      expect('error' in got).toBe(true);
+      expect('error' in got && got.error.startsWith('--project:')).toBe(true);
+    });
+  });
 });
