@@ -1310,7 +1310,7 @@ imports the SDK.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test** for `permit.ts` as a table:
+- [x] **Step 1: Write the failing test** for `permit.ts` as a table:
 
 ```ts
 import { expect, test } from 'bun:test';
@@ -1351,13 +1351,13 @@ builder gets its own test with an injected fake `realpath`, including the symlin
 under `<home>/link-out/x` whose `link-out` resolves outside the home must DENY, and the same path
 whose `link-out` resolves inside must ALLOW. That pair is the one a lexical-only check gets wrong.
 
-- [ ] **Step 2: Write `core/supervisor/permit.ts`** — the pure `containPath` reusing `containHome`'s
+- [x] **Step 2: Write `core/supervisor/permit.ts`** — the pure `containPath` reusing `containHome`'s
   segment logic from `core/watchdog/args.ts` rather than duplicating it, plus
   `buildContainmentHook(homeDir, io)` which resolves the target's deepest existing ancestor through
   `io.realpath` before calling it. A non-absolute path, or one that cannot be resolved at all, is
   denied.
 
-- [ ] **Step 3: Write `core/supervisor/session.ts`** — `buildOneShotOptions(kind, config,
+- [x] **Step 3: Write `core/supervisor/session.ts`** — `buildOneShotOptions(kind, config,
   abortController)` producing spec §5.1's envelope (`cwd` = the campaign home per S-P9,
   `settingSources: []`, `resume` never set, `permissionMode: 'default'`, the `disallowedTools`
   list, the containment hook for `ruling`/`ratify` only), and `runOneShotSession(...)` consuming
@@ -1368,7 +1368,7 @@ whose `link-out` resolves inside must ALLOW. That pair is the one a lexical-only
   spawn that throws resolves to a typed failure rather than rejecting; a timeout resolves to
   `timeout`.
 
-- [ ] **Step 4: Write the opt-in REAL-session test** —
+- [x] **Step 4: Write the opt-in REAL-session test** —
   `plugins/tribe/scripts/tests/test-supervisor-permission-real.sh`, gated behind `TRIBE_REAL_E2E=1`
   so `bun test` never bills anybody. It reproduces spec §19.4 exactly: a throwaway `HOME`, a fake
   repo root, a symlink inside the home pointing out of it, one live Haiku session under the REAL
