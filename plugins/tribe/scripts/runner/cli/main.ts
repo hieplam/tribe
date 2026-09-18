@@ -6,7 +6,7 @@
 // SDK spawn from session.adapter.ts) and hands it to `runLoop`. `main()` is deliberately NOT
 // unit-tested: the logic it depends on (`runLoop`, `deriveCardPhase`, ...) is fully covered
 // without touching a real binary or the network (same precedent as the adapters themselves).
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import {
   liveLockHolder,
@@ -29,6 +29,11 @@ import { containHome, parseWatchdogArgs, resolveHomeArg } from '../core/watchdog
 import { runWatchdog } from '../core/watchdog/watch-loop.ts';
 import { buildWatchdogIo, withHome } from '../adapters/watchdog-io.adapter.ts';
 import { WATCHDOG_EXIT_NEEDS_HUMAN, WATCHDOG_EXIT_USAGE } from '../core/watchdog/model.ts';
+import { parseTranscriptMetricsArgs, type TranscriptMetricsConfig } from '../core/metrics/args.ts';
+import { buildTranscriptIo } from '../adapters/transcript-io.adapter.ts';
+import { measureAtCut, verifyBaseline } from '../adapters/cut.ts';
+import type { BaselineEntry, BaselineFile } from '../core/metrics/model.ts';
+import type { TranscriptIO } from '../ports/ports.ts';
 
 const DEFAULT_SESSION_TIMEOUT_MS = 3 * 60 * 60 * 1000; // spec §2: 3h protocol default.
 const DEFAULT_VIEWER_PORT = 4321; // spec D11.
@@ -490,8 +495,108 @@ export function resolveWatchdogHome(
   return { homeDir: absHome };
 }
 
+// ---------------------------------------------------------------------------------------
+// `transcript-metrics` subcommand (Task 3, spec §15, card `## Measure first`). Token-free by
+// construction: it spawns nothing and reads nothing but transcript files.
+// ---------------------------------------------------------------------------------------
+
+/** Searches `io.listProjectDirs(root)` for a `<sessionId>.jsonl` file, honoring an optional
+ * `--project` filter (matched against each candidate directory's basename). `null` means no
+ * transcript was found anywhere searched — the caller turns that into a named, typed
+ * refusal, never a throw. */
+function findTranscriptPath(io: TranscriptIO, root: string, sessionId: string, project: string | null): string | null {
+  for (const dir of io.listProjectDirs(root)) {
+    if (project !== null && basename(dir) !== project) continue;
+    const candidate = join(dir, `${sessionId}.jsonl`);
+    if (io.fileExists(candidate)) return candidate;
+  }
+  return null;
+}
+
+function formatEntryHuman(entry: BaselineEntry): string {
+  const m = entry.metrics;
+  return [
+    `session ${entry.sessionId} (${entry.path})`,
+    `  turns=${m.turns} tokens(input=${m.tokens.input} cacheRead=${m.tokens.cacheRead} ` +
+      `cacheWrite=${m.tokens.cacheWrite} output=${m.tokens.output})`,
+    `  maxContext=${m.maxContext} babysittingShare=${m.babysittingShare.toFixed(4)} skippedLines=${m.skippedLines}`,
+    `  cut: lines=${entry.cut.lines} bytes=${entry.cut.bytes} sha256=${entry.cut.sha256}`,
+  ].join('\n');
+}
+
+/** The subcommand's execution, apart from argv parsing/`process.exit` (mirrors
+ * `performResetCard`'s shape) — exported so `cli/main.test.ts` can inject a fake
+ * `TranscriptIO` instead of touching a real `~/.claude/projects`. `measureAtCut`/
+ * `verifyBaseline` (`adapters/cut.ts`) always touch the real filesystem directly (see that
+ * file's own doc comment) — this function's `io` parameter governs only path discovery
+ * (`listProjectDirs`/`fileExists`) and the `--verify` baseline file's own read. */
+export async function runTranscriptMetrics(config: TranscriptMetricsConfig, io: TranscriptIO): Promise<number> {
+  if (config.verifyPath !== null) {
+    if (!io.fileExists(config.verifyPath)) {
+      console.error(`transcript-metrics: --verify file not found: ${config.verifyPath}`);
+      return 1;
+    }
+    let baseline: BaselineFile;
+    try {
+      const raw = [...io.readLines(config.verifyPath)].join('\n');
+      baseline = JSON.parse(raw) as BaselineFile;
+    } catch (err) {
+      console.error(
+        `transcript-metrics: --verify file ${config.verifyPath} is not valid JSON: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      return 1;
+    }
+    const results = verifyBaseline(baseline.sessions);
+    console.log(JSON.stringify(results, null, 2));
+    return results.every((r) => r.status === 'verified') ? 0 : 1;
+  }
+
+  const root = io.projectsRoot();
+  const entries: BaselineEntry[] = [];
+  for (const sessionId of config.sessions) {
+    const found = findTranscriptPath(io, root, sessionId, config.project);
+    if (found === null) {
+      console.error(
+        `transcript-metrics: no transcript found for session "${sessionId}"` +
+          `${config.project !== null ? ` under project "${config.project}"` : ''} (searched ${root})`,
+      );
+      return 1;
+    }
+    const { cut, metrics } = measureAtCut(found, config.cutBytes);
+    metrics.sessionId = sessionId;
+    entries.push({ sessionId, path: found, cut, metrics });
+  }
+
+  if (config.json) {
+    const output: BaselineFile = {
+      v: 1,
+      tool: 'transcript-metrics',
+      generatedAt: new Date().toISOString(),
+      sessions: entries,
+    };
+    console.log(JSON.stringify(output, null, 2));
+  } else {
+    for (const entry of entries) console.log(formatEntryHuman(entry));
+  }
+  return 0;
+}
+
 export async function main(): Promise<void> {
   const argv = process.argv.slice(2);
+
+  if (argv[0] === 'transcript-metrics') {
+    const parsed = parseTranscriptMetricsArgs(argv.slice(1));
+    if ('error' in parsed) {
+      console.error(`transcript-metrics: ${parsed.error}`);
+      process.exit(1);
+      return;
+    }
+    const io = buildTranscriptIo();
+    const exitCode = await runTranscriptMetrics(parsed.config, io);
+    process.exit(exitCode);
+    return;
+  }
 
   if (argv[0] === 'watchdog') {
     const parsed = parseWatchdogArgs(argv.slice(1));

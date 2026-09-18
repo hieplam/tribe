@@ -8,12 +8,19 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { announceViewer, parseArgs, parseResetCardArgs, performResetCard, scrubTargetEnvLocal } from './main.ts';
+import { homedir, tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import {
+  announceViewer, parseArgs, parseResetCardArgs, performResetCard, runTranscriptMetrics,
+  scrubTargetEnvLocal,
+} from './main.ts';
 import { campaignStatePathOf, escalationPathOf } from '../core/paths.ts';
 import { WATCHDOG_EXIT_NEEDS_HUMAN } from '../core/watchdog/model.ts';
 import type { ViewerLaunchDecision } from '../core/viewer-launch.ts';
+import { buildTranscriptIo } from '../adapters/transcript-io.adapter.ts';
+import { measureAtCut } from '../adapters/cut.ts';
+import type { TranscriptMetricsConfig } from '../core/metrics/args.ts';
+import type { TranscriptIO } from '../ports/ports.ts';
 
 const RUN_ID = '2026-07-24T00-00-00-000Z-beef';
 
@@ -783,5 +790,125 @@ describe('announceViewer (Task 27, spec §10.2)', () => {
     expect(out.error).toHaveBeenCalledTimes(1);
     expect(String(out.error.mock.calls[0]?.[0])).toContain('campaign viewer: failed to start (continuing): boom');
     expect(result).toBeNull();
+  });
+});
+
+function baseTranscriptConfig(overrides: Partial<TranscriptMetricsConfig> = {}): TranscriptMetricsConfig {
+  return { sessions: [], project: null, json: true, cutBytes: null, verifyPath: null, ...overrides };
+}
+
+describe('runTranscriptMetrics — the transcript-metrics subcommand (Task 3, fail-closed)', () => {
+  test('a session with no matching transcript is a typed refusal naming it, exit 1', async () => {
+    const io: TranscriptIO = {
+      readLines: () => [],
+      readPrefix: () => ({ text: '', sha256: '', actualBytes: 0 }),
+      fileExists: () => false,
+      listProjectDirs: () => ['/nowhere/project-a'],
+      projectsRoot: () => '/nowhere',
+    };
+    const { result, errors } = await captureConsole(() =>
+      runTranscriptMetrics(baseTranscriptConfig({ sessions: ['no-such-session'] }), io),
+    );
+    expect(result).toBe(1);
+    expect(errors.some((e) => e.includes('transcript-metrics') && e.includes('no-such-session'))).toBe(true);
+  });
+
+  test('a found session prints a cut-pinned entry and exits 0', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-'));
+    try {
+      const sessionId = 'sess-1';
+      writeFileSync(join(dir, `${sessionId}.jsonl`), `${JSON.stringify({ type: 'assistant', message: { id: 'a' } })}\n`);
+      const io: TranscriptIO = { ...buildTranscriptIo(), listProjectDirs: () => [dir] };
+
+      const { result, logs } = await captureConsole(() =>
+        runTranscriptMetrics(baseTranscriptConfig({ sessions: [sessionId] }), io),
+      );
+
+      expect(result).toBe(0);
+      const output = JSON.parse(logs.join(''));
+      expect(output.sessions).toHaveLength(1);
+      expect(output.sessions[0].sessionId).toBe(sessionId);
+      expect(output.sessions[0].cut.sha256).toHaveLength(64);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('--project filters which project directory is searched', async () => {
+    const dirA = mkdtempSync(join(tmpdir(), 'cli-transcript-a-'));
+    const dirB = mkdtempSync(join(tmpdir(), 'cli-transcript-b-'));
+    try {
+      const sessionId = 'sess-2';
+      writeFileSync(join(dirB, `${sessionId}.jsonl`), `${JSON.stringify({ type: 'assistant', message: { id: 'a' } })}\n`);
+      const io: TranscriptIO = { ...buildTranscriptIo(), listProjectDirs: () => [dirA, dirB] };
+
+      const wrongProject = await captureConsole(() =>
+        runTranscriptMetrics(baseTranscriptConfig({ sessions: [sessionId], project: basename(dirA) }), io),
+      );
+      expect(wrongProject.result).toBe(1);
+
+      const rightProject = await captureConsole(() =>
+        runTranscriptMetrics(baseTranscriptConfig({ sessions: [sessionId], project: basename(dirB) }), io),
+      );
+      expect(rightProject.result).toBe(0);
+    } finally {
+      rmSync(dirA, { recursive: true, force: true });
+      rmSync(dirB, { recursive: true, force: true });
+    }
+  });
+
+  test('--verify against a missing baseline file is a typed refusal, exit 1', async () => {
+    const io: TranscriptIO = { ...buildTranscriptIo(), fileExists: () => false };
+    const { result, errors } = await captureConsole(() =>
+      runTranscriptMetrics(baseTranscriptConfig({ verifyPath: '/nope/baseline.json' }), io),
+    );
+    expect(result).toBe(1);
+    expect(errors.some((e) => e.includes('transcript-metrics') && e.includes('/nope/baseline.json'))).toBe(true);
+  });
+
+  test('--verify against unparseable JSON is a typed refusal, exit 1, never a throw', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-verify-bad-'));
+    try {
+      const baselinePath = join(dir, 'baseline.json');
+      writeFileSync(baselinePath, 'not json{');
+      const io = buildTranscriptIo();
+
+      const { result, errors } = await captureConsole(() =>
+        runTranscriptMetrics(baseTranscriptConfig({ verifyPath: baselinePath }), io),
+      );
+
+      expect(result).toBe(1);
+      expect(errors.some((e) => e.includes('transcript-metrics') && e.includes('not valid JSON'))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('--verify re-measures every entry at its recorded cut and exits 0 only when all verify', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-verify-'));
+    try {
+      const transcriptPath = join(dir, 'sess-3.jsonl');
+      writeFileSync(transcriptPath, `${JSON.stringify({ type: 'assistant', message: { id: 'a' } })}\n`);
+      const { cut, metrics } = measureAtCut(transcriptPath, null);
+      metrics.sessionId = 'sess-3';
+      const baseline = {
+        v: 1,
+        tool: 'transcript-metrics',
+        generatedAt: new Date().toISOString(),
+        sessions: [{ sessionId: 'sess-3', path: transcriptPath, cut, metrics }],
+      };
+      const baselinePath = join(dir, 'baseline.json');
+      writeFileSync(baselinePath, JSON.stringify(baseline));
+      const io = buildTranscriptIo();
+
+      const { result, logs } = await captureConsole(() =>
+        runTranscriptMetrics(baseTranscriptConfig({ verifyPath: baselinePath }), io),
+      );
+
+      expect(result).toBe(0);
+      expect(JSON.parse(logs.join(''))).toEqual([{ sessionId: 'sess-3', status: 'verified' }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

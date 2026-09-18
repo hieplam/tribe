@@ -336,3 +336,27 @@ export interface WatchdogIO
     EnvPort,
     LockReadPort,
     LinePort {}
+
+// ---------------------------------------------------------------------------------------
+// Transcript reading edge (Task 3, spec §15, card `## Measure first`). Type declarations
+// only, same as the rest of this file — the real implementation is
+// `adapters/transcript-io.adapter.ts`.
+// ---------------------------------------------------------------------------------------
+
+export interface TranscriptIO {
+  /** Streams `path` one line at a time — never the whole file in one buffer (measured: the
+   * largest single transcript line is 442,691 bytes; a real session is 4.6 MB). */
+  readLines(path: string): Iterable<string>;
+  /** Reads EXACTLY `min(bytes, currentSize)` bytes from the start of `path` and hashes
+   * exactly those bytes — never the whole file (S-P14: this is what makes a pinned cut
+   * reproducible). */
+  readPrefix(path: string, bytes: number): { text: string; sha256: string; actualBytes: number };
+  fileExists(path: string): boolean;
+  /** Absolute paths of `root`'s immediate subdirectories. Non-recursive; a missing or
+   * unreadable root is `[]`, never a throw. */
+  listProjectDirs(root: string): string[];
+  /** `$CLAUDE_CONFIG_DIR/projects` when `CLAUDE_CONFIG_DIR` is set and non-empty, else
+   * `$HOME/.claude/projects` (viewer README, "## Run it", verbatim). An empty
+   * `CLAUDE_CONFIG_DIR=` is treated as unset. */
+  projectsRoot(): string;
+}

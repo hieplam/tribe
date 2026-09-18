@@ -450,7 +450,7 @@ and the viewer README, `## Run it`, verbatim:
 
 **Steps**
 
-- [ ] **Step 1: Write the failing tests.** `core/metrics/args.test.ts` mirrors
+- [x] **Step 1: Write the failing tests.** `core/metrics/args.test.ts` mirrors
   `core/watchdog/args.test.ts`'s shape: every unknown flag rejected by name, `--session` repeatable
   and required at least once, `--json` boolean, `--project` optional, `--cut-bytes` a bounded
   positive integer, `--verify <path>` mutually exclusive with `--session`.
@@ -459,16 +459,16 @@ and the viewer README, `## Run it`, verbatim:
   then asserts `skippedLines === 2` (the array and the malformed line; a blank line is not a skip),
   `skippedReasons` names both kinds, and that no exception escaped.
 
-- [ ] **Step 2: Append `TranscriptIO` to `ports/ports.ts`** — `readLines(path): Iterable<string>`,
+- [x] **Step 2: Append `TranscriptIO` to `ports/ports.ts`** — `readLines(path): Iterable<string>`,
   `readPrefix(path, bytes): { text: string; sha256: string; actualBytes: number }`,
   `fileExists(path): boolean`, `listProjectDirs(root): string[]`, `projectsRoot(): string`. Type
   declarations only, as that file requires. `readPrefix` is what makes S-P14's cut possible: it
   reads **exactly** `bytes` bytes and hashes exactly those, never the whole file.
 
-- [ ] **Step 3: Write the adapter and the pure arg parser**, then the `cli/main.ts` dispatch block
+- [x] **Step 3: Write the adapter and the pure arg parser**, then the `cli/main.ts` dispatch block
   mirroring the `watchdog` one: parse, resolve, run, print, `process.exit`.
 
-- [ ] **Step 4: Write the cut and `--verify`** (S-P14, spec §15). A run with `--cut-bytes n`
+- [x] **Step 4: Write the cut and `--verify`** (S-P14, spec §15). A run with `--cut-bytes n`
   measures only the first `n` bytes and emits a `cut` object. A run with `--verify <baseline.json>`
   re-measures every session at its recorded cut and compares, emitting one typed status per
   session — `verified` / `prefix_mismatch` / `truncated` / `absent` — and exiting `1` if any is not
@@ -535,7 +535,7 @@ test('a missing file is absent, not a throw', () => {
 });
 ```
 
-- [ ] **Step 5: Gate — run it against a REAL transcript** (`fixtures-mirror-reality.md` rule 2):
+- [x] **Step 5: Gate — run it against a REAL transcript** (`fixtures-mirror-reality.md` rule 2):
 
 ```sh
 cd plugins/tribe/scripts/runner
@@ -549,7 +549,7 @@ object with a `sha256`; the missing session prints one typed line naming the id 
 no stack trace. **Do not expect a particular turn count here** — that transcript is live and moves;
 the pinned number is Task 4's business.
 
-- [ ] **Step 6: Commit** — `feat(metrics): transcript reading edge, pinned cuts, and the transcript-metrics subcommand (task 3/24)`.
+- [x] **Step 6: Commit** — `feat(metrics): transcript reading edge, pinned cuts, and the transcript-metrics subcommand (task 3/24)`.
 
 ---
 
