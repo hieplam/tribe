@@ -675,7 +675,7 @@ the supervisor is NOT described yet — it does not exist.
 
 **Steps**
 
-- [ ] **Step 1: File-context gate, then author the ADR body outside `.c3/`.**
+- [x] **Step 1: File-context gate, then author the ADR body outside `.c3/`.**
 
 ```sh
 cd /Users/hip/repo/tribe-wt/campaign-supervisor
@@ -690,7 +690,7 @@ measurably wrong in six ways), the decision (a committed, tested, token-free sub
 numbers-only baseline file, landing before any supervisor code), and the evidence (the two gate
 commands and their measured outputs).
 
-- [ ] **Step 2: Cite, scaffold, patch, apply.**
+- [x] **Step 2: Cite, scaffold, patch, apply.**
 
 ```sh
 C3X_MODE=agent bash "$C3X_BIN" read c3-215 --section Contract --cite
@@ -705,7 +705,7 @@ C3X_MODE=agent bash "$C3X_BIN" check
 Expected: `change view` shows one pending patch with no drift; `apply` lands it; `check` prints
 `total: 53` (the entity count grows by the ADR) with `ok: true`.
 
-- [ ] **Step 3: Commit** — `docs(c3): ADR and c3-215 contract row for the transcript ratchet (task 5/24)`.
+- [x] **Step 3: Commit** — `docs(c3): ADR and c3-215 contract row for the transcript ratchet (task 5/24)`.
 
 ---
 
