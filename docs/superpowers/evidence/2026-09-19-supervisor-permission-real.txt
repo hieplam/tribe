@@ -1,0 +1,70 @@
+{
+  "outcome": "success",
+  "sessionId": "75c547fd-40a8-4698-85e7-1c1e6df4317c",
+  "finalText": "**✗ (d) refused** – Write to link-out/escape.txt not permitted (outside campaign home)\n\n---\n\nDONE",
+  "usage": {
+    "input_tokens": 42,
+    "cache_creation_input_tokens": 8982,
+    "cache_read_input_tokens": 84178,
+    "output_tokens": 1156,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 8982,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 7,
+        "output_tokens": 34,
+        "cache_read_input_tokens": 16596,
+        "cache_creation_input_tokens": 345,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 345
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "totalCostUsd": 0.0331338,
+  "permissionDenials": [
+    {
+      "tool_name": "Write",
+      "tool_use_id": "toolu_01DmDYUoKg9HNDgf2kSGMPXp",
+      "tool_input": {
+        "file_path": "/private/var/folders/t2/s0b8z5m947l7kdcvwtrtrt480000gn/T/tmp.VmsPz1rcyd/repo/src/touched.txt",
+        "content": "x"
+      }
+    },
+    {
+      "tool_name": "Write",
+      "tool_use_id": "toolu_01WjWGNHxiw7gLFBCC8YCFeb",
+      "tool_input": {
+        "file_path": "/tmp/tribe-supervisor-real-e2e-70696-31559.txt",
+        "content": "x"
+      }
+    },
+    {
+      "tool_name": "Write",
+      "tool_use_id": "toolu_01CUZMuftxvqfDKMi5TKJJzi",
+      "tool_input": {
+        "file_path": "/private/var/folders/t2/s0b8z5m947l7kdcvwtrtrt480000gn/T/tmp.VmsPz1rcyd/home/link-out/escape.txt",
+        "content": "x"
+      }
+    }
+  ]
+}
+ok - the run ended subtype=success with no prompt and no hang
+permission_denials payload: [{"tool_name": "Write", "tool_use_id": "toolu_01DmDYUoKg9HNDgf2kSGMPXp", "tool_input": {"file_path": "/private/var/folders/t2/s0b8z5m947l7kdcvwtrtrt480000gn/T/tmp.VmsPz1rcyd/repo/src/touched.txt", "content": "x"}}, {"tool_name": "Write", "tool_use_id": "toolu_01WjWGNHxiw7gLFBCC8YCFeb", "tool_input": {"file_path": "/tmp/tribe-supervisor-real-e2e-70696-31559.txt", "content": "x"}}, {"tool_name": "Write", "tool_use_id": "toolu_01CUZMuftxvqfDKMi5TKJJzi", "tool_input": {"file_path": "/private/var/folders/t2/s0b8z5m947l7kdcvwtrtrt480000gn/T/tmp.VmsPz1rcyd/home/link-out/escape.txt", "content": "x"}}]
+ok - (a) <home>/answers.md succeeded — byte length changed, prior history preserved as a prefix
+ok - (b) <repo>/src/touched.txt was denied — absent on disk
+ok - (c) /tmp/<unique>.txt was denied — absent on disk
+ok - (d) <home>/link-out/escape.txt (symlink escape) was denied — absent on disk
+
+5 passed, 0 failed

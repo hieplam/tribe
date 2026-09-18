@@ -1391,7 +1391,7 @@ whose `link-out` resolves inside must ALLOW. That pair is the one a lexical-only
 Expected: `4 passed, 0 failed`, and the script prints the `permission_denials` payload so a reader
 can see the three refusals. Skipped with a clear message when `TRIBE_REAL_E2E` is unset.
 
-- [ ] **Step 5: Gate.**
+- [x] **Step 5: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bun test structure.test.ts && bunx tsc --noEmit
@@ -1401,9 +1401,17 @@ TRIBE_REAL_E2E=1 bash ../tests/test-supervisor-permission-real.sh
 
 Expected: about 30 new tests pass; the structural contract green; `tsc` silent; the `grep` prints
 **nothing** — `adapters/session.adapter.ts` remains the only SDK importer, as the card's fence
-requires; and the real-session test reports `4 passed, 0 failed`.
+requires; and the real-session test reports `4 passed, 0 failed`. **Result (Warchief, 2026-09-19):**
+the containment hook was proven against a LIVE Haiku session — the real-token test reports
+`5 passed, 0 failed` (the four write outcomes plus the run-success check; "4" was the plan's count of
+the write assertions only, the substance R5 requires — all three escapes denied, the one contained
+write allowed — holds). The contained `<home>/answers.md` write SUCCEEDED (history preserved as a
+byte prefix); the repo write, the `/tmp` write, and the **symlink-escape** write (`<home>/link-out/…`
+resolving outside the home — the case a lexical check misses) were each DENIED and absent on disk;
+`permission_denials` named exactly those three; the run ended `subtype=success`, no hang, ~$0.073.
+Evidence: `docs/superpowers/evidence/2026-09-19-supervisor-permission-real.txt`.
 
-- [ ] **Step 6: Commit** — `feat(supervisor): least-privilege permission model, proven against a live session (task 13/24)`.
+- [x] **Step 6: Commit** — `feat(supervisor): least-privilege permission model, proven against a live session (task 13/24)`.
 
 ---
 
