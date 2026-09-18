@@ -1239,16 +1239,16 @@ child spawn, the `tribe-home.sh` execution, and the `git status --porcelain` pro
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test.** Against a `mktemp -d` tree: an atomic write survives a
+- [x] **Step 1: Write the failing test.** Against a `mktemp -d` tree: an atomic write survives a
   concurrent read (temp-then-rename, never a truncated read); `renameIfPresent` on an absent file is
   a no-op, not a throw; a path containing `..` that escapes the home is refused **before** the file
   is opened; `readFileOrEmpty` on an unreadable file returns `''`; `listEntries` on a missing
   directory returns `[]`; the `git` probe sets both config env vars and carries a timeout.
 
-- [ ] **Step 2: Append the port, write the adapter.** Note in the port's doc comment that
+- [x] **Step 2: Append the port, write the adapter.** Note in the port's doc comment that
   `spawnWatchdog` returns a handle with no `kill` — S-P7.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test adapters/supervisor-io.adapter.test.ts && bun test structure.test.ts && bunx tsc --noEmit
@@ -1257,7 +1257,7 @@ cd plugins/tribe/scripts/runner && bun test adapters/supervisor-io.adapter.test.
 Expected: about 12 new tests pass; the structural contract still green (the adapter is the only new
 file naming `node:fs`/`node:child_process`); `tsc` silent.
 
-- [ ] **Step 4: Commit** — `feat(supervisor): the IO seam and its fail-closed adapter (task 12/24)`.
+- [x] **Step 4: Commit** — `feat(supervisor): the IO seam and its fail-closed adapter (task 12/24)`.
 
 ---
 
