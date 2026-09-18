@@ -1,6 +1,6 @@
 ---
 id: adr-20260919-supervisor-core-change-safety
-c3-seal: 0c9bbc74c189e49517ec58a7afe13567812ceaaf1bb21a47fd8a697ae8190748
+c3-seal: 5cb6d776f232e79fc3a5f029767952c12b9965b6de363929904d5368c1e68a16
 title: supervisor-core-change-safety
 type: adr
 goal: |-
@@ -73,4 +73,4 @@ cycle this task exists to break.
 | Check | Result |
 | --- | --- |
 | C3X_MODE=agent bash "$C3X_BIN" change apply adr-20260919-supervisor-core-change-safety | applies clean; the new row lands as the last row of c3-215's Change Safety table |
-| C3X_MODE=agent bash "$C3X_BIN" check | total: 53, ok: true (no new component; core/supervisor/** is covered by the existing c3-215 row) |
+| C3X_MODE=agent bash "$C3X_BIN" check | total: 54, ok: true (this ADR is the one new entity; no new component — core/supervisor/** is covered by the existing c3-215 row) |
