@@ -75,6 +75,29 @@ read the same oracle. Spec section references are to
   several transcript lines, each repeating the full identical `usage` block. Per-line summing
   double-counts. Under-counting turns is a bug; over-reporting a skipped malformed line is by
   design.
+- **S-P12 — the containment hook is the ONLY enforcement, so it is impure and it is proven by a
+  real session** (spec §5.1, §19.4). Measured: with the hook removed, the same envelope wrote to
+  the repo, to `/tmp`, and through a symlink out of the home — `permissionMode: 'default'` confines
+  nothing and `additionalDirectories` is not a write boundary. The hook therefore follows
+  `decideMergeGateHook(io)`'s existing builder shape (`buildContainmentHook(homeDir, io)`), resolves
+  the target's deepest existing ancestor through `io.realpath`, and keeps only
+  `containPath(resolved, home)` pure. A unit table alone does not discharge this; Task 13's opt-in
+  real-session test does.
+- **S-P13 — a ruling never rewrites history, and a violation never retries** (spec §5.2, §5.3,
+  §3.4 rows V1-V2). The pre-session `answers.md` must be a byte prefix of the post-session file; a
+  ratify session may change only the blocks named in `run.unratifiedRulings`. Measured: a session
+  told to "write the exact text" replaced a 46-byte file with 16 bytes and would have passed every
+  original postcondition. Retrying cannot undo that, so it parks.
+- **S-P14 — the baseline is pinned to a byte cut, never to "the whole file"** (spec §15, §21 D2).
+  Measured: the cited transcript was live while being measured (1,443 → 1,507 → 1,509 lines), so an
+  unpinned baseline is not reproducible by anyone, including its author. Every entry records
+  `cut: {lines, bytes, sha256}` over exactly that prefix; a changed prefix, a short file or a
+  missing file is a typed status and exit 1, never a silent re-baseline.
+- **S-P15 — the context ratchet is a committed per-kind ceiling, measured not guessed** (spec §15).
+  The pinned baseline stays the historical record; the gate reads the ceiling file, whose values
+  Task 20 writes as `measured_max × 1.5`. Lowering is free; raising requires a recorded Shaman
+  ruling id. Until Task 20 runs, the gate falls back to the baseline and says
+  `"ceilingSource": "baseline-fallback"` in its own output.
 
 ---
 
@@ -429,20 +452,90 @@ and the viewer README, `## Run it`, verbatim:
 
 - [ ] **Step 1: Write the failing tests.** `core/metrics/args.test.ts` mirrors
   `core/watchdog/args.test.ts`'s shape: every unknown flag rejected by name, `--session` repeatable
-  and required at least once, `--json` boolean, `--project` optional.
+  and required at least once, `--json` boolean, `--project` optional, `--cut-bytes` a bounded
+  positive integer, `--verify <path>` mutually exclusive with `--session`.
   `adapters/transcript-io.adapter.test.ts` writes a throwaway JSONL under `mktemp -d` containing:
   two valid rows, one line of `{not json`, one line that is a bare JSON array, and one empty line —
   then asserts `skippedLines === 2` (the array and the malformed line; a blank line is not a skip),
   `skippedReasons` names both kinds, and that no exception escaped.
 
 - [ ] **Step 2: Append `TranscriptIO` to `ports/ports.ts`** — `readLines(path): Iterable<string>`,
+  `readPrefix(path, bytes): { text: string; sha256: string; actualBytes: number }`,
   `fileExists(path): boolean`, `listProjectDirs(root): string[]`, `projectsRoot(): string`. Type
-  declarations only, as that file requires.
+  declarations only, as that file requires. `readPrefix` is what makes S-P14's cut possible: it
+  reads **exactly** `bytes` bytes and hashes exactly those, never the whole file.
 
 - [ ] **Step 3: Write the adapter and the pure arg parser**, then the `cli/main.ts` dispatch block
   mirroring the `watchdog` one: parse, resolve, run, print, `process.exit`.
 
-- [ ] **Step 4: Gate — run it against a REAL transcript** (`fixtures-mirror-reality.md` rule 2):
+- [ ] **Step 4: Write the cut and `--verify`** (S-P14, spec §15). A run with `--cut-bytes n`
+  measures only the first `n` bytes and emits a `cut` object. A run with `--verify <baseline.json>`
+  re-measures every session at its recorded cut and compares, emitting one typed status per
+  session — `verified` / `prefix_mismatch` / `truncated` / `absent` — and exiting `1` if any is not
+  `verified`. It **never** rewrites the baseline.
+
+  The failing test that pins the append-only assumption (spec §15, §19.5) — a fixture that GROWS
+  between two measurements:
+
+```ts
+import { expect, test } from 'bun:test';
+import { mkdtempSync, appendFileSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { measureAtCut, verifyBaseline } from './cut.ts';
+
+test('a transcript that GROWS still verifies byte-identically at its recorded cut', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cut-'));
+  try {
+    const p = join(dir, 's.jsonl');
+    const row = (id: string) => JSON.stringify({
+      type: 'assistant', isSidechain: false,
+      message: { id, usage: { input_tokens: 1, cache_read_input_tokens: 2,
+                              cache_creation_input_tokens: 0, output_tokens: 3 } },
+    }) + '\n';
+    writeFileSync(p, row('a') + row('b'));
+    const first = measureAtCut(p, null);
+    expect(first.cut.bytes).toBeGreaterThan(0);
+
+    appendFileSync(p, row('c') + row('d'));           // the session kept running
+
+    const again = measureAtCut(p, first.cut.bytes);
+    expect(again.metrics).toEqual(first.metrics);      // the pinned numbers did not move
+    expect(again.cut.sha256).toBe(first.cut.sha256);
+    expect(verifyBaseline([{ sessionId: 's', path: p, ...first }])[0].status).toBe('verified');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a rewritten prefix is reported, never silently re-baselined', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cut-'));
+  try {
+    const p = join(dir, 's.jsonl');
+    writeFileSync(p, 'AAAA\n');
+    const pinned = measureAtCut(p, null);
+    writeFileSync(p, 'BBBB\nmore\n');                  // history rewritten
+    const [r] = verifyBaseline([{ sessionId: 's', path: p, ...pinned }]);
+    expect(r.status).toBe('prefix_mismatch');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a file shorter than the cut is truncated, not a crash', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cut-'));
+  try {
+    const p = join(dir, 's.jsonl');
+    writeFileSync(p, 'AAAA\nBBBB\n');
+    const pinned = measureAtCut(p, null);
+    writeFileSync(p, 'AA');
+    expect(verifyBaseline([{ sessionId: 's', path: p, ...pinned }])[0].status).toBe('truncated');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a missing file is absent, not a throw', () => {
+  expect(verifyBaseline([{ sessionId: 's', path: '/nope/nope.jsonl',
+    cut: { lines: 1, bytes: 1, sha256: 'x' }, metrics: {} as never }])[0].status).toBe('absent');
+});
+```
+
+- [ ] **Step 5: Gate — run it against a REAL transcript** (`fixtures-mirror-reality.md` rule 2):
 
 ```sh
 cd plugins/tribe/scripts/runner
@@ -451,11 +544,12 @@ bun run.ts transcript-metrics --session 6a8a8fe4-f716-43f2-936f-0da47662d9d9 --j
 bun run.ts transcript-metrics --session no-such-session-id-at-all ; echo "exit=$?"
 ```
 
-Expected: tests green; the real session prints JSON with `"turns": 174` and
-`"cacheRead": 26469777`; the missing session prints one typed line naming the id and `exit=1` with
-no stack trace.
+Expected: tests green, including all four cut tests; the real session prints JSON carrying a `cut`
+object with a `sha256`; the missing session prints one typed line naming the id and `exit=1` with
+no stack trace. **Do not expect a particular turn count here** — that transcript is live and moves;
+the pinned number is Task 4's business.
 
-- [ ] **Step 5: Commit** — `feat(metrics): transcript reading edge and the transcript-metrics subcommand (task 3/24)`.
+- [ ] **Step 6: Commit** — `feat(metrics): transcript reading edge, pinned cuts, and the transcript-metrics subcommand (task 3/24)`.
 
 ---
 
@@ -467,11 +561,17 @@ printed. Judgment is not required; fidelity is.
 **Files:** create `docs/superpowers/evidence/2026-09-18-supervisor-baseline.json` and
 `docs/superpowers/evidence/2026-09-18-supervisor-baseline.md`.
 
-**Oracle.** The committed tool's output IS the baseline. Do not hand-adjust a number to match the
-card's table; the card itself says the tool wins. **Numbers only** — the baseline file must contain
-no message text, no prompt text, no file paths from inside a transcript.
+**Oracle.** The committed tool's output IS the baseline, **and it is pinned to a cut** (S-P14). Do
+not hand-adjust a number to match the card's table or the spec's prose. **Numbers only** — the
+baseline file must contain no message text, no prompt text, no file paths from inside a transcript.
 
-**Fence by intent.** Two evidence files and nothing else. No source change.
+**The turn/token totals are expected to differ from the spec's §1.1 table, and that is correct.**
+Both cited transcripts were live while being measured during planning, so the numbers moved between
+readings (spec §21 D2). Whatever the tool measures at the cut you take **is** the baseline; record
+it and move on. The only numbers that must match exactly are the ones `--verify` produces on a
+re-run of that same cut.
+
+**Fence by intent.** Three evidence files and nothing else. No source change.
 
 **Governing quote** — the card, `## Measure first`, verbatim:
 > "**Only numbers are committed.** Transcripts are machine-local and private: the baseline file
@@ -486,11 +586,13 @@ no message text, no prompt text, no file paths from inside a transcript.
 **Steps**
 
 - [ ] **Step 1: Write the failing check.** Add `core/metrics/baseline.test.ts` asserting the
-  baseline file exists, parses, has `v: 1`, and carries exactly the two session ids — and that its
-  serialized text contains none of the strings `"content"`, `"text"`, `"prompt"` (the privacy wall,
-  mechanically enforced). It fails now because the file does not exist.
+  baseline file exists, parses, has `v: 1`, carries exactly the two session ids, and that **every
+  entry has a `cut` with a positive `bytes`, a positive `lines` and a 64-hex-character `sha256`** —
+  an unpinned entry is a failed baseline (S-P14). Also assert its serialized text contains none of
+  the strings `"content"`, `"text"`, `"prompt"` (the privacy wall, mechanically enforced). It fails
+  now because the file does not exist.
 
-- [ ] **Step 2: Generate the baseline.**
+- [ ] **Step 2: Generate the PINNED baseline.** Take the cut at each transcript's current length.
 
 ```sh
 cd plugins/tribe/scripts/runner
@@ -500,28 +602,50 @@ bun run.ts transcript-metrics \
   --json > ../../../../docs/superpowers/evidence/2026-09-18-supervisor-baseline.json
 ```
 
-Expected content, verbatim from the planning measurement — if the tool disagrees with ANY of these,
-stop and report `NEEDS_CONTEXT` rather than editing either side:
+Expected: valid JSON, two entries, each carrying a `cut` object. The numbers will be close to the
+planning measurements below but need not equal them — both sessions were live during planning:
 
-| Session | turns | cacheRead | cacheWrite | output | firstContext | maxContext | babysittingShare |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `6a8a8fe4-f716-43f2-936f-0da47662d9d9` | 174 | 26,469,777 | 934,272 | 102,960 | 41,693 | 258,795 | 0.3168 |
-| `ba6e93f0-72e4-4e08-9c64-03d7ea6fb917` | 154 | 28,075,416 | 1,267,340 | 125,461 | 40,845 | 307,375 | 0.5357 |
+| Session | turns (planning) | cacheRead (planning) | maxContext (planning) | babysittingShare |
+| --- | --- | --- | --- | --- |
+| `6a8a8fe4-f716-43f2-936f-0da47662d9d9` | 174 | 26,469,777 | 258,795 | 0.3168 |
+| `ba6e93f0-72e4-4e08-9c64-03d7ea6fb917` | 154 | 28,075,416 | 307,375 | 0.5357 |
 
-- [ ] **Step 3: Write the `.md` twin** — the table above, the per-class breakdown, the ratchet
-  assertion (spec §15: babysitting share 0, no Monitor arm, max context below 258,795), and a
-  "Deltas from the card's table" section recording all six discrepancies (spec §21 D2).
+- [ ] **Step 3: Prove the pin holds.** This is what makes it a ratchet rather than a snapshot:
 
-- [ ] **Step 4: Gate.**
+```sh
+bun run.ts transcript-metrics --verify \
+  ../../../../docs/superpowers/evidence/2026-09-18-supervisor-baseline.json ; echo "exit=$?"
+```
+
+Expected: both sessions report `"status": "verified"` with identical metrics and `exit=0` — even if
+either transcript has grown since step 2, because each is re-measured only over its recorded cut.
+
+- [ ] **Step 4: Create the ceiling file** at
+  `docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json` with
+  `{"v":1,"headroomFactor":1.5,"source":"unmeasured — task 20 writes these","ceilings":
+  {"ruling":0,"ratify":0,"closing":0,"doorbell":0}}`. A `0` means "not yet measured": the checker
+  falls back to the baseline figure and reports `"ceilingSource":"baseline-fallback"` (S-P15).
+  Add `core/metrics/ceiling.test.ts` asserting: a `0` ceiling falls back and says so; a measured
+  ceiling is used; **lowering a ceiling is accepted and raising one is refused** unless the entry
+  carries a `raisedBy` ruling id — with the refusal naming both the old and the new value.
+
+- [ ] **Step 5: Write the `.md` twin** — the measured table, the per-class breakdown, the cut for
+  each session, the ratchet assertion (spec §15), and a "Deltas from the card's table" section
+  recording spec §21's discrepancies **with D2's corrected explanation**: the turn/token deltas are
+  a moving-file effect, not a classifier error; only the class-bucket deltas were mis-bucketed.
+
+- [ ] **Step 6: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/metrics/ && bunx tsc --noEmit
 grep -c '"content"' ../../../../docs/superpowers/evidence/2026-09-18-supervisor-baseline.json
+python3 -c "import json;d=json.load(open('../../../../docs/superpowers/evidence/2026-09-18-supervisor-baseline.json'));print(all('cut' in s for s in d['sessions']))"
 ```
 
-Expected: tests green including the new baseline test; `grep -c` prints `0`.
+Expected: tests green including the baseline and ceiling tests; `grep -c` prints `0`; the python
+line prints `True`.
 
-- [ ] **Step 5: Commit** — `docs(evidence): committed transcript baseline for both measured sessions (task 4/24)`.
+- [ ] **Step 7: Commit** — `docs(evidence): pinned transcript baseline and the ratchet ceiling file (task 4/24)`.
 
 ---
 
@@ -828,6 +952,8 @@ directly as well as by `structure.test.ts`).
 `## ` block exists whose `ratified-as:` value passes the EXISTING `isRulingRatified()` — do not write
 a second vocabulary. A park marker counts only when it parses and its `kind` is one of the two
 allowed values; anything else is `too_hard` plus a counted malformed-marker event.
+**And history must be intact (S-P13):** the integrity check runs FIRST and its failure is not
+retryable.
 
 **Fence by intent.** Pure. It receives `answers.md`'s content before and after, the park-marker file
 contents, and the `git status --porcelain` output — as strings. It reads nothing.
@@ -855,19 +981,70 @@ Note S-P4: the archive half is performed by the supervisor after this check, not
   the same, never a throw; a non-empty `git status --porcelain` → `failed` with reason
   `repo_touched`, **even when a valid ruling landed** (decision 4: a violation is a failed ruling).
 
-- [ ] **Step 2: Write `core/supervisor/verify.ts`** — `verifyRuling`, `verifyRatify`,
-  `verifyClosing`, `parseParkMarker`, all pure, importing `parseRulings`/`isRulingRatified` from
-  `../rulings.ts`.
+- [ ] **Step 2: Write the failing integrity tests** (S-P13, spec §5.2/§5.3) — this is the half the
+  original postconditions missed:
 
-- [ ] **Step 3: Gate.**
+```ts
+import { expect, test } from 'bun:test';
+import { verifyRuling, verifyRatify } from './verify.ts';
+
+const PRE = '# answers\n\n## R1 one\nratified-as: operational\n';
+const APPENDED = PRE + '\n## R2 two\nratified-as: operational\n';
+
+test('a legitimate append verifies as ruled', () => {
+  expect(verifyRuling({ before: PRE, after: APPENDED, repoStatus: '' }).outcome).toBe('ruled');
+});
+
+test('a session that REPLACED the file parks history_rewritten, and is not retryable', () => {
+  const clobbered = '## R2 two\nratified-as: operational\n';   // R1 is gone
+  const v = verifyRuling({ before: PRE, after: clobbered, repoStatus: '' });
+  expect(v.outcome).toBe('history_rewritten');
+  expect(v.retryable).toBe(false);
+});
+
+test('a session that edited an EARLIER ruling parks history_rewritten', () => {
+  const edited = PRE.replace('R1 one', 'R1 one (tidied)') + '\n## R2 two\nratified-as: operational\n';
+  expect(verifyRuling({ before: PRE, after: edited, repoStatus: '' }).outcome).toBe('history_rewritten');
+});
+
+test('the integrity check runs BEFORE the new-block check: a clobber with a valid new block still parks', () => {
+  const v = verifyRuling({ before: PRE, after: '## R2 two\nratified-as: rule docs/x.md\n', repoStatus: '' });
+  expect(v.outcome).toBe('history_rewritten');
+});
+
+test('ratify may change only the ids it was given', () => {
+  const before = '## R1 a\nratified-as: pending\n\n## R2 b\nratified-as: operational\n';
+  const okAfter = '## R1 a\nratified-as: operational\n\n## R2 b\nratified-as: operational\n';
+  expect(verifyRatify({ before, after: okAfter, named: ['R1 a'] }).outcome).toBe('ratified');
+
+  const badAfter = '## R1 a\nratified-as: operational\n\n## R2 b\nratified-as: dismissed\n';
+  const v = verifyRatify({ before, after: badAfter, named: ['R1 a'] });
+  expect(v.outcome).toBe('ratify_out_of_scope');
+  expect(v.retryable).toBe(false);
+});
+
+test('ratify that drops a ruling id entirely parks out_of_scope', () => {
+  const before = '## R1 a\nratified-as: pending\n\n## R2 b\nratified-as: operational\n';
+  expect(verifyRatify({ before, after: '## R1 a\nratified-as: operational\n', named: ['R1 a'] }).outcome)
+    .toBe('ratify_out_of_scope');
+});
+```
+
+- [ ] **Step 3: Write `core/supervisor/verify.ts`** — `verifyRuling`, `verifyRatify`,
+  `verifyClosing`, `parseParkMarker`, all pure, importing `parseRulings`/`isRulingRatified` from
+  `../rulings.ts`. Every returned verdict carries a `retryable: boolean`; the two integrity
+  outcomes are the only ones that set it `false`.
+
+- [ ] **Step 4: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bunx tsc --noEmit
 ```
 
-Expected: about 15 new tests pass, everything from Tasks 6-7 still green, `tsc` silent.
+Expected: about 22 new tests pass, including all six integrity cases; everything from Tasks 6-7
+still green; `tsc` silent.
 
-- [ ] **Step 4: Commit** — `feat(supervisor): disk postcondition verification and park markers (task 8/24)`.
+- [ ] **Step 5: Commit** — `feat(supervisor): disk postconditions, ruling integrity and park markers (task 8/24)`.
 
 ---
 
@@ -1086,15 +1263,24 @@ file naming `node:fs`/`node:child_process`); `tsc` silent.
 existing `PreToolUse` hooks exactly; the option block mirrors `buildSessionOptions`.
 
 **Files:** create `core/supervisor/permit.ts`, `core/supervisor/permit.test.ts`,
-`core/supervisor/session.ts`, `core/supervisor/session.test.ts`.
+`core/supervisor/session.ts`, `core/supervisor/session.test.ts`,
+`plugins/tribe/scripts/tests/test-supervisor-permission-real.sh`.
 
 **Oracle.** Owner decision 4, verbatim below. A `Write`/`Edit` whose resolved target is not inside
 the campaign home is DENIED for a `ruling` or `ratify` session. Over-denying is by design;
 one escaped write is the defect. The `closing` session is the named exception and is NOT hooked.
 
-**Fence by intent.** `permit.ts` is a pure decision over one `PreToolUse` event, tested as a table.
-`session.ts` builds the option block and consumes the message stream through the existing
-`SessionIO` seam — it never imports the SDK.
+**This hook is the ONLY enforcement there is (S-P12).** Measured during planning (spec §19.4): with
+the hook removed, the identical envelope wrote to the repo, to `/tmp`, and through a symlink out of
+the home. `permissionMode: 'default'` confines nothing; `additionalDirectories` is a read
+convenience, not a write boundary. Treat a defect here as a security defect, not a tidiness one.
+
+**Fence by intent.** The *decision* — `containPath(resolvedTarget, homeDir)` — stays pure and
+table-tested in `permit.ts`. The *hook* cannot be pure: catching the symlink case requires
+resolving the target, so `buildContainmentHook(homeDir, io)` follows the builder shape
+`core/session.ts`'s own `decideMergeGateHook(io)` already established. `session.ts` builds the
+option block and consumes the message stream through the existing `SessionIO` seam — it never
+imports the SDK.
 
 **Governing quote** — the card, `## Ratified decisions`, item 4, verbatim:
 > "**Least privilege for judgment sessions.** A ruling/ratify session may write only under the
@@ -1107,8 +1293,16 @@ one escaped write is the defect. The `closing` session is the named exception an
   refused by S-P4 and spec §5.5: the supervisor archives. A shell allowlist is escaped by a second
   command on the same line.
 - "`permissionMode: 'bypassPermissions'` like the executor" — refused: the executor is trusted with
-  the repo by design; a judgment session is not.
+  the repo by design; a judgment session is not. Measured: `'default'` already lets the contained
+  write through, so there is no functional reason to reach for it.
 - "the hook should allow a write to `/tmp`" — refused: the campaign home is the only writable root.
+- "`permit.ts` must be pure, so drop the symlink case" — refused: the symlink escape is one of the
+  four shapes the real-session test exercises, and it was the one a lexical-only check would have
+  let through. The purity line is drawn at `containPath`, not at the hook.
+- "the unit table is enough; the real-session test is redundant" — refused by
+  `fixtures-mirror-reality.md`: the unit table only distinguishes deny from not-deny, and cannot
+  tell "allowed" from "silently refused by a permission layer with nobody to approve". Only a live
+  session answers that, and the session double never exercises the permission layer at all.
 
 **Steps**
 
@@ -1148,10 +1342,16 @@ test('a malformed event denies rather than throwing', () => {
 ```
 
 The `${HOME}-sibling` row is the segment-comparison case `containHome` already learned: a string
-prefix is not containment.
+prefix is not containment. Note these rows drive `containPath` directly — the pure half. The hook
+builder gets its own test with an injected fake `realpath`, including the symlink row: a target
+under `<home>/link-out/x` whose `link-out` resolves outside the home must DENY, and the same path
+whose `link-out` resolves inside must ALLOW. That pair is the one a lexical-only check gets wrong.
 
-- [ ] **Step 2: Write `core/supervisor/permit.ts`** — pure, reusing `containHome`'s segment logic
-  from `core/watchdog/args.ts` rather than duplicating it.
+- [ ] **Step 2: Write `core/supervisor/permit.ts`** — the pure `containPath` reusing `containHome`'s
+  segment logic from `core/watchdog/args.ts` rather than duplicating it, plus
+  `buildContainmentHook(homeDir, io)` which resolves the target's deepest existing ancestor through
+  `io.realpath` before calling it. A non-absolute path, or one that cannot be resolved at all, is
+  denied.
 
 - [ ] **Step 3: Write `core/supervisor/session.ts`** — `buildOneShotOptions(kind, config,
   abortController)` producing spec §5.1's envelope (`cwd` = the campaign home per S-P9,
@@ -1164,18 +1364,42 @@ prefix is not containment.
   spawn that throws resolves to a typed failure rather than rejecting; a timeout resolves to
   `timeout`.
 
-- [ ] **Step 4: Gate.**
+- [ ] **Step 4: Write the opt-in REAL-session test** —
+  `plugins/tribe/scripts/tests/test-supervisor-permission-real.sh`, gated behind `TRIBE_REAL_E2E=1`
+  so `bun test` never bills anybody. It reproduces spec §19.4 exactly: a throwaway `HOME`, a fake
+  repo root, a symlink inside the home pointing out of it, one live Haiku session under the REAL
+  envelope, and a prompt asking for four writes in order — insisting each be attempted even if an
+  earlier one is refused.
+
+```sh
+# (a) <home>/answers.md            MUST succeed  — the ruling path itself
+# (b) <repo>/src/touched.txt       MUST be denied
+# (c) /tmp/<unique>.txt            MUST be denied
+# (d) <home>/link-out/escape.txt   MUST be denied (link-out resolves outside the home)
+#
+# Assert on DISK, not on what the model said:
+#   a) the answers.md byte length changed
+#   b,c,d) none of the three files exist
+#   result.permission_denials names exactly the three denied calls
+#   the run ended subtype=success with no prompt and no hang
+```
+
+Expected: `4 passed, 0 failed`, and the script prints the `permission_denials` payload so a reader
+can see the three refusals. Skipped with a clear message when `TRIBE_REAL_E2E` is unset.
+
+- [ ] **Step 5: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bun test structure.test.ts && bunx tsc --noEmit
 grep -rn "claude-agent-sdk" core/ | grep -v '\.test\.ts'
+TRIBE_REAL_E2E=1 bash ../tests/test-supervisor-permission-real.sh
 ```
 
-Expected: about 25 new tests pass; the structural contract green; `tsc` silent; the `grep` prints
+Expected: about 30 new tests pass; the structural contract green; `tsc` silent; the `grep` prints
 **nothing** — `adapters/session.adapter.ts` remains the only SDK importer, as the card's fence
-requires.
+requires; and the real-session test reports `4 passed, 0 failed`.
 
-- [ ] **Step 5: Commit** — `feat(supervisor): least-privilege permission model and the one-shot session runner (task 13/24)`.
+- [ ] **Step 6: Commit** — `feat(supervisor): least-privilege permission model, proven against a live session (task 13/24)`.
 
 ---
 
@@ -1610,19 +1834,50 @@ PY
 
 Expected: `ledger ok:` with between 1 and 4 spawns and no `failed`/`timeout` verdict.
 
-- [ ] **Step 3: Assert the G0 ratchet over the run's own transcripts.** Collect every session id
-  from the ledger, run the Task-3 subcommand over them, and assert the three ratchet conditions
-  from spec §15: babysitting share is `0`, `monitorArms` is `0`, and every session's `maxContext`
-  is below `258795`.
+- [ ] **Step 3: Assert the G0 ratchet, and WRITE the measured ceilings** (S-P15). Collect every
+  session id from the ledger, measure them, assert the first two ratchet conditions, then turn the
+  measured maxima into the committed per-kind ceilings.
 
 ```sh
 bun plugins/tribe/scripts/runner/run.ts transcript-metrics \
   $(python3 -c 'import json,sys;print(" ".join("--session "+json.loads(l)["sessionId"] for l in open(sys.argv[1]) if l.strip()))' "$HOME_DIR/supervisor/ledger.jsonl") \
-  --json
+  --json > "$TMP/e2e-metrics.json"
+python3 - "$TMP/e2e-metrics.json" "$HOME_DIR/supervisor/ledger.jsonl" \
+  docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json <<'PY'
+import json, math, sys
+metrics, ledger, ratchet_path = sys.argv[1], sys.argv[2], sys.argv[3]
+m = {s["sessionId"]: s for s in json.load(open(metrics))["sessions"]}
+kind = {json.loads(l)["sessionId"]: json.loads(l)["kind"] for l in open(ledger) if l.strip()}
+for sid, s in m.items():
+    assert s["babysittingShare"] == 0, (sid, s["babysittingShare"])
+    assert s["monitorArms"] == 0, (sid, s["monitorArms"])
+r = json.load(open(ratchet_path)); f = r["headroomFactor"]
+peak = {}
+for sid, s in m.items():
+    k = kind.get(sid, "ruling")
+    peak[k] = max(peak.get(k, 0), s["maxContext"])
+for k, v in peak.items():
+    r["ceilings"][k] = math.ceil(v * f)
+r["source"] = f"measured by task 20 from {len(m)} session(s); factor {f}"
+json.dump(r, open(ratchet_path, "w"), indent=2)
+print("measured maxima:", peak, "-> ceilings:", r["ceilings"])
+PY
 ```
 
-Expected: every session reports `"babysittingShare": 0`, `"monitorArms": 0`, and a `maxContext`
-two orders of magnitude below the baseline's `258795`.
+Expected: every session reports `"babysittingShare": 0` and `"monitorArms": 0`; the script prints
+the measured maxima per kind and the ceilings it wrote (each `measured × 1.5`, rounded up). A kind
+with no session in this run keeps its `0` and stays on the baseline fallback — do not invent one.
+
+- [ ] **Step 3a: Re-run the ceiling gate against the file just written.**
+
+```sh
+cd plugins/tribe/scripts/runner && bun test core/metrics/ceiling.test.ts
+git -C /Users/hip/repo/tribe-wt/campaign-supervisor diff --stat docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json
+```
+
+Expected: the ceiling tests pass against real values, the diff shows only `ceilings` and `source`
+changing, and no ceiling was raised relative to a previously measured value (the first measurement
+moves them off `0`, which the test treats as the initial set, not a raise).
 
 - [ ] **Step 4: Prove G6 in the viewer.** Start the viewer, open it, and record BOTH:
   the project directory listing (reproducible) and a screenshot (what the card asks for).
@@ -1703,8 +1958,16 @@ a defect.
 
 **Fence by intent.** Stage B gains the supervisor launch beside the watchdog launch; Stage C gains
 "the supervisor does this for you, and here is when it hands back"; Stage D gains "a closing session
-may already have run — verify, do not repeat"; a new short "The doorbell session" section. Walls W1,
-W3 and W7 are **not** reworded.
+may already have run — verify, do not repeat"; a new "The doorbell session" section carrying the
+six-step owner-ruling transcription procedure from spec §12.1. Walls W1, W3 and W7 are **not**
+reworded.
+
+**The doorbell writes `answers.md` — and that is W3-compliant, by the Shaman's ruling of
+2026-09-18.** W3 reads "written only by you (a session) **or the owner**". The doorbell never rules
+on its own authority; when the owner states a decision it records that decision verbatim, marked
+`ruled-by: owner`, then archives the escalation, deletes the `NEEDS_OWNER.md` latch, and restarts
+the supervisor. Document the procedure exactly as spec §12.1 numbers it, including that
+`ratified-as: pending` is a legitimate outcome when the owner gives no disposition.
 
 **Governing quote** — the card's scope fence, verbatim:
 > "`orchestrate-campaign/SKILL.md` is updated so Stage B/C/D describe the supervisor path and the
@@ -1726,9 +1989,12 @@ W3 and W7 are **not** reworded.
 # Wall 1: SKILL.md names the supervisor launch in Stage B and keeps the bare watchdog launch.
 grep -q 'run.ts supervise' "$SKILL" || bad "Stage B names the supervisor"
 grep -q 'run.ts watchdog'  "$SKILL" || bad "the watchdog launch is still documented"
-# Wall 2: the doorbell section exists and states the three things it never does.
+# Wall 2: the doorbell section exists, states what it never does, and carries the owner-ruling
+# transcription procedure (spec 12.1) including the ruled-by marker and the latch deletion.
 grep -q 'doorbell' "$SKILL" || bad "the doorbell section exists"
-grep -q 'never rules' "$SKILL" || bad "the doorbell never rules"
+grep -q 'never rules on its own authority' "$SKILL" || bad "the doorbell never rules on its own authority"
+grep -q 'ruled-by: owner' "$SKILL" || bad "the owner-ruling marker is documented"
+grep -q 'NEEDS_OWNER.md' "$SKILL" || bad "the latch and its deletion are documented"
 # Wall 3: the walls are untouched, byte for byte.
 grep -q 'W7 — bounded auto-answer.\*\* At most 2 auto-answer rounds per card' "$SKILL" || bad "W7 unchanged"
 grep -q 'W3 — judgment stays in sessions' "$SKILL" || bad "W3 unchanged"
@@ -1849,7 +2115,10 @@ only the change-unit and document files this plan authored (`.c3/c3.db` is git-i
 
 | Goal | Tasks that prove it | Proof artefact |
 | --- | --- | --- |
-| **G0** ratchet | 1, 2, 3, **4** | `docs/superpowers/evidence/2026-09-18-supervisor-baseline.json` plus its `.md` twin |
+| **G0** ratchet | 1, 2, 3, **4**, 20 step 3 | The **pinned** baseline plus its `.md` twin; `--verify` re-measuring at the cut; the grow-then-remeasure fixture; the measured per-kind ceiling file |
+| **Ruling integrity** (S-P13) | **8**, 14, 17 | `history_rewritten` and `ratify_out_of_scope` park without a retry |
+| **Enforcement is real** (S-P12) | **13** | `test-supervisor-permission-real.sh`: contained write lands, three escape shapes denied, against a live model |
+| **Owner ruling path** (spec §12.1) | **22** | The SKILL.md procedure, grep-gated for `ruled-by: owner` and the latch |
 | **G1** no babysitter | 14, 17, **20** | The real E2E evidence file: one command, exit 0, no session held |
 | **G2** tokens only for judgment | 13, 14, **20** | `ledger.jsonl` has one line per spawn; the supervisor's loop appears in no transcript |
 | **G3** bounded context | 9, 13, **19** | The replay fixture: 5 spawns, no `resume`, against 174 measured turns |
@@ -1880,15 +2149,26 @@ only the change-unit and document files this plan authored (`.c3/c3.db` is git-i
 | 8. `c3x check` `ok: true`, no new error | Tasks 5, 11, 16, 21, 24 |
 | 9. Fence, two skinners, tracker, scout, the ADR and the decision-4 change-unit | §8 below; Task 16 |
 
-## 7. Spec amendments awaiting the Shaman's ratification
+## 7. Spec amendments — all ruled, nothing outstanding
 
-Spec §20 carries seven (A1 through A7). None changes What or Why; the plan already builds to them.
-The two the Shaman should rule on first, because a different ruling changes tasks:
+The Shaman reviewed this plan on 2026-09-18 and ruled on every open item. Spec §20 carries the full
+status. Nothing here awaits a decision, and **none of it is to be re-litigated by an executing
+session**:
 
-- **A1** — the session rules, the supervisor archives (affects Tasks 8, 13, 14, 17, 18).
-- **A2** — the two closed park-marker vocabularies (affects Tasks 6, 8, 10).
-
-The rest are measurement corrections or naming (A3 through A7) and change no task's shape.
+| Amendment | Status | Tasks built to it |
+| --- | --- | --- |
+| A1 — the session rules, the supervisor archives | **ACCEPTED** (option a) | 8, 13, 14, 17, 18 |
+| A2 — two closed park vocabularies | **ACCEPTED**, extended to 22 supervisor values by A9 | 6, 8, 10 |
+| A3 — "use the measured 258,795" | **REPLACED** by A3′ — a bound two orders of magnitude above the expected value is not a ratchet | — |
+| A3′ — committed per-kind ceilings, measured, lowerable only | **REQUIRED, built** | 4, 20 |
+| A4 — the supervisor owns the W7 counter | **ACCEPTED**; FU-CS-1 out of fence | 7, 10 |
+| A5 — exit codes `20`/`21` | **ACCEPTED** | 6, 15 |
+| A6 — G6 needs no viewer change | **ACCEPTED**; FU-CS-2 out of fence | 13, 20 |
+| A7 — `--home` beside `--campaign` | **ACCEPTED** | 6, 15 |
+| A8 — the baseline is pinned to a byte cut | **REQUIRED, built** | 3, 4 |
+| A9 — rulings are append-only, mechanically | **REQUIRED, built** | 6, 8, 14, 17 |
+| A10 — the hook is the sole enforcement, proven live | **REQUIRED, built** | 13 |
+| A11 — the doorbell transcribes an owner ruling | **REQUIRED, built** | 22 |
 
 ## 8. Delivery — what the Warchief does after Task 24
 
@@ -1899,6 +2179,10 @@ The rest are measurement corrections or naming (A3 through A7) and change no tas
    - `bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh` (`0 failed`)
    - `bash plugins/tribe/scripts/tests/test-supervisor-kill.sh` (`0 failed`)
    - `bash plugins/tribe/scripts/tests/test-supervisor-docs.sh` (`0 failed`)
+   - `TRIBE_REAL_E2E=1 bash plugins/tribe/scripts/tests/test-supervisor-permission-real.sh`
+     (`4 passed, 0 failed` — the only proof the enforcement layer works against a live model)
+   - `bun run.ts transcript-metrics --verify docs/superpowers/evidence/2026-09-18-supervisor-baseline.json`
+     (every session `verified`, exit 0 — re-measured at its pinned cut)
    - `bash plugins/tribe/scripts/tests/test-fresh-machine.sh` (unmoved)
    - `C3X_MODE=agent bash "$C3X_BIN" check` (`ok: true`)
    - `bash plugins/tribe/scripts/validate-plan.sh docs/superpowers/plans/2026-09-18-campaign-supervisor.md`
@@ -1924,7 +2208,7 @@ The rest are measurement corrections or naming (A3 through A7) and change no tas
 **Scope-fence self-check before opening the PR.** `git diff --name-only master...HEAD` must be a
 subset of:
 `plugins/tribe/scripts/runner/{core/metrics/**,core/supervisor/**,ports/ports.ts,adapters/supervisor-io.adapter.ts,adapters/supervisor-io.adapter.test.ts,adapters/transcript-io.adapter.ts,adapters/transcript-io.adapter.test.ts,cli/main.ts,cli/main.test.ts,fixtures/supervisor/**,README.md}`,
-`plugins/tribe/scripts/tests/{test-supervisor-e2e.sh,test-supervisor-kill.sh,test-supervisor-real-e2e.sh,test-supervisor-docs.sh}`,
+`plugins/tribe/scripts/tests/{test-supervisor-e2e.sh,test-supervisor-kill.sh,test-supervisor-real-e2e.sh,test-supervisor-docs.sh,test-supervisor-permission-real.sh}`,
 `plugins/tribe/skills/orchestrate-campaign/SKILL.md`, `plugins/tribe/README.md`,
 `docs/superpowers/{specs,plans,evidence}/**`, `.c3/**`.
 Note what is NOT there: `core/types.ts`, `core/state.ts`, `core/watchdog/**`, and the entire
