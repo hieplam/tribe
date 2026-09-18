@@ -334,7 +334,7 @@ distinct turn is the other. Context size for a turn is `input + cache_read + cac
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test.** `core/metrics/accumulate.test.ts` — build rows as literal
+- [x] **Step 1: Write the failing test.** `core/metrics/accumulate.test.ts` — build rows as literal
   objects (no file IO) covering, at minimum:
 
 ```ts
@@ -400,11 +400,11 @@ test('Monitor arms are counted from assistant tool_use blocks', () => {
 });
 ```
 
-- [ ] **Step 2: Write `core/metrics/accumulate.ts`.** One exported pure function
+- [x] **Step 2: Write `core/metrics/accumulate.ts`.** One exported pure function
   `accumulate(rows: unknown[]): SessionMetrics`, walking rows in order, holding the current trigger
   class and a `Set` of seen message ids. No clock, no fs, no throw.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/metrics/ && bunx tsc --noEmit
@@ -412,7 +412,7 @@ cd plugins/tribe/scripts/runner && bun test core/metrics/ && bunx tsc --noEmit
 
 Expected: all Task-1 and Task-2 tests pass (about 18), `tsc` silent.
 
-- [ ] **Step 4: Commit** — `feat(metrics): pure turn accumulation with message-id de-duplication (task 2/24)`.
+- [x] **Step 4: Commit** — `feat(metrics): pure turn accumulation with message-id de-duplication (task 2/24)`.
 
 ---
 
