@@ -174,3 +174,31 @@ test('validateBaselineFile refuses a sha256 that is not 64 lowercase hex charact
     expect('error' in got).toBe(true);
   }
 });
+
+// Blocker fix (fail-closed-edges.md obligation 1): `metrics` was never checked, so an entry
+// with `metrics` deleted/non-object sailed past validation and later threw a TypeError deep
+// inside `firstMismatchedMetricField` (`recorded[field]` on a non-object `recorded`).
+test('validateBaselineFile refuses an entry whose metrics is missing or not a plain object', () => {
+  for (const bad of [undefined, null, 'x', 42, []]) {
+    const sessions = bad === undefined
+      ? [{ sessionId: VALID_ENTRY.sessionId, path: VALID_ENTRY.path, cut: VALID_ENTRY.cut }]
+      : [{ ...VALID_ENTRY, metrics: bad }];
+    const got = validateBaselineFile(validBaselineFile({ sessions }));
+    expect('error' in got).toBe(true);
+    if ('error' in got) expect(got.error).toContain('metrics');
+  }
+});
+
+// Defense in depth: even if a non-object `metrics` reaches `verifyBaseline` directly (it is an
+// exported function, called from tests, not gated behind validateBaselineFile), it must never
+// throw — `firstMismatchedMetricField` would otherwise do `recorded[field]` on a non-object.
+test('verifyBaseline treats a non-object recorded.metrics as metrics_mismatch, never a throw', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cut-'));
+  try {
+    const p = join(dir, 's.jsonl');
+    writeFileSync(p, `${JSON.stringify({ type: 'assistant', message: { id: 'a' } })}\n`);
+    const { cut } = measureAtCut(p, null);
+    const [r] = verifyBaseline([{ sessionId: 's', path: p, cut, metrics: undefined as never }]);
+    expect(r.status).toBe('metrics_mismatch');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

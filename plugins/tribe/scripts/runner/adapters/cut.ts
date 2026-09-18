@@ -128,9 +128,18 @@ const COMPARED_METRIC_FIELDS: ReadonlyArray<Exclude<keyof SessionMetrics, 'sessi
   'firstAt', 'lastAt', 'babysittingShare', 'sidechain',
 ];
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 /** The first field (in `COMPARED_METRIC_FIELDS` order) where `remeasured` disagrees with
- * `recorded`, or `null` when every compared field matches. */
+ * `recorded`, or `null` when every compared field matches. Defense in depth (fail-closed-edges.md
+ * obligation 1): `validateBaselineFile` is the primary guard against a non-object `recorded`
+ * (deleted/tampered `metrics`), but this function is itself exported and called directly from
+ * tests with no validator in front of it, so a non-object `recorded` must be caught HERE too,
+ * never crash on `recorded[field]`. */
 function firstMismatchedMetricField(remeasured: SessionMetrics, recorded: SessionMetrics): string | null {
+  if (!isPlainObject(recorded)) return COMPARED_METRIC_FIELDS[0];
   for (const field of COMPARED_METRIC_FIELDS) {
     if (JSON.stringify(remeasured[field]) !== JSON.stringify(recorded[field])) return field;
   }
@@ -258,6 +267,12 @@ export function validateBaselineFile(data: unknown): { entries: BaselineEntry[] 
     }
     if (typeof c['sha256'] !== 'string' || !CUT_SHA256_HEX.test(c['sha256'])) {
       return { error: `sessions[${i}].cut.sha256 must be 64 lowercase hex characters` };
+    }
+    // Blocker fix (fail-closed-edges.md obligation 1): an entry with `metrics` deleted/
+    // non-object used to pass validation, then throw a TypeError deep inside
+    // firstMismatchedMetricField (`recorded[field]` on a non-object `recorded`).
+    if (!isPlainObject(entry['metrics'])) {
+      return { error: `sessions[${i}].metrics must be an object` };
     }
 
     entries.push(entry as unknown as BaselineEntry);

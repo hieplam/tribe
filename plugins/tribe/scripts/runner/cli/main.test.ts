@@ -1031,3 +1031,40 @@ describe('transcript-metrics subcommand: --verify accepts BOTH a relative and an
     }
   }, 30_000);
 });
+
+// Blocker fix (fail-closed-edges.md obligation 1): a baseline entry with `metrics` deleted
+// (path/cut/sha still valid) used to sail past validateBaselineFile, then reach
+// firstMismatchedMetricField(remeasured, recorded) where `recorded` is `undefined`, and
+// `recorded[field]` threw an uncaught TypeError that escaped main() as a stack trace. Real
+// subprocess e2e (CLAUDE.md: reproduce the way an end user experiences it) because this is
+// exactly the way a user would see the crash — through `bun run.ts ...`, not a unit call.
+describe('transcript-metrics subcommand: a --verify entry with metrics deleted is fail-closed, not a stack trace', () => {
+  test('one typed line, non-zero exit, no TypeError/stack trace in stdout or stderr', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-no-metrics-'));
+    try {
+      const transcriptPath = join(dir, 'sess-nometrics.jsonl');
+      writeFileSync(transcriptPath, `${JSON.stringify({ type: 'assistant', message: { id: 'a' } })}\n`);
+      const { cut } = measureAtCut(transcriptPath, null);
+      const baseline = {
+        v: 1, tool: 'transcript-metrics', generatedAt: 'x',
+        sessions: [{ sessionId: 'sess-nometrics', path: transcriptPath, cut }], // metrics deleted
+      };
+      const baselinePath = join(dir, 'baseline.json');
+      writeFileSync(baselinePath, JSON.stringify(baseline));
+      const runnerEntry = join(import.meta.dir, '..', 'run.ts');
+
+      const result = spawnSync('bun', [runnerEntry, 'transcript-metrics', '--verify', baselinePath],
+        { cwd: dir, encoding: 'utf8', timeout: 600000 });
+
+      const stackFramePattern = /\n\s+at /; // Node/Bun stack trace frame, e.g. "\n    at foo (bar.ts:1:1)"
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).not.toContain('TypeError');
+      expect(result.stdout).not.toMatch(stackFramePattern);
+      expect(result.stderr).not.toContain('TypeError');
+      expect(result.stderr).not.toMatch(stackFramePattern);
+      expect(result.stderr.includes('metrics')).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
