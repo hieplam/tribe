@@ -1180,7 +1180,7 @@ described yet — it lands in Task 16, with the phase that builds it.
 
 **Steps**
 
-- [ ] **Step 1: Cite, scaffold, patch, apply.**
+- [x] **Step 1: Cite, scaffold, patch, apply.**
 
 ```sh
 cd /Users/hip/repo/tribe-wt/campaign-supervisor
@@ -1199,7 +1199,7 @@ C3X_MODE=agent bash "$C3X_BIN" check
 Expected: one pending patch, no drift, `apply` lands it, `check` prints `total: 53` with
 `ok: true`.
 
-- [ ] **Step 2: Commit** — `docs(c3): change-safety row for the supervisor core (task 11/24)`.
+- [x] **Step 2: Commit** — `docs(c3): change-safety row for the supervisor core (task 11/24)`.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 id: c3-215
-c3-seal: 569be91c1ea507ed706ddc67e1760688b20eb457f00f191299d628c8a3630b08
+c3-seal: bd00bf1cfa393093eaf49e4dd8797cce459f06ec0a94be7d1180c77a6c96b6c6
 title: tribe
 type: component
 category: feature
@@ -91,6 +91,7 @@ Owns the delivery role contracts: who may talk to whom (Owner ⇄ Shaman ⇄ War
 | Runner accepts an unshipped card, or wedges the campaign | Editing verify.ts (the D3 seven-point replay, incl. gapGateStamped and ledgerCommitted), or any gh/git invocation in the runner | Mocked seams validate logic but NOT the commands: gh api pulls/<pr> 404d in reality while 25 tests passed, which would have failed every card forever. A wrong invocation is invisible to the suite | cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit; plus execute any changed gh/git command against a real repo before trusting it |
 | The skill resolves the runner to a wrong path, or a campaign starts on a machine that cannot finish it | Editing resolve-runner.sh, doctor.sh, or re-inlining runner resolution into SKILL.md as shell prose | Invisible on the author's machine, where ~/.claude/skills/orchestrate-campaign always exists — this class needs a SECOND machine to appear. The original readlink -f fallback printed nothing and exited 1 when the skill was not installed there; $() discarded the exit code, dirname "" returned ., and it collapsed to ./scripts/runner against the target repo. A moved repo was worse: readlink prints the deepest surviving ancestor, so the result was a confident WRONG absolute path | bash plugins/tribe/scripts/tests/test-fresh-machine.sh (throwaway HOME per probe — the isolation is load-bearing: without overriding HOME every probe reads the author's real install and passes against a broken resolver). Mutation-check any change: swap the old expression back in and confirm the harness FAILS, incl. an empty HOME never yields the forbidden relative path |
 | The watchdog waits forever, relaunches forever, or kills a healthy runner | Editing core/watchdog/* | The 48-row action-table test plus the double-driven integration tests | cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit; bash plugins/tribe/scripts/tests/test-watchdog-e2e.sh |
+| A wrong decide() row spawns a supervision session that was not needed, or parks one that should have run | Editing core/supervisor/** (the pure decide table, verify postconditions, the brief renderer, state/status shaping) | The row-per-case decide.test.ts table plus the pure verify/state/status suites; a mocked seam validates the logic but the real session is wired only by the Task-14 loop | cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit |
 
 ## Derived Materials
 
