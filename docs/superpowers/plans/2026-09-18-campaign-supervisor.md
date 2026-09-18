@@ -585,14 +585,14 @@ re-run of that same cut.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing check.** Add `core/metrics/baseline.test.ts` asserting the
+- [x] **Step 1: Write the failing check.** Add `core/metrics/baseline.test.ts` asserting the
   baseline file exists, parses, has `v: 1`, carries exactly the two session ids, and that **every
   entry has a `cut` with a positive `bytes`, a positive `lines` and a 64-hex-character `sha256`** —
   an unpinned entry is a failed baseline (S-P14). Also assert its serialized text contains none of
   the strings `"content"`, `"text"`, `"prompt"` (the privacy wall, mechanically enforced). It fails
   now because the file does not exist.
 
-- [ ] **Step 2: Generate the PINNED baseline.** Take the cut at each transcript's current length.
+- [x] **Step 2: Generate the PINNED baseline.** Take the cut at each transcript's current length.
 
 ```sh
 cd plugins/tribe/scripts/runner
@@ -610,7 +610,7 @@ planning measurements below but need not equal them — both sessions were live 
 | `6a8a8fe4-f716-43f2-936f-0da47662d9d9` | 174 | 26,469,777 | 258,795 | 0.3168 |
 | `ba6e93f0-72e4-4e08-9c64-03d7ea6fb917` | 154 | 28,075,416 | 307,375 | 0.5357 |
 
-- [ ] **Step 3: Prove the pin holds.** This is what makes it a ratchet rather than a snapshot:
+- [x] **Step 3: Prove the pin holds.** This is what makes it a ratchet rather than a snapshot:
 
 ```sh
 bun run.ts transcript-metrics --verify \
@@ -620,7 +620,7 @@ bun run.ts transcript-metrics --verify \
 Expected: both sessions report `"status": "verified"` with identical metrics and `exit=0` — even if
 either transcript has grown since step 2, because each is re-measured only over its recorded cut.
 
-- [ ] **Step 4: Create the ceiling file** at
+- [x] **Step 4: Create the ceiling file** at
   `docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json` with
   `{"v":1,"headroomFactor":1.5,"source":"unmeasured — task 20 writes these","ceilings":
   {"ruling":0,"ratify":0,"closing":0,"doorbell":0}}`. A `0` means "not yet measured": the checker
@@ -629,12 +629,12 @@ either transcript has grown since step 2, because each is re-measured only over 
   ceiling is used; **lowering a ceiling is accepted and raising one is refused** unless the entry
   carries a `raisedBy` ruling id — with the refusal naming both the old and the new value.
 
-- [ ] **Step 5: Write the `.md` twin** — the measured table, the per-class breakdown, the cut for
+- [x] **Step 5: Write the `.md` twin** — the measured table, the per-class breakdown, the cut for
   each session, the ratchet assertion (spec §15), and a "Deltas from the card's table" section
   recording spec §21's discrepancies **with D2's corrected explanation**: the turn/token deltas are
   a moving-file effect, not a classifier error; only the class-bucket deltas were mis-bucketed.
 
-- [ ] **Step 6: Gate.**
+- [x] **Step 6: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/metrics/ && bunx tsc --noEmit
@@ -645,7 +645,7 @@ python3 -c "import json;d=json.load(open('../../../../docs/superpowers/evidence/
 Expected: tests green including the baseline and ceiling tests; `grep -c` prints `0`; the python
 line prints `True`.
 
-- [ ] **Step 7: Commit** — `docs(evidence): pinned transcript baseline and the ratchet ceiling file (task 4/24)`.
+- [x] **Step 7: Commit** — `docs(evidence): pinned transcript baseline and the ratchet ceiling file (task 4/24)`.
 
 ---
 
