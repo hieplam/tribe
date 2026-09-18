@@ -1,7 +1,7 @@
 {
   "v": 1,
   "tool": "transcript-metrics",
-  "generatedAt": "2026-09-18T17:30:21.375Z",
+  "generatedAt": "2026-09-19T00:00:00.000Z",
   "sessions": [
     {
       "sessionId": "6a8a8fe4-f716-43f2-936f-0da47662d9d9",
@@ -16,7 +16,7 @@
         "lines": 1508,
         "skippedLines": 0,
         "skippedReasons": [],
-        "turns": 174,
+        "turns": 173,
         "tokens": {
           "input": 346,
           "cacheRead": 26469777,
@@ -25,7 +25,7 @@
         },
         "perClass": {
           "human": {
-            "turns": 80,
+            "turns": 79,
             "tokens": {
               "input": 158,
               "cacheRead": 14002197,
@@ -64,10 +64,10 @@
         "firstContext": 41693,
         "lastContext": 258795,
         "maxContext": 258795,
-        "monitorArms": 5,
+        "monitorArms": 8,
         "monitorExpiries": 8,
-        "firstAt": "",
-        "lastAt": "",
+        "firstAt": "2026-09-18T02:11:46.605Z",
+        "lastAt": "2026-09-18T15:03:54.206Z",
         "babysittingShare": 0.31676306209739175,
         "sidechain": {
           "turns": 0,
@@ -93,7 +93,7 @@
         "lines": 1480,
         "skippedLines": 0,
         "skippedReasons": [],
-        "turns": 154,
+        "turns": 152,
         "tokens": {
           "input": 2890,
           "cacheRead": 28075416,
@@ -111,7 +111,7 @@
             }
           },
           "monitor-event": {
-            "turns": 86,
+            "turns": 84,
             "tokens": {
               "input": 1538,
               "cacheRead": 15090043,
@@ -141,10 +141,10 @@
         "firstContext": 40845,
         "lastContext": 307375,
         "maxContext": 307375,
-        "monitorArms": 0,
+        "monitorArms": 1,
         "monitorExpiries": 0,
-        "firstAt": "",
-        "lastAt": "",
+        "firstAt": "2026-09-13T09:04:53.132Z",
+        "lastAt": "2026-09-17T14:40:23.104Z",
         "babysittingShare": 0.5357185259447499,
         "sidechain": {
           "turns": 0,

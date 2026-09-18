@@ -5,7 +5,10 @@ Task 3), never hand-adjusted (Task 4 Oracle). **Raw data:**
 `docs/superpowers/evidence/2026-09-18-supervisor-baseline.json`. **Ratchet ceiling file:**
 `docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json`.
 
-Measured on 2026-09-18 by:
+Measured on 2026-09-18, then **re-measured 2026-09-19 at the identical pinned cuts** after the
+Phase-1 fix round (Shaman ruling R7) corrected the pure reducer. The `cut.{lines,bytes,sha256}`
+below are byte-identical to the first measurement; only the metrics moved — see "Fix round (R7)"
+at the foot of this file. The snapshot command (measures at each transcript's current length):
 
 ```sh
 cd plugins/tribe/scripts/runner
@@ -15,19 +18,23 @@ bun run.ts transcript-metrics \
   --json > ../../../../docs/superpowers/evidence/2026-09-18-supervisor-baseline.json
 ```
 
+The R7 re-measurement pinned each session to its already-committed cut so the prefix stayed
+byte-identical: `--session <id> --cut-bytes <that session's cut.bytes> --json`, per session.
+
 ## Measured table
 
 | Fact | `6a8a8fe4-…` (viewer-consolidation, ~24h, opus-5) | `ba6e93f0-…` (issue #142, 4 days, fable-5-1) |
 | --- | --- | --- |
-| Model turns (deduped by `message.id`) | 174 | 154 |
+| Model turns (deduped by `message.id`, synthetic placeholder rows excluded) | 173 | 152 |
 | Input tokens | 346 | 2,890 |
 | Cache-read tokens | 26,469,777 | 28,075,416 |
 | Cache-write tokens | 934,272 | 1,267,340 |
 | Output tokens | 102,960 | 125,461 |
 | First-turn context | 41,693 | 40,845 |
 | Last-turn / max context | 258,795 | 307,375 |
-| Monitor arms / expiries | 5 / 8 | 0 / 0 |
-| Babysitting share (`(monitor-event + monitor-expiry) turns / turns`) | 0.3168 | 0.5357 |
+| Monitor arms / expiries | 8 / 8 | 1 / 0 |
+| Wall-clock span (`firstAt` → `lastAt`) | `2026-09-18T02:11:46.605Z` → `2026-09-18T15:03:54.206Z` | `2026-09-13T09:04:53.132Z` → `2026-09-17T14:40:23.104Z` |
+| Babysitting share (`(monitor-event + monitor-expiry) tokens / total tokens`) | 0.3168 | 0.5357 |
 
 ## Per-class breakdown
 
@@ -38,7 +45,7 @@ classes named by the card's oracle — spec §21 D3).
 
 | Class | Turns | Input | Cache-read | Cache-write | Output |
 | --- | --- | --- | --- | --- | --- |
-| human | 80 | 158 | 14,002,197 | 703,384 | 48,664 |
+| human | 79 | 158 | 14,002,197 | 703,384 | 48,664 |
 | monitor-event | 37 | 74 | 4,460,444 | 34,589 | 17,077 |
 | monitor-expiry | 34 | 68 | 4,017,115 | 164,757 | 19,190 |
 | task-notification | 23 | 46 | 3,990,021 | 31,542 | 18,029 |
@@ -48,7 +55,7 @@ classes named by the card's oracle — spec §21 D3).
 | Class | Turns | Input | Cache-read | Cache-write | Output |
 | --- | --- | --- | --- | --- | --- |
 | human | 47 | 878 | 8,324,938 | 569,079 | 53,598 |
-| monitor-event | 86 | 1,538 | 15,090,043 | 647,620 | 49,017 |
+| monitor-event | 84 | 1,538 | 15,090,043 | 647,620 | 49,017 |
 | monitor-expiry | 0 | 0 | 0 | 0 | 0 |
 | task-notification | 21 | 474 | 4,660,435 | 50,641 | 22,846 |
 
@@ -88,10 +95,13 @@ commits the first non-zero ceilings.
 ## Deltas from the card's table (spec §21 D2, corrected)
 
 The card's own table (re-quoted in the plan's Task 4 Step 2) reported `6a8a8fe4-…` as **168 model
-turns**. This baseline measures **174** — a delta of **+6 turns** (and the token sums move with
+turns**. This baseline measures **173** — a delta of **+5 turns** (and the token sums move with
 it: cache-read 24.9M → 26,469,777, cache-write 0.93M → 934,272, output 100K → 102,960, max context
-254K → 258,795). Session `ba6e93f0-…` shows **no delta at all** at this cut: the card's "154
-turns, 28.1M cache-read" reproduces exactly (154 turns, 28,075,416 cache-read).
+254K → 258,795). Session `ba6e93f0-…` measures **152** against the card's **154**, a **−2** delta.
+Both turn deltas now fold in the R7 correction that excludes synthetic zero-usage placeholder rows
+(§"Fix round (R7)" below): the token sums are unchanged by that exclusion, because a synthetic row
+carries zero tokens — the card's "28.1M cache-read" for `ba6e93f0-…` still reproduces exactly
+(28,075,416).
 
 **Per spec §21 D2, this is corrected into two separate causes, not one:**
 
@@ -121,3 +131,26 @@ verbatim: "where the card and the code disagree about a fact, the code is right"
 is a hand-adjustment; every number in
 `docs/superpowers/evidence/2026-09-18-supervisor-baseline.json` is the committed tool's own,
 unmodified output.
+
+## Fix round (R7) — deltas from the previously-committed Phase-1 baseline
+
+The Shaman's Phase-1 audit (ruling R7, 2026-09-19) found four counting defects in the pure
+reducer. Fixing them re-measured the two sessions **at their identical pinned cuts** (the
+`cut.{lines,bytes,sha256}` above are unchanged, so `--verify` re-hashes the same prefix bytes).
+Only the metrics moved:
+
+| Metric | `6a8a8fe4-…` before → after | `ba6e93f0-…` before → after | Cause |
+| --- | --- | --- | --- |
+| Monitor arms | 5 → **8** | 0 → **1** | Arms are now counted on **every** assistant line before the `message.id` de-dup; a `Monitor` block on a continuation line of an already-seen id was previously dropped. |
+| Model turns | 174 → **173** | 154 → **152** | Assistant rows with `model: "<synthetic>"` and zero usage are placeholders, not turns — excluded (dropped from the `human` bucket for `6a8a8fe4-…`, from `monitor-event` for `ba6e93f0-…`). |
+| `firstAt` / `lastAt` | `"" ` → **populated** | `""` → **populated** | Wall-clock span (spec §15 metric) is now filled from the first/last row timestamps. |
+| Token sums, `cut`, `babysittingShare` | unchanged | unchanged | Synthetic rows carry zero tokens; the cut is byte-identical; the share is a token ratio. |
+
+Two further R7 corrections harden the tool without moving these two sessions' numbers (both have
+zero skipped lines and no sidechain rows here): trigger classes are gated on the
+`<task-notification>` wrapper (an unwrapped `Monitor expired`/`<event>` in prose is `human`),
+sidechain rows never change the lead's trigger/expiries/arms, and `--verify` now compares every
+metric field (not just the prefix hash) and refuses a malformed baseline with a typed line rather
+than a stack trace. Re-verification transcript: `--verify` on the committed file → both
+`"verified"`, `exit=0`; `--verify` on a copy with one metric altered → `"metrics_mismatch"` on the
+altered session, `exit=1`.
