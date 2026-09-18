@@ -33,9 +33,16 @@ e2e/perf.test.ts`, `measuredAt: "2026-09-17T14:54:07.272Z"`, this file's current
 | open a 13,178,184-byte session, first `rows` frame | ≤ 1.0 s | 111.28 ms (384 nodes, byte range 2,657,179–13,178,184) | yes |
 | back-fill 500 more nodes | ≤ 400 ms | 56.27 ms | yes |
 | append → browser (G2) | ≤ 1 s | 243.5 ms worst of 44 samples (`latency.json`) | yes |
-| 8 concurrent streams, RSS | ≤ 800 MB (D34/R18) | 307,625,984 B = **293.4 MB** | yes |
-| 8 concurrent streams, RSS after 10 min of appends | ≤ 800 MB (D34/R18) | 103,333,888 B = **98.5 MB** (120 rows appended over 600,000 ms) | yes |
+| 8 concurrent streams, RSS | ≤ 800 MB (D34/R18) | 293,765,120 B = **280.2 MB** | yes |
+| 8 concurrent streams, RSS after 10 min of appends | ≤ 800 MB (D34/R18) | 315,817,984 B = **301.2 MB** (120 rows appended over 600,000 ms) | yes |
 | single SSE frame (initial window, largest real transcript) | ≤ 1 MiB | 376,271 B ≈ **376 KB** (2 frames in the initial burst) | yes |
+
+The two 8-stream RSS rows are from a **2026-09-18 re-run**: `e2e/perf.test.ts` was strengthened to
+assert all 8 streams are still connected on one server pid at each sample, and that every stream
+advanced ≥ 1 frame during the append window — closing the final-audit finding that the earlier
+sample could pass vacuously (a sample read after the streams had silently closed). The
+after-appends figure (301.2 MB) now sits *above* the at-connect figure (280.2 MB), the expected
+live-stream pattern, both far under the 800 MB ceiling.
 
 An earlier 2026-09-14 run (recorded in the campaign's own worker-report log, before the real
 corpus grew from 181 to 224 sessions) measured the same 7 budgets at 137 ms / 47 ms / 87 ms / 54 ms
