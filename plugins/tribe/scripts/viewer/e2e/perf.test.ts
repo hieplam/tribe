@@ -296,34 +296,81 @@ describe('perf.test.ts (spec §14 budgets, opt-in)', () => {
 
       const writableViewer = await spawnViewer({ CLAUDE_CONFIG_DIR: join(copyRoot, 'cfg'), HOME: copyRoot });
       const controllers: AbortController[] = [];
+      // R20: an RSS sample proves nothing about "8 concurrent streams" unless the 8 streams are
+      // provably still open, on this same server pid, at the moment of the sample. Per-stream
+      // state — not a bare fire-and-forget loop — is what makes that provable.
+      const streams: Array<{ connected: boolean; status: number; frames: number }> = Array.from({ length: 8 }, () => ({
+        connected: false,
+        status: 0,
+        frames: 0,
+      }));
       try {
         for (let i = 0; i < 8; i++) {
           const controller = new AbortController();
           controllers.push(controller);
           fetch(`http://127.0.0.1:${writableViewer.port}/events?session=${copySessionId}`, { signal: controller.signal }).then(
             async (res) => {
+              streams[i]!.status = res.status;
+              streams[i]!.connected = res.ok;
               // Drain the stream in the background so the poller keeps ticking for this connection;
-              // never awaited here (this suite only cares about the server's own RSS).
+              // never awaited here (this suite only cares about the server's own RSS) — but every
+              // non-empty chunk bumps this stream's frame counter, and a server-closed stream
+              // (`done`) flips it back to not-connected instead of silently vanishing.
               if (res.body) {
                 const reader = res.body.getReader();
                 try {
                   // eslint-disable-next-line no-constant-condition
                   while (true) {
                     const r = await reader.read();
-                    if (r.done) break;
+                    if (r.done) {
+                      streams[i]!.connected = false;
+                      break;
+                    }
+                    if (r.value && r.value.length > 0) streams[i]!.frames += 1;
                   }
                 } catch {
-                  // aborted on teardown — expected
+                  // aborted on teardown — expected; not "connected" either way past this point.
+                  streams[i]!.connected = false;
                 }
               }
             },
             () => {
               // connection aborted before it ever resolved — expected on teardown
+              streams[i]!.connected = false;
             },
           );
         }
+
+        /** Throws, naming the exact stream index, unless every one of the 8 is live right now. */
+        function assertAllStreamsLive(label: string): void {
+          for (let i = 0; i < streams.length; i++) {
+            const s = streams[i]!;
+            if (!s.connected || s.status !== 200) {
+              throw new Error(`${label}: stream ${i} is not live (connected=${s.connected}, status=${s.status})`);
+            }
+          }
+        }
+
+        /** Throws unless `pid` is still alive — `process.kill(pid, 0)` sends no signal, it only
+         * probes; ESRCH means the process is gone. */
+        function assertPidAlive(pid: number, label: string): void {
+          try {
+            process.kill(pid, 0);
+          } catch (err) {
+            throw new Error(`${label}: server pid ${pid} is no longer alive: ${String(err)}`);
+          }
+        }
+
+        // Wait (bounded) for all 8 streams to actually report connected before trusting the
+        // at-connect sample — a fixed sleep proves nothing about connection state.
+        await waitFor(() => (streams.every((s) => s.connected && s.status === 200) ? true : null), 10_000, 'waiting for all 8 streams to connect before the at-connect RSS sample');
+        assertAllStreamsLive('at-connect RSS sample');
+        assertPidAlive(writableViewer.pid, 'at-connect RSS sample');
         // Let all 8 streams reach steady state (initial window sent, poll loop settled).
         await sleep(5000);
+        assertAllStreamsLive('at-connect RSS sample, after steady-state wait');
+        assertPidAlive(writableViewer.pid, 'at-connect RSS sample, after steady-state wait');
+        const framesAtConnect = streams.map((s) => s.frames);
         const rssAfter8 = rssBytesOf(writableViewer.pid);
         results.push({
           budget: '8 concurrent streams, RSS',
@@ -353,6 +400,20 @@ describe('perf.test.ts (spec §14 budgets, opt-in)', () => {
         }
         // One more poll tick to let the last append(s) be observed before measuring.
         await sleep(500);
+        // The sample can no longer pass vacuously: every one of the 8 must still be connected on
+        // THIS pid, and must have actually advanced (received ≥1 more frame) during the append
+        // window — a stream that silently closed, or one that connected but never saw a delta,
+        // trips one of these before the RSS number is ever read.
+        assertAllStreamsLive('after-10-minutes-of-appends RSS sample');
+        assertPidAlive(writableViewer.pid, 'after-10-minutes-of-appends RSS sample');
+        for (let i = 0; i < streams.length; i++) {
+          if (!(streams[i]!.frames > framesAtConnect[i]!)) {
+            throw new Error(
+              `after-10-minutes-of-appends RSS sample: stream ${i} never advanced during the append window ` +
+                `(frames at connect=${framesAtConnect[i]}, frames now=${streams[i]!.frames})`,
+            );
+          }
+        }
         const rssAfterAppends = rssBytesOf(writableViewer.pid);
         results.push({
           budget: '8 concurrent streams, RSS after 10 minutes of appends',
