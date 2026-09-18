@@ -170,7 +170,7 @@ route contract.
 
 `<home>/campaign-state.json` is the one artifact the runner requires but never creates — it must
 be authored before the runner is ever invoked (normally by a Shaman-authority session doing Stage
-A planning; see `plugins/tribe/agents/shaman.md`'s Mode 2). This section documents the schema
+A planning; see `plugins/tribe/agents/shaman.md`'s Mode 3). This section documents the schema
 completely enough to author a valid file from this README alone, derived from the authoritative
 source: the zod schema in `state.ts`'s `CampaignStateSchema`/`CardSchema` and the TypeScript
 types in `types.ts`. Schema version stays `"v": 1` — every field this effort added is optional,
