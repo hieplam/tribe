@@ -1,10 +1,14 @@
 // Tests for card-actions.ts's buildEscalationMarkdown (P5 fix-list: escalation files must say
 // what actually unblocks them — a reason-specific "## Options" / "How to unblock" block instead
 // of the old generic list that presented the ruling path first for every reason, including
-// mechanical verify failures a ruling can never clear).
-import { describe, expect, test } from 'bun:test';
-import { buildEscalationMarkdown } from './card-actions.ts';
-import type { ResolvedConfig } from '../types.ts';
+// mechanical verify failures a ruling can never clear) and (Task 27, spec §10.2)
+// buildSessionIOForCard's onSessionStart, which prints the per-card session line the instant
+// the SDK assigns a session id.
+import { describe, expect, mock, test } from 'bun:test';
+import { buildEscalationMarkdown, buildSessionIOForCard } from './card-actions.ts';
+import type { CardCtx } from './card-actions.ts';
+import type { CampaignState, Card, ResolvedConfig } from '../types.ts';
+import type { LoopIO } from '../../ports/ports.ts';
 import type { VerifyPointId } from '../verify.ts';
 
 function fixtureResolved(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
@@ -22,6 +26,63 @@ function fixtureResolved(overrides: Partial<ResolvedConfig> = {}): ResolvedConfi
     answersContent: '',
     briefTemplate: '',
     ...overrides,
+  };
+}
+
+function fixtureCard(overrides: Partial<Card> = {}): Card {
+  return {
+    status: 'staged',
+    spec: null,
+    plan: null,
+    branch: null,
+    baseSha: null,
+    pr: null,
+    mergeSha: null,
+    sessionId: null,
+    updatedAt: null,
+    ...overrides,
+  };
+}
+
+function fixtureIo(overrides: Partial<LoopIO> = {}): LoopIO {
+  return {
+    exec: mock(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+    sleep: mock(async () => {}),
+    fileExists: mock(() => true),
+    readFile: mock(() => ''),
+    writeFile: mock(() => {}),
+    renameFile: mock(() => {}),
+    appendLog: mock(() => {}),
+    readLock: mock(() => null),
+    writeLock: mock(() => {}),
+    removeLock: mock(() => {}),
+    isProcessAlive: mock(() => false),
+    currentPid: mock(() => 1),
+    now: mock(() => '2026-09-13T00:00:00Z'),
+    spawnSession: mock(async function* () {}),
+    ensureDir: mock(() => {}),
+    writeFileAtomic: mock(() => {}),
+    printLine: mock(() => {}),
+    ...overrides,
+  };
+}
+
+function fixtureCtx(overrides: { resolved?: Partial<ResolvedConfig>; io?: Partial<LoopIO> } = {}): CardCtx {
+  const state: CampaignState = {
+    v: 1,
+    campaign: 'test',
+    mergePolicy: 'merge',
+    sequence: ['C1'],
+    schemaLockPaths: [],
+    docsOnlyPaths: [],
+    ownerOnlyEscalations: [],
+    cards: { C1: fixtureCard() },
+  };
+  return {
+    cardId: 'C1',
+    state,
+    resolved: fixtureResolved(overrides.resolved),
+    io: fixtureIo(overrides.io),
   };
 }
 
@@ -115,5 +176,40 @@ describe('buildEscalationMarkdown — P5 reason-specific Options', () => {
     const markdown = buildEscalationMarkdown('C1', 'verify_failed_twice', detail, fixtureResolved(), failedPoints);
     expect(markdown).toContain('Check for uncommitted or unmerged work FIRST');
     expect(markdown).toContain('delete the leftover remote branch / worktree by hand');
+  });
+});
+
+// Task 27 (spec §10.2 line 2): buildSessionIOForCard's onSessionStart prints the per-card
+// session line the instant the SDK assigns a session id — the exact moment this callback
+// already runs at — and stays silent when the viewer isn't up to serve one.
+describe('buildSessionIOForCard — onSessionStart printLine (Task 27, spec §10.2)', () => {
+  test('prints "card <id>: <base>/s/<sessionId>" exactly once when viewerBaseUrl is set', () => {
+    const ctx = fixtureCtx({ resolved: { viewerBaseUrl: 'http://127.0.0.1:4321/?campaign=my-repo/my-slug' } });
+    const sessionIO = buildSessionIOForCard(ctx);
+
+    sessionIO.onSessionStart('d7d21837-6f4e-4b1a-9a02-2b6e4c1f8e55');
+
+    expect(ctx.io.printLine).toHaveBeenCalledTimes(1);
+    expect(ctx.io.printLine).toHaveBeenCalledWith('card C1: http://127.0.0.1:4321/s/d7d21837-6f4e-4b1a-9a02-2b6e4c1f8e55');
+  });
+
+  test('prints nothing when viewerBaseUrl is null (--no-viewer/--dry-run/skip/stale)', () => {
+    const ctx = fixtureCtx({ resolved: { viewerBaseUrl: null } });
+    const sessionIO = buildSessionIOForCard(ctx);
+
+    sessionIO.onSessionStart('d7d21837-6f4e-4b1a-9a02-2b6e4c1f8e55');
+
+    expect(ctx.io.printLine).not.toHaveBeenCalled();
+  });
+
+  test('still updates the card and persists state regardless of the printLine call', () => {
+    const ctx = fixtureCtx({ resolved: { viewerBaseUrl: null } });
+    const sessionIO = buildSessionIOForCard(ctx);
+
+    sessionIO.onSessionStart('some-session-id');
+
+    expect(ctx.state.cards.C1?.sessionId).toBe('some-session-id');
+    expect(ctx.state.cards.C1?.status).toBe('running');
+    expect(ctx.io.writeFile).toHaveBeenCalledTimes(1);
   });
 });

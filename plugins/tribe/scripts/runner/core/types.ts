@@ -140,6 +140,14 @@ export interface RunLoopConfig {
    * Default `'origin'` (a protocol-level default, spec §2 shape — not a campaign value).
    * Threaded everywhere the runner previously hardcoded the literal string `'origin'`. */
   remote: string;
+  /** Task 27 (spec §10.2): the root viewer URL's own origin, set by `cli/main.ts`'s
+   * `announceViewer` once the launch decision is known — `null` under `--no-viewer`,
+   * `--dry-run`, a missing viewer entry, or a stale (unrecognized) port occupant. OPTIONAL,
+   * same reasoning as `maxConcurrent` above: every existing `RunLoopConfig`/`ResolvedConfig`
+   * literal that omits it keeps compiling and behaving exactly as before (read as `?? null`
+   * — see `core/loop/card-actions.ts`'s `onSessionStart`, which never prints a card's session
+   * line when this is absent or null: printing a URL nothing can serve is worse than silence). */
+  viewerBaseUrl?: string | null;
 }
 
 /** `RunLoopConfig` plus everything `core/loop/run-loop.ts`'s `resolveRunContext` loads

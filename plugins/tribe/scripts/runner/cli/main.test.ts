@@ -5,14 +5,15 @@
 // model, or campaign (stateless-capability wall); `--session-timeout`/`--logs-dir` are the
 // two protocol-level defaults spec §2 itself documents; `--home` (Task 2, spec §4) is the
 // campaign's machine-local operational home — also a REQUIRED input, never derived here.
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { parseArgs, parseResetCardArgs, performResetCard, scrubTargetEnvLocal } from './main.ts';
+import { announceViewer, parseArgs, parseResetCardArgs, performResetCard, scrubTargetEnvLocal } from './main.ts';
 import { campaignStatePathOf, escalationPathOf } from '../core/paths.ts';
 import { WATCHDOG_EXIT_NEEDS_HUMAN } from '../core/watchdog/model.ts';
+import type { ViewerLaunchDecision } from '../core/viewer-launch.ts';
 
 const RUN_ID = '2026-07-24T00-00-00-000Z-beef';
 
@@ -692,4 +693,95 @@ describe('watchdog subcommand: a realpath failure resolving --home is a typed us
       rmSync(homeParent, { recursive: true, force: true });
     }
   }, 20_000);
+});
+
+// Task 27 (spec §10.2): `announceViewer` is `main()`'s extracted, testable print step — the
+// root viewer line is printed once, before the first card's session, and `--no-viewer`/
+// `--dry-run` each print neither of the two spec stdout lines. `main()` itself stays
+// deliberately NOT unit-tested (this file's own top-of-file convention); this is the same
+// extract-and-test shape as `scrubTargetEnvLocal`/`resolveWatchdogHome` above.
+describe('announceViewer (Task 27, spec §10.2)', () => {
+  const baseConfig = { dryRun: false, viewerDisabled: false, viewerPort: 4321, homeDir: '/th/-r/campaigns/s' };
+
+  function fixtureOut() {
+    return { log: mock((_line: string) => {}), error: mock((_line: string) => {}) };
+  }
+
+  test('a reuse/spawn decision prints the root line ONCE, before the first card, and returns its url', async () => {
+    const decision: ViewerLaunchDecision = {
+      kind: 'spawn',
+      url: 'http://127.0.0.1:4321/?campaign=my-repo/my-slug',
+      argv: ['bun', '/p/serve.ts', '--port', '4321'],
+      note: null,
+    };
+    const launch = mock(async () => decision);
+    const out = fixtureOut();
+
+    const result = await announceViewer(baseConfig, launch, out);
+
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(out.log).toHaveBeenCalledTimes(1);
+    expect(out.log).toHaveBeenCalledWith('campaign viewer: http://127.0.0.1:4321/?campaign=my-repo/my-slug (read-only)');
+    expect(out.error).not.toHaveBeenCalled();
+    expect(result).toBe('http://127.0.0.1:4321/?campaign=my-repo/my-slug');
+  });
+
+  test('--dry-run prints neither line and never even calls launch (D11: zero side effects)', async () => {
+    const launch = mock(async (): Promise<ViewerLaunchDecision> => {
+      throw new Error('launch must never be called under --dry-run');
+    });
+    const out = fixtureOut();
+
+    const result = await announceViewer({ ...baseConfig, dryRun: true }, launch, out);
+
+    expect(launch).not.toHaveBeenCalled();
+    expect(out.log).not.toHaveBeenCalled();
+    expect(out.error).not.toHaveBeenCalled();
+    expect(result).toBeNull();
+  });
+
+  test('--no-viewer (a skip decision) prints no root line and returns null', async () => {
+    const decision: ViewerLaunchDecision = { kind: 'skip', url: null, argv: null, note: 'skipped: --no-viewer' };
+    const launch = mock(async () => decision);
+    const out = fixtureOut();
+
+    const result = await announceViewer({ ...baseConfig, viewerDisabled: true }, launch, out);
+
+    expect(out.log).not.toHaveBeenCalled();
+    expect(result).toBeNull();
+  });
+
+  // spec §10.4 outcome 3: a stale viewer prints the exact stderr line, no root line, and
+  // returns null so card-actions.ts's onSessionStart never prints a session URL either.
+  test('a stale decision prints exactly the spec stderr line, no root line, and returns null', async () => {
+    const decision: ViewerLaunchDecision = {
+      kind: 'stale',
+      url: null,
+      argv: null,
+      note: 'stale viewer on port 4321, stop it or pass --viewer-port <n> (needs v2, got v1)',
+    };
+    const launch = mock(async () => decision);
+    const out = fixtureOut();
+
+    const result = await announceViewer(baseConfig, launch, out);
+
+    expect(out.log).not.toHaveBeenCalled();
+    expect(out.error).toHaveBeenCalledTimes(1);
+    expect(out.error).toHaveBeenCalledWith('campaign viewer: stale viewer on port 4321, stop it or pass --viewer-port <n> (needs v2, got v1)');
+    expect(result).toBeNull();
+  });
+
+  test('a thrown launch failure degrades to one stderr line and returns null (viewer failure never gates the run)', async () => {
+    const launch = mock(async (): Promise<ViewerLaunchDecision> => {
+      throw new Error('boom');
+    });
+    const out = fixtureOut();
+
+    const result = await announceViewer(baseConfig, launch, out);
+
+    expect(out.log).not.toHaveBeenCalled();
+    expect(out.error).toHaveBeenCalledTimes(1);
+    expect(String(out.error.mock.calls[0]?.[0])).toContain('campaign viewer: failed to start (continuing): boom');
+    expect(result).toBeNull();
+  });
 });

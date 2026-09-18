@@ -16,6 +16,7 @@ import { persistLocalState } from './commit-guard.ts';
 import { answersPathOf, escalationPathOf } from '../paths.ts';
 import { decideResidueHeal, type HealAction } from '../residue.ts';
 import { WORKTREE_STILL_PRESENT_DETAIL } from '../verify.ts';
+import { sessionUrlFor } from '../viewer-launch.ts';
 
 export type CardOutcome =
   | { kind: 'shipped'; cardId: string }
@@ -490,6 +491,13 @@ export function buildSessionIOForCard(ctx: CardCtx): SessionIO {
       card.status = 'running';
       card.updatedAt = io.now();
       persistLocalState(state, resolved, io);
+      // Task 27 (spec §10.2 line 2): printed the instant the SDK assigns a session id — this
+      // callback already runs at exactly that moment. `viewerBaseUrl` is null under
+      // --no-viewer/--dry-run/a missing entry/a stale port (cli/main.ts's `announceViewer`),
+      // so this stays silent rather than print a URL nothing can serve.
+      if (resolved.viewerBaseUrl != null) {
+        io.printLine(`card ${cardId}: ${sessionUrlFor(resolved.viewerBaseUrl, sessionId)}`);
+      }
     },
     // P2 fix-list card: the pre-merge check gate's exec seam — reuses LoopIO's own `exec`,
     // scoped to this card's repo root.

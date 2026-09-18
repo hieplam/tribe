@@ -109,3 +109,18 @@ for snippet in "$PLUGIN_DIR/claude-md"/*.md; do
   { printf '\n'; cat "$snippet"; } >> "$TARGET"
   printf '  added   CLAUDE.md %s -> %s\n' "$(basename "$snippet")" "$TARGET"
 done
+
+# --- viewer client build (D1: React + Vite, served as static files) ---------
+# spec §10.3: builds the client into dist/, warns and continues (never fails the whole
+# install) when bun is absent or the build itself fails — this hook also links agents,
+# rules and canvases, which must keep working on a machine with no bun at all.
+VIEWER_DIR="$PLUGIN_DIR/scripts/viewer"
+if [ -d "$VIEWER_DIR" ]; then
+  if command -v bun >/dev/null 2>&1; then
+    ( cd "$VIEWER_DIR" && bun install --frozen-lockfile && bun run build ) \
+      && printf '  built   viewer client -> %s/dist\n' "$VIEWER_DIR" \
+      || printf 'WARN: viewer client build failed — the viewer will refuse to start until `bun run build` succeeds\n' >&2
+  else
+    printf 'WARN: bun not found — skipping the viewer client build\n' >&2
+  fi
+fi

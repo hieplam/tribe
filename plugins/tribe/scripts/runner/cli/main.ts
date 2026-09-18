@@ -19,6 +19,7 @@ import { loadState, resetCard, serializeState } from '../core/state.ts';
 import { campaignStatePathOf, escalationPathOf, reportDirOf } from '../core/paths.ts';
 import { buildRealIo, unsetAnthropicApiKeyEnv } from '../adapters/run-io.adapter.ts';
 import { launchViewer } from '../adapters/viewer-launch.adapter.ts';
+import type { ViewerLaunchDecision } from '../core/viewer-launch.ts';
 import { deriveExitReason, shouldWriteReport, writeReport, type ReportRunInfo } from '../core/report.ts';
 import { EXIT_ERROR } from '../core/types.ts';
 import type { CampaignState } from '../core/types.ts';
@@ -267,6 +268,44 @@ export async function scrubTargetEnvLocal(
     console.error(`campaign runner: removed ${removed} ANTHROPIC_API_KEY line(s) from ${envLocalPath}`);
   } catch (err) {
     console.error(`campaign runner: could not scrub ${envLocalPath} for ANTHROPIC_API_KEY (continuing): ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** Task 27 (spec §10.2): runs the viewer launch decision and prints the root stdout/stderr
+ * line exactly once, before the first card's session — returns the `viewerBaseUrl` to thread
+ * onto `RunLoopConfig` (`null` on skip/stale, so `core/loop/card-actions.ts`'s
+ * `onSessionStart` never prints a card session line for a viewer that cannot serve one —
+ * printing a URL that 404s is worse than printing none, spec §10.4). Extracted from `main()`
+ * (same shape as `scrubTargetEnvLocal`/`resolveWatchdogHome` above) purely so
+ * `cli/main.test.ts` can unit test the print behavior with an injected `launch` and injected
+ * `out` — `main()` itself stays untested, per this file's own top-of-file convention. Any
+ * failure (a stray exception, a rejected probe/spawn) degrades to one stderr line — viewer
+ * failure must never affect the campaign run (D12: "observability exhaust never kills a
+ * run"). */
+export async function announceViewer(
+  config: { dryRun: boolean; viewerDisabled: boolean; viewerPort: number; homeDir: string },
+  launch: (input: { dryRun: boolean; disabled: boolean; port: number; homeDir: string }) => Promise<ViewerLaunchDecision>,
+  out: { log(line: string): void; error(line: string): void },
+): Promise<string | null> {
+  if (config.dryRun) return null; // D11: --dry-run never reaches this code path at all.
+  try {
+    const decision = await launch({
+      dryRun: config.dryRun,
+      disabled: config.viewerDisabled,
+      port: config.viewerPort,
+      homeDir: config.homeDir,
+    });
+    if ((decision.kind === 'spawn' || decision.kind === 'reuse') && decision.url) {
+      out.log(`campaign viewer: ${decision.url} (read-only)`);
+      return decision.url;
+    }
+    if (decision.note) {
+      out.error(`campaign viewer: ${decision.note}`);
+    }
+    return null;
+  } catch (err) {
+    out.error(`campaign viewer: failed to start (continuing): ${err instanceof Error ? err.message : String(err)}`);
+    return null;
   }
 }
 
@@ -528,30 +567,21 @@ export async function main(): Promise<void> {
   // comment above for the best-effort contract (never throws).
   await scrubTargetEnvLocal(parsed.config.repoRoot, parsed.config.dryRun, io);
 
-  // Task 13 (spec D11/D12): bring the read-only live viewer up before the first card's
-  // session spawns, and print its URL on this process's own stdout (G3). `--dry-run` never
-  // reaches this code path at all — zero side effects stays a hard contract, so this whole
-  // step is skipped rather than merely short-circuited inside the adapter. Any failure
-  // (a stray exception, a rejected probe/spawn) degrades to one stderr line and the loop
-  // proceeds exactly as if `--no-viewer` had been passed — viewer failure must never affect
-  // the campaign run (the repo's "observability exhaust never kills a run" convention).
-  if (!parsed.config.dryRun) {
-    try {
-      const decision = await launchViewer({
-        dryRun: parsed.config.dryRun,
-        disabled: parsed.viewerDisabled,
-        port: parsed.viewerPort,
-        homeDir: parsed.config.homeDir,
-      });
-      if ((decision.kind === 'spawn' || decision.kind === 'reuse') && decision.url) {
-        console.log(`campaign viewer: ${decision.url} (read-only)`);
-      } else if (decision.note) {
-        console.error(`campaign viewer: ${decision.note}`);
-      }
-    } catch (err) {
-      console.error(`campaign viewer: failed to start (continuing): ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
+  // Task 13/27 (spec D11/D12, §10.2): bring the read-only live viewer up before the first
+  // card's session spawns, print its root URL on this process's own stdout (G3), and thread
+  // the result onto `RunLoopConfig.viewerBaseUrl` so `core/loop/card-actions.ts`'s
+  // `onSessionStart` can print each card's own session line (spec §10.2 line 2). See
+  // `announceViewer`'s own doc comment above for the --dry-run/failure-degradation contract.
+  parsed.config.viewerBaseUrl = await announceViewer(
+    {
+      dryRun: parsed.config.dryRun,
+      viewerDisabled: parsed.viewerDisabled,
+      viewerPort: parsed.viewerPort,
+      homeDir: parsed.config.homeDir,
+    },
+    launchViewer,
+    { log: (line) => console.log(line), error: (line) => console.error(line) },
+  );
 
   let result: LoopResult | undefined;
   let thrown: unknown;

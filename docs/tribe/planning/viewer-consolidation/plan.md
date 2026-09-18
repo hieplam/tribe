@@ -316,7 +316,7 @@ built from nothing **before** the server that reads it is designed into existenc
 
 Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
 
-- [ ] **Step 1: Write the failing test** `V/fixtures/build.test.ts`.
+- [x] **Step 1: Write the failing test** `V/fixtures/build.test.ts`.
 
       **The builder produces exactly TWO fake HOMEs** (spec §16.2), because one directory cannot
       both hold a populated `.claude/projects` and have no `.claude`:
@@ -410,12 +410,12 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       empty shape produces exactly the layout it names and nothing else.
 
       Expected on first run: `error: Cannot find module './build.ts'`.
-- [ ] **Step 2: Implement** `V/fixtures/build.ts`. Pure data plus one `mkdirSync`/`writeFileSync`
+- [x] **Step 2: Implement** `V/fixtures/build.ts`. Pure data plus one `mkdirSync`/`writeFileSync`
       edge; it takes the destination directory as an argument and constructs nothing it was not
       given (`pure-core.md`). Every row it writes is copied in shape from the real corpus — spec
       §7 names the fields, and `~/.claude/projects` is the oracle for any field the spec leaves
       unstated.
-- [ ] **Step 3: Verify against an empty target, by hand.** Run the tree builder into a bare
+- [x] **Step 3: Verify against an empty target, by hand.** Run the tree builder into a bare
       directory and walk it, proving the layout spec §5.1 expects is what actually lands:
 
       ```sh
@@ -437,14 +437,14 @@ Model: **Sonnet**. Mechanical authoring against the measured table in spec §7.
       `<session>/tool-results/*.txt`; and exactly three symlinks with the targets named in step 1.
       (`<session-4>.rotated` is a fixture input, not a served session, and does not carry the
       `.jsonl` extension.) Paste both listings into the task report.
-- [ ] **Step 4: Run the suite.**
+- [x] **Step 4: Run the suite.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test fixtures/
       ```
       Expected: all new tests pass; the three deleted `.jsonl` fixtures are referenced by nothing
       (`grep -rn 'session-valid\|subagent-valid\|session-malformed' .` returns only history).
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): run the builder into a bare `mkdtemp` yourself, then diff the set of
 `type` values actually present in the generated session-1 file against spec §7.1's table. A type in
@@ -461,7 +461,7 @@ file.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** `V/core/routes.test.ts`, one case per row of spec §3.2's
+- [x] **Step 1: Write the failing test** `V/core/routes.test.ts`, one case per row of spec §3.2's
       route table plus the refusal matrix: a session id containing `..`, a percent-encoded slash, a
       double-encoded `..%2f`, a NUL byte, an empty id, a 500-character id, an unknown `/api` path,
       and an unknown asset name. Every refusal returns a typed route (`bad_request` with a reason,
@@ -478,7 +478,7 @@ Model: **Sonnet**.
       TypeScript union is erased and cannot be iterated).
 
       Expected on first run: `Cannot find module './routes.ts'`.
-- [ ] **Step 2: Implement** `V/core/routes.ts` and `V/core/model.ts` (spec §4, verbatim — the
+- [x] **Step 2: Implement** `V/core/routes.ts` and `V/core/model.ts` (spec §4, verbatim — the
       `RenderNode` union is the contract three later tasks compile against). `model.ts` is
       types-only **except** `RENDER_NODE_KINDS`, the one runtime value it exports. It must also
       carry `interface Chip` (spec §4 — the four kinds `slash-command`, `system-reminder`,
@@ -486,13 +486,23 @@ Model: **Sonnet**.
       **`text: string | null`**, which is where §6.1's `row too large (N bytes)` label lives; without
       that field the oversized-row contract has no home and §6.1 contradicts §4. Routes are pure
       string math: `new URL(...)`, pattern matching, no path joins.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bunx tsc --noEmit && bun test core/routes.test.ts
       ```
       Expected: `tsc` clean, every route case passing.
-- [ ] **Step 4: Commit**
+
+      **Warchief ruling (compile-red migration window, resolves the Task 2 NEEDS_CONTEXT):**
+      package-wide `tsc` cannot be clean until the old runtime is deleted across phases 2–4; the
+      gate is redefined to "every erroring file is in the DOOMED set {`serve.ts`,
+      `adapters/scan.adapter(.ts/.test.ts)`, `adapters/poller.adapter(.ts/.test.ts)`,
+      `e2e/harness(.ts/.test.ts)`, `e2e/live-viewer.e2e.test.ts`, `idle-timeout.integration.test.ts`,
+      `core/live/**`, `core/derive(.ts/.test.ts)`, `core/render(.ts/.test.ts)`}, and no error is in
+      a file created this task" — see the Hunter report for the transcribed evidence. `bun test`
+      gates on this task's own files only (`core/routes.test.ts core/model.test.ts
+      structure.test.ts`), per the KNOWN-RED BASELINE (task 1) carried through phase 1.
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the refusal matrix yourself against the parser. Verify that no
 branch of `routes.ts` returns a value that a later caller could join into a path without passing
@@ -512,7 +522,7 @@ possible; the patches land in tasks 21 and 29.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing check.** There is no unit test for an ADR; the mechanical gate is
+- [x] **Step 1: Write the failing check.** There is no unit test for an ADR; the mechanical gate is
       the C3 toolchain. Run it first and record the failure:
 
       ```sh
@@ -522,15 +532,15 @@ Model: **Sonnet**.
       Expected before the ADR exists: `c3x` reports no ADR covering the viewer contract change
       that tasks 21/29 will patch (or, if `c3x` is silent on that, record its actual output
       verbatim — the point is the before/after pair, not a specific message).
-- [ ] **Step 2: Author the ADR** with `status: accepted`, `date: "2026-09-11"`,
+- [x] **Step 2: Author the ADR** with `status: accepted`, `date: "2026-09-11"`,
       `supersedes: [adr-20260903-fix-viewer-launch-docs]`. Its Goal, Context and Decision restate
       spec §0, §3 and §11 — Context cites the measured numbers (83.6% log duplication, B1/B2/B3,
       0 unparsable rows in 127,085). Its Consequences name the two change units tasks 21 and 29
       will apply to `c3-215` rows 76 and 72.
-- [ ] **Step 3: Mark the old design spec superseded** — a header note at the top of
+- [x] **Step 3: Mark the old design spec superseded** — a header note at the top of
       `2026-09-02-campaign-live-viewer-design.md` pointing at this spec and this ADR. Do not delete
       it; it is the record of what the deleted code was for.
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
       ```sh
       bunx @c3x/cli@11.6.3 check </dev/null
@@ -538,7 +548,7 @@ Model: **Sonnet**.
 
       Expected: clean, or the same output as step 1 minus the ADR gap. Record both runs in the task
       report.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): confirm the ADR's `supersedes` names a real ADR id that exists on disk,
 and that the Consequences section names both change units by target (`c3-215` rows 72 and 76). An
@@ -560,7 +570,7 @@ written for.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** `V/core/paths.test.ts`. Carry over every existing
+- [x] **Step 1: Write the failing test** `V/core/paths.test.ts`. Carry over every existing
       `sanitizeProjectDirName` case unchanged (the encoding is ported from Claude Code's own and
       must not drift), then add `containedJoin` cases: an empty segment, `.`, `..`, `a/b`,
       `a\\b`, a segment with a NUL byte, an absolute segment, a segment that resolves back inside
@@ -585,12 +595,12 @@ Model: **Sonnet**.
         proves nothing, so the positive cases are mandatory.
 
       Expected on first run: `Cannot find module './paths.ts'`.
-- [ ] **Step 2: Implement** `V/core/paths.ts`: `containedJoin(root, ...segments)` and
+- [x] **Step 2: Implement** `V/core/paths.ts`: `containedJoin(root, ...segments)` and
       `isContainedResolved(root, resolvedTarget)` per spec §12.2, plus the fixed-layout helpers
       (`transcriptPathOf`, `subagentsDirOf`, `toolResultsDirOf`). Pure string math; `node:path`'s
       `join`/`resolve`/`sep` are pure and permitted, the filesystem is not — `realpath` is the
       adapter's act (task 15), and this module only judges the string it returns.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/paths.test.ts core/paths.containment.test.ts structure.test.ts
@@ -598,7 +608,7 @@ Model: **Sonnet**.
 
       Expected: all pass, including the positive containment case; the structure wall still reports
       zero world-touching imports under `core/`.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): this is `fail-closed-edges` obligation 4's implementation. Run the
 refusal matrix yourself and additionally try three inputs the test does not list, of your own
@@ -614,7 +624,7 @@ Critical finding.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing tests.** For `records.ts`: carry over the existing cases, then
+- [x] **Step 1: Write the failing tests.** For `records.ts`: carry over the existing cases, then
       add one per new field the widened reader must keep (`subtype`, `content`, `attachment`,
       `isMeta`, `isCompactSummary`, `apiErrorStatus`, `isApiErrorMessage`, `agentId`, `parentUuid`)
       plus `raw`, the verbatim line, which the `raw` card needs. Add: a line that is a JSON array,
@@ -687,13 +697,13 @@ Model: **Sonnet**.
          is over the cap and yields exactly one `raw oversized` node. Assert all three.
 
       Expected on first run: all three modules missing.
-- [ ] **Step 2: Implement** all three. `tail.ts` keeps its current arithmetic exactly —
+- [x] **Step 2: Implement** all three. `tail.ts` keeps its current arithmetic exactly —
       `offset = base.offset + consumedBytes`, never `fileSize`, never `chunk.length` — and gains
       `ackOffset`, the inode trigger and the one carry cap, over raw bytes per D13. It takes a
       `FileObservation` (spec §4), not a bare size. Keep the existing doc comments; they encode why
       (F56), and add one naming D13 so a later refactor does not reintroduce a decoded-string
       signature.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/records.test.ts core/tail.test.ts core/window.test.ts
@@ -702,7 +712,7 @@ Model: **Sonnet**.
       Expected: all pass — including the seeded-state case, the three tail cases, and
       `core/window.test.ts`'s complete-line selection (this task creates `core/window.ts`, so its
       test runs here, not only in task 18).
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the tail state machine over a real 13 MB transcript in byte-ranged
 chunks of varying sizes — including boundaries that split a multi-byte character and that split a
@@ -719,21 +729,21 @@ finding. Confirm by reading the signature that no decoded string enters this mod
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Carry over the **entire** existing `markdown.test.ts`
+- [x] **Step 1: Write the failing test.** Carry over the **entire** existing `markdown.test.ts`
       corpus, rewriting each assertion from an HTML string to the `MdToken[]` tree of spec §4. Add
       one case per injection shape the old tests covered (script tags, `javascript:` hrefs, unclosed
       fences, angle brackets in code) and assert the token tree contains the raw text as `text`/
       `code` token values with no markup. Expected on first run: `Cannot find module './markdown.ts'`.
-- [ ] **Step 2: Implement** the tokenizer. Same segmentation the current file uses (fences first,
+- [x] **Step 2: Implement** the tokenizer. Same segmentation the current file uses (fences first,
       then inline), emitting tokens instead of strings. Keep the href gate (`http:`, `https:`,
       `mailto:` only). No HTML string is produced anywhere in this module.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/markdown.test.ts
       ```
       Expected: every carried-over case passes with token assertions.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): grep the new module for any string containing `<` followed by a letter.
 The escape-then-markup property is replaced by a structural one — this module must be incapable of
@@ -747,22 +757,22 @@ Model: **Opus.** The oracle-bearing task: "nothing on disk is silently dropped" 
 a measured table, and the failure mode is invisible (a green suite over a lossy normalizer is
 exactly today's bug, B1/B2).
 
-- [ ] **Step 1: Write the failing test** `V/core/normalize.test.ts`, one case per row of spec §7.2:
+- [x] **Step 1: Write the failing test** `V/core/normalize.test.ts`, one case per row of spec §7.2:
       `message.content` as a bare string (user and assistant); array `text` blocks on a user row
       (B2 — every runner prompt); assistant `text`; `thinking` non-empty; `thinking` empty (asserts
       **no node**, with the measured 8,411-of-17,873 rationale in a comment); `tool_use`;
       `tool_result` in each of its four measured content shapes plus `is_error`; a base64 `image`
       block on a user row. Assert `RowAnchor` is populated (`uuid`, `i`, `at`, `ts`) on every node
       and that node order equals input order. Expected on first run: module missing.
-- [ ] **Step 2: Implement** the message-row half of `V/core/normalize.ts`. Signature takes already
+- [x] **Step 2: Implement** the message-row half of `V/core/normalize.ts`. Signature takes already
       parsed rows plus their byte offsets and returns `RenderNode[]` — no I/O, no clock.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/normalize.test.ts
       ```
       Expected: every §7.2 case passes; the empty-thinking case asserts an empty node list.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): take 1,000 consecutive rows from a real subagent transcript, run them
 through the normalizer, and account for every input row in the output. Under-rendering is a bug per
@@ -776,7 +786,7 @@ the oracle — a row class present in your sample and absent from the output, ot
 
 Model: **Opus.** Same reason as task 7; this half is where the open-world rule lives.
 
-- [ ] **Step 1: Write the failing tests.** `normalize.coverage.test.ts` is the mechanical proof of
+- [x] **Step 1: Write the failing tests.** `normalize.coverage.test.ts` is the mechanical proof of
       spec §7.1. It loads the task-1 fixture and classifies **every row, and every block inside a
       message row**, by D23's precedence ladder at the granularity D28 fixes:
 
@@ -832,17 +842,17 @@ Model: **Opus.** Same reason as task 7; this half is where the open-world rule l
       (asserting the node keeps only a `basename`, never the absolute path), `apiErrorStatus` rows,
       and an invented row type rendering as `raw`. Expected on first run: unaccounted rows reported
       by the coverage test.
-- [ ] **Step 2: Implement** the metadata half. The default branch of the row dispatch is a `raw`
+- [x] **Step 2: Implement** the metadata half. The default branch of the row dispatch is a `raw`
       node — `continue` appears nowhere in this module except for the declared empty-`thinking`
       exception, which carries the spec §7.2 citation in a comment.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/normalize
       ```
       Expected: the coverage test reports 0 unaccounted rows over the fixture; every subtype case
       passes.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the coverage test against a **real** transcript of your choosing
 from `~/.claude/projects` (not the fixture) and report the unaccounted-row count. Also verify the
@@ -856,7 +866,7 @@ seed of a traversal (B3's class).
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Cases: a call and result in order; a result whose call is
+- [x] **Step 1: Write the failing test.** Cases: a call and result in order; a result whose call is
       outside the window (asserts an `orphan_result` node **at the result's file position**, never
       a drop — this is B1's other half); a call with no result (stays `pending`); two calls with the
       same id; a result with `is_error`; a `Task` call whose id matches a sidecar `toolUseId`
@@ -920,16 +930,16 @@ Model: **Sonnet**.
         entry was evicted renders as an `orphan_result` rather than growing the map.
 
       Expected on first run: module missing.
-- [ ] **Step 2: Implement** a single forward pass with a bounded `Map<tool_use_id, RowAnchor.id>`
+- [x] **Step 2: Implement** a single forward pass with a bounded `Map<tool_use_id, RowAnchor.id>`
       carried in the normalize state, per spec §7.5 and §6.4. No backward scan, no second pass, and
       no unbounded map.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/pair.test.ts core/normalize
       ```
       Expected: all pass, including the orphan case.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): measure the elision threshold's effect on a real transcript — count how
 many nodes carry `elided: true`, and confirm no node's serialized size exceeds
@@ -945,15 +955,15 @@ bytes were chunked is a Critical finding: it silently breaks patching and dedupe
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** `title.test.ts`: the five-step fallback of spec §5.3 in
+- [x] **Step 1: Write the failing test.** `title.test.ts`: the five-step fallback of spec §5.3 in
       order, each step tested in isolation and in combination; a file with several `ai-title` rows
       (last wins); a file with none of them (falls through to the session id); a tail window whose
       first line is partial (asserts the partial line is dropped, not parsed). `liveness.test.ts`:
       grew-but-old-mtime is live; not-grown-and-mtime-within-10-min is live; neither is not live;
       the first-scan case where no previous size is known. Expected: modules missing.
-- [ ] **Step 2: Implement** both. Both are pure: they take already-read head and tail line arrays,
+- [x] **Step 2: Implement** both. Both are pure: they take already-read head and tail line arrays,
       a size, an mtime and a `nowIso`; they never stat anything.
-- [ ] **Step 3: Measure the window over the whole real corpus** — this is the acceptance gate for
+- [x] **Step 3: Measure the window over the whole real corpus** — this is the acceptance gate for
       spec §5.3's assumption, and it is a measurement, not a test:
 
       ```sh
@@ -965,13 +975,13 @@ Model: **Sonnet**.
       file) and prints `matched/total`. Expected: **at least 180 of 181** files agree. If fewer,
       raise the tail window and re-run until the threshold is met, then record the final constant
       in the task report and in spec §5.3.
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/title.test.ts core/liveness.test.ts
       ```
       Expected: all pass.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): re-run the measurement yourself and report the number. A title rule
 that is right 90% of the time is a user-visible defect on a list page, and the only way to know is
@@ -984,21 +994,21 @@ to run it against all 181 files.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Carry over every existing `processes.test.ts` case that
+- [x] **Step 1: Write the failing test.** Carry over every existing `processes.test.ts` case that
       concerns tree shape (including the F34 missing-parent and F36 any-length-cycle cases), drop
       the ones about `ProcessNode.status` (that concept is gone), and add: a sidecar with no
       `parentAgentId` (measured: 453 of 813 — the common case, hangs off the session); a sidecar
       whose `.meta.json` is missing entirely; ordering by `birthtimeIso` then `agentId`; a
       `toolUseId` present on 811 of 813 sidecars and absent on the rest. Expected: module missing.
-- [ ] **Step 2: Implement** `V/core/subagents.ts` returning `Agent[]` per spec §4. Pure: it takes
+- [x] **Step 2: Implement** `V/core/subagents.ts` returning `Agent[]` per spec §4. Pure: it takes
       already-read sidecar entries and stats.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/subagents.test.ts
       ```
       Expected: all pass, including both malformed-tree cases.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run this against a real session directory with subagents (116 exist on
 this machine) and compare the tree to the `.meta.json` files by hand. Verify no field read from a
@@ -1011,7 +1021,7 @@ this machine) and compare the tree to the `.meta.json` files by hand. Verify no 
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Build the index from already-read JSON per spec §9:
+- [x] **Step 1: Write the failing test.** Build the index from already-read JSON per spec §9:
       a well-formed state file indexes every card with a session id; a card with a null session id
       is skipped; a session id failing the id charset is dropped and counted; a malformed state
       file contributes nothing and does not throw; `runnerAlive` is true only when `endedAt` is
@@ -1037,17 +1047,17 @@ Model: **Sonnet**.
       name — so the adapter performs the reads the selection names and chooses nothing.
 
       Expected: module missing.
-- [ ] **Step 2: Implement.** The module takes already-read JSON values and a
+- [x] **Step 2: Implement.** The module takes already-read JSON values and a
       `processAlive: (pid: number) => boolean` function — injected, never constructed
       (`pure-core.md`), plus `selectCampaigns`. `statePath` from `run.json` is never read; there is
       no code path that could.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/badge.test.ts
       ```
       Expected: all pass, including the traversal case.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): this module closes B3. Verify by reading it that no value originating in
 a JSON file is ever concatenated into a path, and run the traversal case yourself. Also confirm the
@@ -1059,7 +1069,7 @@ module names neither `logsDir` nor `statePath` anywhere (D6).
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Encoding: every frame type of spec §6.2 round-trips,
+- [x] **Step 1: Write the failing test.** Encoding: every frame type of spec §6.2 round-trips,
       **including `patch`**; `id:` is present on every frame and is a **per-stream monotonic
       sequence** starting at 1 on `hello` and incrementing by one per frame, of any type (D12) —
       assert a `hello`/`rows`/`patch`/`meta`/`ping` sequence carries ids 1,2,3,4,5; **`hello` carries a
@@ -1093,14 +1103,14 @@ Model: **Sonnet**.
       lists, never a single happy path.
 
       Expected: module missing.
-- [ ] **Step 2: Implement** `V/core/sse.ts`. Pure.
-- [ ] **Step 3: Run.**
+- [x] **Step 2: Implement** `V/core/sse.ts`. Pure.
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/sse.test.ts
       ```
       Expected: all pass, including the `U+2028`/`U+2029` cases.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): feed the encoder a frame whose payload contains a literal
 `\ndata: injected` sequence and confirm the receiving side sees one frame, not two. Frame-splitting
@@ -1116,7 +1126,7 @@ not bound a frame, and the initial window is exactly where the aggregate bites.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Extend `V/structure.test.ts` with the five new rules of
+- [x] **Step 1: Write the failing test.** Extend `V/structure.test.ts` with the five new rules of
       spec §12.6 that are checkable today (the client rules land in task 22): `process.argv`
       appears only in `serve.ts`; `.tribe` appears only in `adapters/campaign.adapter.ts` (assert
       the rule now, with the adapter not yet existing, so it fails loudly until task 16); the
@@ -1175,12 +1185,12 @@ Model: **Sonnet**.
 
       Expected: the `.tribe` rule and the allowlist rule both fail against the current tree (the old
       `scan.adapter.ts` is still present).
-- [ ] **Step 2: Make them pass** by removing what phase 1 has superseded: delete the empty
+- [x] **Step 2: Make them pass** by removing what phase 1 has superseded: delete the empty
       `V/core/live/` tree and any now-orphaned import. The `.tribe` rule stays failing only if a
       deleted file survives — if it does, delete it.
-- [ ] **Step 3: Update** `V/README.md`'s "Package layout" section to the tree in spec §3.1, and its
+- [x] **Step 3: Update** `V/README.md`'s "Package layout" section to the tree in spec §3.1, and its
       purity paragraph to name the new module set.
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bunx tsc --noEmit && bun test
@@ -1188,7 +1198,7 @@ Model: **Sonnet**.
       Expected: `tsc` clean; the whole suite green; `structure.test.ts` reports every rule passing
       except any whose subject is scheduled for a later phase, and each such exception is named in
       the test's own message.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): run `bun test structure.test.ts` and read each rule's implementation.
 Then **try to defeat the allowlist**: write `import * as fs from 'node:fs'; fs.writeFileSync(...)`,
@@ -1211,7 +1221,7 @@ explain which direction each rule must fail in; that reasoning is the contract.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** In `fs.adapter.test.ts`, against the task-1 fixture:
+- [x] **Step 1: Write the failing test.** In `fs.adapter.test.ts`, against the task-1 fixture:
       `statOrNull` on a missing file returns null and on a real file returns a **`FileObservation`
       including `inode`** (spec §4 — task 5's rotation trigger is dead without it);
       `listDirOrEmpty` on a missing directory returns `[]`; `readRange` returns exactly the
@@ -1242,17 +1252,17 @@ Model: **Sonnet**.
          Claude Code writes on this machine.
 
       Expected: both modules missing.
-- [ ] **Step 2: Implement.** Carry over the existing adapter's primitives verbatim where they
+- [x] **Step 2: Implement.** Carry over the existing adapter's primitives verbatim where they
       apply (`readRange` returning raw `Uint8Array` so a multi-byte character split across ticks is
       the caller's problem to solve with a streaming decoder — keep that doc comment, it is F44),
       and add `readHead`, `readTail`, `readTextCapped`.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test adapters/fs.adapter.test.ts
       ```
       Expected: all pass.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): confirm by reading that every function is read-only, and that the
 adapter makes no line-boundary, cache or reset decision — those belong to `core/window.ts`,
@@ -1269,7 +1279,7 @@ task 19's rotation test is worthless if it is.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Against a fixture `~/.tribe` built in a `mkdtemp`: the
+- [x] **Step 1: Write the failing test.** Against a fixture `~/.tribe` built in a `mkdtemp`: the
       fixed-depth walk finds campaigns; a campaign with no `runs/` directory yields
       `runnerAlive: false`; a malformed `campaign-state.json` is isolated to its own campaign and is
       reported as **malformed**, while an unreadable one is reported as **absent** (the two-outcome
@@ -1300,17 +1310,17 @@ Model: **Sonnet**.
       the 500-entry bound — and have the adapter hold the `Map` and obey it. Assert the module's source
       contains neither `logsDir` nor `statePath` (a source-level assertion, deliberately, because
       this is a D6 boundary and not merely behaviour). Expected: module missing.
-- [ ] **Step 2: Implement** per spec §9. `process.kill(pid, 0)` lives here, wrapped so `ESRCH` is
+- [x] **Step 2: Implement** per spec §9. `process.kill(pid, 0)` lives here, wrapped so `ESRCH` is
       false and `EPERM` is true; it is exposed as the `processAlive` the pure `core/badge.ts`
       receives.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test adapters/campaign.adapter.test.ts structure.test.ts
       ```
       Expected: both pass — including the `structure.test.ts` `.tribe` rule from task 14, which now
       has exactly one file to point at.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run this adapter against the real `~/.tribe` on this machine (17
 campaigns exist) and print every path it opens, by instrumenting the adapter temporarily or by
@@ -1324,7 +1334,7 @@ campaigns exist) and print every path it opens, by instrumenting the adapter tem
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** `core/scan.test.ts` (pure: takes already-read directory
+- [x] **Step 1: Write the failing test.** `core/scan.test.ts` (pure: takes already-read directory
       listings and stats, returns the index) covers ordering, the
       `size+mtime+inode` cache key, the duplicate-session-id-across-projects case of spec §5.2
       (**`projects: string[]`** — every encoded project dir holding that id, on `SessionSummary`
@@ -1340,16 +1350,16 @@ Model: **Sonnet**.
       project's own URL lists **all** of its sessions; an empty projects root; a missing `.claude`
       directory; and an unknown session id (404 with a one-line body). Expected: routes 404 before
       implementation.
-- [ ] **Step 2: Implement.** The index lives in `core/scan.ts` (pure) and is fed by the adapters at
+- [x] **Step 2: Implement.** The index lives in `core/scan.ts` (pure) and is fed by the adapters at
       the composition root.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test core/scan.test.ts serve.api.test.ts
       ```
       Expected: all pass; the empty and missing-root cases return an empty list with a note, not an
       error.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the real server against the real `~/.claude/projects` (181 sessions)
 and time `/api/projects` cold and warm. Report both numbers against spec §14's budgets. Also confirm
@@ -1363,7 +1373,7 @@ the cache key includes both size and mtime — a size-only key silently serves a
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.**
+- [x] **Step 1: Write the failing test.**
 
       **`/api/rows`'s full contract (spec §3.2), because "back-fill on scroll-up" is not one.**
       `limit` counts **pre-pairing candidate nodes** (D21's unit — the same one the window boundary
@@ -1490,9 +1500,9 @@ Model: **Sonnet**.
 
       `/api/spill` returns the fixture's spill file, refuses `../etc/passwd`, refuses a name with a
       slash, refuses a name failing the charset, and caps the read at 2 MiB. Expected: routes 404.
-- [ ] **Step 2: Implement** per spec §3.2, §6.3 and §7.6, routing every path through
+- [x] **Step 2: Implement** per spec §3.2, §6.3 and §7.6, routing every path through
       `containedJoin` and the resolved check of D14.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test serve.reads.test.ts
@@ -1500,7 +1510,7 @@ Model: **Sonnet**.
 
       Expected: all pass, including the four spill refusals, the fewer-than-500-rows node assertion,
       and the uuid-less attachment expansion.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): attempt the traversal yourself, with at least these encodings: `..%2f`,
 `%2e%2e/`, a NUL byte, a UTF-8 overlong `..`, and an absolute path. Any that reads a file outside the
@@ -1519,7 +1529,7 @@ and a subtle error here is invisible until a live campaign — which is precisel
 survived 804 tests. (**There is no resume to get wrong**: D12 removed byte-offset resume entirely,
 and a reconnect is a fresh snapshot.)
 
-- [ ] **Step 1: Write the failing test.** `poller.adapter.test.ts` with an injected clock. The
+- [x] **Step 1: Write the failing test.** `poller.adapter.test.ts` with an injected clock. The
       adapter **observes and emits; it decides nothing** — every branch under test is a call into
       `core/tail.ts` or `core/normalize.ts`, and the test asserts the adapter forwards what core
       returned rather than re-deriving it (`pure-core.md`).
@@ -1559,15 +1569,15 @@ and a reconnect is a fresh snapshot.)
       disconnect arrives **already paired** rather than as an orphan; the 9th concurrent stream gets 503; closing a connection
       releases its slot (assert by opening, closing and reopening 9 times). Expected: the poller
       module is missing and `/events` 404s.
-- [ ] **Step 2: Implement** per spec §6. The clock is injected; this adapter is the package's only
+- [x] **Step 2: Implement** per spec §6. The clock is injected; this adapter is the package's only
       clock owner.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test adapters/poller.adapter.test.ts serve.events.test.ts
       ```
       Expected: all pass, including the stream-slot accounting.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run a real stream against a file you append to yourself and kill the
 connection **between a `tool_use` row and its `tool_result`**; reconnect and confirm the tool card
@@ -1586,7 +1596,7 @@ confirm the slot counter returns to zero.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** `V/serve.security.test.ts`, one case per row of spec §13
+- [x] **Step 1: Write the failing test** `V/serve.security.test.ts`, one case per row of spec §13
       that the server owns: `--port abc`, `--port 0`, `--port 70000`, an unknown flag, a port
       already in use, `dist/index.html` missing — each producing one stderr line and the stated
       exit code, never a stack trace. Plus: a `Host` header of `evil.example.com` gets 403; a
@@ -1627,15 +1637,15 @@ Model: **Sonnet**.
 
       Carry over the idle-timeout case. Expected: most cases fail; `--port abc` currently yields a
       random port and `/healthz` still returns the v1 body.
-- [ ] **Step 2: Implement.** `HOME` and `process.argv` are read here and nowhere else. `dist/` is
+- [x] **Step 2: Implement.** `HOME` and `process.argv` are read here and nowhere else. `dist/` is
       loaded into a `Map` at boot (spec §12.4).
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bunx tsc --noEmit && bun test
       ```
       Expected: the whole package green; `/healthz` byte-identical.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): curl the running server with a spoofed `Host`, with a path-traversing
 asset name, and with 9 simultaneous streams. Then check `/healthz` against spec §10.4's table: the
@@ -1651,7 +1661,7 @@ and no viewer-only test can see it.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing check.** Run the C3 gate before touching anything and record its
+- [x] **Step 1: Write the failing check.** Run the C3 gate before touching anything and record its
       output:
 
       ```sh
@@ -1661,19 +1671,19 @@ Model: **Sonnet**.
 
       Expected before the change: the lookup reports the c3-215 Contract row describing a
       two-surface viewer with `--tribe-root`, which is now false.
-- [ ] **Step 2: Rewrite** `V/README.md` in full against spec §3.2, §5, §6, §10.3 and §13: one
+- [x] **Step 2: Rewrite** `V/README.md` in full against spec §3.2, §5, §6, §10.3 and §13: one
       surface, the route table, the discovery algorithm, the SSE contract, the build step, the
       failure table. Delete the status-page and `/live` sections and the `--tribe-root` row.
-- [ ] **Step 3: Author the change unit and apply it** to c3-215 row 76. Every literal `|` inside
+- [x] **Step 3: Author the change unit and apply it** to c3-215 row 76. Every literal `|` inside
       the row is escaped as `\|` (`rule-c3-table-cell-no-pipe` — three prior incidents).
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
       ```sh
       bunx @c3x/cli@11.6.3 check </dev/null
       ```
       Expected: clean, and `bunx @c3x/cli@11.6.3 lookup plugins/tribe/scripts/viewer/serve.ts` now returns the new
       row. Paste both.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): run `bunx @c3x/cli@11.6.3 check` yourself and read the new row against the code. A
 Contract row that claims a route, a flag or a guarantee the code does not have is a Critical
@@ -1701,7 +1711,7 @@ file, there is no alias layer, and no component may introduce a name the file do
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Extend `structure.test.ts`: no file under `client/`
+- [x] **Step 1: Write the failing test.** Extend `structure.test.ts`: no file under `client/`
       contains `dangerouslySetInnerHTML`; **no file under `client/` at all** contains a literal
       colour (there is no `tokens.css` under `client/` to exempt — D18 delivers tokens by `@import`
       from the owner's file, so the only exempt file is `design/sea-salt/tokens.css` itself, which
@@ -1711,7 +1721,7 @@ Model: **Sonnet**.
       Add `V/client/src/routes.test.ts` asserting the four URL shapes of spec §3.2 parse and
       round-trip through `pushState`. Expected: the client rules fail against the old `app.css`,
       which is full of literals.
-- [ ] **Step 2: Implement** the scaffold. **Tokens arrive by `@import`, not by a copy step (D18).**
+- [x] **Step 2: Implement** the scaffold. **Tokens arrive by `@import`, not by a copy step (D18).**
       `client/src/styles/index.css` carries exactly:
 
       ```css
@@ -1737,7 +1747,7 @@ Model: **Sonnet**.
       with the one-line remedy `bunx playwright install chromium` when none resolves**. It must not
       skip: a user-visible goal that goes green because its browser was missing is exactly the
       proxy-proof failure this revision exists to remove.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer
@@ -1746,7 +1756,7 @@ Model: **Sonnet**.
 
       Expected: `dist/index.html` and `dist/assets/` exist; every structural rule passes; the old
       client files are gone.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the build from a clean `node_modules` and confirm `dist/` is
 produced and git-ignored. Then grep the built bundle for any hex colour outside the token block — a
@@ -1767,7 +1777,7 @@ proves the import resolved rather than silently failing. Finally check every
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** using `@happy-dom/global-registrator` under `bun test`:
+- [x] **Step 1: Write the failing test** using `@happy-dom/global-registrator` under `bun test`:
       a project list renders one row per project with its `cwd` label and falls back to the encoded
       directory name when `cwd` is null; a session row shows title, short id, size, relative age,
       subagent count; `LiveDot` renders only when `live`; `CampaignBadge` renders slug, card,
@@ -1786,15 +1796,15 @@ Model: **Sonnet**.
       href is `?all=1`; with `olderCount: 0` it renders nothing; and **a project's session list is
       never filtered by age** — assert an old project opened directly shows every session it has.
       Expected: components missing.
-- [ ] **Step 2: Implement.** Every visual value is `var(--token)` (spec §8.1 names the token per
+- [x] **Step 2: Implement.** Every visual value is `var(--token)` (spec §8.1 names the token per
       component).
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test client/
       ```
       Expected: all pass; `structure.test.ts` still green (no literal slipped in).
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): render the list against the real server and count the rows against
 `ls ~/.claude/projects`. A project silently missing from the list is under-rendering by the oracle's
@@ -1806,7 +1816,9 @@ own definition, one level up from rows.
   `V/client/src/components/SessionView.tsx`,
   `RowList.tsx`, `Markdown.tsx`, `PromptCard.tsx`, `AssistantCard.tsx`, `ThinkingCard.tsx`,
   `ToolCard.tsx`, `Divider.tsx`, `ChipRow.tsx`, `ErrorCard.tsx`, `FollowTail.tsx`,
-  `LoadEarlier.tsx`
+  `LoadEarlier.tsx`,
+  `ConnectionNote.tsx` (R13: §8.1's top-level `<ConnectionNote>` — a plan gap, built in the
+  phase-3 fix round; renders the SSE connection state `useEventStream` tracks)
 - Create: `V/client/src/components/session.test.tsx`, `V/client/src/useEventStream.test.ts`,
   `V/client/src/rowStore.test.ts`
 
@@ -1814,7 +1826,7 @@ Model: **Opus.** Follow-the-tail, windowed back-fill and incoming frames all mut
 container; this is the one client task with real state-machine risk, and B7 is the evidence that
 getting it wrong is easy and silent.
 
-- [ ] **Step 1: Write the failing test.** `rowStore.test.ts` first, because it is the contract the
+- [x] **Step 1: Write the failing test.** `rowStore.test.ts` first, because it is the contract the
       other two rest on (spec §8.4). The store holds **one contiguous window** of nodes,
       `[first, last]` in byte offsets — never a sparse set of ranges:
       - nodes are keyed by `RowAnchor.id` and held in file order;
@@ -1911,16 +1923,16 @@ getting it wrong is easy and silent.
       token; follow-the-tail scrolls on new rows while within 32 px of the bottom, does **not**
       scroll when outside it, shows the pill, and resumes on click (spec §8.3). Expected: modules
       missing.
-- [ ] **Step 2: Implement.** `Markdown.tsx` maps `MdToken[]` to elements — there is no HTML string
+- [x] **Step 2: Implement.** `Markdown.tsx` maps `MdToken[]` to elements — there is no HTML string
       anywhere in the client. `rowStore.ts` is the single owner of row identity, dedupe and
       eviction; components read from it and never keep their own copy of a row.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test client/ && bun run build
       ```
       Expected: all pass; the build succeeds.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): drive the scroll state machine yourself through the sequence bottom, new
 nodes, scroll up, new nodes, click pill, new nodes — and assert the viewport moves only in states 2
@@ -1940,7 +1952,7 @@ built bundle.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** Tabs render from `Agent[]` in tree order with depth
+- [x] **Step 1: Write the failing test.** Tabs render from `Agent[]` in tree order with depth
       indentation; selecting a tab navigates to `/s/<id>/a/<agentId>` and opens a new stream; a
       `Task` tool card whose node carries an `agentId` links to that tab; `ImageCard` fetches
       `/api/block?at=<RowAnchor.at>&i=<RowAnchor.i>` only on expand — **addressed by the node's own
@@ -1956,14 +1968,14 @@ Model: **Sonnet**.
       `attachment` node with `expandable: false` renders **no** affordance rather than one that
       would return nothing; `RawCard` renders collapsed with the row type
       visible; `UnreadableNote` shows the count. Expected: components missing.
-- [ ] **Step 2: Implement.**
-- [ ] **Step 3: Run.**
+- [x] **Step 2: Implement.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test client/
       ```
       Expected: all pass, including the two lazy-fetch assertions (nothing fetched before expand).
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): open a real session with subagents in a browser and compare the tab set
 to `ls` of its `subagents/` directory. A sidecar with no tab is under-rendering.
@@ -1977,14 +1989,14 @@ to `ls` of its `subagents/` directory. A sidecar with no tab is under-rendering.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** `plugins/tribe/scripts/tests/test-install-viewer-build.sh`,
+- [x] **Step 1: Write the failing test** `plugins/tribe/scripts/tests/test-install-viewer-build.sh`,
       in the repo's existing test-script style with `set -euo pipefail`
       (`rule-bash-strict-mode`). It runs the plugin hook against a temporary `CLAUDE_DIR`, asserts
       `dist/index.html` exists afterwards, then re-runs it with `bun` masked out of `PATH` and
       asserts the hook still exits 0 and prints the warning. Expected on first run: the hook does
       not build anything, so the first assertion fails.
-- [ ] **Step 2: Implement** the build block and the `doctor.sh` check.
-- [ ] **Step 3: Run.**
+- [x] **Step 2: Implement** the build block and the `doctor.sh` check.
+- [x] **Step 3: Run.**
 
       ```sh
       bash plugins/tribe/scripts/tests/test-install-viewer-build.sh
@@ -1993,7 +2005,7 @@ Model: **Sonnet**.
       ```
 
       Expected: the first two pass; `doctor.sh` reports the viewer client as built.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run `install.sh` on a machine state where `dist/` does not exist and
 confirm the viewer then starts. Then delete `dist/` and confirm `serve.ts` refuses with the
@@ -2012,11 +2024,17 @@ with phase 1 or 3 in its own worktree.
   `R/ports/ports.ts`, `R/adapters/run-io.adapter.ts`, `R/core/loop/card-actions.ts`,
   `R/cli/main.ts`
 - Modify: `R/core/loop/card-actions.test.ts`, `R/cli/main.test.ts`
+- Modify: `R/adapters/viewer-launch.adapter.ts`, `R/adapters/viewer-launch.adapter.test.ts`
+  (R4 ruling, added during Task 27's own build: this file is the sole `ViewerPort`
+  implementer — it owns the `/healthz` probe fetch and the old `VIEWER_IDENTITY_MARKER` —
+  and Step 2's own accept-condition rewrite plus the audit lens's "stand up a real old-shape
+  responder" check both require editing it. The original list omitted it; this note plus the
+  two file names is the fix, made in the same commit as the code per the ruling.)
 
 Model: **Sonnet**. Mechanical against a precise brief; the risk is breadth (645 tests construct
 `LoopIO`), not depth, and `LinePort` already exists.
 
-- [ ] **Step 1: Write the failing test.** `viewer-launch.test.ts`:
+- [x] **Step 1: Write the failing test.** `viewer-launch.test.ts`:
       `viewerRootUrl(4321, 'my-repo', 'my-slug')` is exactly
       `http://127.0.0.1:4321/?campaign=my-repo/my-slug` — the **pair**, because a slug alone does
       not identify a campaign on this machine (spec §9); a repo key or slug containing `&`, a space
@@ -2038,11 +2056,11 @@ Model: **Sonnet**. Mechanical against a precise brief; the risk is breadth (645 
       when it is null. `main.test.ts`: the root line is printed once before the first card, and
       `--no-viewer` and `--dry-run` each print neither line. Expected: `viewerRootUrl` does not
       exist and `LoopIO` has no `printLine`.
-- [ ] **Step 2: Implement** per spec §10.2 and §10.4. `LinePort` is added to `LoopIO`'s composition;
+- [x] **Step 2: Implement** per spec §10.2 and §10.4. `LinePort` is added to `LoopIO`'s composition;
       the production wiring is one line in `run-io.adapter.ts`. The probe's accept condition becomes
       `viewer === 'tribe-viewer' && typeof v === 'number' && v >= 2` — a version floor, not an
       equality, so a future v3 viewer is still reusable.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/runner && bunx tsc --noEmit && bun test
@@ -2050,7 +2068,7 @@ Model: **Sonnet**. Mechanical against a precise brief; the risk is breadth (645 
       Expected: the full runner suite green (645 tests today), with the new cases added. Any
       existing test that fails to satisfy the widened `LoopIO` gets the one missing method, never a
       cast.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the runner on `--dry-run` and confirm zero viewer lines; then read
 every `LoopIO` mock changed by this task and confirm none was silenced with `as any` or a
@@ -2068,7 +2086,7 @@ body) on the probe port and confirm the runner neither reuses nor spawns, and pr
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** `V/deletion-guard.test.ts`, implementing spec §11.4's rules
+- [x] **Step 1: Write the failing test** `V/deletion-guard.test.ts`, implementing spec §11.4's rules
       exactly — **six** rules now, because the old rule 3 split into 3 (absent) and 4 (present with
       a content marker), renumbering what follows.
 
@@ -2080,9 +2098,9 @@ Model: **Sonnet**.
       distinguishes them — `core/model.ts` must **export `RENDER_NODE_KINDS`**, which the old file
       could not have. A replaced file is proved by what it now contains, never by its absence. Expected on first run: rules 1–3 fail, because `derive.ts` and
       `render.ts` still exist and still name the status page.
-- [ ] **Step 2: Delete** everything remaining in spec §11.1 and fix the resulting import errors —
+- [x] **Step 2: Delete** everything remaining in spec §11.1 and fix the resulting import errors —
       there should be none, because nothing in the new tree imports them.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bunx tsc --noEmit && bun test
@@ -2091,7 +2109,7 @@ Model: **Sonnet**.
 
       Expected: the suite green; the `diff --stat` shows the deleted line count, which goes into
       the PR body as G5's measurement. Paste it into the task report.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the grep guard's **six** rules yourself, by hand, with your own
 `grep`. A guard that passes because its pattern is subtly wrong is worse than no guard — check rule
@@ -2110,7 +2128,7 @@ Audit lens (skinner, contract): run the grep guard's **six** rules yourself, by 
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing check.** The D9 sweep's gate is a grep, run before and after:
+- [x] **Step 1: Write the failing check.** The D9 sweep's gate is a grep, run before and after:
 
       ```sh
       grep -rn -i 'supervisor' plugins/tribe .c3/
@@ -2137,7 +2155,7 @@ Model: **Sonnet**.
 
       The `Monitor` and `ScheduleWakeup` tool names and the `artifact-comment-monitor` row type are
       **not** in scope and must still be present afterwards — assert that too.
-- [ ] **Step 2: Apply the eight renames** of spec §15 and rewrite the two README sections against
+- [x] **Step 2: Apply the eight renames** of spec §15 and rewrite the two README sections against
       the new single surface and the two stdout lines of spec §10.2.
 
       **D9 retires only the PROCESS NAMES, and sites 3–4 are where that distinction bites.** D9 says
@@ -2152,9 +2170,9 @@ Model: **Sonnet**.
       Sites 4 and 5 (`runner/README.md:76`, `:129`) fall inside ranges being rewritten anyway — they
       still have to be in the inventory, because the gate is "the grep returned exactly this set
       before, and returns empty after".
-- [ ] **Step 3: Author and apply** the c3-215 row 72 change unit (the runner's viewer sentences),
+- [x] **Step 3: Author and apply** the c3-215 row 72 change unit (the runner's viewer sentences),
       escaping every literal `|` as `\|`.
-- [ ] **Step 4: Run.**
+- [x] **Step 4: Run.**
 
       ```sh
       bunx @c3x/cli@11.6.3 check </dev/null
@@ -2165,7 +2183,7 @@ Model: **Sonnet**.
 
       Expected: `bunx @c3x/cli@11.6.3 check` clean; the runner suite green; the supervisor grep empty; `Monitor`
       still present in `session.ts`. This closes follow-up card **FU2** (STATE.md `F2`).
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): run both greps yourself. Then confirm the D9 rename did **not** touch a
 Claude Code tool name or a transcript row type — an over-eager sweep here breaks the wait-tool denial
@@ -2187,7 +2205,7 @@ runner *log* — that is D6, and it is a different claim.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** per spec §16.2 and §16.5. These are **DOM** proofs in real
+- [x] **Step 1: Write the failing test** per spec §16.2 and §16.5. These are **DOM** proofs in real
       headless Chromium via `e2e/browser.ts`, not API-shape assertions — G1, G4 and G6 are claims
       about what a person sees, so that is where they are observed.
 
@@ -2283,12 +2301,12 @@ Model: **Sonnet**.
       1 MiB).
 
       Expected: the e2e files do not exist and the old harness still does.
-- [ ] **Step 2: Implement,** carrying the current harness's proven parts: the bounded deadline
+- [x] **Step 2: Implement,** carrying the current harness's proven parts: the bounded deadline
       loops, the shell-metacharacter quoting for `commands.md` (F54), and the "a screenshot that
       cannot be captured is recorded, never faked" rule. Screenshots are still taken — they are how
       a human reviews the result — but **no assertion rests on one**. If no browser resolves, these
       suites **fail** with `bunx playwright install chromium`; they never skip.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && bun test e2e/dom-kinds.e2e.test.ts e2e/url-refusals.e2e.test.ts e2e/served-build.e2e.test.ts
@@ -2300,7 +2318,7 @@ Model: **Sonnet**.
       no token — only the Haiku suites in tasks 31 and 32 are gated); the opt-in run additionally
       produces `perf.json` and the screenshots, each a real non-trivial PNG. Every budget in spec §14 is met or the shortfall is
       recorded verbatim — never widened to make the test pass.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): run the DOM suites yourself with `HOME` set to a directory that has no
 `.claude` and no `.tribe` at all, and confirm they pass — that is G1's actual claim. Then delete one
@@ -2317,7 +2335,7 @@ that is G6's claim and the viewer-side half of the stale-viewer defect.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test** per spec §16.3. The latency number comes from a
+- [x] **Step 1: Write the failing test** per spec §16.3. The latency number comes from a
       **controlled writer the test owns**, never from a transcript row's `timestamp` field — that is
       the model's clock, it can precede the write by seconds, and using it makes the measurement a
       proxy for the thing G2 actually claims.
@@ -2382,9 +2400,9 @@ Model: **Sonnet**.
       A real `claude -p` Haiku 4.5 session runs alongside as the realism check (it writes a real
       transcript the page renders), but **no assertion depends on its content** — that is what makes
       the measurement reproducible. Expected: the test file does not exist.
-- [ ] **Step 2: Implement,** gated behind `TRIBE_VIEWER_E2E=1` so a plain `bun test` never spawns a
+- [x] **Step 2: Implement,** gated behind `TRIBE_VIEWER_E2E=1` so a plain `bun test` never spawns a
       session or spends a token.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && TRIBE_VIEWER_E2E=1 bun test e2e/live-tail.e2e.test.ts
@@ -2394,7 +2412,7 @@ Model: **Sonnet**.
       real PNGs.
       If the budget is missed, record the real number — never widen the budget to make the test
       pass.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): re-run this yourself and read `latency.json`. Confirm every sample's
 start is the **writer's own** `performance.now()` — a sample derived from a row's `timestamp` field
@@ -2411,7 +2429,7 @@ rebuilding pairing from the file.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing test.** **Spec §16.4 states this harness in full** — the throwaway
+- [x] **Step 1: Write the failing test.** **Spec §16.4 states this harness in full** — the throwaway
       repo, the fake `HOME`, both campaign-home layouts, the card whose plan forces one `Task`-tool
       subagent dispatch, the exact runner invocation, every assertion and the teardown. Build it from
       that section; nothing here is "carried over" from a harness the reader cannot see.
@@ -2464,7 +2482,7 @@ Model: **Sonnet**.
       **Port ownership is a precondition, not a thing to clear**: if anything is already listening
       on 4399 at start, the test **refuses to run** with a clear message. Expected: the test file
       does not exist.
-- [ ] **Step 2: Implement.** Teardown kills **only the pids this test spawned** — the runner's
+- [x] **Step 2: Implement.** Teardown kills **only the pids this test spawned** — the runner's
       process group by the pid the test holds, and the viewer child by the pid the test holds. It
       never kills "whatever holds port 4399": that may be an unrelated process, and terminating one
       is outside this card's authority (the old harness did exactly that and it is being removed,
@@ -2481,14 +2499,14 @@ Model: **Sonnet**.
       `homeB` removes them. Delete the throwaway repo the same way. The evidence lives under
       `docs/tribe/planning/viewer-consolidation/evidence/`: the captured stdout lines, the assertion
       output and the screenshots — nothing needs to survive teardown.
-- [ ] **Step 3: Run.**
+- [x] **Step 3: Run.**
 
       ```sh
       cd plugins/tribe/scripts/viewer && TRIBE_VIEWER_E2E=1 bun test e2e/campaign-badge.e2e.test.ts
       ```
       Expected: both stdout lines match spec §10.2 character for character; the badge assertions
       pass; `commands.md` records every command actually run.
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 Audit lens (skinner, contract): confirm the printed session URL actually opens that session in the
 running viewer — the test asserts it in the browser, so re-run it and watch. Then, **separately and read-only**, start the viewer with the
@@ -2510,8 +2528,10 @@ Should-fix at minimum, because it can kill a process this card never owned.
 
 Model: **Sonnet**.
 
-- [ ] **Step 1: Write the failing check.** The gate is the full repo sweep; run it first and record
-      every failure:
+- [x] **Step 1: Write the failing check.** The gate is the full repo sweep; run it first and record
+      every failure: (run in full MINUS `pre-gate.sh` and `gap-gate.ts` — deferred to the Warchief's
+      own final Method-step-7 run per this task's hunter brief, to avoid double-appending to
+      `.tribe/harness-gaps.jsonl`; every other command run and green, see the hunter report)
 
       ```sh
       cd plugins/tribe/scripts/viewer && bunx tsc --noEmit && bun test
@@ -2568,18 +2588,21 @@ Model: **Sonnet**.
 
       Expected: everything green by this point; anything red here is a real regression and is fixed
       before the index is written.
-- [ ] **Step 2: Write the evidence index** — one table mapping each of G1–G6 to the artifact that
+- [x] **Step 2: Write the evidence index** — one table mapping each of G1–G6 to the artifact that
       proves it, with the real measured number beside it (latency, line counts, budgets, pass
       counts). No claim without an artifact path. For G1, G2, G4 and G6 the artifact must be the
       **DOM-level** one from spec §16 (`dom-kinds`, `latency.json` + the scroll readings,
       `paths.containment` + `readonly` + `serve.security`, `served-build`) — naming a unit test
       there would re-introduce exactly the proxy-proof gap this revision closed.
-- [ ] **Step 3: Reconcile the spec** with what was actually measured. The spec is the contract, so
+- [x] **Step 3: Reconcile the spec** with what was actually measured. The spec is the contract, so
       a constant that changed during the build is corrected here, in the same PR, with the
-      measurement cited.
-- [ ] **Step 4: Run.** The command block from step 1, again.
+      measurement cited. Re-ran `tools/title-window.ts --head 65536 --tail 262144`: 223/224 (99.6%)
+      ≥ the 99% threshold — the head/tail window constant is unchanged, and §14's RSS budget was
+      already reconciled by R18/D34 (commit 9e1b5bd). No-op: spec.md left untouched (a no-op is a
+      valid outcome per this step's own instruction; see the evidence index and hunter report).
+- [x] **Step 4: Run.** The command block from step 1, again (same deferral as Step 1).
       Expected: identical, all green, and the evidence index resolves every link it names.
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 Audit lens (skinner, contract): open every link in the evidence index and confirm it resolves. Then
 check each G1–G6 row against the card's own wording — a goal whose artifact proves something

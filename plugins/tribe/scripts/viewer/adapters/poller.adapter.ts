@@ -1,75 +1,84 @@
-// adapters/poller.adapter.ts — the ONLY clock owner in the viewer (spec §4/§7). Every "run this
-// again in 400ms" and "what time is it" decision lives here, behind an injectable seam
-// (`schedule`/`now`) so a test can drive the poller with a controllable tick instead of a real
-// timer. Every filesystem access goes through the injected `TranscriptIo` — this file names no
-// `node:fs`/`node:child_process`/`node:http` import of its own.
+// adapters/poller.adapter.ts — Task 19. ONE poll loop per open SSE stream, and the package's ONLY
+// clock owner (spec §4, §6). This file OBSERVES and EMITS; it DECIDES nothing (`pure-core.md`):
 //
-// One poller instance owns exactly one SSE connection's worth of state: it always tails the
-// campaign's parent (session) transcript — that is the ONLY place a subagent's spawning
-// `tool_use` gets resolved (spec D3) — and, when the caller selected a different process, tails
-// that process's own transcript too. `deriveProcesses`/`normalizeRecords`/`advanceTail` do every
-// decision; this file only feeds them already-read bytes and turns their output into SSE frames.
-import { join, resolve, sep } from 'node:path';
-import { advanceTail, initialTailState, type TailState } from '../core/live/tail.ts';
-import { parseRecordLines } from '../core/live/records.ts';
-import { initialNormalizeState, normalizeRecords, type NormalizeState, type NormalizePatch } from '../core/live/normalize.ts';
-import { deriveProcesses, type SubagentEntry } from '../core/live/processes.ts';
-import { agentIdFromFileName, metaFileNameFor } from '../core/live/paths.ts';
-import { MAX_SNAPSHOT_EVENTS, type ProcessNode, type SseFrame, type TranscriptEvent } from '../core/live/model.ts';
-import type { TranscriptIo } from './transcript.adapter.ts';
+//   - which bytes form complete rows, where a live tail stands, and whether the file rotated or
+//     truncated  ->  `core/tail.ts#advanceTail` (pure, over raw bytes, D13);
+//   - what the initial/reset window is  ->  `core/window.ts#findWindow` — the SAME function
+//     `/api/rows` uses (D31), never a second implementation;
+//   - what a row becomes, and how a `tool_use` pairs with its later `tool_result`  ->
+//     `core/normalize.ts` + `core/pair.ts` (§6.4);
+//   - how a frame is encoded, sequence-numbered and split at the 1 MiB cap  ->  `core/sse.ts`.
+//
+// Everything world-touching arrives through the injected `io` (stat / ranged read / a meta
+// snapshot), and the clock (`now`) and scheduler (`schedule`) are injected too — so this file
+// names no `node:fs` / `node:child_process` / `node:net` import of its own, and a test drives it
+// with a controllable tick instead of a real timer. D12: a reconnect is a fresh snapshot handled
+// entirely in `serve.ts` (a new poller, a new `generation`); this loop carries no resume state and
+// never reads `Last-Event-ID`.
+import { advanceTail, type TailState } from '../core/tail.ts';
+import { candidatesFromRows, findWindow, type FindWindowResult, type ReadBack } from '../core/window.ts';
+import { createPairState, pair, type PairState } from '../core/pair.ts';
+import { batchFrames, batchPatches, encodeFrame, type SseFrame } from '../core/sse.ts';
+import type { Agent, Badge, FileObservation, Patch, RenderNode, SessionSummary } from '../core/model.ts';
 
-// Exported so `core/live/model.test.ts` can assert `SSE_IDLE_TIMEOUT_SECONDS` (serve.ts's
-// Bun.serve idleTimeout) actually exceeds this interval (F55) — the two constants must never
-// drift apart silently.
-export const PING_INTERVAL_MS = 15_000;
+/** Poll interval (spec §6.2): 250 ms leaves room within G2's 1 s budget for parse + transport. */
+export const POLL_INTERVAL_MS = 250;
+/** Per-tick read cap (spec §6.2/§6.5): the remainder arrives next tick, losslessly, because the
+ * tail advances only by bytes actually consumed. */
+const TICK_READ_CAP = 4 * 1024 * 1024;
+/** 1 MiB SSE frame cap (spec §6.2/§6.5). `core/sse.ts` bounds each node at 64 KiB (D15), so a
+ * `rows`/`patch` frame is bounded by splitting alone — no oversized-node branch. */
+const FRAME_MAX_BYTES = 1024 * 1024;
+/** Keep-alive interval (spec §6.2). */
+const PING_INTERVAL_MS = 15_000;
+/** The initial/reset window is the last 500 pre-pairing candidate nodes (spec §6.3, D21). */
+const DEFAULT_WINDOW_LIMIT = 500;
 
-export interface LiveCampaignContext {
-  cardId: string;
-  sessionId: string;
-  transcriptPath: string;
-  subagentsDir: string;
-  cardStatus: string;
+const EMPTY = new Uint8Array(0);
+
+/** The point-in-time metadata that decorates a focused session view (spec §6.2). The poller reads
+ * one of these on connect (for `hello`) and once per tick (to detect a change — a new sidecar, a
+ * badge, a liveness flip — and forward it as a `meta` frame). It is supplied by the composition
+ * root (`serve.ts`), which owns the scan; this file only compares and forwards. */
+export interface PollerMeta {
+  session: SessionSummary;
+  agents: Agent[];
+  badges: Badge[];
+  live: boolean;
 }
 
-export interface CreateLivePollerInput {
-  io: TranscriptIo;
-  intervalMs: number;
-  campaign: LiveCampaignContext;
-  processId: string | null;
-  emit: (frame: SseFrame) => void;
-  /** Injected clock — defaults to the real one. The only reason a caller would override it is a
-   * test wanting a deterministic `nowIso` without waiting on wall time. */
-  now?: () => string;
-  /** Injected scheduler — defaults to real `setInterval`/`clearInterval`. This is the seam a
-   * test uses to drive the poller with a controllable tick. */
-  schedule?: (fn: () => void, ms: number) => { stop: () => void };
+/** The injected world contact — every read the poller makes, and nothing else. `serve.ts` wires
+ * the real `fs.adapter` reads and the real scan behind it; a test supplies an in-memory fake. The
+ * observe method is named `statFile` (not `stat`) so the structural wall's `node:fs` universe scan
+ * — which refuses a bare async `stat` call on any receiver (§12.6 (7c)) — never mistakes this
+ * injected abstraction for the async filesystem observe. */
+export interface PollerIo {
+  statFile(path: string): FileObservation | null;
+  readRange(path: string, start: number, end: number): Uint8Array;
+  readMeta(): PollerMeta;
 }
 
-interface TrackedTranscript {
+export interface CreatePollerInput {
+  io: PollerIo;
+  /** The resolved, contained transcript file this stream tails (`serve.ts` resolves it once). */
   path: string;
-  tail: TailState;
-  normalize: NormalizeState;
-  /** Streaming UTF-8 decoder (F44): a multi-byte character can straddle two polls of a file
-   * that is actively being appended to. Decoding each `readRange` independently (the old
-   * behavior) turns the split character into `U+FFFD` on both sides and loses it permanently.
-   * `TextDecoder` is STATEFUL when used with `{ stream: true }` — it withholds an incomplete
-   * trailing byte sequence internally and prepends it to the next `decode()` call — so this
-   * instance must live here, alongside this track's offset/carry, and never be recreated per
-   * read (recreating it per call would throw away exactly the state that makes it work). */
-  decoder: TextDecoder;
-}
-
-interface PullOutcome {
-  events: TranscriptEvent[];
-  patches: NormalizePatch[];
-}
-
-function freshTrack(path: string): TrackedTranscript {
-  return { path, tail: initialTailState(), normalize: initialNormalizeState(), decoder: new TextDecoder('utf-8') };
-}
-
-function describeError(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  intervalMs: number;
+  /** Minted fresh per connection by the composition root (D12); carried verbatim onto `hello`. */
+  generation: string;
+  /** Receives each already-encoded SSE wire record. `serve.ts` enqueues it onto the response. */
+  emit: (encoded: string) => void;
+  /** Invoked EXACTLY once when the poller reaches a terminal state — a `gone` (the file was
+   * deleted), a connect failure, or a mid-stream filesystem error. `serve.ts` uses it to close the
+   * `ReadableStream` and release the stream slot (spec §6.5: "a closed connection releases its slot
+   * exactly once") so a dead/errored stream never permanently consumes one of the 8. Optional so the
+   * unit tests (which observe frames, not the socket) can omit it; defaults to a no-op. */
+  onClose?: () => void;
+  /** Injected clock (epoch ms). Defaults to the real one — this adapter is the only clock owner. */
+  now?: () => number;
+  /** Injected scheduler. Defaults to `setInterval`; a test captures the callback to tick by hand. */
+  schedule?: (fn: () => void, ms: number) => { stop: () => void };
+  /** Window node limit (spec §6.3); defaults to 500. */
+  limit?: number;
 }
 
 function defaultSchedule(fn: () => void, ms: number): { stop: () => void } {
@@ -77,243 +86,265 @@ function defaultSchedule(fn: () => void, ms: number): { stop: () => void } {
   return { stop: () => clearInterval(handle) };
 }
 
-/** Reads exactly the bytes `track`'s file grew by since the last call (or nothing, on a
- * shrink/rotate — `advanceTail` resets internally and the NEXT call re-reads from zero, spec
- * D2/D8). A FRESH `track` (offset 0) naturally reads everything already on disk, which is
- * exactly what the connection's first tick needs for the `snapshot` frame. Throws when the file
- * cannot be stat'd at all — the caller turns that into a per-process `error` frame. */
-function readNewLines(io: TranscriptIo, track: TrackedTranscript): string[] {
-  const stat = io.statFileOrNull(track.path);
-  if (stat === null) throw new Error(`transcript not found: ${track.path}`);
-  // A shrink/rotate (spec D2/D8) means whatever incomplete byte sequence the decoder was
-  // carrying belonged to content that no longer exists at this offset — start it fresh so those
-  // stale pending bytes never get prepended to the rewritten file's unrelated bytes.
-  if (stat.sizeBytes < track.tail.offset) track.decoder = new TextDecoder('utf-8');
-  const bytes = stat.sizeBytes > track.tail.offset ? io.readRange(track.path, track.tail.offset, stat.sizeBytes) : new Uint8Array(0);
-  const chunk = track.decoder.decode(bytes, { stream: true });
-  // `bytes.length` (F56) — the RAW byte count actually returned by `readRange`, which can be
-  // LESS than `stat.sizeBytes - track.tail.offset` asked for (a single `readSync` is not
-  // guaranteed to fill its buffer, and the file can shrink between the `stat` and the `read`).
-  // `advanceTail` advances the offset by exactly this many bytes, never by `stat.sizeBytes` —
-  // trusting the stale stat size instead would silently and permanently skip whatever the read
-  // actually missed.
-  const advanced = advanceTail(track.tail, chunk, bytes.length, stat.sizeBytes);
-  track.tail = advanced.state;
-  return advanced.lines;
+/** A narrow guard for a genuine filesystem error (a Node errno) — the only failure class a live
+ * poll loop should fail CLOSED on (`fail-closed-edges` obligation 1). Anything else is an
+ * unexpected bug that must propagate, never be silently swallowed by a broad `catch (err)`. */
+function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
+  return err instanceof Error && 'code' in err;
 }
 
-function readSubagentEntries(io: TranscriptIo, subagentsDir: string): SubagentEntry[] {
-  const entries: SubagentEntry[] = [];
-  for (const name of io.listDirOrEmpty(subagentsDir)) {
-    const agentId = agentIdFromFileName(name);
-    if (agentId === null) continue;
-    const stat = io.statFileOrNull(join(subagentsDir, name));
-    const rawMeta = io.readJsonOrNull(join(subagentsDir, metaFileNameFor(agentId)));
-    const meta = rawMeta !== null && typeof rawMeta === 'object' ? (rawMeta as SubagentEntry['meta']) : null;
-    entries.push({
-      agentId,
-      meta,
-      sizeBytes: stat?.sizeBytes ?? 0,
-      mtimeIso: stat?.mtimeIso ?? null,
-      firstSeenIso: stat?.birthtimeIso ?? null,
-    });
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  if (a.length === 0) return b;
+  if (b.length === 0) return a;
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
+/** Splits a byte buffer that ENDS exactly at a `0x0A` (the confirmed-rows range `advanceTail`
+ * marked complete this tick) into one `Uint8Array` per row, each excluding its terminating
+ * newline — the forward-order shape `core/window.ts#candidatesFromRows` consumes. There is no
+ * trailing partial segment by construction: the range ends on a newline, so the loop's `start`
+ * lands exactly at `buf.length`. */
+function splitRows(buf: Uint8Array): Uint8Array[] {
+  const rows: Uint8Array[] = [];
+  let start = 0;
+  for (let i = 0; i < buf.length; i++) {
+    if (buf[i] === 0x0a) {
+      rows.push(buf.subarray(start, i));
+      start = i + 1;
+    }
   }
-  return entries;
+  return rows;
 }
 
-function capSnapshot(events: TranscriptEvent[]): { events: TranscriptEvent[]; truncated: boolean } {
-  if (events.length <= MAX_SNAPSHOT_EVENTS) return { events, truncated: false };
-  return { events: events.slice(events.length - MAX_SNAPSHOT_EVENTS), truncated: true };
+/** The `{agents, badges, live}` fingerprint used to detect a meta change across ticks — NOT the
+ * session summary, whose `sizeBytes`/`mtime` change on every growth tick and would otherwise emit
+ * a `meta` frame every 250 ms. Only the three fields the `meta` frame actually carries (spec §6.2)
+ * decide whether it fires. */
+function metaKey(meta: PollerMeta): string {
+  return JSON.stringify({ agents: meta.agents, badges: meta.badges, live: meta.live });
 }
 
-function agentIdOf(processId: string, cardId: string): string | null {
-  const prefix = `agent:${cardId}:`;
-  return processId.startsWith(prefix) ? processId.slice(prefix.length) : null;
-}
-
-/** Second, independent boundary (F43 layer 2) — refuses to read outside `dir` regardless of
- * what `filePath` was built from. `core/live/routes.ts` already validates `process` so this
- * should never fire in practice, but this endpoint is unauthenticated by design: one layer is a
- * filter, two layers is a boundary. Resolves and normalizes both paths before comparing so
- * `..` segments (however they got there) can never slip through as a false "inside". */
-function isWithinDir(dir: string, filePath: string): boolean {
-  const normalizedDir = resolve(dir);
-  const normalizedFile = resolve(filePath);
-  return normalizedFile === normalizedDir || normalizedFile.startsWith(normalizedDir + sep);
-}
-
-export function createLivePoller(input: CreateLivePollerInput): { stop: () => void } {
-  const { io, intervalMs, campaign, emit } = input;
-  const now = input.now ?? (() => new Date().toISOString());
+export function createPoller(input: CreatePollerInput): { stop: () => void } {
+  const { io, path, intervalMs, generation, emit } = input;
+  const now = input.now ?? (() => Date.now());
   const schedule = input.schedule ?? defaultSchedule;
+  const limit = input.limit ?? DEFAULT_WINDOW_LIMIT;
+  const onClose = input.onClose ?? (() => {});
 
-  const sessionProcessId = `card:${campaign.cardId}`;
-  const effectiveProcessId = input.processId ?? sessionProcessId;
-  const isSessionSelected = effectiveProcessId === sessionProcessId;
-  const selectedAgentId = isSessionSelected ? null : agentIdOf(effectiveProcessId, campaign.cardId);
-  const rawSelectedPath =
-    selectedAgentId === null ? null : join(campaign.subagentsDir, `agent-${selectedAgentId}.jsonl`);
-  const selectedPath =
-    rawSelectedPath !== null && isWithinDir(campaign.subagentsDir, rawSelectedPath) ? rawSelectedPath : null;
+  const readBack: ReadBack = (end, len) => io.readRange(path, end - len, end);
 
-  const parentTrack = freshTrack(campaign.transcriptPath);
-  const selectedTrack = selectedPath === null ? null : freshTrack(selectedPath);
+  // Per-stream state — all bounded (spec §6.5): the tail carry (<= ROW_CAP), one pending-tool map
+  // (<= 512 in core/pair.ts), a sequence counter, and a meta fingerprint. Nothing here grows with
+  // the transcript's total size (D7).
+  let state: TailState = { offset: 0, carry: EMPTY, ackOffset: 0, inode: 0, skipping: false, rowStart: 0, skippedBytes: 0 };
+  let pairState: PairState = createPairState();
+  let seq = 0;
+  let lastMetaKey = '';
+  let lastPingAtMs = now();
+  let stopped = false;
+  let closed = false;
+  let scheduled: { stop: () => void } | null = null;
 
-  // Resolved by walking the PARENT transcript's own tool_call/tool_result pairing (spec D3): a
-  // subagent's spawning `tool_use` id counts as resolved the moment the parent transcript
-  // records the matching `tool_result` — tracked here so `deriveProcesses` never has to re-scan
-  // the whole file itself.
-  const seqToToolUseId = new Map<number, string>();
-  const resolvedToolUseIds = new Set<string>();
-
-  let lastSubagentEntries: SubagentEntry[] = [];
-  let lastProcessesJson: string | null = null;
-  let ticksSincePing = 0;
-  const pingEveryTicks = Math.max(1, Math.round(PING_INTERVAL_MS / intervalMs));
-
-  function pullParent(): PullOutcome {
-    const lines = readNewLines(io, parentTrack);
-    if (lines.length === 0) return { events: [], patches: [] };
-    const { records } = parseRecordLines(lines);
-    const outcome = normalizeRecords(parentTrack.normalize, records);
-    parentTrack.normalize = outcome.state;
-    for (const event of outcome.events) {
-      if (event.toolUseId !== undefined) seqToToolUseId.set(event.seq, event.toolUseId);
-    }
-    for (const patch of outcome.patches) {
-      const toolUseId = seqToToolUseId.get(patch.seq);
-      if (toolUseId !== undefined) resolvedToolUseIds.add(toolUseId);
-    }
-    return outcome;
+  function stopInternal(): void {
+    if (stopped) return;
+    stopped = true;
+    scheduled?.stop();
   }
 
-  function pullSelected(track: TrackedTranscript): PullOutcome {
-    const lines = readNewLines(io, track);
-    if (lines.length === 0) return { events: [], patches: [] };
-    const { records } = parseRecordLines(lines);
-    const outcome = normalizeRecords(track.normalize, records);
-    track.normalize = outcome.state;
-    return outcome;
+  /** Every TERMINAL poller path funnels through here: it stops the poll loop and invokes `onClose`
+   * EXACTLY once (spec §6.5), so `serve.ts` closes the stream and releases the slot a single time
+   * however many terminal signals arrive. `stop()` (the public handle) intentionally does NOT call
+   * this — a client-initiated cancel releases its own slot in `serve.ts`, so calling `onClose` there
+   * too would double-release. */
+  function terminate(): void {
+    stopInternal();
+    if (closed) return;
+    closed = true;
+    onClose();
   }
 
-  function computeProcesses(nowIso: string): ProcessNode[] {
-    const sessionStat = io.statFileOrNull(campaign.transcriptPath);
-    return deriveProcesses({
-      cardId: campaign.cardId,
-      sessionId: campaign.sessionId,
-      transcriptPath: campaign.transcriptPath,
-      sessionStat: { sizeBytes: sessionStat?.sizeBytes ?? 0, mtimeIso: sessionStat?.mtimeIso ?? null },
-      subagentsDir: campaign.subagentsDir,
-      subagents: lastSubagentEntries,
-      resolvedToolUseIds,
-      cardStatus: campaign.cardStatus,
-      nowIso,
+  function emitFrame(frame: SseFrame): void {
+    seq += 1;
+    emit(encodeFrame(frame, seq));
+  }
+
+  /** `rows`/`patch` are the only variable-length frames; both are split so no encoded frame
+   * exceeds the 1 MiB cap (spec §6.2), each batch carrying its own incrementing `id:`. */
+  function emitRows(nodes: RenderNode[], from: number, to: number): void {
+    for (const batch of batchFrames(nodes, FRAME_MAX_BYTES)) {
+      emitFrame({ event: 'rows', data: { nodes: batch, from, to } });
+    }
+  }
+  function emitPatches(patches: Patch[]): void {
+    for (const batch of batchPatches(patches, FRAME_MAX_BYTES)) {
+      emitFrame({ event: 'patch', data: { patches: batch } });
+    }
+  }
+
+  /** Seeds the forward tail from `findWindow`'s result (D30): `carry := carrySeed`, `offset := eof`,
+   * and `ackOffset := eof - carrySeed.length` — so the invariant `offset == ackOffset + carry.length`
+   * holds from tick one and the next read starts at `eof`, never re-reading the carry. Deriving
+   * `ackOffset` from the carry's own length (rather than a bare `win.to`) keeps the invariant exact
+   * even when `findWindow` CAPPED an oversized carry at `ROW_CAP` (spec §6.5): for the common small
+   * carry, `eof - carrySeed.length` is exactly `win.to`. */
+  function seedFromWindow(obs: FileObservation): FindWindowResult {
+    const win = findWindow(readBack, obs.sizeBytes, limit);
+    const ackOffset = obs.sizeBytes - win.carrySeed.length;
+    state = { offset: obs.sizeBytes, carry: win.carrySeed, ackOffset, inode: obs.inode, skipping: false, rowStart: 0, skippedBytes: 0 };
+    return win;
+  }
+
+  /** The window's display nodes, with each in-window `tool_use`/`tool_result` pair already merged
+   * into one complete `tool` node — the SAME outcome `/api/rows` produces (D31). Crucially it runs
+   * over the PERSISTENT `pairState`, so a `tool_use` whose result is NOT yet in the window stays in
+   * the pending map and its later live result becomes a `patch` (§6.4). */
+  function buildWindowNodes(win: FindWindowResult): RenderNode[] {
+    const candidates = candidatesFromRows(win.rows, win.from);
+    const { nodes, patches } = pair(candidates, pairState);
+    const indexById = new Map<string, number>();
+    nodes.forEach((n, i) => indexById.set(n.id, i));
+    const merged = nodes.slice();
+    for (const patch of patches) {
+      if (patch.op !== 'result') continue;
+      const idx = indexById.get(patch.id);
+      if (idx !== undefined) merged[idx] = patch.node;
+    }
+    return merged;
+  }
+
+  function maybeMeta(): void {
+    const meta = io.readMeta();
+    const key = metaKey(meta);
+    if (key === lastMetaKey) return;
+    lastMetaKey = key;
+    emitFrame({ event: 'meta', data: { agents: meta.agents, badges: meta.badges, live: meta.live } });
+  }
+
+  function maybePing(): void {
+    const t = now();
+    if (t - lastPingAtMs < PING_INTERVAL_MS) return;
+    lastPingAtMs = t;
+    emitFrame({ event: 'ping', data: { t: new Date(t).toISOString() } });
+  }
+
+  function runConnect(): void {
+    const obs = io.statFile(path);
+    if (obs === null) {
+      emitFrame({ event: 'gone', data: { reason: 'deleted' } });
+      terminate();
+      return;
+    }
+    const win = seedFromWindow(obs);
+    const meta = io.readMeta();
+    lastMetaKey = metaKey(meta);
+    const windowNodes = buildWindowNodes(win);
+    emitFrame({
+      event: 'hello',
+      data: { generation, session: meta.session, agents: meta.agents, badges: meta.badges, from: win.from, to: win.to, truncatedBefore: win.truncatedBefore },
     });
+    emitRows(windowNodes, win.from, win.to);
+    lastPingAtMs = now();
   }
 
-  function emitProcessesIfChanged(force: boolean): void {
-    const nodes = computeProcesses(now());
-    const serialized = JSON.stringify(nodes);
-    if (!force && serialized === lastProcessesJson) return;
-    lastProcessesJson = serialized;
-    emit({ event: 'processes', data: { processes: nodes } });
-  }
-
-  function refreshSubagents(): void {
-    try {
-      lastSubagentEntries = readSubagentEntries(io, campaign.subagentsDir);
-    } catch (err) {
-      emit({ event: 'error', data: { message: `listing subagents: ${describeError(err)}` } });
-    }
-  }
-
-  function runFirstTick(): void {
-    refreshSubagents();
-
-    let contentEvents: TranscriptEvent[] = [];
-    try {
-      const parentOutcome = pullParent();
-      if (isSessionSelected) contentEvents = parentOutcome.events;
-    } catch (err) {
-      emit({ event: 'error', data: { message: `reading session transcript: ${describeError(err)}` } });
-    }
-
-    if (!isSessionSelected && selectedTrack !== null) {
-      try {
-        contentEvents = pullSelected(selectedTrack).events;
-      } catch (err) {
-        emit({ event: 'error', data: { message: `reading process transcript: ${describeError(err)}` } });
-      }
-    }
-
-    emitProcessesIfChanged(true);
-
-    const { events, truncated } = capSnapshot(contentEvents);
-    emit({
-      event: 'snapshot',
-      data: {
-        processId: effectiveProcessId,
-        events,
-        truncated,
-        nextOffset: (selectedTrack ?? parentTrack).tail.offset,
-      },
-    });
+  function handleReset(obs: FileObservation, reason: 'truncated' | 'rotated'): void {
+    // `advanceTail` decided BOTH that a reset fired and WHICH of §6.1's two triggers caused it; the
+    // poller forwards that decision rather than re-deriving it (`pure-core.md`: the adapter decides
+    // nothing).
+    emitFrame({ event: 'reset', data: { reason } });
+    // Drop tail + pairing state and stream the NORMAL tail window of the file as it now is (spec
+    // §6.1) — never the file from byte 0.
+    pairState = createPairState();
+    const win = seedFromWindow(obs);
+    emitRows(buildWindowNodes(win), win.from, win.to);
   }
 
   function runTick(): void {
-    refreshSubagents();
+    const obs = io.statFile(path);
+    if (obs === null) {
+      emitFrame({ event: 'gone', data: { reason: 'deleted' } });
+      terminate();
+      return;
+    }
 
+    const prevOffset = state.offset;
+    const prevCarry = state.carry;
+    const readEnd = Math.min(obs.sizeBytes, prevOffset + TICK_READ_CAP);
+    const chunk = readEnd > prevOffset ? io.readRange(path, prevOffset, readEnd) : EMPTY;
+
+    const tick = advanceTail(state, chunk, obs);
+    state = tick.state;
+
+    if (tick.reset && tick.resetReason !== null) {
+      handleReset(obs, tick.resetReason);
+      maybeMeta();
+      maybePing();
+      return;
+    }
+
+    // The rows `advanceTail` confirmed complete this tick occupy `[absBase, ackOffset)`, where
+    // `absBase` is where `combined` (the carry re-joined with the new bytes) begins in the file —
+    // exactly `advanceTail`'s own internal accounting. Re-deciding the row boundaries would be
+    // deciding; instead the confirmed bytes are handed to `candidatesFromRows`, which walks the
+    // offsets and normalizes each row (`pure-core.md`). An oversized row `advanceTail` already
+    // discarded surfaces through `tick.oversized`, carrying its own true anchor.
+    const absBase = prevOffset - prevCarry.length;
+    const confirmedLen = state.ackOffset - absBase;
+    let newNodes: RenderNode[] = [];
+    if (confirmedLen > 0) {
+      const confirmed = concatBytes(prevCarry, chunk).subarray(0, confirmedLen);
+      let off = absBase;
+      for (const rowBytes of splitRows(confirmed)) {
+        for (const node of candidatesFromRows([rowBytes], off)) newNodes.push(node);
+        off += rowBytes.length + 1;
+      }
+    }
+    if (tick.oversized.length > 0) {
+      newNodes = [...tick.oversized, ...newNodes].sort((a, b) => a.at - b.at || a.i - b.i);
+    }
+
+    if (newNodes.length > 0) {
+      const { nodes, patches } = pair(newNodes, pairState);
+      // Order matters (spec §6.4 point 3): the `patch` follows the `rows` frame, because a patch
+      // may target a node emitted in the same tick.
+      if (nodes.length > 0) emitRows(nodes, absBase, state.ackOffset);
+      if (patches.length > 0) emitPatches(patches);
+    }
+
+    maybeMeta();
+    maybePing();
+  }
+
+  function runTickGuarded(): void {
     try {
-      const parentOutcome = pullParent();
-      if (isSessionSelected && (parentOutcome.events.length > 0 || parentOutcome.patches.length > 0)) {
-        emit({
-          event: 'append',
-          data: {
-            processId: effectiveProcessId,
-            events: parentOutcome.events,
-            patches: parentOutcome.patches,
-            nextOffset: parentTrack.tail.offset,
-          },
-        });
-      }
+      runTick();
     } catch (err) {
-      emit({ event: 'error', data: { message: `reading session transcript: ${describeError(err)}` } });
-    }
-
-    if (!isSessionSelected && selectedTrack !== null) {
-      try {
-        const outcome = pullSelected(selectedTrack);
-        if (outcome.events.length > 0 || outcome.patches.length > 0) {
-          emit({
-            event: 'append',
-            data: {
-              processId: effectiveProcessId,
-              events: outcome.events,
-              patches: outcome.patches,
-              nextOffset: selectedTrack.tail.offset,
-            },
-          });
-        }
-      } catch (err) {
-        emit({ event: 'error', data: { message: `reading process transcript: ${describeError(err)}` } });
-      }
-    }
-
-    emitProcessesIfChanged(false);
-
-    ticksSincePing += 1;
-    if (ticksSincePing >= pingEveryTicks) {
-      ticksSincePing = 0;
-      emit({ event: 'ping', data: { t: now() } });
+      // A live poll loop that hits a filesystem error (a `readRange`/`stat` failure mid-stream)
+      // must neither spin every `intervalMs` nor leak a traceback into the event loop
+      // (`fail-closed-edges` obligation 1): TERMINATE — stop the loop and signal `serve.ts` to close
+      // the stream and release the slot (I1). The SSE client reconnects on its own `retry:` and gets
+      // a fresh snapshot (D12). The catch stays narrow: only an errno error is a filesystem failure;
+      // anything else is an unexpected bug and re-throws on the fall-through.
+      if (isErrnoException(err)) return terminate();
+      throw err;
     }
   }
 
-  runFirstTick();
-  const scheduled = schedule(runTick, intervalMs);
+  function runConnectGuarded(): void {
+    try {
+      runConnect();
+    } catch (err) {
+      // Same fail-closed lifecycle at connect: an errno read failure terminates cleanly; a
+      // non-filesystem error re-throws on the fall-through (obligation 1).
+      if (isErrnoException(err)) return terminate();
+      throw err;
+    }
+  }
 
-  return {
-    stop() {
-      scheduled.stop();
-    },
-  };
+  runConnectGuarded();
+  if (!stopped) scheduled = schedule(runTickGuarded, intervalMs);
+
+  return { stop: stopInternal };
 }

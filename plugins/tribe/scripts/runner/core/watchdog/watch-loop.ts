@@ -78,7 +78,7 @@ function observe(config: WatchdogConfig, homeDir: string, io: WatchdogIO, state:
       try {
         record = JSON.parse(raw) as Record<string, unknown>;
       } catch (err) {
-        // A run.json caught mid-write is "no record yet", never a crash of the supervisor.
+        // A run.json caught mid-write is "no record yet", never a crash of the watchdog.
         if (!(err instanceof SyntaxError)) throw err;
       }
     }

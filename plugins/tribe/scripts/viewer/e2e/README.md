@@ -1,83 +1,84 @@
-# Opt-in end-to-end test (card D4/G5)
+# e2e — the DOM-level and process-level proofs (spec §16)
 
-`live-viewer.e2e.test.ts` is the only place in this package that proves the live viewer end to
-end, against a **real** campaign run — a real throwaway git repo, a real `bun run.ts` process, a
-real Claude Agent SDK session, a real subagent dispatch, and real screenshots taken with the
-machine's installed Chrome. Nothing here is stubbed, simulated, or hand-written.
+Every user-visible goal in the card (G1, G2, G4, G6) is proved **in a real browser against the
+real server**, never at a unit or API boundary alone — spec §2's goal map names the reason: a unit
+test can pass while what a person actually sees is broken (a missing kind, a dropped write-guard,
+a served file that differs from the built one). The files below are that proof layer, plus the two
+opt-in suites that exercise a real campaign runner on a real Haiku 4.5 session.
 
-## Why it is opt-in
+`browser.ts` is a shared helper, not a test: it resolves a real, installed Chromium executable from
+Playwright's own registry and **fails closed** — it throws with a one-line remedy
+(`bunx playwright install chromium`) rather than returning nothing, so a missing browser can never
+turn into a silent skip (spec §16.0).
 
-A plain `bun test` (no environment variable) must never start a campaign, never spawn `claude`,
-and never spend a token — CI and every ordinary contributor run stays free and instant. This test
-is gated behind `TRIBE_VIEWER_E2E=1` (`test.skipIf(!ENABLED)`), so it only runs when a human (or
-the Warchief re-verifying evidence) deliberately asks for it.
+## Always-on (plain `bun test`, no environment variable)
+
+These are **not** gated behind an environment variable and **fail** — never skip — when no
+Chromium resolves, which is deliberate: a user-visible goal must never go green because its
+browser happened to be missing (spec §16.0, R8).
+
+- **`dom-kinds.e2e.test.ts`** (G1, G4) — headless Chromium against the real server and a fixture
+  tree built from nothing (`~/.tribe` absent, `HOME`/`CLAUDE_CONFIG_DIR` pointed at a synthetic
+  `homeA`). Proves every one of the 12 `RENDER_NODE_KINDS` renders (the runtime witness in
+  `core/model.ts`, so the kind list cannot silently drift from the type), plus one DOM assertion
+  per distinguishable input shape (string vs array prompt, pending/ok/error tool, orphan result,
+  empty vs non-empty thinking, base64 image, compaction divider, `<persisted-output>` spill,
+  unknown row type), plus the D10 project-window listing in both directions. It also carries G4's
+  DOM-level zero-write proof: the fixture tree is hashed before and after, byte-identical.
+- **`real-transcript.e2e.test.ts`** (G1) — the same class of DOM assertions as `dom-kinds`, run
+  **read-only** against the largest real transcript on this machine (13,178,184 B, spec §14's
+  measured ceiling) and one real session with subagents, against the owner's real
+  `~/.claude/projects` (never a fixture). Its zero-write proof is scoped to exactly the files it
+  opens, hashed before and after.
+- **`served-build.e2e.test.ts`** (G6) — moves any existing `dist/` aside, runs the real build,
+  hashes every produced file, starts the real server, fetches `/` and every asset a browser would
+  load, and asserts the served bytes hash-match the built bytes — then restores the prior `dist/`
+  in a `finally`. The server has no `--dist` override flag, so this is the only honest way to prove
+  "served == built".
+- **`url-refusals.e2e.test.ts`** (G4) — the URL/security matrix over real HTTP against a real
+  `serve.ts` child process (status codes and bodies, not DOM — that is `dom-kinds`'s job): path
+  containment, `Host`/`Origin` refusals, and the rest of the refusal matrix spec §16.2 names.
 
 ```sh
-cd plugins/tribe/scripts/viewer && bun test              # e2e is SKIPPED, no side effects at all
-cd plugins/tribe/scripts/viewer && TRIBE_VIEWER_E2E=1 bun test e2e/   # the real run
+cd plugins/tribe/scripts/viewer && bun test    # runs everything above; needs a real Chromium
 ```
 
-## What it costs
+## Opt-in behind `TRIBE_VIEWER_E2E=1`
 
-One real Claude Agent SDK session, `--model claude-haiku-4-5-20251001`, capped at
-`--session-timeout 6m`. The card is **not** expected to reach `SHIPPED` — the throwaway repo has
-no git remote at all, so opening a real PR is impossible by construction (card D4). The point of
-the run is the viewer, not the card's outcome: it only needs to get far enough to dispatch one
-`hunter` subagent so the live view has a parent session **and** a subagent transcript to render.
+Three suites are gated behind `test.skipIf(!ENABLED)` so a plain `bun test` never spends a token,
+spawns a campaign runner, or runs a real ten-minute wall-clock window:
 
-## What it does
+- **`perf.test.ts`** (spec §14) — every performance budget in the table, measured against the real
+  corpus and written unconditionally to `e2e/output/perf.json` (a missed budget is recorded, never
+  widened to pass). Includes the 8-concurrent-streams RSS measurement, both at open and again after
+  a real 10-minute window of appends.
+- **`live-tail.e2e.test.ts`** (G2, spec §16.3) — a controlled writer the test itself owns appends
+  rows to a real, growing transcript and measures append-to-arrival latency from its own
+  `performance.now()`, written to `e2e/output/latency.json`. Also proves the subagent-append case,
+  the §8.3 follow/scroll contract on real `scrollTop` readings, live-patch, reconnect, window
+  eviction, and same-size rotation. A real `claude -p` Haiku 4.5 session runs alongside purely as a
+  realism check — no assertion depends on its content, and its absence never fails the suite.
+- **`campaign-badge.e2e.test.ts`** (G3, spec §16.4) — a real campaign runner run on real Haiku 4.5:
+  both stdout lines (`campaign viewer: ...`, `card ...: ...`) captured verbatim, the badge asserted
+  in the DOM, the filter proved by clicking the badge element. Its fixture carries two campaigns
+  sharing one slug under two repo keys, the collision spec §9 measures on this machine.
 
-1. Creates a throwaway target repo under `mkdtemp`, `git init`, one commit, **no remote**
-   (`git remote -v` is asserted empty).
-2. Authors a campaign home at `$HOME/.tribe/<repoKey>/campaigns/<slug>` — `<repoKey>` is exactly
-   what `plugins/tribe/scripts/tribe-home.sh <repo>` prints for the throwaway repo. This has to be
-   the *default* tribe root: the runner auto-starts the viewer with only `--port`, so a home
-   outside `$HOME/.tribe` would be invisible to it.
-3. Stages exactly one card in `campaign-state.json`, validated with a real `--dry-run` first.
-4. Commits a trivial spec + plan into the throwaway repo whose Global Constraints and goal
-   **require** the executor to dispatch its one implementation task to the `hunter` subagent
-   (never inline) — that subagent transcript is the whole point of the second screenshot.
-5. Spawns the real `run.ts` (`--viewer-port 4399`, never the default 4321), waits for the
-   viewer's `/healthz` identity body, then polls `/api/processes` until a session **and** a
-   subagent node both appear.
-6. Opens a real SSE connection to `/events` and measures append-to-arrival latency **per
-   transcript event**, not per frame (F51): the production poller batches every line written
-   since its last 400ms tick into one `append` frame, so a frame can carry several events with
-   different true delays. Each event's own `timestamp` (carried on the wire, `core/live/model.ts`)
-   is the honest per-line sample — `arrivalMs - Date.parse(event.timestamp)`, which can only ever
-   over-state the true delay, never under-state it. The transcript file's mtime is used ONLY as a
-   fallback for an event whose `timestamp` is null. Never fabricated, clamped, or discarded — a
-   negative sample (clock skew) is reported as measured. The worst sample across all events must
-   stay inside the 2000ms budget (card D3/G2).
-7. Takes two real screenshots with the machine's installed Chrome
-   (`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --headless=new`) of the live
-   parent view and the live subagent view, verifying each is a real, non-trivial PNG.
-8. Writes the evidence artifacts below, then tears everything down: kills the runner's process
-   group, kills whatever is listening on port 4399 (the viewer, spawned detached by the runner),
-   and deletes the throwaway repo. **The campaign home under `$HOME/.tribe` is deliberately never
-   deleted** — it is the evidence a reviewer re-inspects.
+```sh
+cd plugins/tribe/scripts/viewer && bun test                                     # all three skipped
+cd plugins/tribe/scripts/viewer && TRIBE_VIEWER_E2E=1 bun test e2e/perf.test.ts
+cd plugins/tribe/scripts/viewer && TRIBE_VIEWER_E2E=1 bun test e2e/live-tail.e2e.test.ts
+cd plugins/tribe/scripts/viewer && TRIBE_VIEWER_E2E=1 bun test e2e/campaign-badge.e2e.test.ts
+```
 
-## What it writes
+## `output/`
 
-`docs/superpowers/evidence/2026-09-02-campaign-live-viewer/`:
-
-- `latency.json` — `{ measuredAt, budgetMs, latenciesMs, worstMs, sampleCount, sampleMethods }`.
-  `sampleMethods[i]` names how `latenciesMs[i]` was derived — `"timestamp"` (the per-event
-  signal, the normal case) or `"mtime-fallback"` (only when that event's `timestamp` was null).
-- `processes.json` — the real `/api/processes` payload (a session node and ≥1 subagent node).
-- `after-live-parent.png` / `after-live-subagent.png` — real Chrome screenshots of the live page.
-- `commands.md` — every command actually run (repo creation, the runner invocation, the printed
-  `campaign viewer: <url> (read-only)` line, the Chrome commands), so a reader can reproduce the
-  run by hand. `before-status-page.png` is captured separately (it is the status page *before*
-  this run starts) and is only referenced here, never created by this harness.
-
-A screenshot that genuinely cannot be captured is never faked or replaced with a placeholder —
-`commands.md` records the exact command and its exact stderr under a "Screenshot failure"
-heading instead, and the run continues.
+Git-ignored (`e2e/output/`, see the package `.gitignore`). Holds artifacts written by the opt-in
+suites above — `perf.json`, `latency.json`, screenshots — reproducible from a real run and never
+checked in. `docs/tribe/planning/viewer-consolidation/evidence/` cites their numbers inline for
+exactly this reason.
 
 ## Prerequisites
 
-`bash plugins/tribe/scripts/doctor.sh` — needs `bun`, `gh` authenticated, a Claude Code login
-(never `ANTHROPIC_API_KEY` alone), and the runner's dependencies installed. Chrome must be
-installed at the path above for the two screenshots; if it is missing, they land in
-`commands.md`'s "Screenshot failure" section instead of silently vanishing.
+A real, installed Chromium (`bunx playwright install chromium` — `playwright-core` is a pinned
+devDependency but never downloads a browser itself). The two opt-in Haiku suites additionally need
+a real Claude Code login (never `ANTHROPIC_API_KEY` alone) and `bun`.

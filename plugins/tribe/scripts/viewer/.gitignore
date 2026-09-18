@@ -1,1 +1,5 @@
 node_modules/
+dist/
+
+# task 30 e2e run artifacts (screenshots, perf.json) — reproducible from a real run, never checked in
+e2e/output/

@@ -1,5 +1,12 @@
 # Campaign live viewer — every spawned process, transcript tailed live — design
 
+> **Superseded 2026-09-11.** The two-surface design this page describes (a `~/.tribe`-scanning
+> status page plus this `/live` transcript tailer) is replaced by Option A — one surface over
+> `~/.claude/projects` — in `docs/tribe/planning/viewer-consolidation/spec.md` and recorded in
+> `.c3/adr/adr-20260911-viewer-consolidation.md`. This page is kept, not deleted: it is the
+> record of what the deleted code (`core/live/**`, the status page, `/live`, the vanilla client)
+> was for.
+
 **Date:** 2026-09-02 · **Card:** `campaign-live-viewer` · **Status:** authored by the Warchief for Shaman review
 **Will be committed at:** `docs/superpowers/specs/2026-09-02-campaign-live-viewer-design.md`
 **Plan:** `docs/superpowers/plans/2026-09-02-campaign-live-viewer.md`

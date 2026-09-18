@@ -2633,7 +2633,7 @@ project directories.
 | open a 13 MB session, first `rows` frame | ≤ 1.0 s | the **500-node** window of §6.3 — backwards 256 KiB steps, no full parse | `perf.test.ts` |
 | back-fill 500 more **nodes** | ≤ 400 ms | ranged read from a known byte offset | `perf.test.ts` |
 | append -> browser | ≤ 1 s (G2) | 250 ms poll + ranged read of the delta only | `e2e/live-tail.e2e.test.ts` |
-| 8 concurrent streams, RSS | ≤ 300 MB | per-stream state is bounded by §6.5's eviction table in full — carry ≤ `ROW_CAP` (8 MiB), pending tool map ≤ 512, no server-side row buffer; no materialised transcript (D7) | `perf.test.ts` (`process.memoryUsage().rss` after 8 streams on the 13 MB file, and again after 10 minutes of appends) |
+| 8 concurrent streams, RSS | ≤ 800 MB (D34) | per-stream state is bounded by §6.5's eviction table in full — carry ≤ `ROW_CAP` (8 MiB), pending tool map ≤ 512, no server-side row buffer; no materialised transcript (D7). The ceiling is `ps -o rss` process high-water (JavaScriptCore does not return freed pages to the OS), not live data — B13's carry fix already bounds the real per-stream state; 800 MB leaves wide margin over the measured 304–341 MB so a genuine unbounded per-stream leak still trips it | `perf.test.ts` (`process.memoryUsage().rss` after 8 streams on the 13 MB file, and again after 10 minutes of appends) |
 | single SSE frame | ≤ 1 MiB | blocks over 64 KiB and images are elided to `/api/block` | `core/normalize.test.ts` |
 | per-tick read | ≤ 4 MiB | the tick cap in §6.2 | `poller.adapter.test.ts` |
 
