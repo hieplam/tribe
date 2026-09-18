@@ -802,7 +802,7 @@ No clock (`nowMs` arrives on the observation), no fs, no throw, no `Math.random`
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test** as ONE table, one case per row of spec §3.4 — 4 pre-loop
+- [x] **Step 1: Write the failing test** as ONE table, one case per row of spec §3.4 — 4 pre-loop
   rows plus 28 main rows, plus the tie-break cases below. Build a `base()` observation factory so
   each row states only its own differences:
 
@@ -924,10 +924,10 @@ test('the function is pure: the same observation decides the same action every t
 Write one such case for **every** row of spec §3.4 — the list above is the shape and the hard cases,
 not the whole set.
 
-- [ ] **Step 2: Write `core/supervisor/decide.ts`** as a straight-line reading of spec §3.4, with a
+- [x] **Step 2: Write `core/supervisor/decide.ts`** as a straight-line reading of spec §3.4, with a
   section comment per group of rows naming the spec row numbers.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/decide.test.ts && bunx tsc --noEmit
@@ -937,7 +937,7 @@ grep -nE "readFile|node:fs|child_process|Date\.now|Math\.random" core/supervisor
 Expected: about 40 tests pass; `tsc` silent; the `grep` prints **nothing** (purity, checked
 directly as well as by `structure.test.ts`).
 
-- [ ] **Step 4: Commit** — `feat(supervisor): the pure decision table (task 7/24)`.
+- [x] **Step 4: Commit** — `feat(supervisor): the pure decision table (task 7/24)`.
 
 ---
 

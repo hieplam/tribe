@@ -155,6 +155,7 @@ interface SupervisorObservation {
   parkMarkers: ParkMarker[];              // <home>/supervisor/park/*.json written by a session
   state: SupervisorState;                 // the supervisor's own persisted counters
   limits: SupervisorLimits;
+  lastSessionOutcome: SessionOutcome | null; // required by §3.4 row 5 / post-session rows
 }
 
 interface EscalationFact {
@@ -163,6 +164,7 @@ interface EscalationFact {
   contentSha256: string;                  // the repeat-escalation breaker's key
   reason: string;                         // the file's own **Reason:** value, verbatim
   autoAnswerRounds: number;               // from the report (see §7 — advisory only)
+  landedRulingId: string | null;          // required by §3.4 row 5 / post-session rows
 }
 ```
 

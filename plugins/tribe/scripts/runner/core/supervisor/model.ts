@@ -84,6 +84,12 @@ export interface EscalationFact {
   contentSha256: string;
   reason: string;
   autoAnswerRounds: number;
+  /** §3.4 row 5 / §4.3's crash-recovery guard: the id of a ruling block in `answers.md` that
+   * already answers THIS card's current escalation, when the escalation file has not yet been
+   * archived (a session wrote the ruling, the supervisor died before archiving it). `null` when
+   * no such ruling exists yet. A typed disk fact the edge computes by parsing `answers.md`;
+   * `decide()` only reads it, never interprets prose. */
+  landedRulingId: string | null;
 }
 
 /** §8: the five budget flags `decide()` actually reads (the table's caps). The remaining §8
@@ -140,6 +146,32 @@ export interface SupervisorObservation {
   /** The supervisor's own persisted counters. */
   state: SupervisorState;
   limits: SupervisorLimits;
+  /** §3.4's post-session rows (V1-V5): "the loop records the verdict into the observation as
+   * `lastSessionOutcome` and re-enters `decide()`." `null` on every ordinary tick; set for
+   * exactly the one re-entrant tick immediately after a one-shot session returns. When set,
+   * `decide()` evaluates ONLY the post-session rows and returns — they run "before any other
+   * row" (§3.4). */
+  lastSessionOutcome: SessionOutcome | null;
+}
+
+/** §3.4's post-session rows (V1-V5): a one-shot session's verdict, decided by the postcondition
+ * check on disk (never by the session's own words — S-P3). `rulingId` is set for `'ruled'`
+ * (V3); `parkMarkerKind` is set for `'parked'` (V4, the marker a SESSION wrote — §6.1's two
+ * values). Neither is meaningful for the other outcome kinds. */
+export interface SessionOutcome {
+  kind: SessionKind;
+  cardId: string | null;
+  outcome:
+    | 'ruled'
+    | 'ratified'
+    | 'closed'
+    | 'parked'
+    | 'failed'
+    | 'timeout'
+    | 'history_rewritten'
+    | 'ratify_out_of_scope';
+  rulingId?: string | null;
+  parkMarkerKind?: ParkMarkerKind;
 }
 
 /** §3.3: exactly one action per tick. */
