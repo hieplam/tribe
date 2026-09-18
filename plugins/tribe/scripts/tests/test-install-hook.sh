@@ -75,4 +75,20 @@ check "empty-marker snippet: target stays empty" "$(count_in "$d" "# Orphan head
 if grep -qi 'first line empty' <<<"$out"; then ok "empty-marker snippet: warns"
 else bad "empty-marker snippet: no warning (got: $out)"; fi
 
+# --- 5. the REAL shipped snippets reach a machine that already has the global rules ------
+# A snippet added after install day must land beside an already-installed global-rules.md,
+# which means its first line and every heading must be absent from that snippet.
+REAL_MD="$HERE/../../claude-md"
+BRAINSTORM_MARKER="$(head -n 1 "$REAL_MD/shaman-brainstorm-together.md" 2>/dev/null || true)"
+d="$TMP/real"; mkdir -p "$d/plugin/claude-md" "$d/claude"
+cp "$HOOK_SRC" "$d/plugin/install.sh"; cp "$REAL_MD"/*.md "$d/plugin/claude-md/"
+cp "$REAL_MD/global-rules.md" "$d/claude/CLAUDE.md"
+run_hook "$d" >/dev/null; run_hook "$d" >/dev/null
+check "real snippets: brainstorm-together lands once on an installed machine" \
+  "$(count_in "$d" "$BRAINSTORM_MARKER")" "1"
+check "real snippets: global rules are not duplicated" \
+  "$(count_in "$d" "$(head -n 1 "$REAL_MD/global-rules.md")")" "1"
+dupes="$(cat "$REAL_MD"/*.md | grep -E '^#{1,6} ' | sort | uniq -d)"
+check "real snippets: no heading is shared between two snippets" "$dupes" ""
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [[ "$FAIL" -eq 0 ]]
