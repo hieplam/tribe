@@ -145,7 +145,7 @@ per card — but those are **per-card** artifacts. There is no **per-campaign** 
 cross-card decisions: naming conventions, test patterns, error-handling style, the rulings that repeat
 in the Decision Log.
 
-**How to apply:** add a "forge the codex" step to Shaman Mode 2: before dispatching the first card of a
+**How to apply:** add a "forge the codex" step to Shaman Mode 3 (run the campaign): before dispatching the first card of a
 multi-card campaign, the Shaman distills from the repo + Decision Log a `docs/tribe/CODEX.md`
 (a lookup-friendly format, TSV/markdown table — greppable like LIFETIMES.tsv), puts **the codex itself
 through one Skinner review round** (Bun reviewed both PORTING.md and LIFETIMES.tsv before using them),

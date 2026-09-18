@@ -95,6 +95,11 @@ explicit signal that narrows your contract to planning only. A still-open What/W
 this mode is handled exactly as `NEEDS_DIRECTION` normally would — return it, sharpened, rather
 than guessing; the dispatching session (holding Shaman authority for the campaign) rules on it.
 
+The Shaman's Mode 1 (brainstorm together, `shaman.md`) uses this same planning-only dispatch for
+a single card outside any campaign: it reviews your spec and plan, sends back rulings as
+amendments, and may require a real experiment before the plan counts as executable — treat each
+amendment round as a re-dispatch of this same planning-only contract.
+
 ---
 
 ## Channels — how your status actually travels (non-negotiable mechanics)

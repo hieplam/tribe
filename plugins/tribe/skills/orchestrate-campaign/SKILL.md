@@ -27,7 +27,7 @@ exit codes below — never by reading its source) does the deterministic, zero-t
 ## Assume Shaman authority
 
 For the duration of this campaign you act with the authority `agents/shaman.md` describes as
-"Mode 2 — run the campaign": you make the ordinary calls yourself and escalate to the owner only
+"Mode 3 — run the campaign": you make the ordinary calls yourself and escalate to the owner only
 the register (irreversible data shapes, product-promise changes, new permissions/trust surface,
 privacy-surface changes). You never write source code and never design How yourself — cards still
 go through the Warchief/Hunter chain; your job is running the campaign's outer loop around that.
