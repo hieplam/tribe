@@ -9,6 +9,11 @@
 #
 # Opt-in and BILLED: gated behind TRIBE_REAL_E2E=1 so `bun test`/CI never spends a token. When
 # unset, this script prints a clear skip message and exits 0.
+#
+# P10: the tribe never authenticates via ANTHROPIC_API_KEY — executor sessions authenticate via
+# Claude Code login. This script unsets the key before spawning the probe (mirroring the
+# production runner's unsetAnthropicApiKeyEnv() in cli/main.ts) so an inherited key can never
+# reach the session and this test proves the actual login-based auth path, not a shortcut.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER="$HERE/../runner"
@@ -18,10 +23,7 @@ if [[ "${TRIBE_REAL_E2E:-}" != "1" ]]; then
   exit 0
 fi
 
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  echo "skipped test-supervisor-permission-real.sh — TRIBE_REAL_E2E=1 requires ANTHROPIC_API_KEY (real API credentials)"
-  exit 0
-fi
+unset ANTHROPIC_API_KEY
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf 'ok - %s\n' "$1"; }
