@@ -39,10 +39,15 @@ implementation of the card's own classification oracle, run over the real transc
 | Babysitting share | — | **0.3168** |
 
 Issue #142's session `ba6e93f0-72e4-4e08-9c64-03d7ea6fb917` (`claude-fable-5-1`, 4 days) measures
-**154 turns / 28,075,416 cache-read** — reproducing the card's "154 turns, 28.1M" exactly, which is
-the evidence that the classifier above is sound and that the session-1 deltas belong to the
-throw-away script, not to the oracle. Its babysitting share is **0.5357** and its max context
-**307,375**.
+**154 turns / 28,075,416 cache-read** — reproducing the card's "154 turns, 28.1M" exactly. Its
+babysitting share is **0.5357** and its max context **307,375**.
+
+**Read the two columns above as two readings of a moving file, not as a right answer and a wrong
+one.** Session `6a8a8fe4…` was **still live while both measurements were taken** (1,443 lines at
+14:26Z → 1,507 → 1,509, last row 15:03:54Z), so its turn and token deltas are elapsed time, not
+error; only the trigger-class split differs for a real reason (§21, D2). This is exactly why §15
+pins the baseline to a **byte cut** rather than to "the file": a number measured over a growing file
+cannot be reproduced by anyone, including whoever measured it.
 
 Two facts matter more than the totals:
 
@@ -227,10 +232,29 @@ only. `R` = the supervisor's own per-card ruling-round count (§7).
 | 27 | no watchdog has run yet this invocation | — | `run_watchdog(null, false)` |
 | 28 | `watchdogRuns >= maxWatchdogRuns` | — | `park(watchdog_run_cap)` |
 
+**Post-session rows — evaluated immediately after a one-shot session returns, before any other
+row.** A session's verdict is a disk fact like any other, so `decide()` stays the sole decider: the
+loop records the verdict into the observation as `lastSessionOutcome` and re-enters `decide()`.
+
+| # | `lastSessionOutcome` | Action |
+| --- | --- | --- |
+| V1 | `history_rewritten` (§5.2: the pre-session `answers.md` is not a prefix of the post-session file) | `park(history_rewritten)` — **never a retry**, whatever the retry budget says |
+| V2 | `ratify_out_of_scope` (§5.3: a block outside `run.unratifiedRulings` changed) | `park(ratify_out_of_scope)` — **never a retry** |
+| V3 | `ruled` (a new ratified block, history intact, repo untouched) | `archive_escalation(card, R<n>)` |
+| V4 | `parked` (a valid typed park marker) | `park(marker.kind)` |
+| V5 | `failed` or `timeout`, and `retries(kind, card) < sessionRetries` | `spawn_session(same kind, same card)` — the one bounded retry |
+| V6 | `failed` or `timeout`, retries exhausted | `park(ruling_failed` / `ratify_failed` / `closing_failed)` |
+| V7 | `ratified` (the unratified list reached empty) | `run_watchdog(same scope)` |
+| V8 | `closed` (the final report exists and nothing is unratified) | `exit(done, "campaign_closed")` |
+
+V1 and V2 sit **above** V5 deliberately: an integrity violation must not be reachable by the retry
+path, because retrying cannot undo a rewritten ruling trail and a second attempt would only obscure
+the first.
+
 **Oracle direction, restated as a rule the table obeys (card Oracle):** every row whose facts do
 not *positively* establish that a session is required resolves to `park`. Rows 7-11, 13-14, 17-26
-are all parks. Spawning when none was needed is the bug; parking when a session could have ruled is
-by design.
+and V1/V2/V4/V6 are all parks. Spawning when none was needed is the bug; parking when a session
+could have ruled is by design.
 
 **Never in this table:** anything derived from the text of a model's answer, from a session's
 `result` line, from a report's prose `question` digest, or from a log file's contents.
@@ -299,19 +323,54 @@ write one ledger line → let the session die.
 | `abortController` + wall-clock timeout | `--session-timeout-seconds`, default **1800** | `fail-closed-edges` obligation 3 |
 | `maxTurns` | `--session-max-turns`, default **60** | A bounded budget; exceeding it is a failed attempt, not a hang |
 | `permissionMode` | `'default'` | **Not** `bypassPermissions`. Least privilege (decision 4) |
+| `allowedTools` | `Read`, `Grep`, `Glob`, `Write`, `Edit` (ruling/ratify) | The **tool grant**. An allowlisted tool does not prompt under `'default'`, which is what makes the session headless — measured, §19.4 |
 | `disallowedTools` | `Bash`, `Task`, `Agent`, `WebFetch`, `WebSearch`, `Monitor`, `ScheduleWakeup` | No shell, no subagents, no network, and no wait-tool (a one-shot session that arms a Monitor dies before the notification arrives — the same wall `core/session.ts` already holds for executors) |
-| `hooks.PreToolUse` | the containment hook below | Enforcement, not prose |
+| `additionalDirectories` | `[repoRoot]` (ruling only) | Read access to the card's spec and plan. **Not a write boundary** — see below |
+| `hooks.PreToolUse` | the containment hook below | **The only containment enforcement there is** |
 
-**The containment hook** (pure, in `core/supervisor/permit.ts`, tested as a table): a `Write`/`Edit`
-whose resolved target is not inside the campaign home is **denied** with a typed reason. This is
-`fail-closed-edges` obligation 4 applied at the permission layer, and it is what makes decision 4's
-"may write only under the campaign home" mechanically true rather than merely briefed.
+#### The containment hook is the enforcement layer, not defence in depth
 
-Verified by experiment (§19.2): a session spawned through `query()` with
-`permissionMode: 'default'`, `allowedTools: []` and an explicit `disallowedTools` list runs to a
-clean `result` without hanging on a permission prompt, and its `result` message carries
-`usage.{input_tokens,cache_read_input_tokens,cache_creation_input_tokens,output_tokens}`,
-`total_cost_usd` and `permission_denials` — so the G5 ledger needs no transcript parsing.
+This was measured, and the measurement corrected an assumption this spec previously made
+(§19.4 carries the commands and outputs).
+
+**What was proven.** With the real envelope above, a headless Haiku session:
+
+| Attempt | Result |
+| --- | --- |
+| (a) `Write` to `<home>/answers.md` (contained) | **succeeded** — no prompt, no hang, `subtype: success` |
+| (b) `Write` to `<repoRoot>/src/touched.txt` | denied by the hook |
+| (c) `Write` to `/tmp/…` (absolute, outside everything) | denied by the hook |
+| (d) `Write` through a symlink inside the home pointing outside it | denied by the hook |
+
+**And the control that matters:** the identical envelope with **the hook removed** let *all four*
+land — including `/tmp` and the symlink escape. Therefore:
+
+- `permissionMode: 'default'` plus an allowlisted tool **grants unrestricted write**. It does not
+  confine anything.
+- `additionalDirectories` is a **read**-scope convenience. It is **not** a write boundary; naming
+  the repo there does not stop a write anywhere else, and omitting a path does not stop a write to
+  it.
+- **The `PreToolUse` hook is the single point of enforcement for decision 4.** If it is wrong, the
+  repo is writable. There is no second layer behind it, and this spec does not pretend otherwise.
+
+**Consequence for the code — the hook cannot be pure.** Catching (d) requires resolving symlinks,
+which is filesystem access, so the hook follows the shape `core/session.ts` already uses for
+`decideMergeGateHook(io)`: a builder `buildContainmentHook(homeDir, io)` at the edge returns the
+hook, while the decision itself stays a pure, table-tested
+`containPath(resolvedTarget, homeDir): boolean` in `core/supervisor/permit.ts`. The edge resolves
+the target's **deepest existing ancestor** (the file itself usually does not exist yet) and appends
+the remaining segments before the pure check runs. A path that cannot be resolved, or is not
+absolute, is denied.
+
+Because the hook is load-bearing, it is tested in **both** directions and by a **real** session, not
+only a unit table: `test-supervisor-permission-real.sh` (plan Task 13, opt-in) reproduces exactly
+the four attempts above against a live Haiku session. The session-double E2E cannot prove this — the
+double is not a model and never exercises the permission layer at all.
+
+The `result` message also carries `permission_denials` verbatim (every denied call with its tool
+input), alongside `usage.{input_tokens,cache_read_input_tokens,cache_creation_input_tokens,
+output_tokens}` and `total_cost_usd` — so the G5 ledger needs no transcript parsing, and an
+attempted escape is recorded as evidence rather than merely blocked.
 
 ### 5.2 `ruling`
 
@@ -344,14 +403,45 @@ shape):
 
 **Postconditions, checked on disk, in this order:**
 
-| Check | How |
-| --- | --- |
-| A new `## ` block exists in `answers.md` that was not there before | set difference of `parseRulings()` ids, before vs after |
-| Its `ratified-as:` value is in the frozen vocabulary | `isRulingRatified()` — the existing pure function, reused |
-| The target repo is untouched | `git -C <repo> status --porcelain` compared before/after; any change is a **failed ruling** (decision 4) |
+| Check | How | On failure |
+| --- | --- | --- |
+| **History is intact** — every byte that was in `answers.md` before the session is still there, unchanged, at the front | the pre-session content is a **byte prefix** of the post-session content | `park(history_rewritten)` — **never a retry** |
+| A new `## ` block exists that was not there before | set difference of `parseRulings()` ids, before vs after | failed attempt |
+| Its `ratified-as:` value is in the frozen vocabulary | `isRulingRatified()` — the existing pure function, reused | failed attempt |
+| The target repo is untouched | `git -C <repo> status --porcelain` compared before/after; any change is a **failed ruling** (decision 4) | failed attempt |
 
 **OR** a typed park marker at `<home>/supervisor/park/<cardId>.json`. **Neither** → failed attempt:
 **one** bounded retry with the same brief, then `park(ruling_failed)` (guardrail 2).
+
+#### Why the history check exists, and why it never retries
+
+A ruling session holds `Edit` on `answers.md`, so nothing in the original postcondition stopped it
+from rewriting or deleting `R1..R<n-1>` and still passing: a new ratified block would appear, the
+repo would be untouched, and the campaign would proceed on a falsified ruling trail.
+
+This is not hypothetical. **Measured** (§19.4): a session told to "write the exact text" to
+`answers.md` **replaced the file**, taking a 46-byte file with one prior ruling down to 16 bytes.
+The same envelope, told to append and preserve, used `Read` then `Edit` and left the prior content
+byte-identical.
+
+**The prefix form is sound**, and was checked rather than assumed:
+
+- `answers.md` is append-structured by convention — a ruling is a `## ` block appended at the end.
+  The real campaign's file (31,525 bytes, 22 rulings) ends with a newline, so an append needs no
+  edit to the preceding byte.
+- `parseRulings()` splits on `## ` headings and never reorders, so "old content, then new block" is
+  exactly what a legal ruling produces.
+- Measured on a legitimate append: pre-content was a byte prefix of post-content, exactly.
+
+**A violation parks and never retries.** Every other failure is "the session did not do its job",
+which a fresh attempt can fix. This one is "the session destroyed the ruling trail", which a fresh
+attempt cannot undo and which a human must see. It is the one postcondition failure that bypasses
+the retry budget entirely.
+
+**The brief must ask for the shape the check requires.** §5.2's rendered brief instructs the session
+to append and to preserve every existing byte, because the measured failure above came from a prompt
+that did not say so. Prose alone is not the guarantee — the postcondition is — but a brief that
+invites the failure is a defect in its own right.
 
 On success the supervisor — not the session — performs `archive_escalation` (§5.5).
 
@@ -368,9 +458,19 @@ means, the `SKILL.md` Stage D ratification-pass paragraph verbatim, and the rule
 convention may not stay as prose. The two exits: repair every `ratified-as:`, or write a park
 marker naming the ids it cannot rule on.
 
-**Postcondition:** `unratifiedRulingIds(answers.md)` is empty — computed by the existing pure
-`core/rulings.ts`, over the file the session just wrote. Partial progress (some ids cleared) is a
-failed attempt, not a success; one bounded retry, then `park(ratify_failed)`.
+**Postconditions:**
+
+| Check | How | On failure |
+| --- | --- | --- |
+| **Only the named ids changed** — every ruling block whose id is NOT in `run.unratifiedRulings` is byte-identical before and after | compare each block's bytes, keyed by `parseRulings()` id | `park(ratify_out_of_scope)` — **never a retry** |
+| No ruling id disappeared, and no block's heading text changed | id set before ⊆ id set after | `park(ratify_out_of_scope)` — **never a retry** |
+| `unratifiedRulingIds(answers.md)` is empty | the existing pure `core/rulings.ts`, over the file the session just wrote | failed attempt |
+
+A ratify session's whole job is editing `ratified-as:` lines inside **named** blocks, so the prefix
+rule that fences a ruling session would be wrong here — it legitimately edits the middle of the
+file. The fence is therefore by **id**: touching a block it was not asked about is the same class of
+offence as rewriting history, and parks the same way. Partial progress (some ids cleared, none
+out of scope) is an ordinary failed attempt: one bounded retry, then `park(ratify_failed)`.
 
 ### 5.4 `closing`
 
@@ -441,11 +541,15 @@ as a malformed-marker event — fail closed, never crash.
 `owner_only` · `too_hard` · `w7_cap` · `ratify_cap` · `spawn_cap` · `watchdog_run_cap` ·
 `repeat_escalation` · `ruling_failed` · `ratify_failed` · `closing_failed` · `session_incomplete` ·
 `quota_cap` · `overloaded` · `stalled` · `lock_conflict` · `error` · `unexpected_running` ·
-`watchdog_no_terminal` · `watchdog_usage` · `resume_blocked`
+`watchdog_no_terminal` · `watchdog_usage` · `resume_blocked` · **`history_rewritten`** ·
+**`ratify_out_of_scope`**
 
-Twenty values, each produced by exactly one row of §3.4's table, each mapping to one sentence of
-`NEEDS_OWNER.md`. **Decision authority:** the card gives the Shaman the ruling on this vocabulary;
-§20 amendment A2 submits it for ratification.
+Twenty-two values, each produced by exactly one row of §3.4's table or one postcondition failure,
+each mapping to one sentence of `NEEDS_OWNER.md`. The last two are the integrity parks added by
+§5.2 and §5.3: they are the only park reasons that bypass the retry budget, because a rewritten
+ruling trail is not a retryable failure. **Decision authority:** the card gives the Shaman the
+ruling on this vocabulary; §20 amendment A2 submits it for ratification, as ratified on 2026-09-18
+and extended by these two.
 
 ---
 
@@ -600,7 +704,7 @@ One line per spawn, every field a typed disk or SDK fact:
 
 `verdict` is one of `ruled` · `ratified` · `closed` · `parked` · `failed` · `timeout`, decided by
 the **postcondition check on disk**, never by the session's own words. `usage` and `costUsd` come
-straight off the SDK's `result` message (proven present in §19.2).
+straight off the SDK's `result` message (proven present in §19.3, §19.4).
 
 ### `NEEDS_OWNER.md` — the format
 
@@ -653,10 +757,72 @@ A procedure documented in `SKILL.md`, **not code**. The owner opens a small sess
 
 3. On wake: reads `NEEDS_OWNER.md` (or `supervisor/final-report.md`) and relays it verbatim.
 
-**The doorbell never rules.** It never writes `answers.md`, never writes a park marker, never arms
-a Monitor on campaign files. Its entire cost is bounded to one start plus one wake (the card's
-adjudication rule accepts this cost in advance). **The supervisor behaves identically with no
-session at all** — `NEEDS_OWNER.md` plus the exit code are the truth; the doorbell is a convenience.
+**The doorbell never rules on its own authority.** It never decides a question, never writes a park
+marker, never arms a Monitor on campaign files. Its entire cost is bounded to one start, one wake,
+and — if the owner is present and rules — one transcription round (the card's adjudication rule
+accepts the doorbell's cost in advance). **The supervisor behaves identically with no session at
+all** — `NEEDS_OWNER.md` plus the exit code are the truth; the doorbell is a convenience.
+
+### 12.1 Transcribing an owner ruling (Shaman ruling, 2026-09-18)
+
+W3 reads, verbatim: "`answers.md` is written only by **you (a session) or the owner**". A doorbell
+forbidden from writing it would leave the owner hand-editing markdown and hand-renaming an
+escalation file after every owner-only park — hostile to the person this card exists to serve, and
+not what W3 says.
+
+So: **when the owner states their decision in the doorbell session, the doorbell records it
+verbatim.** It is a transcriber, not a judge. The procedure, in order:
+
+1. **Relay the park.** Show `NEEDS_OWNER.md` and the escalation's `**Reason:**` and `## Context`.
+2. **Wait for the owner's words.** If the owner does not rule, stop here and change nothing.
+3. **Append the ruling to `answers.md`**, as the next `R<n>`, carrying the owner's decision
+   **verbatim** — never summarised, never improved — plus two machine-readable fields:
+
+   ```markdown
+   ## R<n> · <ISO date> · card <cardId> · <the owner's own title or the escalation's reason>
+
+   ruled-by: owner
+   ratified-as: <the owner's own disposition, or `pending` if they gave none>
+
+   <the owner's decision, verbatim>
+   ```
+
+   The same append-only rule as §5.2 applies: every prior byte stays.
+4. **Archive** `escalations/<cardId>.md` to `.resolved-R<n>`.
+5. **Delete `<home>/NEEDS_OWNER.md`** — that file is a latch, and deleting it is the owner's "I have
+   handled it" signal (§11); the supervisor refuses to resume while it exists (row P2).
+6. **Restart the supervisor**, detached, with the same command the park document printed.
+
+**`ratified-as: pending` is a legitimate outcome here.** If the owner rules the substance but not
+the disposition, `pending` is the honest value — and the runner's own exit-5 gate will surface it at
+closing time, which is exactly the backstop that exists for it. The doorbell never invents a
+disposition to make a gate go green.
+
+### 12.2 How the supervisor recognises an owner ruling (and why W7 stays honest)
+
+**Structurally, it cannot miscount one.** W7's counter is incremented by the supervisor
+**immediately before it spawns a ruling session** (S-P6). An owner ruling involves no spawn, so it
+can never increment `rulingRounds` — the count is of *the supervisor's own attempts*, which is
+precisely what W7 bounds ("at most 2 **auto-answer** rounds per card"). An owner ruling is not an
+auto-answer, and no code path exists that would count it as one.
+
+The `ruled-by: owner` field is therefore **not** load-bearing for W7. It exists for three other
+reasons, and the supervisor reads it on restart to:
+
+- **Report honestly.** `NEEDS_OWNER.md` and the final report distinguish "2 of 2 auto-answer rounds
+  used, plus 1 owner ruling" from "3 auto-answer rounds", which W7 forbids.
+- **Keep the repeat-escalation breaker from misfiring.** If the card re-escalates with the same body
+  after an *owner* ruling, that is a genuinely new situation — the owner's decision did not land —
+  and it parks with `repeat_escalation` naming the owner ruling, rather than being read as a failed
+  auto-answer. The supervisor records the owner ruling's id in `state.ownerRulings[cardId]` on the
+  restart that first observes it.
+- **Make the ledger complete.** The owner ruling gets a `ledger.jsonl` line with
+  `kind: "owner"`, `sessionId: null`, and no usage — so a later reader can account for every ruling
+  in `answers.md`, not just the ones a spawn produced.
+
+A ruling block carrying neither `ruled-by: owner` nor a matching supervisor spawn in the ledger is
+recorded as `ruled-by: unknown` in the report and changes no decision — the supervisor never guesses
+who wrote a ruling, and never refuses to proceed because it cannot tell.
 
 ---
 
@@ -693,7 +859,7 @@ The viewer's primary surface is not badges — it is **every transcript on the m
 by walking `~/.claude/projects` two levels deep (§"On-disk discovery" steps 1-2). A session's
 project directory is decided by its `cwd`.
 
-**Measured** (§19.2): a session spawned with
+**Measured** (§19.3): a session spawned with
 `cwd = <tmp>/fakehome/.tribe/key/campaigns/probe` landed its transcript at
 
 ```
@@ -756,7 +922,7 @@ transcript files. **Token-free by construction.**
 - A **turn** is one distinct `message.id` on a `type: "assistant"` row. De-duplication is
   mandatory, not an optimisation: **measured**, a single trivial 59-output-token session emitted the
   same `message.id` on two consecutive lines, each repeating the full identical `usage` block
-  (§19.2). Per-line summing double-counts.
+  (§19.3). Per-line summing double-counts.
 - A turn's **trigger class** is the most recent user-side row that is not a `tool_result` carrier:
   `human` · `monitor-event` · `monitor-expiry` · `task-notification` (other).
 - **Sidechain** (`isSidechain === true`) rows are excluded from lead totals and reported separately.
@@ -783,11 +949,53 @@ invalid UTF-8, or parses to a non-object is **counted and skipped** with a typed
 (`skippedLines`, `skippedReasons`) — never a traceback, never a silent undercount. A missing session
 id is a typed refusal naming it. Pure core (classification, sums) over an edge that only reads files.
 
-### The committed baseline
+### The committed baseline — and why it must be PINNED
 
 `docs/superpowers/evidence/2026-09-18-supervisor-baseline.json` — **numbers only**: session ids,
 counts, token sums, the tool's own version. **Never message text** (card: "Transcripts are
 machine-local and private"). A human-readable `.md` twin sits beside it.
+
+**A baseline measured over a whole file is not reproducible, because the file moves.** Measured,
+twice, on the very session the card cites: `6a8a8fe4…` read 1,443 lines at 14:26Z, 1,507 lines
+minutes later, and 1,509 lines later still — it was **live while being measured** (§21, D2). Without
+a cut, re-running the tool tomorrow yields different numbers than the committed file, and §23's
+"byte-identical" verification step fails for a reason that has nothing to do with the code. That is
+not a ratchet; it is a number that happens to have been true once.
+
+**The cut: measure a PREFIX, and pin it.** Every baseline entry records, alongside its metrics:
+
+```json
+{ "sessionId": "6a8a8fe4-…",
+  "cut": { "lines": 1509, "bytes": 4597864,
+           "sha256": "5a70dd43e35ab27240a4cbe7919e86e163762b3f5b4a4ad514a4d9e7c17eaf72" } }
+```
+
+`sha256` is over **exactly the first `bytes` bytes** of the transcript — not the whole file. The
+tool gains `--cut-bytes <n>` (measure only that prefix) and `--verify <baseline.json>` (re-measure
+each session at its recorded cut and compare).
+
+**Why a prefix cut is sound, and how that is checked rather than asserted.** Claude Code transcripts
+are append-only: rows are appended as the session proceeds, and no earlier row is rewritten. Two
+independent observations support it — the file above grew by 66 lines across three readings while
+its first 200,000 bytes hashed identically both times I sampled them, and the viewer's own tail
+design (`core/tail.ts`, which advances an offset and treats a shrink as a `reset`) is built on the
+same assumption. **Neither is proof**, so the assumption is made falsifiable in the test suite: a
+fixture transcript is measured, then **grown**, then re-measured at the recorded cut, and the
+numbers must be identical. If Claude Code ever rewrites history, that test goes red and says so,
+which is exactly the behaviour a load-bearing assumption should have.
+
+**What happens when the prefix no longer matches.** `--verify` emits a typed, loud result, never a
+silent difference:
+
+| Condition | Result |
+| --- | --- |
+| File ≥ `cut.bytes` and the prefix hash matches | `"status": "verified"`, metrics compared field by field |
+| File ≥ `cut.bytes`, prefix hash **differs** | `"status": "prefix_mismatch"` naming the session — the append-only assumption failed; **exit 1** |
+| File shorter than `cut.bytes` | `"status": "truncated"` naming the session and both lengths; **exit 1** |
+| File missing | `"status": "absent"` naming the session; **exit 1** |
+
+The tool never silently re-baselines. Re-cutting is an explicit act (`--cut-bytes` on a fresh run),
+recorded in the `.md` twin with the reason.
 
 ### The ratchet assertion
 
@@ -796,10 +1004,37 @@ campaign's supervision transcripts (doorbell + every one-shot session):
 
 1. **babysitting share == 0** — no turn is attributed to `monitor-event` or `monitor-expiry`;
 2. **no Monitor arm on campaign files** — zero `Monitor` tool_use blocks;
-3. **every one-shot session's max context < 258,795** — the measured session-1 last-turn/max context
-   (the card says "the baseline's 254K last-turn context is the number to beat, **per decision**").
-   The measured figure supersedes the card's rounded one (§21, D2). A ruling session is expected to
-   land two orders of magnitude below this; the bound is a ceiling, not a target.
+3. **every one-shot session's max context is at or below its kind's committed ceiling** — below.
+
+#### The context ceiling is per session kind, and may only be lowered
+
+The baseline's max context (measured: **258,795** on the pinned cut) is the **historical record** —
+what one decision cost in the old world. It is deliberately **not** the assertion: a ruling session
+is expected to land two orders of magnitude under it, so asserting "below 258,795" would pass a
+tenfold regression without a murmur. A ratchet that cannot catch a 10x bloat is decoration.
+
+The assertion instead reads a **committed ceiling file**,
+`docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json`:
+
+```json
+{ "v": 1, "headroomFactor": 1.5, "source": "measured by task 20 on <date>",
+  "ceilings": { "ruling": 0, "ratify": 0, "closing": 0, "doorbell": 0 } }
+```
+
+- **Where the numbers come from: measurement, not judgment.** Task 20 (the real Haiku E2E) measures
+  each kind's max context and writes `ceiling = ceil(measured_max × headroomFactor)`.
+  `headroomFactor` is **1.5**, committed in the file itself — enough that ordinary variation in a
+  rendered brief does not flap the gate, tight enough that a doubling fails it.
+- **Until Task 20 has run**, every ceiling is `0`, which the checker reads as "not yet measured": it
+  falls back to the pinned baseline figure **and says so in its output**
+  (`"ceilingSource": "baseline-fallback"`), so nobody mistakes a placeholder for a ratchet.
+- **A ceiling may be lowered freely** (that is the ratchet tightening as the design improves) and
+  **may never be raised without a Shaman ruling**. The test that enforces this compares the
+  committed file against its own previous committed value in git: a raise fails with the old value,
+  the new value, and the instruction to obtain a ruling. A raise accompanied by a
+  `"raisedBy": "<ruling id>"` field is accepted and recorded.
+- A kind with no measurement yet (`doorbell`, if the owner never opens one during Task 20) stays at
+  the baseline fallback rather than being invented.
 
 ---
 
@@ -843,7 +1078,11 @@ Nothing here creates that pressure — every observation is a disk read.
 | --- | --- | --- |
 | The supervisor spawns a session when none was needed (the card's named bug) | Every row that does not positively establish "judgment required" parks. The whole table is a pure function tested row by row | The decision-table test |
 | A ruling is applied twice after a crash | The guard is the ruling itself, on disk, not a supervisor memory; `R(card)` increments **before** the spawn so a crash over-counts, never under-counts | The kill tests (mid-wait, mid-ruling, mid-re-trigger) |
-| A ruling session writes into the target repo | Denied at the permission layer by the containment hook, **and** independently proven by a `git status --porcelain` before/after comparison that fails the ruling | The least-privilege test + the real E2E |
+| A ruling session writes into the target repo | Denied by the containment hook, **and** independently caught by a `git status --porcelain` before/after comparison that fails the ruling. The comparison is the genuine second layer — it catches a write the hook let through | The hook table, the opt-in real-session test, and the E2E's probe 5 |
+| **The containment hook is wrong or is not wired** | Measured: there is then **no** confinement at all — the control run wrote to the repo, to `/tmp` and through a symlink. Mitigations: the hook is table-tested in both directions, proven by a real session, and the repo-untouched probe still fails any ruling whose session touched the repo | §19.4's control, `test-supervisor-permission-real.sh` |
+| A ruling session rewrites or deletes earlier rulings | The append-only prefix postcondition; a violation parks without a retry so a human sees it | The history-rewrite test |
+| The baseline stops reproducing because a transcript grew | Every baseline entry is pinned to a byte cut with a prefix hash; `--verify` re-measures at that cut and refuses loudly on mismatch | The grow-then-remeasure fixture |
+| The context ceiling is raised to make a red gate green | A raise is refused unless the file records a Shaman ruling id; lowering is always allowed | The ceiling-raise refusal test |
 | A one-shot session hangs | Wall-clock `abortController` timeout + `maxTurns`; every subprocess carries a timeout (`fail-closed-edges` obligation 3) | The session-double E2E |
 | Two supervisors on one home | `.supervisor.lock` with a liveness probe; a live holder is refused with exit `21` | The single-instance test |
 | The supervisor and the runner both write `campaign-state.json` | The supervisor never writes it at all (§11) | The write-surface test |
@@ -960,7 +1199,9 @@ Findings that this experiment settles:
 
 1. **`cwd` decides the project directory**, encoded by replacing every `/` and `.` with `-`. This is
    the whole of §14's G6 mechanism.
-2. **A restrictive envelope runs headless** — no permission prompt, no hang, clean `result`.
+2. **A restrictive envelope runs headless *for a session that calls no tool*** — no permission
+   prompt, no hang, clean `result`. This probe answered in one turn with **zero tool calls**, so it
+   proved nothing about the write path; §19.4 is the experiment that does.
 3. **The `result` message carries `usage`, `total_cost_usd` and `permission_denials`**, so the G5
    ledger needs no transcript parsing.
 4. **One `message.id` appeared on two consecutive assistant lines** with byte-identical `usage` —
@@ -970,31 +1211,142 @@ Findings that this experiment settles:
 
 The throwaway project directory and both `mktemp` trees were deleted.
 
-### 19.4 Document gates
+### 19.4 The headless write path, and which layer actually enforces containment
+
+The design's whole ruling/ratify path rests on a claim §19.3 did **not** establish: that a headless
+session under `permissionMode: 'default'` can write *inside* the campaign home while the hook denies
+everything outside it. Three live Haiku sessions, each against a fresh `mktemp` tree with its own
+`HOME`, a fake repo root, and a symlink inside the home pointing outside it. The envelope was the
+real one from §5.1, including `additionalDirectories: [repoRoot]` and the containment hook.
+
+The prompt asked for four writes in order, insisting each be attempted even if an earlier one was
+refused: (a) `<home>/answers.md`, (b) `<repo>/src/touched.txt`, (c) `/tmp/a3-outside-abs.txt`,
+(d) `<home>/link-out/escape.txt` where `link-out` is a symlink out of the home.
+
+**Run 1 — the real envelope, hook present.**
+
+```
+SUBTYPE=success   NUM_TURNS=5
+TOOL_CALLS      = [Write answers.md, Write repo/src/touched.txt, Write /tmp/…, Write link-out/escape.txt]
+HOOK_ALLOWED    = [Write <home>/answers.md]
+HOOK_DENIED     = [Write <repo>/src/touched.txt, Write /tmp/a3-outside-abs.txt,
+                   Write <home>/link-out/escape.txt]
+PERMISSION_DENIALS = the same three calls, each with its full tool_input
+FINAL           = "DONE-1: answers.md ✓ — REFUSED-2, REFUSED-3, REFUSED-4"
+disk after: (a) answers.md written · (b) no · (c) no · (d) no
+```
+
+**Run 2 — the control: byte-identical envelope with the hook REMOVED.**
+
+```
+SUBTYPE=success   NUM_TURNS=5   PERMISSION_DENIALS=[]
+disk after: (b) YES · (c) YES · (d) YES     ← all four writes landed
+```
+
+**Run 3 — the append shape**, same envelope, a prompt instructing the session to append a block and
+preserve every existing byte:
+
+```
+SUBTYPE=success   TOOLS=["Read","Edit"]
+pre 48 bytes, post 87 bytes   PRE IS A BYTE PREFIX OF POST: True
+post tail: "\n## R2 second\nratified-as: operational\n"
+```
+
+**What these settle.**
+
+1. **(a) succeeds headlessly.** `permissionMode: 'default'` does not prompt for an allowlisted tool,
+   so the ruling path is viable exactly as designed — G1 is not blocked, and no fallback to
+   `bypassPermissions` is needed.
+2. **(b), (c) and (d) are denied**, including the symlink escape, because the hook resolves the
+   target's deepest existing ancestor before the containment check.
+3. **The control is the important one: the hook is the ONLY enforcement.** With it removed, the same
+   session wrote to the repo, to `/tmp`, and through the symlink. So `allowedTools` is a tool grant,
+   `permissionMode: 'default'` confines nothing, and `additionalDirectories` is a read convenience —
+   **not** a write boundary. §5.1 states this plainly rather than claiming defence in depth that
+   does not exist.
+4. **Run 1's (a) OVERWROTE the file**, 46 bytes down to 16: a ruling session can destroy the ruling
+   trail and still satisfy every original postcondition. That is the measured origin of §5.2's
+   append-only check.
+5. **Run 3 shows the legitimate shape works and is prefix-checkable** — `Read` then `Edit`, prior
+   bytes untouched — so the append-only postcondition passes real sessions rather than merely
+   failing bad ones.
+6. `permission_denials` on the `result` message carries every denied call with its tool input, so an
+   attempted escape is *recorded evidence* in the ledger, not just a blocked action.
+
+All three `mktemp` trees, the `/tmp` probe file, and the three throwaway project directories under
+`~/.claude/projects/` were deleted.
+
+### 19.5 The append-only assumption behind the baseline cut
+
+```
+$ python3 -c "sha256 of the first 200000 bytes of 6a8a8fe4….jsonl"
+5a70dd43e35ab27240a4cbe7919e86e163762b3f5b4a4ad514a4d9e7c17eaf72     (size 4,597,864)
+$ (re-read later in the same session)
+5a70dd43e35ab27240a4cbe7919e86e163762b3f5b4a4ad514a4d9e7c17eaf72     — unchanged
+```
+
+The same file was independently observed at 1,443 lines (14:26Z), 1,507 lines, and 1,509 lines: it
+grew throughout, while its measured prefix hashed identically. That is consistent with append-only
+but is **not a proof**, which is why §15 makes the assumption falsifiable in the suite rather than
+trusting it: a fixture is measured, grown, and re-measured at its recorded cut, and the numbers must
+match.
+
+### 19.6 Document gates
 
 `plugins/tribe/scripts/validate-plan.sh` is run against this spec's plan (verdict must be `pass`)
 and `check-spec-handoffs.sh` against the spec directory; §20 records their outputs at planning time.
 
 ---
 
-## 20. Amendments proposed to the card (for the Shaman)
+## 20. Amendments — status after the Shaman's review of 2026-09-18
 
-None changes What or Why. Each is a How-level gap the card's text does not settle, resolved here
-and listed so a later reader is not left re-deriving it.
+None changes What or Why. Each is a How-level gap the card's text does not settle.
 
-- **A1 — guardrail 2's postcondition splits.** The **session** writes the ruling; the **supervisor**
-  archives the escalation file. Reasons in §5.5 (least privilege, crash-safety, W3 untouched). The
-  observable end state is the card's, exactly.
-- **A2 — the park-marker vocabulary is two closed sets, not one** (§6): two values a session may
-  write (`owner_only`, `too_hard`) and twenty the supervisor may write. The card gives the Shaman
-  the ruling on this vocabulary.
-- **A3 — G0's context bound is the measured 258,795, not the card's rounded 254K** (§15, §21 D2).
-- **A4 — W7 has no mechanical basis anywhere today**, so the supervisor owns the counter (§7). The
-  runner-side fix is follow-up FU-CS-1, out of fence.
+**Ratified by the Shaman, 2026-09-18 — settled, do not re-litigate:**
+
+- **A1 — guardrail 2's postcondition splits.** ACCEPTED as proposed (option a). The **session**
+  writes the ruling; the **supervisor** archives the escalation file. Reasons in §5.5 (least
+  privilege, crash-safety, W3 untouched). The observable end state is the card's, exactly.
+- **A2 — the park vocabulary is two closed sets, not one** (§6). ACCEPTED as specified, and since
+  extended by A8/A9 below to 22 supervisor values.
+- **A4 — W7 has no mechanical basis anywhere today**, so the supervisor owns the counter (§7).
+  ACCEPTED. Runner-side fix is FU-CS-1, out of fence.
 - **A5 — exit codes `20`/`21`**, with `0`/`1` deliberately keeping their shared meanings (§10).
-- **A6 — G6 needs no viewer change at all** (§14); the badge-chip enhancement is follow-up FU-CS-2.
-- **A7 — `--home` is accepted alongside `--campaign`** (mutually exclusive), for tests and for a
-  non-conventional home. The owner-facing path stays `--campaign` exactly as decision 2 requires.
+- **A6 — G6 needs no viewer change at all** (§14); the badge chip is FU-CS-2.
+- **A7 — `--home` is accepted alongside `--campaign`** (mutually exclusive). The owner-facing path
+  stays `--campaign` exactly as decision 2 requires.
+
+**A3 — REPLACED by the Shaman's ruling.** The original proposal ("use the measured 258,795 instead
+of the card's 254K") was rejected as still not a ratchet: a bound two orders of magnitude above the
+expected value passes a tenfold regression. Replaced by **A3′** below.
+
+**New, from the Shaman's review — required amendments now built into this spec:**
+
+- **A3′ — the context assertion is a committed per-kind ceiling** (§15). The pinned baseline stays
+  as the historical record; the gate reads
+  `docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json`, whose ceilings are *measured* by
+  Task 20 at `measured_max × 1.5`, fall back to the baseline with a stated
+  `"ceilingSource": "baseline-fallback"` until then, may be lowered freely, and may not be raised
+  without a Shaman ruling recorded in the file.
+- **A8 — the baseline is PINNED to a prefix cut** (§15, §21 D2). Every entry records
+  `cut: {lines, bytes, sha256}`; the tool gains `--cut-bytes` and `--verify`; a changed prefix, a
+  truncated file or a missing file each produce a typed status and exit 1, never a silent
+  re-baseline. The append-only assumption this rests on is made falsifiable by a grow-then-remeasure
+  fixture rather than trusted.
+- **A9 — rulings are append-only, mechanically** (§5.2, §5.3). A ruling session's pre-session
+  `answers.md` must be a byte prefix of the post-session file; a ratify session may change only the
+  blocks named in `run.unratifiedRulings`. Either violation parks — `history_rewritten` or
+  `ratify_out_of_scope` — and **never retries**. Both join the closed `ParkReason` set (22 values).
+- **A10 — the containment hook is the sole enforcement layer, and this spec says so** (§5.1, §19.4).
+  Measured: with the hook removed the same session wrote to the repo, to `/tmp`, and through a
+  symlink out of the home. The hook is therefore impure by necessity (it must resolve symlinks) and
+  is proven by a real-session test, not only a unit table.
+- **A11 — the doorbell transcribes an owner ruling** (§12.1, §12.2). Shaman ruling: W3 verbatim
+  permits "a session **or the owner**", and forcing the owner to hand-edit markdown is hostile. The
+  doorbell records the owner's words verbatim as `ruled-by: owner`, archives the escalation, clears
+  the `NEEDS_OWNER.md` latch and restarts the supervisor — and never rules on its own authority.
+  W7 cannot miscount it, because the counter is incremented per *spawn* and an owner ruling is not
+  one.
 
 ---
 
@@ -1007,10 +1359,22 @@ is right.
   "today lives in an LLM's memory"; in fact the field the skill tells a session to read is
   permanently `0`. Verified by grep across the runner source and on the real `viewer-consolidation`
   home (3 ruling rounds, no key). Consequence: §7; follow-up FU-CS-1.
-- **D2 — the card's baseline table for session `6a8a8fe4…` is off.** Measured: 174 turns (not 168),
-  26.47M cache-read (not 24.9M), 258,795 max context (not 254K), 37/34 monitor turns (not 43/42), 8
-  expiries (not 10), plus a 23-turn `task-notification` class the table omits. Session
-  `ba6e93f0…` reproduces exactly. Consequence: §1.1, §15's bound, amendment A3.
+- **D2 — the card's table for session `6a8a8fe4…` differs from this spec's, and the two halves have
+  DIFFERENT causes.** Corrected by the Shaman's own re-measurement (2026-09-18), which this spec
+  adopts:
+  - **The turn and token deltas are a moving-file effect, not an error in either measurement.**
+    That session was **still live while both of us measured it**: 1,443 lines / 168 turns at
+    ~14:26Z, then 1,507 lines / 174 turns, then 1,509 lines (last row 15:03:54Z). Both numbers were
+    correct for the file as it stood. **It is specifically NOT the case that the throw-away script
+    got the totals wrong** — an earlier draft of this spec said so, and that was wrong.
+  - **Only the class-bucket deltas are a classification error** (37/34 monitor turns vs 43/42, and
+    the 23-turn `task-notification` class the card's table has no column for). Those come from
+    D3's second notification shape being mis-bucketed.
+  - **Consequence — this is what forces §15's pinned cut.** A baseline over a whole file that is
+    still growing is not reproducible by anyone, including its author. Every baseline entry now
+    records a `cut` (lines, bytes, sha256 of exactly that prefix) and the tool gains `--cut-bytes`
+    and `--verify`. Supersedes the earlier amendment A3, which merely swapped one unpinned number
+    for another.
 - **D3 — `<task-notification>` has two structural shapes**, one with an `<event>` element and one
   (background-command completion) without. The card's oracle names four classes, which is right; the
   original script appears to have mis-bucketed the second shape.
@@ -1029,7 +1393,9 @@ is right.
 
 | Goal | Evidence the PR must carry | Gate |
 | --- | --- | --- |
-| **G0** ratchet | The tool, its tests, and the committed baseline JSON for both sessions — landed in phase 1, before any supervisor code | green, baseline committed |
+| **G0** ratchet | The tool, its tests, and the **pinned** baseline JSON for both sessions (each with its `cut`), landed in phase 1 before any supervisor code; `--verify` re-measures at the cut and is byte-identical; the grow-then-remeasure fixture proves the append-only assumption; the per-kind ceiling file exists and refuses a raise | green, baseline committed and re-verifiable |
+| **Least privilege** (decision 4) | The unit hook table in both directions, **plus** the opt-in real-session test reproducing §19.4's four attempts against live Haiku — the contained write succeeds and all three escape shapes are denied | green, both directions |
+| **Ruling integrity** | A ruling session that rewrites history parks `history_rewritten` without a retry; a ratify session that edits an unnamed block parks `ratify_out_of_scope` | green, two tests |
 | **G1** no babysitter | One real E2E: a toy campaign built to escalate, Haiku as the Shaman model, reaching `done` with no interactive session open; transcript of the whole run in the evidence file | present, reproducible |
 | **G2** tokens only for judgment | The spend ledger shows one line per spawn and nothing else; the supervisor's own loop appears nowhere in any transcript | ledger asserted in the E2E |
 | **G3** bounded context | Every spawn's brief is rendered (the `briefs/` directory is the proof) and no session sets `resume`; the `viewer-consolidation` replay fixture (R16, R18, R22 + closing) yields **≤ 5** spawns where the measured session took 174 turns | green, replay asserted |
@@ -1046,8 +1412,12 @@ is right.
 2. `bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh` — the session-double E2E from an empty
    home, with the campaign named both the way a person types it and as an absolute path.
 3. `bash plugins/tribe/scripts/tests/test-supervisor-kill.sh` — the three G4 kill tests.
-4. Replay G0: run `transcript-metrics` on both baseline sessions and diff against the committed
-   baseline file — byte-identical.
+4. Replay G0: `transcript-metrics --verify docs/superpowers/evidence/2026-09-18-supervisor-baseline.json`
+   — every session `"status": "verified"` and byte-identical metrics, **even though both transcripts
+   have grown since**, because each is re-measured at its recorded cut. Exit 0.
+4a. `bash plugins/tribe/scripts/tests/test-supervisor-permission-real.sh` (opt-in,
+   `TRIBE_REAL_E2E=1`) — the contained write lands and all three escape shapes are denied by the
+   hook, against a live model. This is the only test that proves the enforcement layer works.
 5. Replay G3: the `viewer-consolidation` replay fixture — ≤ 5 spawns.
 6. Read the real-E2E evidence file: the ledger, the `NEEDS_OWNER.md`-free path to `done`, and the
    viewer's project directory naming the campaign.
