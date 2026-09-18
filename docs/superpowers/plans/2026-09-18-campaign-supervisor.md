@@ -973,7 +973,7 @@ Note S-P4: the archive half is performed by the supervisor after this check, not
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test.** Cases: a new ratified block → `ruled` with its id;
+- [x] **Step 1: Write the failing test.** Cases: a new ratified block → `ruled` with its id;
   a new block with `ratified-as: pending` → failed (the existing `isRulingRatified` says so);
   a new block with no `ratified-as:` at all → failed; no new block → failed; an unchanged
   `answers.md` plus a valid park marker → `parked` with the marker kind; a park marker with
@@ -981,7 +981,7 @@ Note S-P4: the archive half is performed by the supervisor after this check, not
   the same, never a throw; a non-empty `git status --porcelain` → `failed` with reason
   `repo_touched`, **even when a valid ruling landed** (decision 4: a violation is a failed ruling).
 
-- [ ] **Step 2: Write the failing integrity tests** (S-P13, spec §5.2/§5.3) — this is the half the
+- [x] **Step 2: Write the failing integrity tests** (S-P13, spec §5.2/§5.3) — this is the half the
   original postconditions missed:
 
 ```ts
@@ -1030,12 +1030,12 @@ test('ratify that drops a ruling id entirely parks out_of_scope', () => {
 });
 ```
 
-- [ ] **Step 3: Write `core/supervisor/verify.ts`** — `verifyRuling`, `verifyRatify`,
+- [x] **Step 3: Write `core/supervisor/verify.ts`** — `verifyRuling`, `verifyRatify`,
   `verifyClosing`, `parseParkMarker`, all pure, importing `parseRulings`/`isRulingRatified` from
   `../rulings.ts`. Every returned verdict carries a `retryable: boolean`; the two integrity
   outcomes are the only ones that set it `false`.
 
-- [ ] **Step 4: Gate.**
+- [x] **Step 4: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bunx tsc --noEmit
@@ -1044,7 +1044,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bunx tsc --noEmi
 Expected: about 22 new tests pass, including all six integrity cases; everything from Tasks 6-7
 still green; `tsc` silent.
 
-- [ ] **Step 5: Commit** — `feat(supervisor): disk postconditions, ruling integrity and park markers (task 8/24)`.
+- [x] **Step 5: Commit** — `feat(supervisor): disk postconditions, ruling integrity and park markers (task 8/24)`.
 
 ---
 
