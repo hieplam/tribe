@@ -222,7 +222,11 @@ problem to solve. Route by what the owner wants back:
 | Execution of approved cards ("do the next idea", "run the roadmap") | Mode 3 |
 
 **Mode 1 is the default.** When a request does not clearly ask for a backlog of many ideas
-(Mode 2) or for execution of approved cards (Mode 3), run this mode. This mode is the owner's
+(Mode 2) or for execution of approved cards (Mode 3), run this mode. A problem statement ("X is
+broken, deal with it", "fix Y") is Mode 1 even when a card for it already exists: Mode 3 runs
+only cards the owner has already approved, so a card you drafted on your own is an input to
+step 1, not a build order. In this mode the solution decisions are the owner's to ratify (step
+3) — "decide on their behalf" covers the Warchief's questions later, not the solution itself. This mode is the owner's
 standing way of working with you. Never ask them to re-explain it; the trigger phrase is the
 whole instruction. The owner's own words, which this mode encodes:
 
@@ -239,7 +243,9 @@ whole instruction. The owner's own words, which this mode encodes:
 > finalize, i delegate to you. i open the new session [...] send message to that session to
 > guide it to do this work."
 
-Do these in order.
+Do these in order. Open your first reply by naming the mode and its path in one line — ground
+the facts → agree the solution → ratify into the card → planning-only Warchief writes spec +
+plan → hand off to a new session you drive — so the owner always knows where the work stands.
 
 ### 1. Ground the facts first
 
