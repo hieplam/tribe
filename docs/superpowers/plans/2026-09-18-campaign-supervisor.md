@@ -226,7 +226,7 @@ nothing, and touches no existing module.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test.** `core/metrics/classify.test.ts`, table-driven:
+- [x] **Step 1: Write the failing test.** `core/metrics/classify.test.ts`, table-driven:
 
 ```ts
 import { describe, expect, test } from 'bun:test';
@@ -278,7 +278,7 @@ describe('userText', () => {
 
 Run it and watch it fail with a module-not-found error — that is the expected red.
 
-- [ ] **Step 2: Write `core/metrics/model.ts`** — types only, importing nothing local:
+- [x] **Step 2: Write `core/metrics/model.ts`** — types only, importing nothing local:
   `TriggerClass = 'human' | 'monitor-event' | 'monitor-expiry' | 'task-notification'`;
   `TokenSums { input: number; cacheRead: number; cacheWrite: number; output: number }`;
   `ClassMetrics { turns: number; tokens: TokenSums }`;
@@ -287,12 +287,12 @@ Run it and watch it fail with a module-not-found error — that is the expected 
   babysittingShare, sidechain: ClassMetrics }`;
   `BaselineFile { v: 1; tool: string; generatedAt: string; sessions: SessionMetrics[] }`.
 
-- [ ] **Step 3: Write `core/metrics/classify.ts`** — three pure functions, no imports:
+- [x] **Step 3: Write `core/metrics/classify.ts`** — three pure functions, no imports:
   `userText(message: unknown): string`, `isToolResultCarrier(message: unknown): boolean`,
   `classifyTrigger(text: string): TriggerClass`. Every one tolerates `null`/`undefined`/wrong
   shapes and returns a value rather than throwing.
 
-- [ ] **Step 4: Gate.**
+- [x] **Step 4: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/metrics/ && bunx tsc --noEmit
@@ -301,7 +301,7 @@ cd plugins/tribe/scripts/runner && bun test core/metrics/ && bunx tsc --noEmit
 Expected: the new file's tests pass (11 of them), `tsc` silent. Then `bun test` overall: expected
 `695 pass, 0 fail`.
 
-- [ ] **Step 5: Commit** — `feat(metrics): transcript trigger vocabulary and classifier (task 1/24)`.
+- [x] **Step 5: Commit** — `feat(metrics): transcript trigger vocabulary and classifier (task 1/24)`.
 
 ---
 
