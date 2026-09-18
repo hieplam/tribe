@@ -1114,12 +1114,16 @@ Expected: about 12 tests pass, including the byte-identical-quote checks against
 **Oracle.** `core/watchdog/status.ts`'s contract: timestamps arrive as arguments, a non-finite
 millisecond value renders `(invalid-timestamp)` rather than throwing, and serialization is total.
 The `NEEDS_OWNER.md` sentence table is frozen: exactly one "what happened" sentence and one "what
-unblocks it" instruction per `ParkReason`, all 20.
+unblocks it" instruction per `ParkReason`, all 22 (task-10 fix: spec §11's own template text says
+"20", but spec §6.2 — "Twenty-two values, each produced by exactly one row..." — and the already-
+committed `model.ts`'s `ParkReason` union are the authoritative count; §11's figure is a stale
+leftover from before §5.2/§5.3's two integrity parks were added, per the dispatch brief's own
+"the spec wins" instruction).
 
 **Fence by intent.** Pure shaping. `state.ts` parses, applies one outcome, and serializes; it never
 decides anything (that is `decide.ts`).
 
-**Governing quote** — spec §11, `NEEDS_OWNER.md` format, and spec §6.2's 20-value `ParkReason`
+**Governing quote** — spec §11, `NEEDS_OWNER.md` format, and spec §6.2's 22-value `ParkReason`
 union. The `ratified-as:` vocabulary quoted in any rendered text comes verbatim from
 `core/rulings.ts`'s own documented set: `rule <path>` | `debt <id>` | `roadmap <ref>` |
 `operational` | `dismissed`.
@@ -1131,17 +1135,17 @@ union. The `ratified-as:` vocabulary quoted in any rendered text comes verbatim 
 
 **Steps**
 
-- [ ] **Step 1: Write the failing tests.** For `state.ts`: an absent state file parses to the zero
+- [x] **Step 1: Write the failing tests.** For `state.ts`: an absent state file parses to the zero
   state; an unknown-version file is a typed refusal; applying a `ruling` outcome increments that
   card's round and appends the content hash; serialize→parse round-trips byte-identically.
   For `status.ts`: `exitCodeOf` maps all four terminal shapes; `buildStatus` fills every field of
   spec §13; `renderNeedsOwner` produces a document containing the reason, the campaign home, the
-  ledger lines, and a re-run command — and a table-driven case asserts **all 20** `ParkReason`
+  ledger lines, and a re-run command — and a table-driven case asserts **all 22** `ParkReason`
   values render a non-empty "what unblocks it" instruction.
 
-- [ ] **Step 2: Write both modules.**
+- [x] **Step 2: Write both modules.**
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bunx tsc --noEmit
@@ -1149,7 +1153,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bunx tsc --noEmi
 
 Expected: about 30 new tests pass; `tsc` silent; the whole suite still green.
 
-- [ ] **Step 4: Commit** — `feat(supervisor): persisted state, status publishing and the owner park document (task 10/24)`.
+- [x] **Step 4: Commit** — `feat(supervisor): persisted state, status publishing and the owner park document (task 10/24)`.
 
 ---
 
