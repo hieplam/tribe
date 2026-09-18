@@ -2192,8 +2192,8 @@ session**:
      wonder, and never claim a green check that does not exist. `gh run watch` and `timeout` are
      both unusable here.
 2. **Before/after evidence in the PR body**, captured by the Warchief, never claimed by a Hunter:
-   **BEFORE** is the Task-4 baseline (174 turns, 26.5M cache-read, 0.3168 babysitting share, three
-   rulings); **AFTER** is the Task-20 evidence file (one command, exit 0, the ledger, the ratchet
+   **BEFORE** is the Task-4 baseline (173 turns, 26.5M cache-read, 0.3168 babysitting share, three
+   rulings — re-measured at the pinned cut in the R7 fix round); **AFTER** is the Task-20 evidence file (one command, exit 0, the ledger, the ratchet
    assertion at share 0, the viewer project directory). Both live under
    `docs/superpowers/evidence/`, so every PR link resolves from the repo itself.
 3. **Audit recorded:** two independent skinners dispatched concurrently in one message — the
@@ -2207,7 +2207,7 @@ session**:
 
 **Scope-fence self-check before opening the PR.** `git diff --name-only master...HEAD` must be a
 subset of:
-`plugins/tribe/scripts/runner/{core/metrics/**,core/supervisor/**,ports/ports.ts,adapters/supervisor-io.adapter.ts,adapters/supervisor-io.adapter.test.ts,adapters/transcript-io.adapter.ts,adapters/transcript-io.adapter.test.ts,cli/main.ts,cli/main.test.ts,fixtures/supervisor/**,README.md}`,
+`plugins/tribe/scripts/runner/{core/metrics/**,core/supervisor/**,ports/ports.ts,adapters/supervisor-io.adapter.ts,adapters/supervisor-io.adapter.test.ts,adapters/transcript-io.adapter.ts,adapters/transcript-io.adapter.test.ts,adapters/cut.ts,adapters/cut.test.ts,cli/main.ts,cli/main.test.ts,fixtures/supervisor/**,README.md}`,
 `plugins/tribe/scripts/tests/{test-supervisor-e2e.sh,test-supervisor-kill.sh,test-supervisor-real-e2e.sh,test-supervisor-docs.sh,test-supervisor-permission-real.sh}`,
 `plugins/tribe/skills/orchestrate-campaign/SKILL.md`, `plugins/tribe/README.md`,
 `docs/superpowers/{specs,plans,evidence}/**`, `.c3/**`.
