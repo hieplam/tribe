@@ -232,7 +232,14 @@ export function decide(o: SupervisorObservation): SupervisorAction {
     return park('watchdog_usage', 'the watchdog child exited with usage code 1');
   }
 
-  // Row 28: a fail-closed backstop, exactly like row 23's — an unrecognised terminal reason once
-  // no other row matched. Never guess at an unknown reason string.
-  return park('watchdog_run_cap', `unrecognised watchdog terminal reason "${String(reason)}"`);
+  // Row 28: the watchdog-run cap is spent — a standalone guard keyed only on the run-cap knob,
+  // never conflated with the residual "unrecognised reason" backstop below (that is a different
+  // failure with its own honest reason).
+  if (o.state.watchdogRuns >= o.limits.maxWatchdogRuns) {
+    return park('watchdog_run_cap', `the watchdog was re-triggered its maximum ${o.limits.maxWatchdogRuns} times`);
+  }
+
+  // Residual backstop: an unrecognised terminal reason, under the run cap — every row above
+  // (1-28) failed to match. Fail closed with the honest 'error' reason; never guess.
+  return park('error', `unrecognised watchdog terminal reason "${String(reason)}"`);
 }

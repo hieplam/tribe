@@ -86,9 +86,14 @@ export function verifyRuling(input: VerifyRulingInput): VerifyVerdict {
   const { before, after, repoStatus, marker } = input;
 
   // S-P13, checked first: every byte in `before` must still be at the front of `after`,
-  // unchanged. Catches both a full replace and an edit to an earlier block — either one breaks
-  // the byte-prefix relationship a legitimate append preserves exactly (spec §5.2).
-  if (!after.startsWith(before)) {
+  // unchanged, AND the append must begin at a line boundary. Catches a full replace, an edit to
+  // an earlier block, AND the narrower case where `before` does not end in `\n` (spec §5.2 notes
+  // the prefix form relies on the file ending in a newline "by convention") and a session
+  // extends the tail of `before`'s own final line instead of appending after it — `startsWith`
+  // alone is blind to that: it stays true while the last existing ruling's content is altered.
+  const atLineBoundary = before === '' || before.endsWith('\n')
+    || after.length === before.length || after.charAt(before.length) === '\n';
+  if (!after.startsWith(before) || !atLineBoundary) {
     return { outcome: 'history_rewritten', retryable: false };
   }
 
@@ -167,6 +172,16 @@ export function verifyRatify(input: VerifyRatifyInput): VerifyVerdict {
       return { outcome: 'ratify_out_of_scope', retryable: false };
     }
     if (!namedIds.has(id) && rawAfter !== rawBefore) {
+      return { outcome: 'ratify_out_of_scope', retryable: false };
+    }
+  }
+
+  // A brand-new block: present in `after`, absent from `before`. A ratify session never adds
+  // rulings — an id with no `before` counterpart is trivially "not in unratifiedRulings" and
+  // "not byte-identical" (it did not exist), so it is the same offence as rewriting an existing
+  // block (spec §5.3 check 1).
+  for (const id of blocksAfter.keys()) {
+    if (!blocksBefore.has(id)) {
       return { outcome: 'ratify_out_of_scope', retryable: false };
     }
   }

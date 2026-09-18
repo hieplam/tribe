@@ -2,7 +2,8 @@
  * Pure CLI parsing for the `supervise` subcommand (spec §10). No I/O, no clock, no ambient env —
  * mirrors `core/watchdog/args.ts`'s contract verbatim: every unknown flag is rejected BY NAME,
  * every required flag has no default, every protocol value carries the spec's own default, and a
- * value-taking flag refuses another flag's token as its value.
+ * value-taking flag refuses any `--`-prefixed token as its value (a real value never begins with
+ * `--`; refusing only KNOWN flag names would let an unrecognised flag slip through, F5 fix).
  *
  * Resolving `--campaign` to a home requires running `tribe-home.sh` (an fs/subprocess concern) —
  * that is the adapter's job (a later task). This module only produces and validates the *shape*:
@@ -35,11 +36,6 @@ const OWN_VALUE_FLAGS = new Set([
   '--max-ruling-rounds', '--max-ratify-rounds', '--max-spawns', '--max-watchdog-runs',
   '--session-timeout-seconds', '--session-max-turns', '--session-retries', '--poll-seconds',
 ]);
-
-/** Every recognized flag token — used to refuse a value-taking flag being handed another flag's
- * token as its "value" (mirrors watchdog args.ts's audit finding F1): without this,
- * `--max-spawns --repo` would silently swallow `--repo` as the spawn count string. */
-const ALL_FLAG_TOKENS = OWN_VALUE_FLAGS;
 
 interface Bound { min: number; max: number }
 const BOUNDS: Record<string, Bound> = {
@@ -81,7 +77,10 @@ export function parseSupervisorArgs(argv: string[]): ParseSupervisorArgsResult |
     if (OWN_VALUE_FLAGS.has(token)) {
       const value = argv[i + 1];
       if (value === undefined) return { error: `${token} requires a value` };
-      if (ALL_FLAG_TOKENS.has(value)) {
+      // A real value never begins with `--` (F5 fix): refuse the SHAPE, not just a fixed list of
+      // known flag names — otherwise `--model --typo` silently swallows an unrecognised flag as
+      // the model name instead of refusing it.
+      if (value.startsWith('--')) {
         return { error: `${token} requires a value, got flag "${value}"` };
       }
       own.set(token, value);

@@ -79,6 +79,24 @@ describe('parseSupervisorArgs', () => {
     expect('error' in got && got.error).toBe('--max-spawns requires a value, got flag "--repo"');
   });
 
+  // F5 fix: refusing only KNOWN flag tokens lets an unrecognised `--`-prefixed token slip
+  // through as a value — a real value never begins with `--`, so the guard must reject the
+  // SHAPE, not a fixed list of names.
+  test('a value-taking flag refuses an UNKNOWN --prefixed token as its value, not just a known flag', () => {
+    const got = parseSupervisorArgs([...REQUIRED, '--model', '--typo']);
+    expect('error' in got && got.error).toBe('--model requires a value, got flag "--typo"');
+  });
+
+  test('--repo also refuses an unknown --prefixed token as its value', () => {
+    const got = parseSupervisorArgs(['--repo', '--oops', '--model', 'opus', '--campaign', 'slug']);
+    expect('error' in got && got.error).toBe('--repo requires a value, got flag "--oops"');
+  });
+
+  test('a normal value still parses (not every string is refused)', () => {
+    const got = parseSupervisorArgs(REQUIRED);
+    expect('error' in got).toBe(false);
+  });
+
   const BOUNDED = [
     ['--max-ruling-rounds', 0, 10, 2],
     ['--max-ratify-rounds', 0, 10, 2],

@@ -263,12 +263,23 @@ test('row 27: nothing has run yet this invocation', () => {
   expect(decide(base())).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false });
 });
 
-test('row 28: an unrecognised terminal reason once the watchdog-run cap is spent parks, never guesses', () => {
+// F1 fix: row 28 (§3.4: `watchdogRuns >= maxWatchdogRuns` -> `park(watchdog_run_cap)`) is a
+// STANDALONE guard, keyed only on the run-cap knob — never conflated with an unrecognised
+// terminal reason, which is a different failure (the residual backstop parks `error`, honestly).
+test('row 28: the watchdog-run cap fires for its own true cause, even paired with an unrecognised reason', () => {
   const a = decide(base({
     lastWatchdog: terminal('some_reason_no_row_recognises'),
     state: { ...base().state, watchdogRuns: 20 },
   }));
   expect(a).toEqual({ kind: 'park', reason: 'watchdog_run_cap', detail: expect.any(String) });
+});
+
+test('row 28 is not reached under the cap: an unrecognised reason parks error, not watchdog_run_cap', () => {
+  const a = decide(base({
+    lastWatchdog: terminal('some_reason_no_row_recognises'),
+    state: { ...base().state, watchdogRuns: 19 },
+  }));
+  expect(a).toEqual({ kind: 'park', reason: 'error', detail: expect.any(String) });
 });
 
 // ---------------------------------------------------------------------------------------------
