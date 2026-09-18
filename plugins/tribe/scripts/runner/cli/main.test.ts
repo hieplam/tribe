@@ -7,7 +7,7 @@
 // campaign's machine-local operational home — also a REQUIRED input, never derived here.
 import { describe, expect, mock, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {
@@ -949,6 +949,46 @@ describe('runTranscriptMetrics — the transcript-metrics subcommand (Task 3, fa
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+// Blocker fix (fail-closed-edges.md obligation 1, mirrors Fix 4's --verify guard): the
+// `--session` measurement path called `measureAtCut(found, ...)` with no fs-error guard, so an
+// unreadable transcript escaped `runTranscriptMetrics` as an UNCAUGHT stack trace, out of
+// `main()`. Real subprocess e2e (CLAUDE.md: reproduce the way an end user experiences it, plus
+// this file's own precedent at "piped stdout is never truncated" / the C2 watchdog tests):
+// `buildTranscriptIo()`'s `projectsRoot()` reads real `CLAUDE_CONFIG_DIR`, and `measureAtCut`
+// always touches the real filesystem directly (adapters/cut.ts's own doc comment) — neither is
+// reachable through an injected fake `TranscriptIO`.
+describe('transcript-metrics subcommand: an unreadable --session transcript is fail-closed, not a stack trace', () => {
+  test('a transcript path that is an existing DIRECTORY (EISDIR) produces one typed "transcript-metrics:" line naming the session, exit 1, no stack trace', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'cli-transcript-session-eisdir-'));
+    try {
+      const projectDir = join(tmp, 'projects', 'myproj');
+      mkdirSync(projectDir, { recursive: true });
+      mkdirSync(join(projectDir, 'sess123.jsonl')); // the transcript "file" is actually a directory
+
+      const runnerEntry = join(import.meta.dir, '..', 'run.ts');
+      const result = spawnSync(
+        'bun',
+        [runnerEntry, 'transcript-metrics', '--session', 'sess123', '--project', 'myproj'],
+        { cwd: import.meta.dir + '/..', encoding: 'utf8', timeout: 600000, env: { ...process.env, CLAUDE_CONFIG_DIR: tmp } },
+      );
+
+      const combined = `${result.stdout}${result.stderr}`;
+      const stackFramePattern = /\n\s+at /; // Node/Bun stack trace frame, e.g. "\n    at foo (bar.ts:1:1)"
+      expect(result.status).toBe(1);
+      expect(combined).not.toMatch(stackFramePattern);
+      expect(combined).not.toContain('at measureWindow');
+      expect(combined).not.toContain('EISDIR: illegal operation on a directory');
+      expect(combined).not.toContain('Bun v');
+      const stderrLines = result.stderr.trim().split('\n').filter((l) => l.length > 0);
+      expect(stderrLines.filter((l) => l.startsWith('transcript-metrics:'))).toHaveLength(1);
+      expect(result.stderr).toContain('transcript-metrics:');
+      expect(result.stderr).toContain('sess123');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 /** A structurally-valid baseline whose every entry points at a transcript that was never

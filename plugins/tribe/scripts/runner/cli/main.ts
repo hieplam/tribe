@@ -513,6 +513,16 @@ function findTranscriptPath(io: TranscriptIO, root: string, sessionId: string, p
   return null;
 }
 
+/** Blocker fix (fail-closed-edges.md obligation 1): the `--session` measurement path called
+ * `measureAtCut` with no guard, so an unreadable transcript (EISDIR — `found` resolves to a
+ * directory; EACCES; an ENOENT race after `findTranscriptPath`'s own exists-check; ELOOP — a
+ * symlink cycle) escaped `runTranscriptMetrics` as an uncaught stack trace, out of `main()`.
+ * Mirrors `adapters/cut.ts#unreadableResult`'s own error-code extraction (Fix 4), which already
+ * guards the sibling `--verify` path the same way. */
+function fsErrorCode(err: unknown): string {
+  return err !== null && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : 'UNKNOWN';
+}
+
 function formatEntryHuman(entry: BaselineEntry): string {
   const m = entry.metrics;
   return [
@@ -586,7 +596,16 @@ export async function runTranscriptMetrics(config: TranscriptMetricsConfig, io: 
       );
       return 1;
     }
-    const { cut, metrics } = measureAtCut(found, config.cutBytes);
+    let measured: ReturnType<typeof measureAtCut>;
+    try {
+      measured = measureAtCut(found, config.cutBytes);
+    } catch (err) {
+      console.error(
+        `transcript-metrics: session "${sessionId}" transcript ${found} could not be read (${fsErrorCode(err)})`,
+      );
+      return 1;
+    }
+    const { cut, metrics } = measured;
     metrics.sessionId = sessionId;
     entries.push({ sessionId, path: found, cut, metrics });
   }
