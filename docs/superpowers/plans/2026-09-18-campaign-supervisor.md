@@ -744,22 +744,22 @@ the *shape* and validates it.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test** covering, at minimum: `--campaign` and `--home` mutually
+- [x] **Step 1: Write the failing test** covering, at minimum: `--campaign` and `--home` mutually
   exclusive; exactly one required; `--repo` and `--model` required; every flag in spec §8 parsed
   with its default and refused outside its bounds; `--max-spawns --repo` refused as
   "requires a value, got flag"; an unknown flag refused by name; and
   `supervisorHomeFromCampaign('/abs/tribe/home', 'slug')` returning `/abs/tribe/home/campaigns/slug`.
 
-- [ ] **Step 2: Write `core/supervisor/model.ts`** — the complete vocabulary from spec §3.2, §3.3,
+- [x] **Step 2: Write `core/supervisor/model.ts`** — the complete vocabulary from spec §3.2, §3.3,
   §6.2, §8, §11, §13: `SupervisorObservation`, `EscalationFact`, `SupervisorAction`, `SessionKind`,
   `ParkReason` (all 20 values), `ParkMarkerKind` (both values), `SupervisorLimits`,
   `SupervisorState`, `SupervisorStatus`, `LedgerEntry`, and the four exit constants
   `SUPERVISOR_EXIT_DONE = 0`, `SUPERVISOR_EXIT_USAGE = 1`, `SUPERVISOR_EXIT_NEEDS_OWNER = 20`,
   `SUPERVISOR_EXIT_RUNNING = 21`. Imports nothing local.
 
-- [ ] **Step 3: Write `core/supervisor/args.ts`.**
+- [x] **Step 3: Write `core/supervisor/args.ts`.**
 
-- [ ] **Step 4: Gate.**
+- [x] **Step 4: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bunx tsc --noEmit
@@ -769,7 +769,7 @@ bun test structure.test.ts
 Expected: the new tests pass (about 30), `tsc` silent, and the structural contract still green —
 including "no interface `*IO`/`*Port` declaration outside `ports/`".
 
-- [ ] **Step 5: Commit** — `feat(supervisor): vocabulary, argument parsing and home path math (task 6/24)`.
+- [x] **Step 5: Commit** — `feat(supervisor): vocabulary, argument parsing and home path math (task 6/24)`.
 
 ---
 
