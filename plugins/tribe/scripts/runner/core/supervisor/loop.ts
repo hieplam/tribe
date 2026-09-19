@@ -558,7 +558,13 @@ function readGapGateOpenIds(io: SupervisorLoopSeam, baseHome: string, cardId: st
  * `answers.md`'s content as already read by the caller (the SAME read used for the
  * postcondition check's `before` snapshot — one read, two uses, never a second read that could
  * observe a different moment). Everything else is read fresh, right here, off the same `io`. */
-async function buildOneShotPrompt(
+// Exported as a test seam ONLY (card `supervisor-hardening`, RW1): the G5 reproduction
+// (`tests/test-supervisor-repro.sh`) calls this directly, with the REAL production io adapter,
+// to prove `readGapGateOpenIds` reads the wrong home — calling that private function in
+// isolation would reproduce nothing, since the defect is THIS function's choice of which home to
+// pass it (`io.resolveTribeHome(config.repoRoot)`, the BASE home, instead of `homeDir`, the
+// campaign home it already holds). Task 11 fixes that one line and keeps this export.
+export async function buildOneShotPrompt(
   io: SupervisorLoopSeam, config: SupervisorLoopConfig, homeDir: string, paths: SupervisorPaths,
   observation: SupervisorObservation, action: { session: SessionKind; cardId: string | null }, before: string,
 ): Promise<string> {

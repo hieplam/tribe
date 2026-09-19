@@ -191,5 +191,95 @@ check "G3: verifyClosing does not close a campaign whose report says BLOCKED wit
   "$g3_verifyclosing_rc" "0"
 [[ -n "$g3_verifyclosing_out" ]] && echo "$g3_verifyclosing_out"
 
+# --- G5: the closing session looks for gap-gate results in the wrong place (spec §6) -----------
+# RW1 (coordinator ruling): calling `readGapGateOpenIds` directly would reproduce nothing — the
+# defect is its CALLER's choice of which home to pass it (`buildOneShotPrompt`,
+# `core/supervisor/loop.ts`: `io.resolveTribeHome(config.repoRoot)`, the BASE home, instead of
+# `homeDir`, the campaign home already in hand). `buildOneShotPrompt` is now exported as a test
+# seam (see its own doc comment in loop.ts) for exactly this reason, and this reproduction MUST
+# flip red -> green precisely at Task 11's fix to that one line.
+GAP_GATE="$HERE/../gaps/gap-gate.ts"
+G5_HOME="$(new_campaign g5-gate generic-ruling-needed 0)"
+mkdir -p "$G5_HOME/reports"
+# The real `HG-candidate N [category]` header shape gap-candidates.ts's HEADER_RE requires
+# (fixtures-mirror-reality: a plain bullet list does not parse and proves nothing). Reproduction
+# honesty (spec §6's own note): the plan's literal Evidence line ("Evidence: 2 hits in ...", no
+# backticked command) was verified BY RUNNING it through the real gate below — it parses into a
+# candidate but the candidate's FINGERPRINT ("2 hits in ...") is not a `grep` invocation, so
+# `validateFingerprint` flags and withholds it, and `open_ids` comes back EMPTY, proving nothing
+# (confirmed by direct measurement before writing this fixture — fixtures-mirror-reality.md: "fix
+# the fixture, never the assertion"). The Evidence field below instead carries the real backticked
+# grep command shape A requires, so the candidate validates and mints a real open id.
+cat > "$G5_HOME/reports/tracker-c1-final.md" <<'MD'
+### Harness gaps
+
+HG-candidate 1 [error-handling]
+Pattern: `grep -rln "REPRO_G5_SENTINEL" plugins/tribe/scripts/runner`
+Evidence: `grep -rln "REPRO_G5_SENTINEL" plugins/tribe/scripts/runner` -> 2 hits
+MD
+G5_BASE_SHA="$(git -C "$REPO" rev-parse HEAD)"
+set +e
+gate_out="$(bun "$GAP_GATE" --repo "$REPO" --home "$G5_HOME" --card c1 --base "$G5_BASE_SHA" 2>&1)"
+gate_rc=$?
+set -e
+G5_GATE_JSON="$G5_HOME/reports/c1-gap-gate.json"
+has_ids="$(python3 -c "
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    print(1 if len(d.get('open_ids', [])) > 0 else 0)
+except Exception:
+    print(0)
+" "$G5_GATE_JSON" 2>/dev/null || echo 0)"
+check "G5: the gate recorded at least one open id" "$has_ids" "1"
+g5_open_id="$(python3 -c "
+import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+    ids = d.get('open_ids', [])
+    print(ids[0] if ids else '')
+except Exception:
+    print('')
+" "$G5_GATE_JSON" 2>/dev/null || echo '')"
+
+# Render the REAL closing brief: the REAL production io adapter (`buildSupervisorIo`, the same
+# one `cli/main.ts`'s `supervise` composition root constructs), the REAL exported
+# `buildOneShotPrompt`, over the campaign home the gate just wrote into for real — never a
+# re-implementation of the reader logic.
+export G5_HOME_ENV="$G5_HOME"
+export G5_REPO_ENV="$REPO"
+set +e
+brief_out="$(cd "$RUNNER" && bun -e '
+import { join } from "node:path";
+import { buildSupervisorIo } from "./adapters/supervisor-io.adapter.ts";
+import { buildOneShotPrompt } from "./core/supervisor/loop.ts";
+
+const homeDir = process.env.G5_HOME_ENV;
+const repoRoot = process.env.G5_REPO_ENV;
+const io = buildSupervisorIo(homeDir);
+// Only `config.repoRoot` is read by the closing branch (`io.resolveTribeHome(config.repoRoot)`)
+// — every other SupervisorLoopConfig field is untouched by that branch, so this minimal object
+// is faithful, not a shortcut.
+const config = { repoRoot: repoRoot };
+// `SupervisorPaths` is a private type in loop.ts; only `.campaignReport`/`.finalReport` are read
+// by the closing branch, built the SAME way `supervisorPathsOf` builds them in production.
+const paths = {
+  campaignReport: join(homeDir, "campaign-report.json"),
+  finalReport: join(homeDir, "supervisor", "final-report.md"),
+};
+// Only the `cards` keys are consulted by the closing branch (it iterates card ids to look up
+// each one'\''s gap-gate result) — the rest of `CampaignReportFacts` is irrelevant here.
+const observation = { report: { cards: { c1: {} } } };
+const action = { session: "closing", cardId: null };
+const prompt = await buildOneShotPrompt(io, config, homeDir, paths, observation, action, "");
+console.log(prompt);
+' 2>&1)"
+brief_rc=$?
+set -e
+if [[ "$brief_rc" != "0" ]]; then
+  printf 'G5: buildOneShotPrompt invocation failed (rc=%s):\n%s\n' "$brief_rc" "$brief_out"
+fi
+contains "G5: the closing brief lists the gate's own open ids" "$brief_out" "$g5_open_id"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

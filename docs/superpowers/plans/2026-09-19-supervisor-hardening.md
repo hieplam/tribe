@@ -192,7 +192,7 @@ below and the suite already exists.
 
 **Files:** edit `plugins/tribe/scripts/tests/test-supervisor-repro.sh`.
 
-- [ ] **Step 1: Add the failing reproduction.**
+- [x] **Step 1: Add the failing reproduction.**
   Build a bare campaign home, write a Tracker report at `$H/reports/tracker-c1-final.md` using the
   **real** candidate header shape the parser requires (`gap-candidates.ts` line 35's `HEADER_RE` —
   a plain bullet list does not parse and yields an empty `open_ids`, which would make this
@@ -217,7 +217,7 @@ below and the suite already exists.
   Render the brief by calling the supervisor's own exported reader and `renderBrief` through
   `bun -e`, so the assertion is about production code and not a re-implementation.
 
-- [ ] **Step 2: Observe it fail — the red.**
+- [x] **Step 2: Observe it fail — the red.**
 
   ```bash
   TRIBE_REPRO=1 bash plugins/tribe/scripts/tests/test-supervisor-repro.sh
@@ -228,7 +228,13 @@ below and the suite already exists.
   If `open_ids` comes back empty, the candidate block shape is wrong — fix the fixture, never the
   assertion.
 
-- [ ] **Step 3: Commit** — `test(supervisor): reproduce the gap-gate reader and writer disagreeing`.
+- [x] **Step 3: Commit** — `test(supervisor): reproduce the gap-gate reader and writer disagreeing`.
+
+> **RW1 (coordinator ruling, mid-task):** calling `readGapGateOpenIds` directly would reproduce
+> nothing (the defect is its caller `buildOneShotPrompt`'s choice of home). `buildOneShotPrompt`
+> was exported as a test seam in `core/supervisor/loop.ts` (one word, zero behavior change) so
+> this reproduction drives it directly with the real `buildSupervisorIo` adapter; Task 11 keeps
+> the export and fixes the one line. See this task's commit for the full reasoning.
 
 ## Task 4: G2's reproduction — an unjustified ceiling raise passes every gate
 
