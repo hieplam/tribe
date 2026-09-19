@@ -2,6 +2,7 @@
 // "show N older projects" affordance (spec §8.1). Purely compositional: each child owns its own
 // behaviour and token set; this component adds none of its own beyond the frame.
 import type { Project } from '../../../core/model.ts';
+import type { ClientRoute } from '../routes.ts';
 import { CampaignFilter } from './CampaignFilter.tsx';
 import { ProjectList } from './ProjectList.tsx';
 import { ShowOlderProjects } from './ShowOlderProjects.tsx';
@@ -19,9 +20,11 @@ export interface SidebarProps {
    * shares the list route's error branch (Item D, phase-3 audit fix). `null`/omitted renders
    * nothing, same as every other optional degraded note in this file family. */
   projectsError?: string | null;
+  /** In-app navigation owned by `App`, threaded to each project row's link. */
+  onNavigate?: (route: ClientRoute) => void;
 }
 
-export function Sidebar({ projects, olderCount, campaignFilter, onCampaignFilterChange, activeProjectDir, projectsError }: SidebarProps) {
+export function Sidebar({ projects, olderCount, campaignFilter, onCampaignFilterChange, activeProjectDir, projectsError, onNavigate }: SidebarProps) {
   return (
     <aside className="sidebar">
       <h2 className="sidebar__heading">Projects</h2>
@@ -30,7 +33,7 @@ export function Sidebar({ projects, olderCount, campaignFilter, onCampaignFilter
           {projectsError}
         </p>
       )}
-      <ProjectList projects={projects} activeProjectDir={activeProjectDir} />
+      <ProjectList projects={projects} activeProjectDir={activeProjectDir} onNavigate={onNavigate} />
       <CampaignFilter value={campaignFilter} onChange={onCampaignFilterChange} />
       <ShowOlderProjects olderCount={olderCount} />
     </aside>

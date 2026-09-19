@@ -3,6 +3,7 @@
 // a project are never hidden" — so this component has no age-related prop or logic at all, and a
 // session's `mtimeIso` never gates whether it renders here.
 import type { SessionSummary } from '../../../core/model.ts';
+import type { ClientRoute } from '../routes.ts';
 import { SessionRow } from './SessionRow.tsx';
 
 export interface SessionListProps {
@@ -13,6 +14,8 @@ export interface SessionListProps {
   /** The main column's header title — the project path on `/p/<dir>`, a general label on `/`
    * (preview §C `.screen-head .ttl`). Omitted renders the meta line alone. */
   heading?: string;
+  /** In-app navigation owned by `App`, threaded to each row's link. */
+  onNavigate?: (route: ClientRoute) => void;
 }
 
 /** Pure: `sessions` narrowed to those carrying a badge for the exact `(repoKey, slug)` pair
@@ -30,7 +33,7 @@ export function filterSessionsByCampaign(sessions: SessionSummary[], campaignFil
   return sessions.filter((s) => s.badges.some((b) => b.repoKey === repoKey && b.slug === slug));
 }
 
-export function SessionList({ sessions, campaignFilter = '', heading }: SessionListProps) {
+export function SessionList({ sessions, campaignFilter = '', heading, onNavigate }: SessionListProps) {
   const filtered = filterSessionsByCampaign(sessions, campaignFilter);
   return (
     <section className="session-list-view">
@@ -48,7 +51,7 @@ export function SessionList({ sessions, campaignFilter = '', heading }: SessionL
         <ul className="session-list">
           {filtered.map((session) => (
             <li key={session.id}>
-              <SessionRow session={session} />
+              <SessionRow session={session} onNavigate={onNavigate} />
             </li>
           ))}
         </ul>

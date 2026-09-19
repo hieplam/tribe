@@ -35,6 +35,15 @@ browser happened to be missing (spec §16.0, R8).
   load, and asserts the served bytes hash-match the built bytes — then restores the prior `dist/`
   in a `finally`. The server has no `--dist` override flag, so this is the only honest way to prove
   "served == built".
+- **`navigation.e2e.test.ts`** — a person can click their way to a session: open `/`, click a
+  project in the sidebar (URL becomes `/p/<dir>`), click a session row (URL becomes `/s/<id>` and
+  the transcript renders), press Back (the project list returns); plus a session row clicked on the
+  aggregate `/` list, and both rows asserted to be real `<a href>` links. Test data is a sandbox
+  `HOME` built from nothing, holding copies of two REAL transcripts picked from this machine's
+  `~/.claude/projects` (the first project with two top-level transcripts of 20 KB-1 MB); the viewer
+  resolves it the production way (`CLAUDE_CONFIG_DIR` unset). Fails, never skips, when no such pair
+  exists. Every step is a real click, never a `page.goto` to a deep link — deep links kept working
+  while every click did nothing.
 - **`url-refusals.e2e.test.ts`** (G4) — the URL/security matrix over real HTTP against a real
   `serve.ts` child process (status codes and bodies, not DOM — that is `dom-kinds`'s job): path
   containment, `Host`/`Origin` refusals, and the rest of the refusal matrix spec §16.2 names.
