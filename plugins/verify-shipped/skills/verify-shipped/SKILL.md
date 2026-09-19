@@ -37,9 +37,22 @@ isn't available):
 
 ## Usage
 
-```bash
-bash ~/.claude/skills/verify-shipped/scripts/verify-shipped.sh --pr <number|url> --worktree <path> --card <slug> [--base master] [--repo owner/repo]
+**Do not hand-write the script's path — run the bundled resolver.** It ships beside this file, so
+`<skill-dir>` is the base directory announced when this skill loaded:
+
+```sh
+script_path="$(bash "<skill-dir>/resolve-verify-shipped.sh")" || exit 1
+bash "$script_path" --pr <number|url> --worktree <path> --card <slug> [--base master] [--repo owner/repo] [--verdict-out <path>]
 ```
+
+A hand-written path under the user's home directory (`~/.claude/skills/...`) assumes a
+home-directory install and does not exist when this skill loads as a plugin (the campaign
+supervisor's closing session loads it exactly that way) — that was FU-CS-4, the closing session
+running a path that was never there and never noticing. The resolver checks `$CLAUDE_PLUGIN_ROOT`
+first (a native/marketplace-cached install), then locates itself through the symlink a local
+install creates, and never prints a path it has not proven exists. On failure it prints nothing to
+stdout and exits `3` with a named diagnostic on stderr — take that at face value and stop; never
+substitute a guess or a bare relative path.
 
 - `--pr` — required. PR number or full URL.
 - `--worktree` — required. The worktree path used for the work being verified. May be relative
@@ -51,6 +64,10 @@ bash ~/.claude/skills/verify-shipped/scripts/verify-shipped.sh --pr <number|url>
 - `--base` — optional, defaults to `master`.
 - `--repo` — optional; passed to `gh` as `--repo` when not run from inside the target repo's
   checkout, or when `gh`'s own repo inference would pick the wrong remote.
+- `--verdict-out` — optional. When given, the script also writes the same JSON it prints on
+  stdout (byte-identical) to that path, atomically. This is the artifact the campaign
+  supervisor's closing postcondition checks — the verdict must be a file the script produced,
+  never prose a session wrote.
 
 The script prints a JSON summary on stdout only (logs go to stderr) and exits `0` whether the
 verdict is `PASS` or `FAIL` — a failed check is a normal result, not a script error. It exits
@@ -63,7 +80,8 @@ Read the top-level `verdict` field (`PASS` only when all four checks pass) and e
 ## Example
 
 ```
-$ bash ~/.claude/skills/verify-shipped/scripts/verify-shipped.sh --pr 37 --worktree /tmp/wt-card4 --card card4 --repo hieplam/tribe
+$ script_path="$(bash "<skill-dir>/resolve-verify-shipped.sh")"
+$ bash "$script_path" --pr 37 --worktree /tmp/wt-card4 --card card4 --repo hieplam/tribe
 {
   "pr_number": "37",
   "base_branch": "master",
@@ -93,3 +111,5 @@ $ bash ~/.claude/skills/verify-shipped/scripts/verify-shipped.sh --pr 37 --workt
 
 - `scripts/verify-shipped.sh` — runs the four checks, emits a JSON summary. Requires `gh`
   (authenticated), `git`, and `python3` (used only to emit well-formed JSON).
+- `resolve-verify-shipped.sh` — resolves `scripts/verify-shipped.sh`'s absolute path. Run it,
+  never hand-write the path (see Usage above).

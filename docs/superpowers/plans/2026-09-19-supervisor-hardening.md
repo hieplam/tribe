@@ -454,7 +454,7 @@ existing file in this repo.
 `plugins/verify-shipped/skills/verify-shipped/SKILL.md` and
 `plugins/verify-shipped/scripts/tests/test-verify-shipped.sh`.
 
-- [ ] **Step 1: Write the failing test first.**
+- [x] **Step 1: Write the failing test first.**
   Assert the resolver prints an absolute path that exists and exits `0` when `CLAUDE_PLUGIN_ROOT`
   points at the plugin directory; that it also resolves with `CLAUDE_PLUGIN_ROOT` unset or pointing
   somewhere stale; that it prints **nothing** on stdout and exits `3` with a diagnostic on stderr
@@ -467,7 +467,7 @@ existing file in this repo.
 
   Expected: the new assertions fail.
 
-- [ ] **Step 2: Write the resolver.**
+- [x] **Step 2: Write the resolver.**
   Copy the contract and the two-tier structure of
   `plugins/tribe/skills/orchestrate-campaign/resolve-runner.sh` exactly: tier 1 honours
   `$CLAUDE_PLUGIN_ROOT` **only when the target file actually exists under it**, tier 2 locates
@@ -475,13 +475,13 @@ existing file in this repo.
   proven exists, and never prints a relative one. A stale or foreign `CLAUDE_PLUGIN_ROOT` must fall
   through to tier 2 rather than win on presence alone.
 
-- [ ] **Step 3: Fix `SKILL.md`.**
+- [x] **Step 3: Fix `SKILL.md`.**
   Replace the two `~/.claude/skills/verify-shipped/scripts/verify-shipped.sh` invocations (its
   Usage block and its Example) with the resolver form, and document `--verdict-out` alongside the
   existing flags. Say plainly, as the orchestrate-campaign skill does, that the resolution must not
   be hand-written.
 
-- [ ] **Step 4: Prove it.**
+- [x] **Step 4: Prove it.**
 
   ```bash
   bash plugins/verify-shipped/scripts/tests/test-verify-shipped.sh
@@ -490,7 +490,7 @@ existing file in this repo.
 
   Expected: `0 failed`, and the grep prints `0`.
 
-- [ ] **Step 5: Commit** — `fix(verify-shipped): resolve the script path under a plugin load`.
+- [x] **Step 5: Commit** — `fix(verify-shipped): resolve the script path under a plugin load`.
 
 ## Task 10: G3c — the supervisor checks the verdict on disk
 

@@ -4,6 +4,10 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/../../skills/verify-shipped/scripts/verify-shipped.sh"
+PLUGIN_ROOT="$(cd "$HERE/../.." && pwd)"
+SKILL_DIR="$PLUGIN_ROOT/skills/verify-shipped"
+RESOLVER="$SKILL_DIR/resolve-verify-shipped.sh"
+SKILL_MD="$SKILL_DIR/SKILL.md"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
@@ -11,6 +15,12 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf 'ok - %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf 'not ok - %s\n' "$1"; }
 check() { if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got: $2, want: $3)"; fi; }
+contains() { # contains NAME HAYSTACK NEEDLE
+  if [[ -z "$3" ]]; then bad "$1 (empty needle — a vacuous \"contains\" check is not a valid assertion)"
+  elif [[ "$2" == *"$3"* ]]; then ok "$1"
+  else bad "$1 (got: $2, want substring: $3)"
+  fi
+}
 # NOTE: `python3 -c '...' "$@"` (not `python3 - ... <<'EOF'`) — a heredoc attached to
 # `python3 -` is consumed as the SCRIPT SOURCE (that's what `-` means to python3), which
 # leaves stdin empty by the time `sys.stdin.read()` runs and defeats every `pipe | jget -`
@@ -117,6 +127,55 @@ set +e
 code9=$?
 set -e
 check "valueless --verdict-out (no following value) -> setup error, exit 2 (not an unbound-variable crash)" "$code9" "2"
+
+# --- resolve-verify-shipped.sh: the skill resolves its own script path (FU-CS-4) ---
+
+if [[ -x "$RESOLVER" ]]; then
+  # Tier 1: CLAUDE_PLUGIN_ROOT points at the real plugin root.
+  set +e
+  out_t1="$(CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT" bash "$RESOLVER" 2>"$TMP/resolver-err-t1")"
+  rc_t1=$?
+  set -e
+  check "resolver: CLAUDE_PLUGIN_ROOT set -> exit 0" "$rc_t1" "0"
+  case "$out_t1" in
+    /*) ok "resolver: CLAUDE_PLUGIN_ROOT set -> absolute path" ;;
+    *)  bad "resolver: CLAUDE_PLUGIN_ROOT set -> absolute path (got: $out_t1)" ;;
+  esac
+  check "resolver: CLAUDE_PLUGIN_ROOT set -> resolved path exists" "$([[ -f "$out_t1" ]] && echo yes || echo no)" "yes"
+
+  # Tier 2: CLAUDE_PLUGIN_ROOT unset, resolver locates itself.
+  set +e
+  out_unset="$(env -u CLAUDE_PLUGIN_ROOT bash "$RESOLVER" 2>"$TMP/resolver-err-unset")"
+  rc_unset=$?
+  set -e
+  check "resolver: CLAUDE_PLUGIN_ROOT unset -> exit 0" "$rc_unset" "0"
+  check "resolver: CLAUDE_PLUGIN_ROOT unset -> resolved path exists" "$([[ -f "$out_unset" ]] && echo yes || echo no)" "yes"
+
+  # A stale/foreign CLAUDE_PLUGIN_ROOT must fall through to tier 2, not win on presence alone.
+  set +e
+  out_stale="$(CLAUDE_PLUGIN_ROOT="$TMP/not-a-plugin-root" bash "$RESOLVER" 2>"$TMP/resolver-err-stale")"
+  rc_stale=$?
+  set -e
+  check "resolver: stale CLAUDE_PLUGIN_ROOT falls through -> exit 0" "$rc_stale" "0"
+  check "resolver: stale CLAUDE_PLUGIN_ROOT falls through -> resolved path exists" \
+    "$([[ -f "$out_stale" ]] && echo yes || echo no)" "yes"
+
+  # Genuine failure: the resolver copied somewhere its target script does not exist alongside it.
+  BROKEN="$TMP/broken-skill"; mkdir -p "$BROKEN"
+  cp "$RESOLVER" "$BROKEN/resolve-verify-shipped.sh"   # no scripts/verify-shipped.sh beside it
+  set +e
+  out_broken="$(env -u CLAUDE_PLUGIN_ROOT bash "$BROKEN/resolve-verify-shipped.sh" 2>"$TMP/resolver-err-broken")"
+  rc_broken=$?
+  set -e
+  check "resolver: genuine failure -> exit 3" "$rc_broken" "3"
+  check "resolver: genuine failure -> nothing on stdout" "$out_broken" ""
+  contains "resolver: genuine failure -> named diagnostic on stderr" "$(cat "$TMP/resolver-err-broken")" "verify-shipped"
+else
+  bad "resolve-verify-shipped.sh exists and is executable (missing: $RESOLVER)"
+fi
+
+check "SKILL.md no longer references ~/.claude/skills/verify-shipped" \
+  "$(grep -c '~/\.claude/skills/verify-shipped' "$SKILL_MD" 2>/dev/null || true)" "0"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 exit $((FAIL > 0))
