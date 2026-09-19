@@ -11,7 +11,7 @@
 import { useEffect, useState } from 'react';
 import { fetchProjects, fetchSessions, type ProjectsResponse } from './api.ts';
 import type { SessionSummary } from '../../core/model.ts';
-import { parseClientPath, type ClientRoute } from './routes.ts';
+import { navigate, parseClientPath, type ClientRoute } from './routes.ts';
 import { SessionList } from './components/SessionList.tsx';
 import { SessionView } from './components/SessionView.tsx';
 import { Sidebar } from './components/Sidebar.tsx';
@@ -123,6 +123,13 @@ export function App() {
     };
   }, [isSession, projectDir, projects]);
 
+  // In-app navigation from a link click: push the address AND set the route. `pushState` fires no
+  // `popstate`, so the listener above never sees it; setting the route here is what re-renders.
+  const goTo = (next: ClientRoute) => {
+    navigate(window.history, next);
+    setRoute(next);
+  };
+
   const agentId = route.kind === 'session_agent' ? route.agentId : null;
 
   // The main column's header title (preview §C `.screen-head .ttl`): on `/p/<dir>` the project's
@@ -140,6 +147,7 @@ export function App() {
         onCampaignFilterChange={setCampaignFilter}
         activeProjectDir={projectDir}
         projectsError={projectsError}
+        onNavigate={goTo}
       />
       <main className="app-main">
         {isSession && (route.kind === 'session' || route.kind === 'session_agent') ? (
@@ -156,7 +164,7 @@ export function App() {
               </p>
             )}
             {sessions !== null && (
-              <SessionList sessions={sessions} campaignFilter={campaignFilter} heading={listHeading} />
+              <SessionList sessions={sessions} campaignFilter={campaignFilter} heading={listHeading} onNavigate={goTo} />
             )}
           </>
         )}

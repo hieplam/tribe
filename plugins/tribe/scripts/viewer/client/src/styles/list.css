@@ -43,6 +43,18 @@
   border-radius: var(--radius-4);
   font-size: var(--size-13);
   color: var(--ink-soft);
+  text-decoration: none; /* the row is an <a> to its project page */
+}
+
+.project-row:hover {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.project-row:focus-visible,
+.session-row__link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* The project whose page is showing — preview §C `.proj.on`: the accent carried as an inset stroke,
@@ -144,6 +156,17 @@
   padding: var(--space-12) var(--space-16);
   border-bottom: var(--rule-weight) var(--rule-style) var(--rule);
   color: var(--ink);
+}
+
+/* The title + meta block is an <a> to the session page; it reads as the row, not as a link. */
+.session-row__link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+.session-row:hover {
+  background: var(--surface-raised);
 }
 
 /* preview §C `.item .top`: dot · title · age, title taking the slack so age sits at the right. */
