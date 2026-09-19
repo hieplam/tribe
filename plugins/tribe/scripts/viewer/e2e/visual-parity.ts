@@ -186,13 +186,45 @@ async function spawnViewer(env: Record<string, string | undefined>): Promise<Vie
 // EDGE — capture helpers.
 // ---------------------------------------------------------------------------------------------
 
+/** Extra waits a session capture needs that a list/project capture does not. */
+interface ShootLiveOptions {
+  /** Wait until at least one `[data-row-id]` row has attached before the shot. The session pane
+   * fills its rows asynchronously AFTER the shell paints, so the body-text wait below fires while
+   * the pane is still blank — a screenshot taken then catches an empty pane. On timeout the run
+   * refuses (the outer catch turns the thrown Error into one line, never a stack trace). */
+  waitForRows?: boolean;
+  /** Scroll `[data-scroll="rows"]` back to the top before the shot, so the capture shows the row
+   * list's beginning rather than wherever a prior interaction left the scroll position. */
+  scrollRowsToTop?: boolean;
+  /** Names the capture subject (e.g. the session id) in the row-wait refusal message. */
+  subject?: string;
+}
+
 /** Full-page screenshot of a live viewer URL, returned as the bare filename it was written under
  * (so the index.html references it relatively). */
-async function shootLive(page: Page, base: string, url: string, outDir: string, name: string): Promise<string> {
+async function shootLive(
+  page: Page,
+  base: string,
+  url: string,
+  outDir: string,
+  name: string,
+  opts: ShootLiveOptions = {},
+): Promise<string> {
   await page.goto(`${base}${url}`);
   // Give the React client a moment to render its rows before the shot; a bounded wait, never a
   // fixed sleep that either flakes or wastes time.
   await waitFor(() => page.$eval('body', (b) => ((b.textContent ?? '').trim().length > 0 ? true : null)), 15_000, `${url} never rendered any body text`);
+  if (opts.waitForRows) {
+    await waitFor(
+      () => page.$('[data-row-id]'),
+      15_000,
+      `session ${opts.subject ?? url} never rendered a row ([data-row-id])`,
+    );
+  }
+  if (opts.scrollRowsToTop) {
+    const scroller = await page.$('[data-scroll="rows"]');
+    if (scroller !== null) await scroller.evaluate((el) => ((el as HTMLElement).scrollTop = 0));
+  }
   await sleep(400);
   await page.screenshot({ path: join(outDir, name), fullPage: true });
   return name;
@@ -304,7 +336,10 @@ async function run(args: Args): Promise<void> {
         // the session page for the preview. Reference (preview) shots come last, per scheme.
         const listPng = await shootLive(page, base, '/', args.outDir, `live-list-${scheme}.png`);
         const projectPng = await shootLive(page, base, `/p/${PROJECT_A_DIR}`, args.outDir, `live-project-${scheme}.png`);
-        const sessionPng = await shootLive(page, base, `/s/${SESSION_1_ID}`, args.outDir, `live-session-${scheme}.png`);
+        const sessionPng = await shootLive(page, base, `/s/${SESSION_1_ID}`, args.outDir, `live-session-${scheme}.png`, {
+          waitForRows: true,
+          subject: SESSION_1_ID,
+        });
 
         let expandedPng: string | null = null;
         if (await expandFirstToolCard(page)) {
@@ -315,7 +350,11 @@ async function run(args: Args): Promise<void> {
         let realPng: string | null = null;
         if (realViewer !== null && args.session !== null) {
           realPng = `real-session-${scheme}.png`;
-          await shootLive(page, `http://127.0.0.1:${realViewer.port}`, `/s/${args.session}`, args.outDir, realPng);
+          await shootLive(page, `http://127.0.0.1:${realViewer.port}`, `/s/${args.session}`, args.outDir, realPng, {
+            waitForRows: true,
+            scrollRowsToTop: true,
+            subject: args.session,
+          });
         }
 
         // Reference shots (these navigate the page away from the live server).
