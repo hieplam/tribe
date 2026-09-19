@@ -151,6 +151,12 @@ function fakeSeam(opts: { watchdogRuns: ScriptedWatchdogRun[]; sessions: Scripte
     writeFileAtomic: (p, content) => {
       files.set(p, content);
     },
+    // Honest mirror of the real adapter's O_EXCL create: creates only when the path is absent.
+    createFileExclusive: (p, content) => {
+      if (files.has(p)) return false;
+      files.set(p, content);
+      return true;
+    },
     readFileOrEmpty: (p) => files.get(p) ?? '',
     renameIfPresent: (from, to) => {
       if (!files.has(from)) return;

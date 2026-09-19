@@ -373,6 +373,12 @@ export interface SupervisorIO extends ClockPort, MsClockPort, AppendFilePort, Pr
   /** Crash-safe write: temp file inside the campaign home, then rename (spec §4) — never an
    * observable half-written file, even to a reader racing the write. */
   writeFileAtomic(resolvedPath: string, content: string): void;
+  /** Atomic exclusive create (spec §9's "atomic create"): creates `resolvedPath` with `content`
+   * ONLY if it does not already exist, returning `true` when THIS call created it and `false`
+   * when it already existed — the single-winner primitive two cold-start supervisors race on for
+   * the lock (Guardrail 6). Any other error (a containment escape, a real fs failure) is thrown,
+   * never swallowed (fail-closed-edges obligation 1). */
+  createFileExclusive(resolvedPath: string, content: string): boolean;
   /** `''` for a missing or unreadable file — the caller decides what absence means. */
   readFileOrEmpty(resolvedPath: string): string;
   /** Archives the escalation file (S-P4: "the session rules, the supervisor archives"). A

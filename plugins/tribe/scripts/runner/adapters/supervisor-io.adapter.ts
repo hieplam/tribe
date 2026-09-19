@@ -175,6 +175,24 @@ export function buildSupervisorIo(homeDir: string): SupervisorIO {
       renameSync(tmp, real);
     },
 
+    // spec §9's "atomic create": `writeFileSync` with the `wx` flag (= O_CREAT|O_EXCL|O_WRONLY)
+    // succeeds ONLY when the path did not exist — the OS itself, not a check-then-write, decides
+    // the single winner, so two cold-start supervisors cannot both create the lock. An `EEXIST`
+    // (the path already exists) is the caller-visible `false`; every other error propagates
+    // (fail-closed-edges obligation 1 — never swallowed). Containment (obligation 4) is proven
+    // BEFORE the create, exactly like `writeFileAtomic`.
+    createFileExclusive: (p, content) => {
+      const real = containedPath(homeDir, p);
+      mkdirSync(dirname(real), { recursive: true });
+      try {
+        writeFileSync(real, content, { flag: 'wx' });
+        return true;
+      } catch (err) {
+        if ((err as { code?: string }).code === 'EEXIST') return false;
+        throw err;
+      }
+    },
+
     readFileOrEmpty: (p) => {
       const real = resolvedReadPath(p);
       try {

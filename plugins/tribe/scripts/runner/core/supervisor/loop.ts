@@ -213,15 +213,21 @@ function readForeignLock(io: SupervisorLoopSeam, lockPath: string, currentPid: n
   return { pid, alive: io.isProcessAlive(pid) };
 }
 
-/** Oracle step 1: acquire or reclaim `<home>/supervisor/.supervisor.lock`. Refuses only against a
- * LIVE foreign pid (D74-7: never a second supervisor); a dead or absent lock is reclaimed by
- * overwriting it with our own pid. */
+/** Oracle step 1: acquire or reclaim `<home>/supervisor/.supervisor.lock`. The FRESH create is
+ * atomic (spec §9's "atomic create"): `createFileExclusive` wins only when no lock file exists,
+ * so two cold-start supervisors racing on an empty home can never BOTH acquire — the OS picks the
+ * single winner (closing the two-cold-starts race a check-then-write left open). When the create
+ * loses, a lock file already exists: it is refused only against a LIVE foreign pid (D74-7: never a
+ * second supervisor), and a dead-or-ours lock is reclaimed by overwriting it — the fall-through
+ * `writeFileAtomic` an exclusive create alone cannot perform. */
 function tryAcquireLock(
   io: SupervisorLoopSeam, lockPath: string, currentPid: number,
 ): { ok: true } | { ok: false; pid: number } {
+  const content = `${JSON.stringify({ pid: currentPid, acquiredAt: io.now() }, null, 2)}\n`;
+  if (io.createFileExclusive(lockPath, content)) return { ok: true }; // atomic create won — no prior lock (spec §9)
   const foreign = readForeignLock(io, lockPath, currentPid);
   if (foreign !== null && foreign.alive) return { ok: false, pid: foreign.pid };
-  io.writeFileAtomic(lockPath, `${JSON.stringify({ pid: currentPid, acquiredAt: io.now() }, null, 2)}\n`);
+  io.writeFileAtomic(lockPath, content); // the existing lock is dead/ours — reclaim it (O_EXCL alone cannot)
   return { ok: true };
 }
 

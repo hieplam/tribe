@@ -81,12 +81,16 @@ function fakeSeam(opts: {
    * `undefined` for every ordinary scenario — none of them need it against the FIXED loop.ts.
    */
   rescueWatchdogStatusAfterSpawns?: number;
+  /** F1 (skinner audit): pids that `isProcessAlive` must report DEAD from the outset — lets a
+   * test seed a genuinely-dead foreign lock so the reclaim path can be exercised. */
+  initialDeadPids?: number[];
 }) {
   const files = new Map<string, string>([...Object.entries(REAL_TEMPLATES), ...Object.entries(opts.initialFiles ?? {})]);
   const writes: string[] = []; // every writeFileAtomic/appendFile/renameIfPresent(to) target
+  const createFileExclusiveCalls: string[] = []; // every createFileExclusive path, in order
   const callLog: string[] = []; // 'events' | 'effect', in order — proves step-4-before-step-5
   const statusHistory: string[] = []; // every status.json body, in publish order
-  const deadPids = new Set<number>();
+  const deadPids = new Set<number>(opts.initialDeadPids ?? []);
   let nextPid = 5000;
   let nowMs = 1_800_000_000_000;
   const watchdogQueue = [...(opts.watchdogRuns ?? [])];
@@ -125,6 +129,16 @@ function fakeSeam(opts: {
       files.set(p, content);
       writes.push(p);
       if (p === statusPath) statusHistory.push(content);
+    },
+    // Honest mirror of the real adapter's O_EXCL create (`fixtures-mirror-reality.md`): creates
+    // only when the path is absent, returns `true` then, `false` when it already exists. Recorded
+    // in its OWN log (never `writes`) so a fresh atomic-create acquire stays distinguishable from
+    // a `writeFileAtomic` reclaim.
+    createFileExclusive: (p, content) => {
+      createFileExclusiveCalls.push(p);
+      if (files.has(p)) return false;
+      files.set(p, content);
+      return true;
     },
     readFileOrEmpty: (p) => files.get(p) ?? '',
     renameIfPresent: (from, to) => {
@@ -198,7 +212,7 @@ function fakeSeam(opts: {
   };
 
   return {
-    io, files, writes, callLog, statusHistory, spawnedPrompts, spawnedOptions,
+    io, files, writes, createFileExclusiveCalls, callLog, statusHistory, spawnedPrompts, spawnedOptions,
     get spawnWatchdogCalls(): number { return spawnWatchdogCalls; },
   };
 }
@@ -364,6 +378,49 @@ describe('runSupervisor — a live foreign supervisor refuses (P1, exit 21)', ()
       statusPath: null,
     });
     expect(seam.writes).toEqual([]);
+  });
+});
+
+describe('runSupervisor — F1 (skinner audit, spec §9): the lock is acquired by an atomic '
+  + 'exclusive create, and a dead lock is still reclaimed', () => {
+  const LOCK = join(HOME, 'supervisor', '.supervisor.lock');
+
+  test('a fresh home (no lock) acquires via the exclusive-create primitive, NOT writeFileAtomic', async () => {
+    // STOP present so the run terminates the moment after the lock is acquired — this test is
+    // only about which primitive won the lock, not the tick loop.
+    const seam = fakeSeam({ initialFiles: { [join(HOME, 'STOP')]: '' } });
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+
+    expect(result.exitCode).toBe(0); // acquired, then STOP exit
+    expect(seam.createFileExclusiveCalls).toContain(LOCK); // the atomic create is what ran
+    expect(seam.writes).not.toContain(LOCK); // the reclaim (writeFileAtomic) path was NOT taken
+  });
+
+  test('a LIVE foreign pid still refuses, exit 21 — the create loses and the live holder wins', async () => {
+    const seam = fakeSeam({
+      initialFiles: { [LOCK]: JSON.stringify({ pid: 4242 }) },
+    });
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+
+    expect(result).toEqual({
+      exitCode: 21, kind: 'already_running',
+      reason: 'a live supervisor (pid 4242) already holds this campaign\'s lock',
+      statusPath: null,
+    });
+    expect(seam.createFileExclusiveCalls).toContain(LOCK); // the atomic create was tried and lost
+    expect(seam.writes).not.toContain(LOCK); // never reclaimed a live lock
+  });
+
+  test('a DEAD foreign pid is reclaimed via writeFileAtomic, and the run proceeds (acquires ok)', async () => {
+    const seam = fakeSeam({
+      initialFiles: { [LOCK]: JSON.stringify({ pid: 4242 }), [join(HOME, 'STOP')]: '' },
+      initialDeadPids: [4242],
+    });
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+
+    expect(result.exitCode).toBe(0); // acquired (reclaimed a dead lock), then STOP exit — never refused
+    expect(seam.createFileExclusiveCalls).toContain(LOCK); // the atomic create was tried (lost — the file existed)
+    expect(seam.writes).toContain(LOCK); // the reclaim went through writeFileAtomic (O_EXCL alone cannot reclaim)
   });
 });
 

@@ -93,6 +93,37 @@ describe('buildSupervisorIo — the real edge', () => {
     expect(io.readFileOrEmpty(from)).toBe('');
   });
 
+  // F1 (skinner audit, spec §9 "atomic create"): the lock's fresh CREATE must be atomic —
+  // an O_EXCL create that wins only when the path does not already exist, so two cold-start
+  // supervisors cannot both "create" the same lock.
+  test('createFileExclusive on a fresh path creates it, returns true, and writes the content under the home', () => {
+    const home = tmp();
+    const io = buildSupervisorIo(home);
+    const target = join(home, 'supervisor', '.supervisor.lock');
+
+    expect(io.createFileExclusive(target, 'first\n')).toBe(true);
+    expect(readFileSync(target, 'utf8')).toBe('first\n'); // parent dir was mkdir'd, content landed
+  });
+
+  test('createFileExclusive on an EXISTING path returns false and leaves the first content byte-unchanged', () => {
+    const home = tmp();
+    const io = buildSupervisorIo(home);
+    const target = join(home, 'supervisor', '.supervisor.lock');
+
+    expect(io.createFileExclusive(target, 'first\n')).toBe(true);
+    expect(io.createFileExclusive(target, 'second\n')).toBe(false); // did NOT create — the path exists
+    expect(readFileSync(target, 'utf8')).toBe('first\n'); // the second call never overwrote
+  });
+
+  test('createFileExclusive refuses a path that escapes the home, exactly like writeFileAtomic', () => {
+    const home = tmp();
+    const io = buildSupervisorIo(home);
+    const escapee = join(home, '..', `sup-io-excl-escape-${process.pid}.txt`);
+
+    expect(() => io.createFileExclusive(escapee, 'should never land')).toThrow(PathEscapesHomeError);
+    expect(existsSync(escapee)).toBe(false); // never created — containment refuses before opening
+  });
+
   test('a path containing ".." that escapes the home is refused BEFORE the file is opened', () => {
     const home = tmp();
     const io = buildSupervisorIo(home);
