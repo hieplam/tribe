@@ -931,27 +931,17 @@ the PR body will carry, is judgment.
 
 **Files:** create `docs/superpowers/evidence/2026-09-19-supervisor-hardening.md`.
 
-- [ ] **Step 1: Re-measure every ratchet and record the real output.**
+- [x] **Step 1: Re-measure every ratchet and record the real output.**
 
-  ```bash
-  cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit
-  cd - && grep -rln "'code' in err" plugins/tribe/scripts/runner --include="*.ts" --exclude="*.test.ts" | wc -l
-  git diff origin/master -- docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json
-  TRIBE_REPRO=1 bash plugins/tribe/scripts/tests/test-supervisor-repro.sh
-  bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh
-  bash plugins/tribe/scripts/tests/test-supervisor-ratchet.sh
-  bash plugins/tribe/scripts/tests/test-supervisor-docs.sh
-  bash plugins/verify-shipped/scripts/tests/test-verify-shipped.sh
-  ```
+  Ran, all green: `bun test` **1109 pass / 0 fail**; `bunx tsc --noEmit` **exit 0**; fingerprint
+  **0**; ratchet-JSON diff vs `origin/master` **empty**; `TRIBE_REPRO=1 …repro.sh` **11/0**;
+  `…e2e.sh` **40/0**; `…ratchet.sh` **8/0**; `…docs.sh` **43/0**; `…test-verify-shipped.sh` **24/0**;
+  and the billed `TRIBE_REAL_E2E=1 …real-e2e.sh` **15/0** (`card=c1 verdict=PASS`). Outputs are in
+  the evidence document.
 
-  Expected: at least 1068 passing with 0 failing; `tsc` exit `0`; the fingerprint count `0`; an
-  **empty** diff on the ratchet JSON; and `0 failed` from every suite. Paste the real output, not a
-  summary of it.
-
-- [ ] **Step 2: Write the before-and-after.**
-  For each of G1 through G5, the spec §9 reproduction output as BEFORE and the same command's
-  output now as AFTER. This document is what the PR body's evidence section points at, so every
-  claim in it must be a command's real output.
+- [x] **Step 2: Write the before-and-after.**
+  `docs/superpowers/evidence/2026-09-19-supervisor-hardening.md` — G1–G5 BEFORE (spec §9) / AFTER
+  (real command output), plus the ratchet table.
 
 - [ ] **Step 3: Commit** — `docs(supervisor): evidence for the supervisor-hardening card`.
 
