@@ -153,16 +153,25 @@
 }
 
 .session-row {
+  position: relative; /* the containing block for the link's click area below */
   padding: var(--space-12) var(--space-16);
   border-bottom: var(--rule-weight) var(--rule-style) var(--rule);
   color: var(--ink);
 }
 
-/* The title + meta block is an <a> to the session page; it reads as the row, not as a link. */
+/* The title + meta block is an <a> to the session page; it reads as the row, not as a link. The
+ * whole row highlights on hover, so the whole row must open the session: the ::after box stretches
+ * the link's click area over the row's padding and badge line too. */
 .session-row__link {
   display: block;
   color: inherit;
   text-decoration: none;
+}
+
+.session-row__link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
 }
 
 .session-row:hover {
@@ -214,8 +223,10 @@
   color: var(--ink-soft);
 }
 
-/* preview §C `.item .badgeline`. */
+/* preview §C `.item .badgeline`. Raised above the stretched link so each badge keeps its own
+ * click (it filters by campaign) instead of opening the session. */
 .session-row__badges {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-8);

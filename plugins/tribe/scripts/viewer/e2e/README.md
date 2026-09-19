@@ -37,8 +37,9 @@ browser happened to be missing (spec §16.0, R8).
   "served == built".
 - **`navigation.e2e.test.ts`** — a person can click their way to a session: open `/`, click a
   project in the sidebar (URL becomes `/p/<dir>`), click a session row (URL becomes `/s/<id>` and
-  the transcript renders), press Back (the project list returns); plus a session row clicked on the
-  aggregate `/` list, and both rows asserted to be real `<a href>` links. Test data is a sandbox
+  the transcript renders), press Back (the project list returns); a click on a session row's padding, outside
+  every text span (the whole row highlights on hover, so the whole row must open it); a session row
+  clicked on the aggregate `/` list; and both rows asserted to be real `<a href>` links. Test data is a sandbox
   `HOME` built from nothing, holding copies of two REAL transcripts picked from this machine's
   `~/.claude/projects` (the first project with two top-level transcripts of 20 KB-1 MB); the viewer
   resolves it the production way (`CLAUDE_CONFIG_DIR` unset). Fails, never skips, when no such pair
