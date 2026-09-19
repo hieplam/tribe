@@ -255,8 +255,8 @@ function parseWatchdogStatusFacts(raw: string): WatchdogStatusFacts | null {
 /** `campaign-report.json`'s typed fields only (spec §3.2's `CampaignReportFacts`) — deliberately
  * independent of `core/report.ts`'s own `CampaignReport` (model.ts's own doc comment: "a later
  * task narrows the real report into this shape at the edge" — this IS that task). Malformed or
- * absent content is `null`, never a throw. */
-function parseCampaignReportFacts(raw: string): CampaignReportFacts | null {
+ * absent content is `null`, never a throw. Exported for its own unit test. */
+export function parseCampaignReportFacts(raw: string): CampaignReportFacts | null {
   if (raw === '') return null;
   let parsed: unknown;
   try {
@@ -277,6 +277,10 @@ function parseCampaignReportFacts(raw: string): CampaignReportFacts | null {
   const cardsRaw = obj['cards'];
   if (cardsRaw !== null && typeof cardsRaw === 'object') {
     for (const [cardId, entryRaw] of Object.entries(cardsRaw as Record<string, unknown>)) {
+      // A malformed card entry (null, or a non-object like a number/array/string) is skipped
+      // fail-closed (fail-closed-edges obligation 1) — reading `entry['outcome']` off `null`
+      // would throw a TypeError up through the headless supervisor loop.
+      if (entryRaw === null || typeof entryRaw !== 'object') continue;
       const entry = entryRaw as Record<string, unknown>;
       const outcome = entry['outcome'];
       if (outcome !== 'shipped' && outcome !== 'escalated' && outcome !== 'blocked' && outcome !== 'not_reached') {

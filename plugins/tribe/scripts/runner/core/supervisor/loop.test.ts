@@ -6,7 +6,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  extractRulingBlockVerbatim, runSupervisor,
+  extractRulingBlockVerbatim, parseCampaignReportFacts, runSupervisor,
   type SupervisorLoopConfig, type SupervisorLoopSeam, type SupervisorTerminal,
 } from './loop.ts';
 import { CLOSING_TEMPLATE_PATH, RATIFY_TEMPLATE_PATH, RULING_TEMPLATE_PATH } from './brief.ts';
@@ -597,5 +597,33 @@ describe('extractRulingBlockVerbatim — the ratify brief\'s verbatim-block extr
   test('an id with no matching "## " heading fails closed to null, never a throw or a guess', () => {
     expect(extractRulingBlockVerbatim(answers, 'R99 — does not exist')).toBeNull();
     expect(extractRulingBlockVerbatim('', 'R1')).toBeNull();
+  });
+});
+
+describe('parseCampaignReportFacts — F2 (fail-closed-edges obligation 1): a malformed per-card '
+  + 'entry is skipped, never a TypeError', () => {
+  // A syntactically valid report whose `run.reason` is present (so the cards loop is reached) but
+  // whose one card entry is `null` — the shape that made `entry['outcome']` throw
+  // `TypeError: Cannot read properties of null` before the fix.
+  test('a null card entry is skipped, not thrown on', () => {
+    const raw = JSON.stringify({ run: { reason: 'x' }, cards: { c1: null } });
+    const facts = parseCampaignReportFacts(raw);
+    expect(facts).not.toBeNull();
+    expect(Object.keys((facts as { cards: Record<string, unknown> }).cards)).not.toContain('c1');
+  });
+
+  test('a non-object card entry (a number) is skipped, not thrown on', () => {
+    const raw = JSON.stringify({ run: { reason: 'x' }, cards: { c1: 42 } });
+    const facts = parseCampaignReportFacts(raw);
+    expect(facts).not.toBeNull();
+    expect(Object.keys((facts as { cards: Record<string, unknown> }).cards)).not.toContain('c1');
+  });
+
+  test('a well-formed sibling entry still parses when a malformed entry sits beside it', () => {
+    const raw = JSON.stringify({ run: { reason: 'x' }, cards: { bad: null, c2: { outcome: 'shipped' } } });
+    const facts = parseCampaignReportFacts(raw);
+    const cards = (facts as { cards: Record<string, { outcome: string }> }).cards;
+    expect(Object.keys(cards)).toEqual(['c2']);
+    expect(cards['c2']?.outcome).toBe('shipped');
   });
 });
