@@ -355,7 +355,8 @@ boundary rule and the three-read-site placement decision are judgment inside the
   pass while G2, G3 and G5 still fail.
 
 - [x] **Step 6: Commit** — `fix(supervisor): show the card's own question in NEEDS_OWNER.md`.
- G2 — give the ratchet a caller
+
+## Task 7: G2 — give the ratchet a caller
 
 **Contract:** spec §3. **Depends on:** Task 6. **Model: `opus`** — the merge-base comparison, the
 `raisedBy` shape, and the fail-closed edge are design decisions inside the task.
@@ -364,7 +365,7 @@ boundary rule and the three-read-site placement decision are judgment inside the
 `ratchet-gate.test.ts`; create `plugins/tribe/scripts/ratchet-check.ts`; create
 `plugins/tribe/scripts/tests/test-supervisor-ratchet.sh`.
 
-- [ ] **Step 1: Write the failing unit test first.**
+- [x] **Step 1: Write the failing unit test first.**
   `ratchet-gate.test.ts` covers `checkRatchetRevision(baseJson, headJson)` over two file contents:
   a raise with no `raisedBy` fails and the failure names the old value, the proposed value and
   `raisedBy`; the same raise with `raisedBy` set passes; a lowering passes; an unchanged file
@@ -376,25 +377,25 @@ boundary rule and the three-read-site placement decision are judgment inside the
 
   Expected: fails — the module does not exist.
 
-- [ ] **Step 2: Write the pure checker.**
+- [x] **Step 2: Write the pure checker.**
   Two strings in, `{ ok, failures[] }` out. No fs, no git, no clock. It calls the **existing**
   `reviseCeiling` once per ceiling kind; `reviseCeiling` itself is not modified — this task gives
   it the caller its own module header says it was waiting for.
 
-- [ ] **Step 3: Write the thin edge.**
+- [x] **Step 3: Write the thin edge.**
   `ratchet-check.ts` runs `git -C <repo> show <base>:<path>`, reads the working-tree version, hands
   both strings to the checker, prints each failure, and exits `0` or `1`. Every `git` call carries a
   timeout, and `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` are set to `/dev/null` so a host's git config
   cannot change a verdict — `fail-closed-edges.md` obligations 2 and 3. A missing flag value must
   refuse with a message, never consume the next argv token as its value.
 
-- [ ] **Step 4: Write the gate suite.**
+- [x] **Step 4: Write the gate suite.**
   `test-supervisor-ratchet.sh` drives the edge over a throwaway `mktemp` git repo built from
   nothing, covering the three fixture cases from spec §3, plus one case against the real repo and
   its real merge base which must exit `0`. `pre-gate.sh` enumerates suites by glob, so this file is
   swept automatically with no wiring step.
 
-- [ ] **Step 5: Prove it.**
+- [x] **Step 5: Prove it.**
 
   ```bash
   bash plugins/tribe/scripts/tests/test-supervisor-ratchet.sh
@@ -407,7 +408,7 @@ boundary rule and the three-read-site placement decision are judgment inside the
   the committed ratchet file to raise `ruling` to `999999`, re-run the ratchet suite, and confirm it
   now goes **red** — then restore the file with `git checkout --` before committing.
 
-- [ ] **Step 6: Commit** — `fix(supervisor): enforce the context ratchet against its merge base`.
+- [x] **Step 6: Commit** — `fix(supervisor): enforce the context ratchet against its merge base`.
 
 ## Task 8: G3a — `verify-shipped.sh` writes its own verdict file
 
