@@ -325,7 +325,7 @@ write one ledger line → let the session die.
 | `abortController` + wall-clock timeout | `--session-timeout-seconds`, default **1800** | `fail-closed-edges` obligation 3 |
 | `maxTurns` | `--session-max-turns`, default **60** | A bounded budget; exceeding it is a failed attempt, not a hang |
 | `permissionMode` | `'default'` | **Not** `bypassPermissions`. Least privilege (decision 4) |
-| `allowedTools` | `Read`, `Grep`, `Glob`, `Write`, `Edit` (ruling/ratify) | The **tool grant**. An allowlisted tool does not prompt under `'default'`, which is what makes the session headless — measured, §19.4 |
+| `allowedTools` | `Read`, `Grep`, `Glob`, `Write`, `Edit` (ruling/ratify); `Read`, `Grep`, `Glob`, `Write`, `Edit`, `Bash`, `Skill` (closing — R11, owner ruling, Task 20) | The **tool grant**. An allowlisted tool does not prompt under `'default'`, which is what makes the session headless — measured, §19.4. `closing`'s own grant exists because `settingSources: ['project']` grants NOTHING when the target repo has no committed `.claude/settings.json` (this repo has none) — without an explicit grant `closing` could not run headless at all |
 | `disallowedTools` | `Bash`, `Task`, `Agent`, `WebFetch`, `WebSearch`, `Monitor`, `ScheduleWakeup` | No shell, no subagents, no network, and no wait-tool (a one-shot session that arms a Monitor dies before the notification arrives — the same wall `core/session.ts` already holds for executors) |
 | `additionalDirectories` | `[repoRoot]` (ruling only) | Read access to the card's spec and plan. **Not a write boundary** — see below |
 | `hooks.PreToolUse` | the containment hook below | **The only containment enforcement there is** |
@@ -478,10 +478,30 @@ out of scope) is an ordinary failed attempt: one bounded retry, then `park(ratif
 
 **Fires when:** row 3 — the runner reached `done` and no ruling is unratified.
 
-**Tools:** the full Claude Code set **including `Bash`** and repo write. This session legitimately
-needs them: it runs `verify-shipped` per card and lands the closing governance PR (decision 4
-names this exception explicitly). The containment hook is **not** applied; `settingSources` is
-`['project']` and `cwd` is the campaign home with `additionalDirectories: [repoRoot]`.
+**Tools (R11, owner ruling, Task 20 — REPLACES an earlier "no grant/deny list at all" shape):** an
+explicit `allowedTools: [Read, Grep, Glob, Write, Edit, Bash, Skill]` and
+`disallowedTools: [Task, Agent, WebFetch, WebSearch, Monitor, ScheduleWakeup]` — the tools Stage D
+uses, nothing more; no subagents, no network, no wait-tool. This session legitimately needs `Bash`
+and repo write: it runs `verify-shipped` per card and lands the closing governance PR (decision 4
+names this exception explicitly). The containment hook is **not** applied; `permissionMode` stays
+`'default'`; `cwd` is the campaign home with `additionalDirectories: [repoRoot]`.
+
+`settingSources: ['project']` grants **nothing** on its own: it loads the target repo's own
+committed `.claude/settings.json`, and a target repo need not have one — **this repo has none.**
+Before R11, `closing` relied on `settingSources: ['project']` alone (the spec's original "full
+Claude Code set, named as the exception" shape) and, on a repo with no committed
+`.claude/settings.json`, could not run headless at all: `permissionMode: 'default'` plus no tool
+grant prompts for every tool call, and a one-shot session has nothing to answer the prompt. The
+explicit grant above is what actually makes `closing` headless, exactly as it already does for
+`ruling`/`ratify` (§5.1's own "measured, §19.4" note).
+
+**`verify-shipped` resolution (R11 item 4):** the skill ships in the separate
+`plugins/verify-shipped/` plugin, which `settingSources` never loads. The closing envelope carries
+the SDK's `plugins: [{ type: 'local', path: <verify-shipped plugin dir> }]` option, the path
+resolved by the composition root from **the runner's own file location** (never cwd, never
+`~/.claude`, never a literal) and existence-checked before the session is ever spawned. When that
+directory is absent, the supervisor fails closed: `decide()` parks `closing_failed` instead of
+spawning a `closing` session that cannot verify any card.
 
 **Brief contains:** `SKILL.md` Stage D verbatim (all four numbered steps), the final
 `campaign-report.json` verbatim, every `answers.md` ruling id with its `ratified-as:` value, the
@@ -1349,6 +1369,21 @@ expected value passes a tenfold regression. Replaced by **A3′** below.
   the `NEEDS_OWNER.md` latch and restarts the supervisor — and never rules on its own authority.
   W7 cannot miscount it, because the counter is incremented per *spawn* and an owner ruling is not
   one.
+- **R11 — the `closing` session's own explicit tool grant, owner ruling resolving the Task-20
+  blocker (2026-09-19).** The `closing` one-shot session could not run headless: it had no
+  `allowedTools` grant, and `settingSources: ['project']` grants nothing when the target repo has
+  no committed `.claude/settings.json` (this repo has none). Of the options the Warchief put to the
+  owner, **option (1) is ratified**: `buildOneShotOptions`'s `closing` branch now sets
+  `allowedTools: [Read, Grep, Glob, Write, Edit, Bash, Skill]` (exactly the tools Stage D uses) and
+  `disallowedTools: [Task, Agent, WebFetch, WebSearch, Monitor, ScheduleWakeup]` — REPLACING §5.1's
+  and §5.4's earlier "no grant/deny list at all" shape (§5.1, §5.4 updated above). `permissionMode`
+  stays `'default'`; `closing` still gets no containment hook; `ruling`/`ratify` are unchanged. The
+  owner explicitly refused adding `'user'` to `settingSources` and refused widening
+  `permissionMode`. R11 also settles `verify-shipped` resolution (§5.4 item 4): the SDK's
+  `plugins: [{ type: 'local', path }]` option, the path resolved from the runner's own file
+  location and existence-checked, with the supervisor failing closed (`park(closing_failed)`) when
+  the plugin dir is absent rather than spawning a session that cannot verify any card. c3-215's
+  least-privilege Change Safety row is reconciled by Task 21, not by this ruling.
 
 ---
 

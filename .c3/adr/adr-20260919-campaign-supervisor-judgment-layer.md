@@ -127,6 +127,20 @@ future change to `core/supervisor/permit.ts`'s containment table is now a Change
 edit: the row this ADR adds names the risk, trigger, detection and required verification for editing
 it.
 
+**R11 update (owner ruling, 2026-09-19, Task 20).** The paragraph above ("`closing` is the named
+exception: the full Claude Code toolset... `settingSources: ['project']`...") described a `closing`
+envelope that, on a target repo with no committed `.claude/settings.json` (this repo has none),
+could not actually run headless: `settingSources: ['project']` alone grants nothing to load.
+The owner's R11 ruling replaces that shape with an EXPLICIT `allowedTools: [Read, Grep, Glob,
+Write, Edit, Bash, Skill]` / `disallowedTools: [Task, Agent, WebFetch, WebSearch, Monitor,
+ScheduleWakeup]` pair on `closing` — the tools Stage D uses, nothing more; still no containment
+hook, `permissionMode` unchanged at `'default'`. R11 also adds a fail-closed guard: `closing`
+carries the SDK's `plugins: [{ type: 'local', path }]` option so `verify-shipped` (a separate
+`plugins/verify-shipped/` plugin `settingSources` never loads) resolves by name, and `decide()`
+parks `closing_failed` instead of spawning `closing` when that plugin directory is not found at
+the runner-resolved location. c3-215's own Change Safety row (this ADR's patch 3, above) still
+describes the pre-R11 shape; reconciling it is Task 21's, not this update's.
+
 ## Alternatives Considered
 
 | Alternative | Rejected because |
