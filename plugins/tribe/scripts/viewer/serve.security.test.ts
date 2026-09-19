@@ -466,6 +466,61 @@ describe('read-only and local (spec §12.1) — loopback asserted TWO ways', () 
   });
 });
 
+describe('--host (tribe --remote): opening the viewer to the local network, kanna-style', () => {
+  const lanAddress = Object.values(networkInterfaces())
+    .flat()
+    .find((a) => a !== undefined && a.family === 'IPv4' && !a.internal)?.address;
+
+  test('--host with no value: refused, exit 2, never consumes the next flag', async () => {
+    const { code, stderr } = await runToExit({}, ['--host', '--port', '4321']);
+    expect(code).toBe(2);
+    expect(stderr.trim()).toBe('viewer: --host expects an address, got "--port"');
+  });
+
+  test('--host naming an address this machine does not have: exit 2, not a misleading "port in use"', async () => {
+    const { code, stderr } = await runToExit({}, ['--host', '10.254.254.254']);
+    expect(code).toBe(2);
+    expect(stderr.trim()).toBe('viewer: --host 10.254.254.254 is not an address of this machine');
+  });
+
+  test('--host 0.0.0.0: reachable on the LAN address, prints it with the no-password warning, Host gate still refuses a foreign domain', async () => {
+    if (lanAddress === undefined) {
+      console.error('SKIP (loudly): this machine has no non-loopback IPv4 interface to test against');
+      return;
+    }
+    const root = tmpRoot();
+    buildHomeA(root);
+    const port = await getFreePort();
+    const child = spawn('bun', ['run', SERVE_TS, '--port', String(port), '--host', '0.0.0.0'], {
+      env: { ...process.env, HOME: root, CLAUDE_CONFIG_DIR: join(root, 'cfg') },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    cleanups.push(() => child.kill('SIGKILL'));
+    let stdout = '';
+    child.stdout?.on('data', (c) => (stdout += c.toString()));
+    await waitForStartupLine(child, 10_000);
+    const deadline = Date.now() + 5000;
+    while (!stdout.includes('no password') && Date.now() < deadline) await Bun.sleep(20);
+    expect(stdout).toContain(`on your network at http://${lanAddress}:${port}`);
+    expect(stdout).toContain('no password — any device on this network can read every session transcript');
+
+    const viaLan = await fetch(`http://${lanAddress}:${port}/healthz`);
+    expect(viaLan.status).toBe(200);
+    expect(await viaLan.json()).toEqual({ ok: true, viewer: 'tribe-viewer', v: 2 });
+    expect((await rawRequest(port, '/healthz', { host: `${lanAddress}:${port}` })).status).toBe(200);
+    expect((await rawRequest(port, '/healthz', { host: 'evil.example.com' })).status).toBe(403);
+    expect((await rawRequest(port, '/healthz', { host: `${lanAddress}:${port}`, origin: 'http://evil.example.com' })).status).toBe(403);
+  });
+
+  test('default bind: a LAN-addressed Host header is still refused (the loopback contract is unchanged)', async () => {
+    const root = tmpRoot();
+    buildHomeA(root);
+    const server = await startServer({ HOME: root, CLAUDE_CONFIG_DIR: join(root, 'cfg') });
+    const res = await rawRequest(server.port, '/healthz', { host: `192.168.1.20:${server.port}` });
+    expect(res.status).toBe(403);
+  });
+});
+
 describe('the idle-timeout regression (F55, folded in from the deleted idle-timeout.integration.test.ts)', () => {
   test(
     'a real /events stream on the real serve.ts stays open past Bun\'s ~10s default idle timeout, observed by a genuinely separate curl-shaped client',

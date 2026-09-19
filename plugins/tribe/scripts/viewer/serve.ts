@@ -29,6 +29,7 @@
 // table (spec §3.2's closing paragraph: the SPA shell for `/`, `/index.html`, `/p/*`, `/s/*`;
 // JSON 404 — `{"error":"not found","path":"<path>"}` — for everything else). `HOME` and
 // `process.argv` are read ONLY in this file (spec §12.3/§12.6.5, `pure-core.md`).
+import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import {
   discoverCampaignCandidates,
@@ -43,6 +44,7 @@ import { buildBadgeIndex, selectCampaigns } from './core/badge.ts';
 import { boundedInsert, type CacheEntry, decideCache, SESSION_CACHE_TTL_MS } from './core/cache.ts';
 import type { Agent, Badge, Patch, SessionSummary } from './core/model.ts';
 import { containedJoin, isContainedResolved, subagentsDirOf, toolResultsDirOf, transcriptPathOf } from './core/paths.ts';
+import { bindHostRefusal, hostHeaderAllowed, isLoopbackHost, isWildcardHost, lanIPv4Addresses, type NetAddress } from './core/net.ts';
 import { parseRoute } from './core/routes.ts';
 import { buildScanIndex, partitionProjects, sessionCacheKey, type ScannedSessionInput } from './core/scan.ts';
 import { deriveAgents, type SubagentEntry } from './core/subagents.ts';
@@ -50,8 +52,9 @@ import { applyInWindowPairing, candidatesFromRows, completeBackfillOrphans, comp
 
 // --- Argument parsing (spec §13, `fail-closed-edges` obligation 1) ---------------------------
 // `--tribe-root` is deleted (spec §10.2): the viewer resolves both roots from `HOME`/
-// `CLAUDE_CONFIG_DIR` alone, so `--port` is the only flag left to parse.
-const KNOWN_FLAGS = new Set(['--port']);
+// `CLAUDE_CONFIG_DIR` alone. `--host` (default 127.0.0.1) opens the viewer to the local network
+// when the owner asks for it — the `tribe --remote` flag, modelled on kanna's.
+const KNOWN_FLAGS = new Set(['--port', '--host']);
 
 /** Prints exactly one stderr line and exits — every refusal in this file's boot sequence goes
  * through this one function, so "one line, never a stack trace" (spec §13) is enforced in one
@@ -61,26 +64,31 @@ function fail(exitCode: number, message: string): never {
   process.exit(exitCode);
 }
 
-/** Walks `process.argv` (skipping the interpreter and script path) recognizing only `--port`.
+/** Walks `process.argv` (skipping the interpreter and script path) recognizing `--port` and `--host`.
  * Never lets a flag's value be another flag's name — `--port --foo` is a MISSING value, not
  * `--port` reading `"--foo"` as its argument (the exact class of bug `fail-closed-edges`
  * obligation 1 names: `--card --base <sha>` reading `--base` as the card's name, campaign
  * gap-gate-2026-09-10). An unrecognized token — flag-shaped or not — is refused by name. */
-function parseArgv(argv: string[]): string | undefined {
+function parseArgv(argv: string[]): { portRaw: string | undefined; host: string } {
   const args = argv.slice(2);
   let portRaw: string | undefined;
+  let host = '127.0.0.1';
   let i = 0;
   while (i < args.length) {
     const token = args[i]!;
     if (!KNOWN_FLAGS.has(token)) fail(2, `viewer: unknown flag ${token}`);
     const value = args[i + 1];
-    if (value === undefined || KNOWN_FLAGS.has(value) || value.startsWith('--')) {
-      fail(2, `viewer: --port expects an integer 1-65535, got ${JSON.stringify(value ?? '')}`);
+    const valueMissing = value === undefined || KNOWN_FLAGS.has(value) || value.startsWith('--');
+    if (token === '--port') {
+      if (valueMissing) fail(2, `viewer: --port expects an integer 1-65535, got ${JSON.stringify(value ?? '')}`);
+      portRaw = value;
+    } else {
+      if (valueMissing || value === '') fail(2, `viewer: --host expects an address, got ${JSON.stringify(value ?? '')}`);
+      host = value;
     }
-    portRaw = value;
     i += 2;
   }
-  return portRaw;
+  return { portRaw, host };
 }
 
 /** `--port abc`, `--port 0`, `--port 70000` all refuse with the SAME message (spec §13) — today
@@ -94,7 +102,14 @@ function parsePort(raw: string | undefined): number {
   return Number(raw);
 }
 
-const port = parsePort(parseArgv(process.argv));
+const parsedArgs = parseArgv(process.argv);
+const port = parsePort(parsedArgs.portRaw);
+const bindHost = parsedArgs.host;
+const localAddresses: NetAddress[] = Object.values(networkInterfaces()).flatMap((list) => list ?? []);
+const bindRefusal = bindHostRefusal(bindHost, localAddresses);
+if (bindRefusal !== null) fail(2, bindRefusal);
+/** Bound to anything but loopback: reachable from other devices, so the Host gate widens. */
+const networkBound = !isLoopbackHost(bindHost);
 
 // D32a: `CLAUDE_CONFIG_DIR` when set and non-empty, else `<HOME>/.claude` — `HOME`/
 // `CLAUDE_CONFIG_DIR` are the only environment values this file reads (spec §12.3), and only
@@ -559,7 +574,6 @@ function assetResponse(name: string): Response {
 }
 
 // --- Host/Origin (spec §12.5, DNS rebinding, B16) ----------------------------------------------
-const ALLOWED_HOST_RE = /^(127\.0\.0\.1|localhost)(:\d+)?$/;
 
 /** `new URL(origin).host` — or `null` if `origin` does not parse as a URL at all, which is itself
  * a mismatch (never a match by accident). `URL`'s constructor throws only `TypeError` on a
@@ -579,11 +593,11 @@ function originHostOrNull(origin: string): string | null {
  * set. A DNS-rebinding attacker controls neither. */
 function hostOrOriginRefused(req: Request): boolean {
   const host = req.headers.get('host');
-  if (host === null || !ALLOWED_HOST_RE.test(host)) return true;
+  if (host === null || !hostHeaderAllowed(host, networkBound)) return true;
   const origin = req.headers.get('origin');
   if (origin === null) return false;
   const originHost = originHostOrNull(origin);
-  return originHost === null || !ALLOWED_HOST_RE.test(originHost);
+  return originHost === null || !hostHeaderAllowed(originHost, networkBound);
 }
 
 /** Every response leaves this file through here (spec §12.5: "on every response"). */
@@ -790,7 +804,7 @@ function routeResponse(req: Request): Response {
 let server: ReturnType<typeof Bun.serve>;
 try {
   server = Bun.serve({
-    hostname: '127.0.0.1',
+    hostname: bindHost,
     port,
     // An SSE stream is idle between the 15 s pings; Bun's ~10 s default would close it first. 255 s
     // (Bun's max) keeps `/events` alive between pings (F55; carried over from task 17, verified by
@@ -821,4 +835,11 @@ try {
   throw err;
 }
 
-console.log(`tribe viewer: http://127.0.0.1:${server.port} (projects root: ${projectsRootResolved}) — read-only, refresh to update`);
+// A specific LAN address does not answer on 127.0.0.1; the wildcard and loopback binds do.
+const localHost = isWildcardHost(bindHost) || isLoopbackHost(bindHost) ? '127.0.0.1' : bindHost;
+console.log(`tribe viewer: http://${localHost}:${server.port} (projects root: ${projectsRootResolved}) — read-only, refresh to update`);
+if (networkBound) {
+  const networkHosts = isWildcardHost(bindHost) ? lanIPv4Addresses(localAddresses) : [bindHost];
+  for (const host of networkHosts) console.log(`tribe viewer: on your network at http://${host}:${server.port}`);
+  console.log('tribe viewer: no password — any device on this network can read every session transcript');
+}

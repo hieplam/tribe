@@ -6,7 +6,7 @@ export const DEFAULT_PORT = 4321;
 export type Command =
   | { kind: 'help' }
   | { kind: 'version' }
-  | { kind: 'viewer'; port: number; open: boolean; strictPort: boolean }
+  | { kind: 'viewer'; port: number; open: boolean; strictPort: boolean; host: string }
   | { kind: 'refuse'; message: string };
 
 export const HELP = `tribe — the tribe toolbox
@@ -15,7 +15,10 @@ Usage:
   tribe [options]      start the read-only session viewer and open it in the browser
 
 Options:
-  --port <number>      port to listen on, 127.0.0.1 only (default: ${DEFAULT_PORT})
+  --port <number>      port to listen on (default: ${DEFAULT_PORT})
+  --remote             let other devices on your network open it (shortcut for --host 0.0.0.0);
+                       no password — anyone on the network can read every session transcript
+  --host <address>     listen on this address instead of 127.0.0.1
   --strict-port        fail instead of trying the next port when the port is taken
   --no-open            don't open the browser
   -v, --version        print the version and exit
@@ -30,6 +33,7 @@ export function parseArgs(args: string[]): Command {
   let port = DEFAULT_PORT;
   let open = true;
   let strictPort = false;
+  let host = '127.0.0.1';
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] as string;
@@ -40,6 +44,13 @@ export function parseArgs(args: string[]): Command {
       if (parsed === null) return { kind: 'refuse', message: `tribe: --port expects an integer 1-65535, got ${JSON.stringify(value)}` };
       port = parsed;
       index += 1;
+    } else if (arg === '--host') {
+      const value = args[index + 1] ?? '';
+      if (value === '' || value.startsWith('-')) return { kind: 'refuse', message: `tribe: --host expects an address, got ${JSON.stringify(value)}` };
+      host = value;
+      index += 1;
+    } else if (arg === '--remote') {
+      host = '0.0.0.0';
     } else if (arg === '--no-open') {
       open = false;
     } else if (arg === '--strict-port') {
@@ -49,7 +60,7 @@ export function parseArgs(args: string[]): Command {
     }
   }
 
-  return { kind: 'viewer', port, open, strictPort };
+  return { kind: 'viewer', port, open, strictPort, host };
 }
 
 function parsePort(raw: string): number | null {
