@@ -275,7 +275,7 @@ patches is a judgment act, not a mechanical edit.
 **Files:** `.c3/` entities, authored **only** through the wrapper CLI. Never open or edit a `.c3/`
 instance file by hand.
 
-- [ ] **Step 1: Author the card's ADR.**
+- [x] **Step 1: Author the card's ADR.**
   Record the four decisions spec §11 names: the verdict file's contract (§4a), the ratchet
   enforcement point (§3), the four named parsers (§5), and the campaign-home path truth (§6).
 
@@ -289,7 +289,7 @@ instance file by hand.
   yet — the code they would describe does not exist until Phase 2, and a patch authored against
   absent code is the drift this repo already has three units of.
 
-- [ ] **Step 2: Validate.**
+- [x] **Step 2: Validate.**
 
   ```bash
   C3X_MODE=agent bash "$C3/bin/c3x.sh" check
@@ -298,7 +298,7 @@ instance file by hand.
   Expected: `ok: true`. Record the `total:` count. If `ok` is false, the new ADR is malformed —
   repair it through the CLI, never by editing the file.
 
-- [ ] **Step 3: Commit** — `docs(c3): record the supervisor-hardening ADR`.
+- [x] **Step 3: Commit** — `docs(c3): record the supervisor-hardening ADR`.
 
 ---
 
