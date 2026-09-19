@@ -213,6 +213,36 @@ describe('navigation — click from the list to a session and back', () => {
     }
   }, 60_000);
 
+  // The whole row highlights on hover, so a person clicks anywhere on it — not only on the title
+  // text. Each point below is inside the row's padding, outside every text span.
+  test('clicking anywhere on a session row in the project list opens that session', async () => {
+    const page = await browser.newPage();
+    try {
+      const projectPath = `/p/${encodeURIComponent(pick.projectDir)}`;
+      await page.goto(`http://127.0.0.1:${viewer.port}${projectPath}`);
+      const [target] = pick.sessionIds;
+      const sessionRow = page.locator('.session-list .session-row', { hasText: target.slice(0, 8) });
+      await sessionRow.waitFor({ timeout: 10_000 });
+
+      const box = await sessionRow.boundingBox();
+      if (box === null) throw new Error('session row has no bounding box');
+      const edgePoints = [
+        { name: 'top-left corner', x: box.x + 4, y: box.y + 4 },
+        { name: 'bottom-right corner', x: box.x + box.width - 4, y: box.y + box.height - 4 },
+      ];
+      for (const point of edgePoints) {
+        await page.mouse.click(point.x, point.y);
+        await waitFor(() => (pathOf(page) === `/s/${target}` ? true : null), 5_000, `URL after clicking the row's ${point.name}`);
+        await expectSessionDetail(page);
+        await page.goBack();
+        await waitFor(() => (pathOf(page) === projectPath ? true : null), 5_000, 'URL after Back');
+        await sessionRow.waitFor({ timeout: 10_000 });
+      }
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+
   test('a session row is a real link, so a modified click can open it in a new tab', async () => {
     const page = await browser.newPage();
     try {
