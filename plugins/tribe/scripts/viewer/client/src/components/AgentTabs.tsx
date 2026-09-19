@@ -52,14 +52,13 @@ export function AgentTabs({ sessionId, agents, activeAgentId, onSelect, history 
   }
 
   return (
-    <div className="agent-tabs" style={{ background: 'var(--surface)', borderColor: 'var(--rule)' }}>
+    <div className="agent-tabs">
       <button
         type="button"
         className="agent-tabs__tab"
         data-agent-tab=""
         data-active={activeAgentId === null}
         onClick={() => select(null)}
-        style={{ color: activeAgentId === null ? 'var(--accent)' : 'var(--ink)' }}
       >
         parent
       </button>
@@ -72,10 +71,7 @@ export function AgentTabs({ sessionId, agents, activeAgentId, onSelect, history 
           data-depth={a.depth}
           data-active={activeAgentId === a.id}
           onClick={() => select(a.id)}
-          style={{
-            color: activeAgentId === a.id ? 'var(--accent)' : 'var(--ink)',
-            paddingLeft: `calc(var(--space-12) * ${a.depth})`,
-          }}
+          style={{ paddingLeft: `calc(var(--space-12) * ${a.depth + 1})` }} // one step in per nesting level, past the base tab padding
         >
           {a.label}
         </button>

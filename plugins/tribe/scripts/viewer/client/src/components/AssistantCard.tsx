@@ -12,11 +12,12 @@ export interface AssistantCardProps {
 
 export function AssistantCard({ node, sessionId, agentId }: AssistantCardProps) {
   return (
-    <div className="assistant" style={{ background: 'var(--paper)', color: 'var(--ink)' }}>
+    <div className="assistant">
+      <div className="assistant__role">
+        claude
+        {node.model !== null && <span className="assistant__model"> · {node.model}</span>}
+      </div>
       <Markdown tokens={node.body} />
-      {node.model !== null && (
-        <span className="assistant__model" style={{ color: 'var(--ink-soft)' }}>{node.model}</span>
-      )}
       {node.expandable && <BlockExpander at={node.at} i={node.i} sessionId={sessionId} agentId={agentId} />}
     </div>
   );

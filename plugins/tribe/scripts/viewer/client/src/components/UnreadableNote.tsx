@@ -5,7 +5,7 @@ import type { RenderNode } from '../../../core/model.ts';
 
 export function UnreadableNote({ node }: { node: Extract<RenderNode, { k: 'unreadable' }> }) {
   return (
-    <div className="unreadable" style={{ color: 'var(--warn)' }}>
+    <div className="unreadable">
       {node.count} unreadable row(s)
     </div>
   );

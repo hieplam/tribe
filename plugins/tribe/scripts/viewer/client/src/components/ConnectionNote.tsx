@@ -23,7 +23,6 @@ export function ConnectionNote({ status }: { status: ConnectionStatus | null }) 
       className="connection-note"
       data-testid="connection-note"
       data-note={status.phase}
-      style={{ color: 'var(--warn)' }}
     >
       {text}
     </div>

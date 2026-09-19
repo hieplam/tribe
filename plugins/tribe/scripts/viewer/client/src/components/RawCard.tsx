@@ -14,8 +14,8 @@ export interface RawCardProps {
 
 export function RawCard({ node, sessionId, agentId }: RawCardProps) {
   return (
-    <div className="raw" style={{ color: 'var(--ink-soft)', borderColor: 'var(--rule)' }}>
-      <span className="raw__type" style={{ fontFamily: 'var(--font-mono)' }}>{node.rowType}</span>
+    <div className="raw">
+      <span className="raw__type">{node.rowType}</span>
       {node.text !== null && <span className="raw__note">{node.text}</span>}
       {node.expandable && <BlockExpander at={node.at} i={node.i} sessionId={sessionId} agentId={agentId} />}
     </div>

@@ -7,10 +7,9 @@ export function LoadEarlier({ onLoad, busy }: { onLoad: () => void; busy: boolea
     <button
       type="button"
       data-testid="load-earlier"
-      className="load-earlier"
+      className="load-earlier btn btn--secondary"
       onClick={onLoad}
       disabled={busy}
-      style={{ color: 'var(--accent)' }}
     >
       {busy ? 'loading…' : 'load earlier'}
     </button>

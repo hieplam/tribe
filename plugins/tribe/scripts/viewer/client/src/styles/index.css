@@ -9,3 +9,6 @@
  * `var(--token)` inside it resolves; kept in its own file so the list and session screens do not
  * grow one unreadable stylesheet. */
 @import "./list.css";
+
+/* The session view's rules (plan Task 4), after list.css for the same reason. */
+@import "./session.css";

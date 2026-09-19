@@ -17,11 +17,16 @@ import { RowList } from './RowList.tsx';
 export function SessionHeader({ session }: { session: SessionSummary | null }) {
   if (session === null) return null;
   return (
-    <header className="session-header" style={{ color: 'var(--ink)', borderColor: 'var(--rule)' }}>
+    <header className="session-header">
       <span className="session-header__title">{session.title}</span>
-      {session.live && <span className="session-header__live" style={{ color: 'var(--live)' }}>live</span>}
+      {session.live && (
+        <span className="session-header__live pill">
+          <span className="live-dot" aria-hidden="true" />
+          live
+        </span>
+      )}
       {session.projects.length >= 2 && (
-        <span className="session-header__projects" style={{ color: 'var(--warn)' }}>
+        <span className="session-header__projects">
           found in {session.projects.length} projects
         </span>
       )}
@@ -112,7 +117,7 @@ export function SessionView({ sessionId, agentId, session = null }: SessionViewP
         </div>
       )}
       {loadError !== null && (
-        <p className="session-view__load-error" data-testid="session-load-error" style={{ color: 'var(--warn)' }}>
+        <p className="session-view__load-error" data-testid="session-load-error">
           {loadError}
         </p>
       )}

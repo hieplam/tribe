@@ -68,15 +68,15 @@ function AttachmentEntry({ node, sessionId, agentId }: { node: AttachmentNode; s
   return (
     <div className="attachment-strip__entry" data-row-id={node.id} data-attachment-label={node.label}>
       {node.expandable ? (
-        <button type="button" data-testid="attachment-expand" onClick={expand} style={{ color: 'var(--ink-soft)' }}>
+        <button type="button" className="btn" data-testid="attachment-expand" onClick={expand}>
           {node.label}
         </button>
       ) : (
-        <span style={{ color: 'var(--ink-soft)' }}>{node.label}</span>
+        <span>{node.label}</span>
       )}
-      {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load attachment</span>}
+      {failed && <span className="expand-error" data-testid="expand-error">could not load attachment</span>}
       {expanded && loaded && (
-        <pre className="attachment-strip__body" style={{ fontFamily: 'var(--font-mono)' }}>{JSON.stringify(block)}</pre>
+        <pre className="attachment-strip__body">{JSON.stringify(block)}</pre>
       )}
     </div>
   );
@@ -90,7 +90,7 @@ export interface AttachmentStripProps {
 
 export function AttachmentStrip({ nodes, sessionId, agentId }: AttachmentStripProps) {
   return (
-    <div className="attachment-strip" style={{ color: 'var(--ink-soft)', borderColor: 'var(--rule)' }}>
+    <div className="attachment-strip">
       <span className="attachment-strip__count">{nodes.length} attachment{nodes.length === 1 ? '' : 's'}</span>
       {nodes.map((n) => (
         <AttachmentEntry key={n.id} node={n} sessionId={sessionId} agentId={agentId} />
