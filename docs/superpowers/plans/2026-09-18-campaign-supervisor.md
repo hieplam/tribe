@@ -1688,7 +1688,7 @@ Warchief, not an edit to the test's expectations.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test script.** Three scenarios, using the double's sentinel-file
+- [x] **Step 1: Write the failing test script.** Three scenarios, using the double's sentinel-file
   block so the kill lands at a known instant (there is no `timeout` binary; poll for the sentinel
   in a bounded loop):
 
@@ -1700,8 +1700,14 @@ Warchief, not an edit to the test's expectations.
 #         un-killed control run.
 # Kill B  mid-ruling-session: the double blocks on a sentinel AFTER writing the ruling to
 #         answers.md; kill -9 the supervisor there; remove the sentinel; restart.
-#         Expect: answers.md has EXACTLY ONE new ## block (never two); the restart ARCHIVES the
-#         escalation rather than spawning a second ruling; the double's counter did not grow.
+#         Expect (R6 amendment, 2026-09-19): answers.md has EXACTLY ONE new ## block (never
+#         two); no data is lost (the ruling stays durable in answers.md AND the escalation file
+#         is still present); the restart PARKS with reason repeat_escalation — the accepted
+#         safe-but-manual outcome for the ruling-landed-pre-archive crash window — rather than
+#         spawning a second ruling session; the double's counter did not grow. (An automatic
+#         archive-self-heal here would need a new persisted field — landedRulingId — recorded
+#         through core/state.ts, which is FROZEN/fenced; that self-heal is accepted debt, not
+#         built by this task.)
 # Kill C  mid-re-trigger: kill -9 between the archive and the next run_watchdog.
 #         Expect: the restart re-observes, sees the archive already done, and re-triggers once;
 #         the escalation file is not renamed twice and no .resolved-R<n>.resolved-R<n> exists.
@@ -1709,7 +1715,7 @@ Warchief, not an edit to the test's expectations.
 
 Each scenario ends by asserting `grep -c '^## ' answers.md` equals the control run's value.
 
-- [ ] **Step 2: Gate.**
+- [x] **Step 2: Gate.**
 
 ```sh
 bash plugins/tribe/scripts/tests/test-supervisor-kill.sh
@@ -1718,7 +1724,7 @@ bash plugins/tribe/scripts/tests/test-supervisor-kill.sh
 Expected: `N passed, 0 failed` with all three scenarios green, and the explicit "exactly one `## `
 block" assertion visible in the output for Kill B.
 
-- [ ] **Step 3: Commit** — `test(supervisor): G4 kill-and-restart safety across three instants (task 18/24)`.
+- [x] **Step 3: Commit** — `test(supervisor): G4 kill-and-restart safety across three instants (task 18/24)`.
 
 ---
 

@@ -27,11 +27,19 @@
 #                   rule:<id>         - append a valid ratified "## <id>" block to answers.md
 #                   rule-touch:<id>   - same, AND writes one file into $DOUBLE_REPO (the
 #                                       decision-4 "touched the target repo" case)
+#                   rule-block:<id>   - same write as `rule:<id>`, THEN blocks (polling every
+#                                       0.05s) until $DOUBLE_SENTINEL is removed — Task 18's own
+#                                       sentinel-file block, so a test can `kill -9` the
+#                                       SUPERVISOR at the deterministic instant "the ruling has
+#                                       already landed on disk, but this session has not yet
+#                                       exited" (card `campaign-supervisor` G4, Kill B).
 #                   close             - write a non-empty final-report.md
 #                   sleep:<seconds>   - sleep, then write nothing (lets a test hold the
 #                                       supervisor's lock open long enough to race a second one)
 #   DOUBLE_STATE  path to the attempt-counter file (outside the campaign home)
 #   DOUBLE_REPO   the target repo root — only read by a `rule-touch:` spec
+#   DOUBLE_SENTINEL  path to a test-created file — only read by a `rule-block:` spec, and
+#                    required whenever that spec is selected for the current attempt.
 set -euo pipefail
 
 home=""; kind=""
@@ -59,13 +67,20 @@ case "$spec" in
   sleep:*)
     sleep "${spec#sleep:}"
     ;;
-  rule:*|rule-touch:*)
+  rule:*|rule-touch:*|rule-block:*)
     id="${spec#*:}"
     printf '\n## %s\n\nratified-as: operational\n' "$id" >> "$home/answers.md"
     if [[ "$spec" == rule-touch:* ]]; then
       repo="${DOUBLE_REPO:?session-double: DOUBLE_REPO is required for a rule-touch spec}"
       printf 'touched by session double (kind=%s, attempt=%s)\n' "$kind" "$next" \
         > "$repo/session-double-touch.txt"
+    fi
+    if [[ "$spec" == rule-block:* ]]; then
+      sentinel="${DOUBLE_SENTINEL:?session-double: DOUBLE_SENTINEL is required for a rule-block spec}"
+      # The ruling is already durably on disk (the printf above); this process now sits alive,
+      # blocked, until the test removes the sentinel — the deterministic instant a Task-18 kill
+      # scenario targets ("landed but not yet archived").
+      while [[ -f "$sentinel" ]]; do sleep 0.05; done
     fi
     ;;
   close)
