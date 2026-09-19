@@ -71,6 +71,7 @@ import {
   type RatifyBlockFact, type RatifyBriefFacts, type RulingBriefFacts,
 } from './brief.ts';
 import { parseRulings, unratifiedRulingIds } from '../rulings.ts';
+import { extractReasonLine, parseEscalationQuestion } from '../escalation.ts';
 import { answersPathOf, campaignStatePathOf, escalationPathOf, escalationsDirOf } from '../paths.ts';
 import { REPORT_JSON_FILENAME } from '../report.ts';
 import { watchdogPathsOf } from '../watchdog/select.ts';
@@ -313,14 +314,6 @@ export function parseCampaignReportFacts(raw: string): CampaignReportFacts | nul
       notReached: numOr0(statsRaw?.['notReached']),
     },
   };
-}
-
-/** The escalation file's own `**Reason:**` line, verbatim (S-P3: a fixed-template field, never
- * prose interpretation — the same line `core/report.ts#extractQuestionDigest` already proves is
- * machine-readable, isolated here to just the reason value). */
-function extractReasonLine(content: string): string {
-  const match = /\*\*Reason:\*\*\s*(.+)/.exec(content);
-  return match?.[1]?.trim() ?? '';
 }
 
 function readOwnerOnlyEscalations(io: SupervisorLoopSeam, homeDir: string): string[] {
@@ -959,13 +952,21 @@ export async function runSupervisor(
 
       case 'park': {
         const cardIdHint = currentLastSessionOutcome?.cardId ?? nextUnansweredCardId(observation.escalations);
+        // The park document shows the owner the parked card's OWN question, read from that card's
+        // escalation file (the loop already reads this shape each tick via `buildEscalationFacts`).
+        // `null` only when this park is not about one card's escalation — no card-scoped file to
+        // read. Fail-closed: a missing/empty/unparseable file yields `null`, never a throw.
+        const question = cardIdHint !== null
+          && entryExists(io, escalationsDirOf(homeDir), `${cardIdHint}.md`)
+          ? parseEscalationQuestion(io.readFileOrEmpty(escalationPathOf(homeDir, cardIdHint)))
+          : null;
         const content = renderNeedsOwner({
           campaignSlug: config.campaign,
           campaignHome: homeDir,
           reason: action.reason,
           atMs: io.nowMs(),
           cardId: cardIdHint,
-          question: null,
+          question,
           rulingRoundsUsed: Object.entries(supState.rulingRounds)
             .map(([cardId, used]) => ({ cardId, used, max: config.limits.maxRulingRounds })),
           spawnsUsed: { used: supState.spawns, max: config.limits.maxSpawns },

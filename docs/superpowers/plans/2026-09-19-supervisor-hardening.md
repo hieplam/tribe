@@ -313,7 +313,7 @@ boundary rule and the three-read-site placement decision are judgment inside the
 `core/escalation.test.ts`; edit `core/supervisor/loop.ts` and
 `plugins/tribe/scripts/tests/test-supervisor-e2e.sh`.
 
-- [ ] **Step 1: Write the failing unit test first.**
+- [x] **Step 1: Write the failing unit test first.**
   `core/escalation.test.ts` covers `parseEscalationQuestion`: a well-formed file returns both the
   `**Reason:**` line and the `## Context` body verbatim; a `## Context` followed by another `## `
   heading stops at the boundary; a file with neither returns `null`; malformed input never throws.
@@ -324,24 +324,24 @@ boundary rule and the three-read-site placement decision are judgment inside the
 
   Expected: fails — the module does not exist.
 
-- [ ] **Step 2: Write the parser, pure.**
+- [x] **Step 2: Write the parser, pure.**
   No fs, no clock, no throw. Signature per spec §2. Use the same heading-partition convention
   `verify.ts`'s `blocksById` and `loop.ts`'s `extractRulingBlockVerbatim` already use, so the repo
   has one boundary rule rather than a third.
 
-- [ ] **Step 3: Rewire the two supervisor read sites.**
+- [x] **Step 3: Rewire the two supervisor read sites.**
   `loop.ts`'s private `extractReasonLine` is replaced by a call into the new parser, and the `park`
   branch at `loop.ts:962` stops passing the literal `question: null`: it reads the escalation file
   for `cardIdHint`'s card and passes the parsed result, `null` only when there is no card-scoped
   escalation. **The wiring, not the renderer, is the defect** — `renderNeedsOwner` is already
   correct and must not be changed.
 
-- [ ] **Step 4: Add the permanent ungated assertion.**
+- [x] **Step 4: Add the permanent ungated assertion.**
   In `test-supervisor-e2e.sh`'s probe 3 (the owner-only park), assert the rendered `NEEDS_OWNER.md`
   contains the escalation's own `## Context` text. This is the card's G1 oracle and it must live in
   the ordinary suite, not only in the gated reproduction suite.
 
-- [ ] **Step 5: Prove it.**
+- [x] **Step 5: Prove it.**
 
   ```bash
   grep -c "question: null" plugins/tribe/scripts/runner/core/supervisor/loop.ts
@@ -354,9 +354,8 @@ boundary rule and the three-read-site placement decision are judgment inside the
   exits `0`; the e2e suite reports `0 failed`; and in the reproduction suite G1's assertions now
   pass while G2, G3 and G5 still fail.
 
-- [ ] **Step 6: Commit** — `fix(supervisor): show the card's own question in NEEDS_OWNER.md`.
-
-## Task 7: G2 — give the ratchet a caller
+- [x] **Step 6: Commit** — `fix(supervisor): show the card's own question in NEEDS_OWNER.md`.
+ G2 — give the ratchet a caller
 
 **Contract:** spec §3. **Depends on:** Task 6. **Model: `opus`** — the merge-base comparison, the
 `raisedBy` shape, and the fail-closed edge are design decisions inside the task.

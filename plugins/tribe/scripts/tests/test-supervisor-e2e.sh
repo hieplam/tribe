@@ -170,9 +170,15 @@ absent "probe3: the double's own counter file was never created — zero invocat
 if [[ -f "$H3/NEEDS_OWNER.md" ]]; then
   ok "probe3: NEEDS_OWNER.md exists"
   contains "probe3: it names park reason owner_only" "$(cat "$H3/NEEDS_OWNER.md")" "**Park reason:** owner_only"
+  # G1 oracle (card supervisor-hardening): the park document must carry THIS card's own question —
+  # the `## Context` body of its escalation file — not a "(not applicable)" placeholder. The
+  # new_campaign fixture writes this exact Context line into escalations/c1.md.
+  contains "probe3: NEEDS_OWNER.md carries the escalation's own Context text" \
+    "$(cat "$H3/NEEDS_OWNER.md")" "The session double needs to make a call here."
 else
   bad "probe3: NEEDS_OWNER.md exists"
   bad "probe3: it names park reason owner_only"
+  bad "probe3: NEEDS_OWNER.md carries the escalation's own Context text"
 fi
 
 # --- Probe 4: a double that writes NOTHING — one bounded retry, then park -------------------
