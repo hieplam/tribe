@@ -275,7 +275,13 @@ describe('runSupervisor — the happy path', () => {
             seam.files.set(join(HOME, 'answers.md'), RULING_CONTENT);
           },
         },
-        { effect: () => { seam.files.set(join(HOME, 'supervisor', 'final-report.md'), '# Final Report\n\nShipped c1.\n'); } },
+        { effect: () => {
+          // A real closing session writes final-report.md AND has verify-shipped write one
+          // verdict file per shipped card (spec §4b, Task 10) — the postcondition reads the
+          // verdict FILE, not the prose. c1 is the only shipped card in reportShipped().
+          seam.files.set(join(HOME, 'supervisor', 'final-report.md'), '# Final Report\n\nShipped c1.\n');
+          seam.files.set(join(HOME, 'supervisor', 'verdicts', 'c1.json'), '{"card":"c1","verdict":"PASS"}\n');
+        } },
       ],
     });
     result = await runSupervisor(baseConfig(), HOME, seam.io);
@@ -550,7 +556,13 @@ describe('runSupervisor — Fix 2 (skinner audit): sessionMaxTurns reaches build
       ],
       sessions: [
         { effect: () => { seam.files.set(join(HOME, 'answers.md'), RULING_CONTENT); } },
-        { effect: () => { seam.files.set(join(HOME, 'supervisor', 'final-report.md'), '# Final Report\n\nShipped c1.\n'); } },
+        { effect: () => {
+          // A real closing session writes final-report.md AND has verify-shipped write one
+          // verdict file per shipped card (spec §4b, Task 10) — the postcondition reads the
+          // verdict FILE, not the prose. c1 is the only shipped card in reportShipped().
+          seam.files.set(join(HOME, 'supervisor', 'final-report.md'), '# Final Report\n\nShipped c1.\n');
+          seam.files.set(join(HOME, 'supervisor', 'verdicts', 'c1.json'), '{"card":"c1","verdict":"PASS"}\n');
+        } },
       ],
     });
     const result = await runSupervisor(baseConfig({ sessionMaxTurns: 17 }), HOME, seam.io);
@@ -590,7 +602,13 @@ describe('runSupervisor — R11 (Task 20, spec §5.4 item 4): verifyShippedPlugi
     const seam = fakeSeam({
       watchdogRuns: [{ reason: 'runner_done', exitCode: 0, report: reportShipped() }],
       sessions: [
-        { effect: () => { seam.files.set(join(HOME, 'supervisor', 'final-report.md'), '# Final Report\n\nShipped c1.\n'); } },
+        { effect: () => {
+          // A real closing session writes final-report.md AND has verify-shipped write one
+          // verdict file per shipped card (spec §4b, Task 10) — the postcondition reads the
+          // verdict FILE, not the prose. c1 is the only shipped card in reportShipped().
+          seam.files.set(join(HOME, 'supervisor', 'final-report.md'), '# Final Report\n\nShipped c1.\n');
+          seam.files.set(join(HOME, 'supervisor', 'verdicts', 'c1.json'), '{"card":"c1","verdict":"PASS"}\n');
+        } },
       ],
     });
     const result = await runSupervisor(

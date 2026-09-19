@@ -501,7 +501,7 @@ the retry-versus-park choice, and the brief's oracle wording are judgment inside
 `core/supervisor/brief.ts`, `brief.test.ts`, `core/supervisor/loop.ts`, and
 `plugins/tribe/scripts/tests/test-supervisor-e2e.sh`.
 
-- [ ] **Step 1: Write the failing unit tests first.**
+- [x] **Step 1: Write the failing unit tests first.**
   Cover all five `verifyClosing` rows from spec §4b: `verdict_missing`, `verdict_malformed`,
   `verdict_card_mismatch`, `verdict_fail`, and the success path where every shipped card has a
   present, well-formed, matching `PASS` verdict. Include the spec's own reproduction — a report
@@ -513,24 +513,24 @@ the retry-versus-park choice, and the brief's oracle wording are judgment inside
 
   Expected: fails — `shippedVerdicts` is not a known input.
 
-- [ ] **Step 2: Widen the postcondition, keeping it pure.**
+- [x] **Step 2: Widen the postcondition, keeping it pure.**
   `verifyClosing` takes `shippedVerdicts: Array<{ cardId: string; raw: string | null }>` and parses
   each `raw` narrowly and fail-closed. It reads nothing from disk — the caller reads, this function
   decides. A `FAIL` verdict returns the ordinary retryable `failed` outcome with the typed reason;
   it does **not** introduce a new `ParkReason`, which the fence forbids.
 
-- [ ] **Step 3: Wire the loop and the brief.**
+- [x] **Step 3: Wire the loop and the brief.**
   The loop reads `<home>/supervisor/verdicts/<cardId>.json` for every card the campaign report marks
   `shipped` and passes the contents in. `brief.ts`'s closing template and `ClosingBriefFacts` gain
   the per-card verdict path and the exact command to run, and state the oracle in the brief: the
   verdict file the script writes is the contract, the session's own prose is not.
 
-- [ ] **Step 4: Add the permanent ungated probes.**
+- [x] **Step 4: Add the permanent ungated probes.**
   In `test-supervisor-e2e.sh`, one probe where the double writes a `final-report.md` but no verdict
   file — the supervisor must park, not exit `0` — and one where a well-formed `PASS` verdict file is
   present, which must exit `0`. Both drive the real composition root against a bare home.
 
-- [ ] **Step 5: Prove it.**
+- [x] **Step 5: Prove it.**
 
   ```bash
   cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit
@@ -541,7 +541,7 @@ the retry-versus-park choice, and the brief's oracle wording are judgment inside
   Expected: at least 1068 passing and 0 failing; `tsc` exits `0`; the e2e suite reports `0 failed`
   with both new probes passing; and G3's reproduction assertions now pass, leaving only G5 failing.
 
-- [ ] **Step 6: Commit** — `fix(supervisor): require verify-shipped's own verdict file to close`.
+- [x] **Step 6: Commit** — `fix(supervisor): require verify-shipped's own verdict file to close`.
 
 ## Task 11: G5 — the reader reads where the gate writes
 

@@ -72,6 +72,15 @@ export interface ClosingOpenIdsFact {
   openIds: string[];
 }
 
+/** §4c: one shipped card's verify-shipped verdict artifact. `verdictPath` is the ABSOLUTE
+ * `<home>/supervisor/verdicts/<cardId>.json` the closing session must have the script write with
+ * `--verdict-out` — the file the supervisor's closing postcondition then reads. The session's own
+ * prose is never the contract; this file is (spec §4, `brief-contracts.md` obligation 1). */
+export interface ClosingVerdictFact {
+  cardId: string;
+  verdictPath: string;
+}
+
 export interface ClosingBriefFacts {
   kind: 'closing';
   /** The committed asset at `CLOSING_TEMPLATE_PATH`, already read by the caller. */
@@ -82,6 +91,10 @@ export interface ClosingBriefFacts {
   openIdsByCard: ClosingOpenIdsFact[];
   /** `<home>/supervisor/final-report.md` — where Stage D step 4's report is written. */
   finalReportPath: string;
+  /** §4c: one entry per card the campaign report marks `shipped` — the verdict path the closing
+   * session must have `verify-shipped` write with `--verdict-out`. The postcondition reads these
+   * files; a `shipped` claim with no verdict file will not close the campaign. */
+  shippedVerdicts: ClosingVerdictFact[];
 }
 
 export type BriefFacts = RulingBriefFacts | RatifyBriefFacts | ClosingBriefFacts;
@@ -140,11 +153,19 @@ function renderClosing(facts: ClosingBriefFacts): string {
     ),
     '(no cards)',
   );
+  const shippedVerdicts = bulletList(
+    facts.shippedVerdicts.map(
+      (v) => `${v.cardId}: bash "$script_path" --pr <${v.cardId}'s PR> `
+        + `--worktree <${v.cardId}'s worktree> --card ${v.cardId} --verdict-out ${v.verdictPath}`,
+    ),
+    '(no shipped cards — no verdict files to write)',
+  );
   return renderTemplate(facts.template, {
     CAMPAIGN_REPORT_CONTENT: facts.campaignReportContent,
     RULINGS: rulings,
     OPEN_IDS_BY_CARD: openIds,
     FINAL_REPORT_PATH: facts.finalReportPath,
+    SHIPPED_VERDICTS: shippedVerdicts,
   });
 }
 

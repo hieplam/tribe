@@ -60,14 +60,14 @@ import {
 import {
   buildStatus, exitCodeOf, renderNeedsOwner, serializeStatus, type SupervisorTerminalKind,
 } from './status.ts';
-import { parseParkMarker, verifyClosing, verifyRatify, verifyRuling } from './verify.ts';
+import { parseParkMarker, verifyClosing, verifyRatify, verifyRuling, type ShippedVerdict } from './verify.ts';
 import {
   buildOneShotOptions as _buildOneShotOptions, runOneShotSession,
   type OneShotSessionConfig, type OneShotSessionSeam,
 } from './session.ts';
 import {
   CLOSING_TEMPLATE_PATH, RATIFY_TEMPLATE_PATH, RULING_TEMPLATE_PATH, renderBrief,
-  type ClosingBriefFacts, type ClosingOpenIdsFact, type ClosingRulingFact,
+  type ClosingBriefFacts, type ClosingOpenIdsFact, type ClosingRulingFact, type ClosingVerdictFact,
   type RatifyBlockFact, type RatifyBriefFacts, type RulingBriefFacts,
 } from './brief.ts';
 import { parseRulings, unratifiedRulingIds } from '../rulings.ts';
@@ -156,6 +156,7 @@ interface SupervisorPaths {
   answers: string;
   escalationsDir: string;
   finalReport: string;
+  verdictsDir: string;
 }
 
 function supervisorPathsOf(homeDir: string): SupervisorPaths {
@@ -174,6 +175,7 @@ function supervisorPathsOf(homeDir: string): SupervisorPaths {
     answers: answersPathOf(homeDir),
     escalationsDir: escalationsDirOf(homeDir),
     finalReport: join(dir, 'final-report.md'),
+    verdictsDir: join(dir, 'verdicts'),
   };
 }
 
@@ -546,6 +548,30 @@ function readGapGateOpenIds(io: SupervisorLoopSeam, baseHome: string, cardId: st
   }
 }
 
+/** §4b: the ids of every card the campaign report marks `shipped`. Each one must have a
+ * verify-shipped verdict file before the campaign may close. */
+function shippedCardIds(report: CampaignReportFacts | null): string[] {
+  const cards = report?.cards ?? {};
+  return Object.entries(cards)
+    .filter(([, card]) => card.outcome === 'shipped')
+    .map(([cardId]) => cardId);
+}
+
+/** §4b/§4c: the thin edge read behind the closing postcondition. For every shipped card it reads
+ * `<home>/supervisor/verdicts/<cardId>.json` (the file `verify-shipped.sh --verdict-out` wrote),
+ * or `null` when absent. The pure `verifyClosing` parses each `raw` and decides — this function
+ * only reads (`pure-core.md`). */
+function readShippedVerdicts(
+  io: SupervisorLoopSeam, verdictsDir: string, report: CampaignReportFacts | null,
+): ShippedVerdict[] {
+  return shippedCardIds(report).map((cardId) => ({
+    cardId,
+    raw: entryExists(io, verdictsDir, `${cardId}.json`)
+      ? io.readFileOrEmpty(join(verdictsDir, `${cardId}.json`))
+      : null,
+  }));
+}
+
 /** §5.2/§5.3/§5.4: gathers the disk facts for a `spawn_session` action and renders the real
  * brief (`brief.ts#renderBrief`) — this is the session's initial prompt. `before` is
  * `answers.md`'s content as already read by the caller (the SAME read used for the
@@ -607,6 +633,10 @@ export async function buildOneShotPrompt(
       openIds: readGapGateOpenIds(io, baseHome.home, cardId),
     }))
     : [];
+  const shippedVerdicts: ClosingVerdictFact[] = shippedCardIds(observation.report).map((cardId) => ({
+    cardId,
+    verdictPath: join(paths.verdictsDir, `${cardId}.json`),
+  }));
   const facts: ClosingBriefFacts = {
     kind: 'closing',
     template: io.readFileOrEmpty(CLOSING_TEMPLATE_PATH),
@@ -614,6 +644,7 @@ export async function buildOneShotPrompt(
     rulings,
     openIdsByCard,
     finalReportPath: paths.finalReport,
+    shippedVerdicts,
   };
   return renderBrief('closing', facts);
 }
@@ -909,7 +940,10 @@ export async function runSupervisor(
           const finalReport = entryExists(io, paths.dir, 'final-report.md')
             ? io.readFileOrEmpty(paths.finalReport)
             : null;
-          const verdict = verifyClosing({ finalReport, answers: after });
+          // §4b: the verdict is the verify-shipped SCRIPT's own artifact, one file per shipped
+          // card — never the model's prose. The caller reads each file; `verifyClosing` decides.
+          const shippedVerdicts = readShippedVerdicts(io, paths.verdictsDir, observation.report);
+          const verdict = verifyClosing({ finalReport, answers: after, shippedVerdicts });
           outcome = verdict.outcome;
         }
 

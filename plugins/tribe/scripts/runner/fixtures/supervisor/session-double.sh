@@ -8,11 +8,12 @@
 # times was the double invoked" without that count being just another home artifact the
 # write-surface probe would have to special-case).
 #
-# It writes ONLY `<home>/answers.md` (a ruling/ratify session's real target, spec §5.2/§5.3) and
-# `<home>/supervisor/final-report.md` (a closing session's real target, spec §5.4 — a location
-# already inside the supervisor's own write surface, S-P5) — it NEVER writes anywhere else
-# under `<home>/supervisor/**` (that directory is otherwise the supervisor's own exclusive
-# write surface) and it NEVER spawns anything.
+# It writes ONLY `<home>/answers.md` (a ruling/ratify session's real target, spec §5.2/§5.3),
+# `<home>/supervisor/final-report.md` (a closing session's real target, spec §5.4), and — for the
+# `close-pass` spec — `<home>/supervisor/verdicts/<card>.json` (a closing session's verify-shipped
+# verdict artifact, spec §4b/Task 10). All three are inside the supervisor's own write surface
+# (S-P5); it NEVER writes anywhere else under `<home>/supervisor/**` (that directory is otherwise
+# the supervisor's own exclusive write surface) and it NEVER spawns anything.
 #
 # Args: --home <campaign-home> --kind <ruling|ratify|closing>. `kind` is accepted (and
 # recorded, see DOUBLE_LOG below) so the seam's own contract is satisfied, but this script's
@@ -33,7 +34,19 @@
 #                                       SUPERVISOR at the deterministic instant "the ruling has
 #                                       already landed on disk, but this session has not yet
 #                                       exited" (card `campaign-supervisor` G4, Kill B).
-#                   close             - write a non-empty final-report.md
+#                   close             - write a non-empty final-report.md AND, per shipped card, a
+#                                       FAIL verdict file — a faithful stand-in for a real closing
+#                                       session that ran verify-shipped against a repo with no
+#                                       merged PR (the campaign must PARK on a non-PASS verdict,
+#                                       spec §4b). Reuse this whenever the closing session must NOT
+#                                       close the campaign.
+#                   close-pass        - write a non-empty final-report.md AND, per shipped card, a
+#                                       PASS verdict file at `<home>/supervisor/verdicts/<card>.json`
+#                                       (byte-shape of `verify-shipped.sh --verdict-out`, spec
+#                                       §4b/Task 10) — the campaign closes.
+#                   close-noverdict   - write a non-empty final-report.md but NO verdict file at
+#                                       all (the campaign must PARK on the missing verdict for a
+#                                       shipped card, spec §4b's `verdict_missing` row).
 #                   sleep:<seconds>   - sleep, then write nothing (lets a test hold the
 #                                       supervisor's lock open long enough to race a second one)
 #   DOUBLE_STATE  path to the attempt-counter file (outside the campaign home)
@@ -83,10 +96,24 @@ case "$spec" in
       while [[ -f "$sentinel" ]]; do sleep 0.05; done
     fi
     ;;
-  close)
+  close|close-pass|close-noverdict)
     mkdir -p "$home/supervisor"
     printf '# Campaign report\n\nEverything shipped. (session double, kind=%s, attempt=%s)\n' \
       "$kind" "$next" > "$home/supervisor/final-report.md"
+    if [[ "$spec" != "close-noverdict" ]]; then
+      verdict_value="PASS"; [[ "$spec" == "close" ]] && verdict_value="FAIL"
+      mkdir -p "$home/supervisor/verdicts"
+      # One verdict file per shipped card, exactly the shape `verify-shipped.sh --verdict-out`
+      # writes (spec §4b) — the artifact the supervisor's closing postcondition reads.
+      while IFS= read -r card; do
+        [[ -n "$card" ]] || continue
+        printf '{"card":"%s","verdict":"%s"}\n' "$card" "$verdict_value" \
+          > "$home/supervisor/verdicts/$card.json"
+      done < <(python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+print("\n".join(c for c,v in d.get("cards",{}).items() if isinstance(v,dict) and v.get("outcome")=="shipped"))' \
+        "$home/campaign-report.json")
+    fi
     ;;
   *) printf 'session-double: unknown DOUBLE_PLAN spec "%s"\n' "$spec" >&2; exit 1 ;;
 esac

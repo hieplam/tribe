@@ -255,7 +255,13 @@ describe('replay: the viewer-consolidation escalation history bounds spawns at 5
         { effect: appendRulingBlock('R18') },
         { effect: appendRulingBlock('R22') },
         { effect: ratifyR09 },
-        { effect: (answers) => { seam.files.set(join(HOME, 'supervisor', 'final-report.md'), '# Final Report\n\nSynthesized closing report for the replay fixture.\n'); return answers; } },
+        { effect: (answers) => {
+          // A real closing session writes final-report.md AND has verify-shipped write one
+          // verdict file per shipped card (spec §4b, Task 10); the postcondition reads the file.
+          seam.files.set(join(HOME, 'supervisor', 'final-report.md'), '# Final Report\n\nSynthesized closing report for the replay fixture.\n');
+          seam.files.set(join(HOME, 'supervisor', 'verdicts', `${CARD_ID}.json`), `{"card":"${CARD_ID}","verdict":"PASS"}\n`);
+          return answers;
+        } },
       ],
     });
 

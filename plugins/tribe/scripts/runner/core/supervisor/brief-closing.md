@@ -73,6 +73,25 @@ done, full stop, no matter how many cards shipped.
 
 {{OPEN_IDS_BY_CARD}}
 
+## The closing verdict — the contract is the verdict FILE, not your prose
+
+The oracle for whether the campaign closes is **the verdict file the `verify-shipped` script
+writes, one per shipped card — not the report you compose, and not your own summary.** A report
+that says "everything shipped" with no verdict file on disk will NOT close the campaign; the
+supervisor's closing postcondition reads each file below and closes only when every one is a
+well-formed `PASS` whose `card` field matches. This is `brief-contracts.md`'s rule: prose
+persuades, artifacts get run.
+
+Resolve the script once (never hand-write its path — run the bundled resolver, exactly as the
+`verify-shipped` skill's own `SKILL.md` instructs):
+
+    script_path="$(bash "<skill-dir>/resolve-verify-shipped.sh")" || exit 1
+
+Then, for every card the report marks `shipped`, run it with `--verdict-out` at the exact path the
+supervisor will read:
+
+{{SHIPPED_VERDICTS}}
+
 ## Where to write the owner-facing report
 
 Write the report Stage D step 4 composes to:
