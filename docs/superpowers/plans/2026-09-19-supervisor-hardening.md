@@ -551,7 +551,7 @@ no fallback, and deciding what to export for the test, is judgment inside the ta
 **Files:** edit `plugins/tribe/scripts/runner/core/supervisor/loop.ts` and
 `core/supervisor/loop.test.ts`.
 
-- [ ] **Step 1: Write the failing unit test first.**
+- [x] **Step 1: Write the failing unit test first.**
   Export `readGapGateOpenIds` and assert it finds a report written under the **campaign** home, and
   that a report under the base tribe home is **not** consulted. Over-checking here is by design: one
   path, no silent fallback, because a reader that quietly tries a second directory is how this
@@ -563,13 +563,13 @@ no fallback, and deciding what to export for the test, is judgment inside the ta
 
   Expected: fails — the reader still joins against the base home.
 
-- [ ] **Step 2: Fix the reader.**
+- [x] **Step 2: Fix the reader.**
   `readGapGateOpenIds` joins against `homeDir`, the campaign home it is already given.
   `buildOneShotPrompt` stops calling `io.resolveTribeHome` for this purpose. Update the module doc
   comment, which currently quotes the now-corrected `SKILL.md` sentence, so the code and its own
   citation agree.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   grep -n "resolveTribeHome" plugins/tribe/scripts/runner/core/supervisor/loop.ts
@@ -581,7 +581,7 @@ no fallback, and deciding what to export for the test, is judgment inside the ta
   failing; `tsc` exits `0`; and the reproduction suite now reports `0 failed` — every defect on the
   card is reproduced-then-fixed.
 
-- [ ] **Step 4: Commit** — `fix(supervisor): read gap-gate results from the campaign home`.
+- [x] **Step 4: Commit** — `fix(supervisor): read gap-gate results from the campaign home`.
 
 ## Task 12: G5 — the two documentation lines the fix falsifies `[Q1]`
 

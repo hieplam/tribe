@@ -38,11 +38,11 @@
  * brief already reads them — never `core/types.ts`'s `Card`, which this module does not import),
  * the unratified rulings' own verbatim blocks (`extractRulingBlockVerbatim` below — `../
  * rulings.ts#parseRulings` classifies a block's `ratified-as:` but deliberately never carries
- * its bytes), and the closing session's campaign-report/gap-gate facts (`SupervisorIO`'s
- * `resolveTribeHome` — the BASE tribe home, never the campaign-nested `homeDir` — is what the
- * gate's own JSON lives under, per `orchestrate-campaign/SKILL.md` Stage D step 2, verbatim:
- * "`<base-home>/reports/<card>-gap-gate.json` (... the BASE tribe home the gate writes to, NOT
- * the campaign-nested `--home`)").
+ * its bytes), and the closing session's campaign-report/gap-gate facts (each card's gap-gate JSON
+ * lives under the CAMPAIGN home — `<campaign-home>/reports/<card>-gap-gate.json` — because the gate
+ * writes beside the Tracker reports it consumes, which `core/brief.ts` puts under that same
+ * campaign home; the closing reader (`readGapGateOpenIds`) therefore reads `homeDir`, never
+ * `resolveTribeHome`'s base tribe home — spec §6).
  */
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -532,13 +532,17 @@ function readCardSpecPlan(
 }
 
 /** §5.4's closing brief needs each card's still-open gap ids, from **the gate's own JSON** —
- * `<base-home>/reports/<card>-gap-gate.json`'s `open_ids` (`orchestrate-campaign/SKILL.md`
- * Stage D step 2, quoted in the module doc comment). `baseHome` is `io.resolveTribeHome`'s
- * result, never `homeDir` (which is the campaign-NESTED home). Fail-closed: a missing or
- * unparseable report reads as zero open ids, never a throw — a card that never shipped (so the
- * gate never ran for it) is exactly this case, and is not an error. */
-function readGapGateOpenIds(io: SupervisorLoopSeam, baseHome: string, cardId: string): string[] {
-  const raw = io.readFileOrEmpty(join(baseHome, 'reports', `${cardId}-gap-gate.json`));
+ * `<campaign-home>/reports/<card>-gap-gate.json`'s `open_ids`. `homeDir` is the campaign-nested
+ * home the loop already holds (spec §6): the gate writes there because its Tracker inputs live
+ * there (`core/brief.ts`'s `reportPathFor(homeDir, …)`), so the reader must look there too — never
+ * the base tribe home. One path, no fallback: a reader that quietly tries a second directory is how
+ * the reader and writer end up disagreeing again. Fail-closed: a missing or unparseable report
+ * reads as zero open ids, never a throw — a card that never shipped (so the gate never ran for it)
+ * is exactly this case, and is not an error.
+ * Exported ONLY as a test seam (card `supervisor-hardening`, spec §6 oracle): a unit test asserts a
+ * report written under the campaign home is found and one under the base home is not consulted. */
+export function readGapGateOpenIds(io: SupervisorLoopSeam, homeDir: string, cardId: string): string[] {
+  const raw = io.readFileOrEmpty(join(homeDir, 'reports', `${cardId}-gap-gate.json`));
   if (raw === '') return [];
   try {
     const openIds = (JSON.parse(raw) as Record<string, unknown>)['open_ids'];
@@ -578,11 +582,12 @@ function readShippedVerdicts(
  * postcondition check's `before` snapshot — one read, two uses, never a second read that could
  * observe a different moment). Everything else is read fresh, right here, off the same `io`. */
 // Exported as a test seam ONLY (card `supervisor-hardening`, RW1): the G5 reproduction
-// (`tests/test-supervisor-repro.sh`) calls this directly, with the REAL production io adapter,
-// to prove `readGapGateOpenIds` reads the wrong home — calling that private function in
-// isolation would reproduce nothing, since the defect is THIS function's choice of which home to
-// pass it (`io.resolveTribeHome(config.repoRoot)`, the BASE home, instead of `homeDir`, the
-// campaign home it already holds). Task 11 fixes that one line and keeps this export.
+// (`tests/test-supervisor-repro.sh`) calls this directly, with the REAL production io adapter, to
+// prove the closing brief carries the gate's real open ids — the defect (spec §6) was that this
+// function handed `readGapGateOpenIds` the BASE tribe home (`io.resolveTribeHome`), while the gate
+// writes under the campaign home this function already holds as `homeDir`. The closing branch below
+// now reads that campaign home directly; `config` is retained only for this stable positional
+// signature (the reproduction and `runSupervisor` both call it positionally).
 export async function buildOneShotPrompt(
   io: SupervisorLoopSeam, config: SupervisorLoopConfig, homeDir: string, paths: SupervisorPaths,
   observation: SupervisorObservation, action: { session: SessionKind; cardId: string | null }, before: string,
@@ -626,13 +631,12 @@ export async function buildOneShotPrompt(
     id: block.id,
     ratifiedAs: block.ratifiedAs ?? '',
   }));
-  const baseHome = await io.resolveTribeHome(config.repoRoot);
-  const openIdsByCard: ClosingOpenIdsFact[] = baseHome.ok
-    ? Object.keys(observation.report?.cards ?? {}).map((cardId) => ({
-      cardId,
-      openIds: readGapGateOpenIds(io, baseHome.home, cardId),
-    }))
-    : [];
+  // The gate writes under the campaign home (`homeDir`), so read there — one path, no fallback to
+  // the base tribe home (spec §6 fix). `resolveTribeHome` is deliberately NOT consulted here.
+  const openIdsByCard: ClosingOpenIdsFact[] = Object.keys(observation.report?.cards ?? {}).map((cardId) => ({
+    cardId,
+    openIds: readGapGateOpenIds(io, homeDir, cardId),
+  }));
   const shippedVerdicts: ClosingVerdictFact[] = shippedCardIds(observation.report).map((cardId) => ({
     cardId,
     verdictPath: join(paths.verdictsDir, `${cardId}.json`),
