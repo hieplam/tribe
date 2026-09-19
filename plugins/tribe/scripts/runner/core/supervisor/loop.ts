@@ -35,7 +35,8 @@
  * facts this loop gathers off disk at the moment of a `spawn_session` action (spec §5.2/§5.3/
  * §5.4) — the escalation file's content, the card's spec/plan paths (`campaign-state.json`'s
  * per-card `spec`/`plan` fields, read the same repo-relative way `core/brief.ts`'s executor
- * brief already reads them — never `core/types.ts`'s `Card`, which this module does not import),
+ * brief already reads them — Task 16: through `readCampaignState`, `../state.ts`'s own
+ * `CampaignStateSchema.safeParse`, imported read-only, never edited),
  * the unratified rulings' own verbatim blocks (`extractRulingBlockVerbatim` below — `../
  * rulings.ts#parseRulings` classifies a block's `ratified-as:` but deliberately never carries
  * its bytes), and the closing session's campaign-report/gap-gate facts (each card's gap-gate JSON
@@ -47,6 +48,8 @@
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { WatchdogHandle, SupervisorIO } from '../../ports/ports.ts';
+import { CampaignStateSchema } from '../state.ts';
+import type { CampaignState } from '../types.ts';
 import type {
   CampaignReportCardFact, CampaignReportFacts, EscalationFact, LedgerEntry, LedgerVerdict,
   ParkMarker, ParkReason, SessionKind, SessionOutcome, SupervisorAction, SupervisorLimits,
@@ -318,16 +321,32 @@ export function parseCampaignReportFacts(raw: string): CampaignReportFacts | nul
   };
 }
 
-function readOwnerOnlyEscalations(io: SupervisorLoopSeam, homeDir: string): string[] {
-  const raw = io.readFileOrEmpty(campaignStatePathOf(homeDir));
-  if (raw === '') return [];
+/** Task 16 (spec §5(c)): the ONE reader `readOwnerOnlyEscalations` and `readCardSpecPlan` both
+ * route `campaign-state.json` through — `../state.ts`'s full `CampaignStateSchema`, imported
+ * read-only (never edited), via `safeParse` (never the throwing `parseState`, which additionally
+ * enforces cross-card referential integrity this loop has no business refusing a whole campaign
+ * over). Before this, each site parsed its own field independently off the same raw JSON: a
+ * document with a malformed `ownerOnlyEscalations` entry still let `readCardSpecPlan` read a
+ * perfectly fine `cards.<id>.spec` right next to it, and vice versa — each half "worked" on its
+ * own, which is exactly the drift a schema exists to catch (a document that is malformed ANYWHERE
+ * is malformed, full stop). `null` on ANY structural failure — unreadable file, invalid JSON, or a
+ * schema mismatch anywhere in the document — never a throw reaching the tick loop
+ * (`fail-closed-edges.md` obligation 1). */
+function readCampaignState(io: SupervisorLoopSeam, homeDir: string): CampaignState | null {
+  const text = io.readFileOrEmpty(campaignStatePathOf(homeDir));
+  if (text === '') return null;
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const list = parsed['ownerOnlyEscalations'];
-    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
+    parsed = JSON.parse(text);
   } catch {
-    return [];
+    return null;
   }
+  const result = CampaignStateSchema.safeParse(parsed);
+  return result.success ? (result.data as CampaignState) : null;
+}
+
+function readOwnerOnlyEscalations(io: SupervisorLoopSeam, homeDir: string): string[] {
+  return readCampaignState(io, homeDir)?.ownerOnlyEscalations ?? [];
 }
 
 function readParkMarkers(io: SupervisorLoopSeam, parkDir: string): ParkMarker[] {
@@ -506,29 +525,17 @@ export function extractRulingBlockVerbatim(answersContent: string, id: string): 
 
 /** §5.2's brief needs the card's spec/plan paths, repo-relative — the same convention
  * `core/brief.ts`'s executor brief already uses (`card.spec ?? '(missing)'`, joined with
- * `repoRoot` only by whoever displays it, never here). Read directly off `campaign-state.json`'s
- * raw JSON — never `core/types.ts`'s `CampaignState`/`Card` (this module imports neither; the
- * scope fence keeps `core/types.ts` untouched). Fail-closed: any shape mismatch reads as
- * `null`, never a throw. */
+ * `repoRoot` only by whoever displays it, never here). Task 16: reads off the SAME
+ * `readCampaignState` result `readOwnerOnlyEscalations` reads — a card absent from a validly
+ * parsed document, or a document that failed to parse at all (anywhere in it, not just this
+ * card), both yield `missing`. Fail-closed: never a throw. */
 function readCardSpecPlan(
   io: SupervisorLoopSeam, homeDir: string, cardId: string,
 ): { specPath: string | null; planPath: string | null } {
   const missing = { specPath: null, planPath: null };
-  const raw = io.readFileOrEmpty(campaignStatePathOf(homeDir));
-  if (raw === '') return missing;
-  try {
-    const cards = (JSON.parse(raw) as Record<string, unknown>)['cards'];
-    if (cards === null || typeof cards !== 'object') return missing;
-    const card = (cards as Record<string, unknown>)[cardId];
-    if (card === null || typeof card !== 'object') return missing;
-    const c = card as Record<string, unknown>;
-    return {
-      specPath: typeof c['spec'] === 'string' ? c['spec'] : null,
-      planPath: typeof c['plan'] === 'string' ? c['plan'] : null,
-    };
-  } catch {
-    return missing;
-  }
+  const card = readCampaignState(io, homeDir)?.cards[cardId];
+  if (card === undefined) return missing;
+  return { specPath: card.spec, planPath: card.plan };
 }
 
 /** §5.4's closing brief needs each card's still-open gap ids, from **the gate's own JSON** —

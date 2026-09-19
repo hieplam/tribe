@@ -745,7 +745,7 @@ the non-throwing entry point are both named.
 **Files:** edit `plugins/tribe/scripts/runner/core/supervisor/loop.ts` and
 `core/supervisor/loop.test.ts`.
 
-- [ ] **Step 1: Write the failing test first.**
+- [x] **Step 1: Write the failing test first.**
   Assert that a `campaign-state.json` whose `ownerOnlyEscalations` holds a non-string entry, and one
   whose `cards.c1.spec` is a number, are both rejected as a whole rather than half-accepted — the
   drift the rule exists to stop. Assert that a malformed or absent file yields empty results and
@@ -757,14 +757,14 @@ the non-throwing entry point are both named.
 
   Expected: fails — today the two inline readers accept each half independently.
 
-- [ ] **Step 2: Add one private reader and route both sites through it.**
+- [x] **Step 2: Add one private reader and route both sites through it.**
   `readCampaignState(io, homeDir)` does `JSON.parse` inside a narrow `try` and then
   `CampaignStateSchema.safeParse`, returning `null` on either failure. Use `safeParse`, not
   `parseState`: `parseState` throws referential-integrity errors. `readOwnerOnlyEscalations` (line
   327) and `readCardSpecPlan` (line 522) both read off that one parsed value. **`core/state.ts` is
   imported, never edited** — the fence holds.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   grep -n "CampaignStateSchema" plugins/tribe/scripts/runner/core/supervisor/loop.ts
@@ -776,7 +776,7 @@ the non-throwing entry point are both named.
   Expected: the schema is imported; the count of raw parses drops by two; at least 1068 passing and
   0 failing; `tsc` exits `0`; the e2e suite reports `0 failed`.
 
-- [ ] **Step 4: Commit** — `refactor(supervisor): read campaign state through its own schema`.
+- [x] **Step 4: Commit** — `refactor(supervisor): read campaign state through its own schema`.
 
 ## Task 17: FU-CS-1 — `autoAnswerRounds`, documented as vestigial
 

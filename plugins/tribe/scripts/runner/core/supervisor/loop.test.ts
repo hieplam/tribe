@@ -234,6 +234,28 @@ function escalationFile(reason: string): string {
   return `**Reason:** ${reason}\n\n## Context\nSomething needs a call.\n`;
 }
 
+/** A schema-VALID `campaign-state.json` fixture (Task 16): `core/state.ts`'s `CampaignStateSchema`
+ * declares every one of these top-level fields with no `.optional()`, so a real campaign-state.json
+ * always carries all of them. Every fixture in this file used to write only `{ ownerOnlyEscalations
+ * }` — the convenient shape, not the real one (`fixtures-mirror-reality.md`) — which happened to
+ * work against the old per-field readers but would silently read as "absent" against a
+ * schema-checked one. */
+function campaignStateFixture(ownerOnlyEscalations: string[] = [], cards: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    v: 1, campaign: 'c', mergePolicy: 'merge', sequence: [], schemaLockPaths: [], docsOnlyPaths: [],
+    ownerOnlyEscalations, cards,
+  });
+}
+
+/** A schema-valid `cards.<id>` entry (`core/state.ts`'s `CardSchema`) — every field below is
+ * required (but nullable) at the schema level. */
+function cardFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    status: 'escalated', spec: null, plan: null, branch: null, baseSha: null,
+    pr: null, mergeSha: null, sessionId: null, updatedAt: null, ...overrides,
+  };
+}
+
 function reportEscalated(): Record<string, unknown> {
   return {
     run: { reason: 'escalations_pending', unratifiedRulings: [] },
@@ -261,7 +283,7 @@ describe('runSupervisor — the happy path', () => {
     seam = fakeSeam({
       initialFiles: {
         [join(HOME, 'escalations', 'c1.md')]: escalationFile('planning_needed'),
-        [join(HOME, 'campaign-state.json')]: JSON.stringify({ ownerOnlyEscalations: [] }),
+        [join(HOME, 'campaign-state.json')]: campaignStateFixture(),
       },
       watchdogRuns: [
         { reason: 'escalations_pending', exitCode: 12, report: reportEscalated() },
@@ -436,7 +458,7 @@ describe('runSupervisor — an owner-only escalation parks (exit 20)', () => {
     const seam = fakeSeam({
       initialFiles: {
         [join(HOME, 'escalations', 'c1.md')]: escalationFile('data_shape_change'),
-        [join(HOME, 'campaign-state.json')]: JSON.stringify({ ownerOnlyEscalations: ['data_shape_change'] }),
+        [join(HOME, 'campaign-state.json')]: campaignStateFixture(['data_shape_change']),
       },
       watchdogRuns: [{ reason: 'escalations_pending', exitCode: 12, report: reportEscalated() }],
     });
@@ -450,12 +472,115 @@ describe('runSupervisor — an owner-only escalation parks (exit 20)', () => {
   });
 });
 
+describe('runSupervisor — Task 16 (spec §5(c)): campaign-state.json is read through its own '
+  + 'schema, WHOLE-document, never per-field', () => {
+  test('a non-string entry in ownerOnlyEscalations rejects the WHOLE document — a card\'s '
+    + 'otherwise-valid spec/plan become unavailable too, and the escalation reason that a '
+    + 'per-field reader would still have matched no longer parks owner-only', async () => {
+    const seam = fakeSeam({
+      initialFiles: {
+        [join(HOME, 'escalations', 'c1.md')]: escalationFile('data_shape_change'),
+        [join(HOME, 'campaign-state.json')]: JSON.stringify({
+          v: 1, campaign: 'c', mergePolicy: 'merge', sequence: [], schemaLockPaths: [], docsOnlyPaths: [],
+          // A per-field reader would `.filter(isString)` this down to ['data_shape_change'] and
+          // still park owner-only. A whole-document schema read must refuse the array — and
+          // therefore the whole document — instead.
+          ownerOnlyEscalations: ['data_shape_change', 42],
+          cards: { c1: cardFixture({ spec: 'docs/spec-c1.md', plan: 'docs/plan-c1.md' }) },
+        }),
+      },
+      watchdogRuns: [
+        { reason: 'escalations_pending', exitCode: 12, report: reportEscalated() },
+        { reason: 'runner_done', exitCode: 0, report: reportShipped() },
+      ],
+      sessions: [
+        { effect: () => { seam.files.set(join(HOME, 'answers.md'), RULING_CONTENT); } },
+        { effect: () => {
+          seam.files.set(join(HOME, 'supervisor', 'final-report.md'), '# Final Report\n\nShipped c1.\n');
+          seam.files.set(join(HOME, 'supervisor', 'verdicts', 'c1.json'), '{"card":"c1","verdict":"PASS"}\n');
+        } },
+      ],
+    });
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+
+    // Never parked owner-only — the malformed document reads as absent, never a half-accepted
+    // ownerOnlyEscalations list.
+    expect(result.kind).toBe('done');
+
+    // The card's otherwise-valid spec/plan are ALSO unavailable — proof the whole document was
+    // rejected, not just the field that was actually malformed (`readCardSpecPlan` is poisoned
+    // by the SAME parse failure `readOwnerOnlyEscalations` hit, because both now read one shared
+    // schema-checked value).
+    const rulingPrompt = seam.spawnedPrompts[0] as string;
+    expect(rulingPrompt).toContain('- Spec: (missing)');
+    expect(rulingPrompt).toContain('- Plan: (missing)');
+    expect(rulingPrompt).not.toContain('docs/spec-c1.md');
+  });
+
+  test('a non-string cards.<id>.spec rejects the WHOLE document — a perfectly valid '
+    + 'ownerOnlyEscalations entry that would otherwise match this escalation\'s reason no '
+    + 'longer parks owner-only', async () => {
+    const seam = fakeSeam({
+      initialFiles: {
+        [join(HOME, 'escalations', 'c1.md')]: escalationFile('data_shape_change'),
+        [join(HOME, 'campaign-state.json')]: JSON.stringify({
+          v: 1, campaign: 'c', mergePolicy: 'merge', sequence: [], schemaLockPaths: [], docsOnlyPaths: [],
+          // This field alone is perfectly schema-valid and WOULD match the escalation's reason.
+          ownerOnlyEscalations: ['data_shape_change'],
+          // ...but this sibling field is not (`spec` must be `string | null`) — a per-field
+          // reader wouldn't care, since it never looks at `cards` to decide ownerOnlyEscalations.
+          cards: { c1: cardFixture({ spec: 42 }) },
+        }),
+      },
+      watchdogRuns: [{ reason: 'escalations_pending', exitCode: 12, report: reportEscalated() }],
+      // Neither scripted session touches answers.md — the ruling is attempted (never an
+      // owner-only park) and then fails its postcondition twice, exactly like the clean
+      // empty-ownerOnlyEscalations case in the next describe block.
+      sessions: [{}, {}],
+    });
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+
+    expect(result.reason).toBe('ruling_failed');
+    expect(result.reason).not.toBe('owner_only');
+    expect(seam.spawnedPrompts.length).toBe(2);
+  });
+});
+
+describe('runSupervisor — Task 16: campaign-state.json malformed/absent never throws, and '
+  + 'reads as empty', () => {
+  test('invalid JSON text is treated as absent — the tick loop never throws', async () => {
+    const seam = fakeSeam({
+      initialFiles: {
+        [join(HOME, 'escalations', 'c1.md')]: escalationFile('data_shape_change'),
+        [join(HOME, 'campaign-state.json')]: '{ this is not valid json',
+      },
+      watchdogRuns: [{ reason: 'escalations_pending', exitCode: 12, report: reportEscalated() }],
+      sessions: [{}, {}],
+    });
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+    expect(result.reason).toBe('ruling_failed');
+  });
+
+  test('an absent campaign-state.json (never written) reads the same as an empty one', async () => {
+    const seam = fakeSeam({
+      initialFiles: {
+        [join(HOME, 'escalations', 'c1.md')]: escalationFile('data_shape_change'),
+        // No campaign-state.json entry at all.
+      },
+      watchdogRuns: [{ reason: 'escalations_pending', exitCode: 12, report: reportEscalated() }],
+      sessions: [{}, {}],
+    });
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+    expect(result.reason).toBe('ruling_failed');
+  });
+});
+
 describe('runSupervisor — a failed ruling retries exactly once, then parks (exit 20)', () => {
   test('two spawn_session attempts, then ruling_failed', async () => {
     const seam = fakeSeam({
       initialFiles: {
         [join(HOME, 'escalations', 'c1.md')]: escalationFile('planning_needed'),
-        [join(HOME, 'campaign-state.json')]: JSON.stringify({ ownerOnlyEscalations: [] }),
+        [join(HOME, 'campaign-state.json')]: campaignStateFixture(),
       },
       watchdogRuns: [{ reason: 'escalations_pending', exitCode: 12, report: reportEscalated() }],
       // Neither scripted session touches answers.md — every attempt fails its postcondition.
@@ -549,7 +674,7 @@ describe('runSupervisor — Fix 2 (skinner audit): sessionMaxTurns reaches build
     const seam = fakeSeam({
       initialFiles: {
         [join(HOME, 'escalations', 'c1.md')]: escalationFile('planning_needed'),
-        [join(HOME, 'campaign-state.json')]: JSON.stringify({ ownerOnlyEscalations: [] }),
+        [join(HOME, 'campaign-state.json')]: campaignStateFixture(),
       },
       watchdogRuns: [
         { reason: 'escalations_pending', exitCode: 12, report: reportEscalated() },
@@ -583,7 +708,7 @@ describe('runSupervisor — Fix 3 (skinner audit): status.json carries the watch
     const seam = fakeSeam({
       initialFiles: {
         [join(HOME, 'escalations', 'c1.md')]: escalationFile('data_shape_change'),
-        [join(HOME, 'campaign-state.json')]: JSON.stringify({ ownerOnlyEscalations: ['data_shape_change'] }),
+        [join(HOME, 'campaign-state.json')]: campaignStateFixture(['data_shape_change']),
       },
       watchdogRuns: [{ reason: 'escalations_pending', exitCode: 12, report: reportEscalated() }],
     });
