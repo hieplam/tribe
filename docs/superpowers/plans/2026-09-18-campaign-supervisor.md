@@ -2226,7 +2226,7 @@ session**:
 
 **Scope-fence self-check before opening the PR.** `git diff --name-only master...HEAD` must be a
 subset of:
-`plugins/tribe/scripts/runner/{core/metrics/**,core/supervisor/**,ports/ports.ts,adapters/supervisor-io.adapter.ts,adapters/supervisor-io.adapter.test.ts,adapters/transcript-io.adapter.ts,adapters/transcript-io.adapter.test.ts,adapters/cut.ts,adapters/cut.test.ts,cli/main.ts,cli/main.test.ts,fixtures/supervisor/**,README.md}`,
+`plugins/tribe/scripts/runner/{core/metrics/**,core/supervisor/**,ports/ports.ts,adapters/supervisor-io.adapter.ts,adapters/supervisor-io.adapter.test.ts,adapters/transcript-io.adapter.ts,adapters/transcript-io.adapter.test.ts,adapters/cut.ts,adapters/cut.test.ts,adapters/session-double.adapter.ts,cli/main.ts,cli/main.test.ts,fixtures/supervisor/**,README.md}`,
 `plugins/tribe/scripts/tests/{test-supervisor-e2e.sh,test-supervisor-kill.sh,test-supervisor-real-e2e.sh,test-supervisor-docs.sh,test-supervisor-permission-real.sh}`,
 `plugins/tribe/skills/orchestrate-campaign/SKILL.md`, `plugins/tribe/README.md`,
 `docs/superpowers/{specs,plans,evidence}/**`, `.c3/**`.
