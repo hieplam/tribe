@@ -1,6 +1,6 @@
 ---
 id: c3-215
-c3-seal: 243ed68b14773696b1b07a8ed0e46da58040906d92ac20eb1dee3069b0fe5fbd
+c3-seal: ad3b2d26539511510f54cd1d47032913fb4168d8a2908b88fbdb4941e5237b11
 title: tribe
 type: component
 category: feature
@@ -12,6 +12,7 @@ uses:
     - ref-plugin-layout
     - rule-bash-strict-mode
     - rule-no-squash-merge
+    - rule-one-parser-per-edge-shape
 ---
 
 ## Goal
@@ -59,6 +60,7 @@ Owns the delivery role contracts: who may talk to whom (Owner ⇄ Shaman ⇄ War
 | ref-docs-lifecycle | ref | Specs/plans/evidence for tribe's own feature work | binding | Most docs/superpowers files are tribe designs |
 | rule-bash-strict-mode | rule | heartbeat/resume/validate-plan scripts + their tests | binding | — |
 | rule-no-squash-merge | rule | Every merge the Warchief performs, and the campaign runner's D3 point 2 that verifies it | binding | The agent definitions instructed squash-merge in 12 places, which the runner's 2-parent check rejects — the rule is what keeps agents, runner, and the owner's standing rule on one merge shape |
+| rule-one-parser-per-edge-shape | rule | The runner's four named edge parsers: core/errno.ts#errorCode (a caught filesystem error's code), core/escalation.ts#parseEscalationQuestion (the escalation-file shape, three read sites collapsed to one), core/state.ts's CampaignStateSchema reused read-only via loop.ts's private readCampaignState, and core/metrics/ratchet-gate.ts#checkRatchetRevision's raisedBy/ceilings shape | binding | Paydown of harness gap G-004 (2 identical `'code' in err` narrowings plus 12 lower-rigor bare casts, 2 inline campaign-state.json re-reads, 3 escalation-file read sites); adopted 2026-09-19, cleared by supervisor-hardening card Phase 3 (plan Tasks 14-16) |
 
 ## Contract
 

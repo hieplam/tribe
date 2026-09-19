@@ -824,7 +824,7 @@ parser inventory, against patches Task 13 already shaped.
 
 **Files:** `.c3/` entities, through the wrapper CLI only.
 
-- [ ] **Step 1: Record the four named parsers and validate.**
+- [x] **Step 1: Record the four named parsers and validate.**
 
   ```bash
   C3="$(ls -d ~/.claude/plugins/marketplaces/c3-skill-marketplace/skills/c3)"
@@ -835,7 +835,7 @@ parser inventory, against patches Task 13 already shaped.
   Expected: `ok: true` from both. If the rule-scoped check reports entities citing the rule that are
   now stale, patch them through the change unit rather than editing them.
 
-- [ ] **Step 2: Commit** — `docs(c3): record the runner's named edge parsers`.
+- [x] **Step 2: Commit** — `docs(c3): record the runner's named edge parsers`.
 
 ---
 
