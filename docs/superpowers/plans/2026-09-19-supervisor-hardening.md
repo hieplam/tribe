@@ -943,7 +943,7 @@ the PR body will carry, is judgment.
   `docs/superpowers/evidence/2026-09-19-supervisor-hardening.md` — G1–G5 BEFORE (spec §9) / AFTER
   (real command output), plus the ratchet table.
 
-- [ ] **Step 3: Commit** — `docs(supervisor): evidence for the supervisor-hardening card`.
+- [x] **Step 3: Commit** — `docs(supervisor): evidence for the supervisor-hardening card`. (commit `bd6761d`)
 
 ---
 
