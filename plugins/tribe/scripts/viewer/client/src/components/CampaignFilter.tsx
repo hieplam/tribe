@@ -16,11 +16,6 @@ export function CampaignFilter({ value, onChange }: CampaignFilterProps) {
       placeholder="filter by campaign (repoKey/slug)"
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      style={{
-        background: 'var(--surface)',
-        color: 'var(--ink)',
-        borderColor: 'var(--rule)',
-      }}
     />
   );
 }

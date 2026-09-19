@@ -24,7 +24,7 @@ import { ErrorCard } from './ErrorCard.tsx';
 import { Markdown } from './Markdown.tsx';
 import { PromptCard } from './PromptCard.tsx';
 import { isAtBottom, RowList } from './RowList.tsx';
-import { ToolCard } from './ToolCard.tsx';
+import { ToolCard, toolArg } from './ToolCard.tsx';
 
 function renderInto(node: ReactElement): { container: HTMLDivElement; root: Root } {
   const container = document.createElement('div');
@@ -120,6 +120,36 @@ describe('session view — one node per kind, the DOM contract, follow-the-tail'
     const r2 = renderInto(<ToolCard node={errTool as Extract<RenderNode, { k: 'tool' }>} />);
     expect(r2.container.querySelector('[data-error-token]')).not.toBeNull();
     cleanup(r2.container, r2.root);
+  });
+
+  test('a tool card header shows the call\'s one-line argument and an outcome word per state', () => {
+    const okTool = nodeOfKind('tool', 1000) as Extract<RenderNode, { k: 'tool' }>;
+    const withCommand: RenderNode = { ...okTool, input: { command: 'bun test' } };
+    const ok = renderInto(<ToolCard node={withCommand as Extract<RenderNode, { k: 'tool' }>} />);
+    expect(ok.container.querySelector('.tool__arg')!.textContent).toBe('bun test');
+    expect(ok.container.querySelector('.tool__outcome')!.getAttribute('data-outcome')).toBe('ok');
+    cleanup(ok.container, ok.root);
+
+    const pending: RenderNode = { ...okTool, input: null, state: 'pending', result: null, resultAnchor: null };
+    const p = renderInto(<ToolCard node={pending as Extract<RenderNode, { k: 'tool' }>} />);
+    expect(p.container.querySelector('.tool__arg')).toBeNull(); // no input to summarise → no arg
+    expect(p.container.querySelector('.tool__outcome')!.getAttribute('data-outcome')).toBe('pending');
+    cleanup(p.container, p.root);
+
+    // an ok-state call whose result text is flagged an error reads as an error in the header too
+    const flagged: RenderNode = { ...okTool, result: { r: 'text', body: TEXT, isError: true, elided: false } };
+    const f = renderInto(<ToolCard node={flagged as Extract<RenderNode, { k: 'tool' }>} />);
+    expect(f.container.querySelector('.tool__outcome')!.getAttribute('data-outcome')).toBe('error');
+    cleanup(f.container, f.root);
+  });
+
+  test('toolArg picks the most telling string field and never throws on a non-object input', () => {
+    expect(toolArg({ file_path: '/a/b.ts', description: 'x' })).toBe('/a/b.ts');
+    expect(toolArg({ description: 'do it' })).toBe('do it');
+    expect(toolArg('raw string')).toBe('raw string');
+    expect(toolArg({ unrelated: 1 })).toBeNull();
+    expect(toolArg({ command: '' })).toBeNull();
+    for (const junk of [null, undefined, 42, true, [1, 2]]) expect(toolArg(junk)).toBeNull();
   });
 
   test('an ErrorCard renders with the error token and its status (spec §4)', () => {

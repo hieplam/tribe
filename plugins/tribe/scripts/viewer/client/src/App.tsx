@@ -125,6 +125,12 @@ export function App() {
 
   const agentId = route.kind === 'session_agent' ? route.agentId : null;
 
+  // The main column's header title (preview §C `.screen-head .ttl`): on `/p/<dir>` the project's
+  // own cwd label when the sidebar scan resolved one, else the encoded dir; on the aggregate `/`
+  // there is no single project, so a general label stands in.
+  const activeProject = projectDir !== null ? (projects?.projects.find((p) => p.dir === projectDir) ?? null) : null;
+  const listHeading = projectDir === null ? 'All projects' : (activeProject?.cwd ?? projectDir);
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -132,23 +138,26 @@ export function App() {
         olderCount={projects?.olderCount ?? 0}
         campaignFilter={campaignFilter}
         onCampaignFilterChange={setCampaignFilter}
+        activeProjectDir={projectDir}
         projectsError={projectsError}
       />
       <main className="app-main">
         {isSession && (route.kind === 'session' || route.kind === 'session_agent') ? (
           <SessionView sessionId={route.sessionId} agentId={agentId} />
         ) : projectsError !== null || sessionsError !== null ? (
-          <p className="app-error" data-testid="load-error" style={{ color: 'var(--warn)' }}>
+          <p className="app-error" data-testid="load-error">
             {projectsError ?? sessionsError}
           </p>
         ) : (
           <>
             {degradedProjects > 0 && (
-              <p className="app-degraded" data-testid="degraded-note" style={{ color: 'var(--warn)' }}>
+              <p className="app-degraded" data-testid="degraded-note">
                 {degradedProjects} project{degradedProjects === 1 ? '' : 's'} could not be loaded
               </p>
             )}
-            {sessions !== null && <SessionList sessions={sessions} campaignFilter={campaignFilter} />}
+            {sessions !== null && (
+              <SessionList sessions={sessions} campaignFilter={campaignFilter} heading={listHeading} />
+            )}
           </>
         )}
       </main>

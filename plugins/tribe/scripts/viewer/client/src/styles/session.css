@@ -1,0 +1,525 @@
+/* client/src/styles/session.css — the SESSION VIEW (plan Task 4), styled to preview.html §D.
+ * Imported by ./index.css AFTER the tokens @import, so every value below is a `var(--token)` read
+ * from design/sea-salt/tokens.css. No colour, font, radius, or spacing literal is invented here;
+ * the preview's pixel values with no matching token (a 2-wide tab underline, a 999 pill radius, a
+ * 10-wide caret) are translated to a token expression or a relative unit, each noted on its line.
+ * The app renders more than the preview shows (error/raw/unreadable cards, images, attachments,
+ * dividers, markdown, load-earlier, connection note): those speak the same vocabulary — hairline
+ * rules, `--surface` panels, mono 12–13 soft metadata, accent only as a stroke or small text. */
+
+/* ---- the column: header, tabs and badges hold their height; the row list takes the rest ---- */
+.session-view {
+  position: relative; /* the follow / new-below pills float over the row list (preview `.follow`) */
+}
+
+.connection-note,
+.session-header,
+.agent-tabs,
+.session-view__badges,
+.session-view__load-error,
+.load-earlier {
+  flex: none;
+}
+
+/* ---- header strip (preview §D `.screen-head`) ---- */
+.session-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-12);
+  padding: var(--space-12) var(--space-16);
+  background: var(--surface);
+  border-bottom: var(--rule-weight) var(--rule-style) var(--rule);
+  font-size: var(--size-13);
+  color: var(--ink);
+}
+
+.session-header__title {
+  font-weight: 600;
+  font-size: var(--size-14);
+}
+
+.session-header__live {
+  flex: none;
+}
+
+.session-header__projects {
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+  color: var(--warn);
+}
+
+/* ---- pill (preview `.pill`): accent text and stroke, fully rounded, never a fill ---- */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-12); /* preview vertical padding is 3 → --space-4 */
+  background: var(--surface-raised);
+  color: var(--accent);
+  border: var(--rule-weight) solid var(--accent);
+  border-radius: 100vmax; /* preview radius 999 → any radius past half the height is a full round */
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+  cursor: pointer;
+}
+
+/* The follow-live and new-below pills sit OVER the row list's bottom-right corner (preview
+ * `.follow`), out of the flow so showing one never shifts the transcript. Both can show at once,
+ * so the new-below pill stacks above the follow pill. */
+.session-view > .pill {
+  position: absolute;
+  right: var(--space-24); /* clear of the row list's scrollbar */
+  bottom: var(--space-16);
+  z-index: 1;
+}
+
+.session-view > .pill--new-below {
+  bottom: calc(var(--space-16) + var(--space-32));
+}
+
+/* ---- buttons (preview §E `.btn`): ghost by default, `--secondary` for a primary-ish action ---- */
+.btn {
+  padding: var(--space-4) var(--space-8);
+  background: none;
+  color: var(--ink-soft);
+  border: var(--rule-weight) solid transparent;
+  border-radius: var(--radius-4);
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+  line-height: var(--leading-tight);
+  cursor: pointer;
+}
+
+.btn--secondary {
+  background: var(--surface-raised);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.btn:focus-visible,
+.pill:focus-visible,
+.agent-tabs__tab:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.load-earlier {
+  align-self: center;
+  margin: var(--space-8) 0;
+}
+
+/* ---- agent tabs (preview §D `.tabs` / `.tab`) ---- */
+.agent-tabs {
+  display: flex;
+  gap: var(--space-4);
+  padding: 0 var(--space-16);
+  background: var(--surface);
+  border-bottom: var(--rule-weight) var(--rule-style) var(--rule);
+  overflow-x: auto;
+}
+
+.agent-tabs__tab {
+  padding: var(--space-8) var(--space-12);
+  background: none;
+  color: var(--ink-soft);
+  border: 0;
+  border-bottom: calc(var(--rule-weight) * 2) solid transparent; /* preview underline is 2 → twice the hairline */
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.agent-tabs__tab[data-active="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+/* ---- the session's campaign badges and the notes above the transcript ---- */
+.session-view__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-16);
+  border-bottom: var(--rule-weight) var(--rule-style) var(--rule);
+}
+
+.connection-note,
+.session-view__load-error {
+  margin: 0;
+  padding: var(--space-8) var(--space-16);
+  border-bottom: var(--rule-weight) var(--rule-style) var(--rule);
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+  color: var(--warn);
+}
+
+/* ---- transcript (preview §D `.transcript` / `.msg`) ---- */
+.rows {
+  padding: var(--space-16);
+}
+
+.row {
+  padding: var(--space-8) 0;
+}
+
+/* role label (preview `.role`): a small mono caps line above each message body. */
+.prompt__role,
+.assistant__role {
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+
+.prompt__role {
+  color: var(--accent);
+}
+
+.assistant__role {
+  color: var(--ink-soft);
+}
+
+.assistant__model {
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-soft);
+}
+
+.prompt,
+.assistant,
+.error {
+  color: var(--ink);
+}
+
+.prompt__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+}
+
+/* ---- markdown (preview `.body-text` for messages; inherits the surrounding size elsewhere) ---- */
+.md {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.prompt .md,
+.assistant .md {
+  margin-top: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--size-14);
+  line-height: var(--leading-loose);
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: var(--space-8) 0 var(--space-4) 0;
+  font-size: inherit;
+  font-weight: 600;
+  line-height: inherit;
+}
+
+.md li {
+  list-style-position: inside;
+}
+
+.md li[data-ordered="true"] {
+  list-style-type: decimal;
+}
+
+.md code {
+  padding: 0 var(--space-4);
+  background: var(--surface);
+  border-radius: var(--radius-4);
+  font-family: var(--font-mono);
+  font-size: inherit;
+}
+
+.md pre {
+  margin: var(--space-8) 0;
+  padding: var(--space-8) var(--space-12);
+  background: var(--surface);
+  border: var(--rule-weight) var(--rule-style) var(--rule);
+  border-radius: var(--radius-4);
+  font-family: var(--font-mono);
+  font-size: var(--size-13);
+  line-height: var(--leading-body);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.md pre code {
+  padding: 0;
+  background: none;
+}
+
+.md a {
+  color: var(--accent);
+}
+
+/* ---- thinking (preview `.thinking`): italic soft text on a left stroke ---- */
+.thinking {
+  margin: var(--space-8) 0;
+  padding-left: var(--space-12);
+  border-left: calc(var(--rule-weight) * 2) var(--rule-style) var(--rule); /* preview stroke is 2 */
+  color: var(--ink-soft);
+  font-size: var(--size-13);
+  font-style: italic;
+}
+
+.thinking summary {
+  cursor: pointer;
+}
+
+/* ---- tool card (preview `.tool` / `.tool-head` / `.tool-body`) ---- */
+.tool {
+  margin: var(--space-8) 0;
+  background: var(--surface);
+  border: var(--rule-weight) var(--rule-style) var(--rule);
+  border-left: var(--card-stroke) solid var(--accent); /* preview's sea-salt character: an accent left stroke */
+  border-radius: var(--radius-4);
+}
+
+/* caret · name · arg (ellipsis) · [actions] · outcome right-aligned. */
+.tool__call {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: var(--size-13);
+}
+
+.tool__caret {
+  flex: none;
+  width: 1ch; /* preview caret box is 10 wide → one mono character */
+  color: var(--ink-soft);
+}
+
+.tool__name {
+  flex: none;
+  font-weight: 600;
+}
+
+.tool__arg {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-soft);
+}
+
+.tool__agent-link {
+  color: var(--accent);
+}
+
+.tool__outcome {
+  flex: none;
+  margin-left: auto; /* right-aligned even when there is no arg to take the slack */
+  font-size: var(--size-12);
+  white-space: nowrap;
+}
+
+.tool__outcome[data-outcome="ok"] {
+  color: var(--live);
+}
+
+.tool__outcome[data-outcome="error"] {
+  color: var(--error);
+}
+
+.tool__outcome[data-outcome="pending"] {
+  color: var(--warn);
+}
+
+.tool__result,
+.tool__input,
+.tool__spill-full,
+.tool__result-full,
+.orphan-result__body,
+.attachment-strip__body,
+.block-expander__body {
+  margin: 0;
+  padding: var(--space-8) var(--space-12) var(--space-12) var(--space-24);
+  background: var(--surface-raised);
+  border-top: var(--rule-weight) var(--rule-style) var(--rule);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: var(--size-13);
+  line-height: var(--leading-body);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* An image / reference result carries only a count — soft mono metadata, like the other tool notes. */
+.tool__images,
+.tool__refs {
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+  color: var(--ink-soft);
+}
+
+/* A spilled result: the note, then the inline preview of the spill file's first lines. */
+.tool__spill .md {
+  display: inline;
+}
+
+.tool__result[data-error-token] {
+  color: var(--error);
+}
+
+.tool > .btn {
+  margin: var(--space-4) var(--space-12) var(--space-8) var(--space-12);
+}
+
+.expand-error {
+  color: var(--warn);
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+}
+
+/* ---- the cards the preview does not show, in the same vocabulary ---- */
+.orphan-result,
+.raw,
+.unreadable,
+.image,
+.error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-12);
+  border: var(--rule-weight) var(--rule-style) var(--rule);
+  border-radius: var(--radius-4);
+  font-family: var(--font-mono);
+  font-size: var(--size-13);
+}
+
+.orphan-result {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.orphan-result__body {
+  flex: 1 0 100%;
+}
+
+.error {
+  background: var(--surface);
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.error .md {
+  flex: 1 1 auto;
+  margin: 0;
+  font: inherit; /* the error card's body reads at the card's own mono 13, not the message body size */
+}
+
+.error__status {
+  font-weight: 600;
+}
+
+.raw,
+.unreadable,
+.image {
+  color: var(--ink-soft);
+}
+
+.raw__type {
+  font-weight: 600;
+}
+
+.raw__note {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.image__full {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-4);
+}
+
+/* chip (preview `.tag`): a mono 12 label in a hairline box. */
+.chip {
+  display: inline-flex;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8); /* preview vertical padding is 2 → --space-4 */
+  background: var(--paper);
+  color: var(--ink-soft);
+  border: var(--rule-weight) var(--rule-style) var(--rule);
+  border-radius: var(--radius-4);
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+}
+
+.chip a {
+  color: var(--accent);
+}
+
+.attachment-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+}
+
+.attachment-strip__count {
+  font-weight: 600;
+}
+
+.attachment-strip__entry {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+  border: var(--rule-weight) var(--rule-style) var(--rule);
+  border-radius: var(--radius-4);
+}
+
+.attachment-strip__body {
+  flex: 1 0 100%;
+}
+
+.attachment-strip__entry .btn {
+  padding: 0;
+}
+
+/* divider (a compaction / boundary marker): a --rule hairline either side of a soft label. */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: var(--rule-weight) var(--rule-style) var(--rule);
+}

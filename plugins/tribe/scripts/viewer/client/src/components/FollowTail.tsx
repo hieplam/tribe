@@ -7,7 +7,6 @@ export function FollowTail({ onResume }: { onResume: () => void }) {
       data-testid="follow-pill"
       className="pill"
       onClick={onResume}
-      style={{ background: 'var(--accent)', color: 'var(--paper)', borderRadius: 'var(--radius-8)' }}
     >
       ⇣ follow live
     </button>

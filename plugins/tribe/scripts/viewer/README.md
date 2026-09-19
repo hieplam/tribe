@@ -267,6 +267,29 @@ fails or `bun` is absent from `PATH`; `plugins/tribe/scripts/doctor.sh` reports
 with no bun (or before the hook has ever run), `dist/` can still be built by hand:
 `bun install && bun run build` in this directory, then `bun serve.ts`.
 
+## Look and feel
+
+The client is styled to the owner-ratified sea-salt design
+(`docs/tribe/planning/viewer-consolidation/design/sea-salt/preview.html`, screens §C list and §D
+session). Dark mode is free: `tokens.css` re-declares the same custom properties under
+`prefers-color-scheme: dark`, so there is no toggle and no second stylesheet.
+
+- **Tokens source** — `docs/tribe/planning/viewer-consolidation/design/sea-salt/tokens.css`,
+  imported once by `client/src/styles/index.css` and never copied, is the only place a colour,
+  font, size, space, radius or shadow is spelled. `list.css` (session-list screen) and
+  `session.css` (session view) read them as `var(--token)`; `structure.test.ts` bans any hex / `rgb(` / `hsl(` / `oklch(`
+  literal, non-token `font-family:` and bare `Npx` length anywhere under `client/`.
+- **Ratchet** — `bun tools/unstyled-classes.ts` lists every class the components use that no
+  stylesheet rule mentions; `tools/unstyled-classes.ratchet.test.ts` holds the committed ceiling
+  (`UNSTYLED_CEILING = 0`). A new class must ship with a rule; the ceiling only ever moves down.
+- **Visual contract** — `e2e/visual-contract.e2e.test.ts` drives real Chromium against the real
+  server and asserts the *computed* styles of both screens against the resolved token values, in
+  light and again under `colorScheme: 'dark'`. It runs with the normal `bun test`.
+- **Capture** — `bun run build`, then
+  `bun e2e/visual-parity.ts --out <dir> [--label before|after]` writes side-by-side screenshots
+  (live app | preview reference, light and dark) and an `index.html` to compare them. The committed
+  before/after sets live in `docs/tribe/planning/viewer-visual-parity/evidence/`.
+
 ## Opt-in end-to-end proof
 
 `e2e/` proves the whole picture — a real campaign run through the real runner, watched through

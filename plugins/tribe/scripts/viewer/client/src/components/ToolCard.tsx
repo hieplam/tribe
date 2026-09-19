@@ -26,14 +26,14 @@ function ResultBody({ result }: { result: ToolResult }) {
       return <Markdown tokens={result.body} />;
     case 'spill':
       return (
-        <span className="tool__spill" style={{ color: 'var(--ink-soft)' }}>
+        <span className="tool__spill">
           {result.note} <Markdown tokens={result.previewBody} />
         </span>
       );
     case 'images':
-      return <span className="tool__images" style={{ color: 'var(--ink-soft)' }}>{result.count} image(s)</span>;
+      return <span className="tool__images">{result.count} image(s)</span>;
     case 'refs':
-      return <span className="tool__refs" style={{ color: 'var(--ink-soft)' }}>{result.count} reference(s)</span>;
+      return <span className="tool__refs">{result.count} reference(s)</span>;
   }
 }
 
@@ -46,6 +46,24 @@ export function spillUrl(params: { sessionId?: string; agentId?: string | null; 
   if (params.agentId !== undefined && params.agentId !== null) qs.set('agent', params.agentId);
   qs.set('name', params.name);
   return `/api/spill?${qs.toString()}`;
+}
+
+/** The input keys whose value best summarises a call, most telling first (a Bash `command`, a
+ * Read's `file_path`, a Grep's `pattern`…). */
+const ARG_KEYS = ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'description', 'prompt'] as const;
+
+/** The one-line argument shown after a tool's name (preview §D `.arg`), or null when the input holds
+ * nothing to summarise — a completed call's over-cap input arrives as `null` (D15), and its full
+ * payload stays behind "expand input". Never throws: a non-object input is just null. */
+export function toolArg(input: unknown): string | null {
+  if (typeof input === 'string') return input;
+  if (typeof input !== 'object' || input === null) return null;
+  const fields = input as Record<string, unknown>;
+  for (const key of ARG_KEYS) {
+    const value = fields[key];
+    if (typeof value === 'string' && value !== '') return value;
+  }
+  return null;
 }
 
 export interface ToolCardProps {
@@ -61,6 +79,9 @@ export interface ToolCardProps {
 
 export function ToolCard({ node, sessionId, agentId, history, onSelectAgent }: ToolCardProps) {
   const isError = node.state === 'error' || (node.result?.r === 'text' && node.result.isError);
+  // The outcome the header shows: an ok-state call whose result text is flagged an error reads as an error.
+  const outcome = isError ? 'error' : node.state;
+  const arg = toolArg(node.input);
 
   const [inputExpanded, setInputExpanded] = useState(false);
   const [inputBlock, setInputBlock] = useState<unknown>(null);
@@ -130,48 +151,53 @@ export function ToolCard({ node, sessionId, agentId, history, onSelectAgent }: T
   }
 
   return (
-    <div className="tool" style={{ background: 'var(--surface)', borderColor: isError ? 'var(--error)' : 'var(--rule)' }}>
-      <div className="tool__call" style={{ color: 'var(--ink)' }}>
+    <div className="tool">
+      <div className="tool__call">
+        {/* The caret shows whether the result body below is open: a pending call has none yet. */}
+        <span className="tool__caret" aria-hidden="true">{node.result !== null ? '▾' : '▸'}</span>
         <span className="tool__name">{node.name}</span>
+        {arg !== null && <span className="tool__arg">{arg}</span>}
         {node.agentId !== null && (
           <button
             type="button"
+            className="btn tool__agent-link"
             data-agent-link={node.agentId}
             onClick={goToAgent}
-            style={{ color: 'var(--accent)' }}
           >
             view subagent
           </button>
         )}
         {node.expandable && (
-          <button type="button" data-testid="tool-expand-input" onClick={expandInput} style={{ color: 'var(--ink-soft)' }}>
+          <button type="button" className="btn" data-testid="tool-expand-input" onClick={expandInput}>
             {inputExpanded ? 'hide input' : 'expand input'}
           </button>
         )}
+        <span className="tool__outcome" data-outcome={outcome}>
+          {outcome === 'pending' ? 'running' : outcome === 'error' ? '✗ error' : '✓ ok'}
+        </span>
       </div>
-      {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load payload</span>}
+      {failed && <span className="expand-error" data-testid="expand-error">could not load payload</span>}
       {inputExpanded && inputLoaded && (
-        <pre className="tool__input" style={{ fontFamily: 'var(--font-mono)' }}>{JSON.stringify(inputBlock)}</pre>
+        <pre className="tool__input">{JSON.stringify(inputBlock)}</pre>
       )}
       {node.result !== null && (
         <>
           <div
             data-error-token={isError ? '' : undefined}
             className="tool__result"
-            style={{ color: isError ? 'var(--error)' : 'var(--ink-soft)' }}
           >
             <ResultBody result={node.result} />
           </div>
           {node.resultAnchor !== null && (
-            <button type="button" data-testid="tool-expand-result" onClick={expandResult} style={{ color: 'var(--ink-soft)' }}>
+            <button type="button" className="btn" data-testid="tool-expand-result" onClick={expandResult}>
               {resultExpanded ? 'hide result' : 'expand result'}
             </button>
           )}
           {resultExpanded && resultLoaded && resultText !== null && (
-            <pre className="tool__spill-full" style={{ fontFamily: 'var(--font-mono)' }}>{resultText}</pre>
+            <pre className="tool__spill-full">{resultText}</pre>
           )}
           {resultExpanded && resultLoaded && resultBlock !== null && (
-            <pre className="tool__result-full" style={{ fontFamily: 'var(--font-mono)' }}>{JSON.stringify(resultBlock)}</pre>
+            <pre className="tool__result-full">{JSON.stringify(resultBlock)}</pre>
           )}
         </>
       )}

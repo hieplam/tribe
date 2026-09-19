@@ -13,7 +13,7 @@ export interface ErrorCardProps {
 
 export function ErrorCard({ node, sessionId, agentId }: ErrorCardProps) {
   return (
-    <div data-error-token className="error" style={{ background: 'var(--surface)', color: 'var(--error)' }}>
+    <div data-error-token className="error">
       {node.status !== null && <span className="error__status">{node.status}</span>}
       <Markdown tokens={node.body} />
       {node.expandable && <BlockExpander at={node.at} i={node.i} sessionId={sessionId} agentId={agentId} />}

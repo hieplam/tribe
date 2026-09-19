@@ -22,15 +22,13 @@ function renderToken(token: MdToken, key: number): ReactNode {
       return <span key={key}>{token.v}</span>;
     case 'code':
       return (
-        <pre key={key} style={{ background: 'var(--surface)', fontFamily: 'var(--font-mono)' }}>
+        <pre key={key}>
           <code data-lang={token.lang ?? undefined}>{token.v}</code>
         </pre>
       );
     case 'inline-code':
       return (
-        <code key={key} style={{ background: 'var(--surface)', fontFamily: 'var(--font-mono)' }}>
-          {token.v}
-        </code>
+        <code key={key}>{token.v}</code>
       );
     case 'strong':
       return <strong key={key}>{renderTokens(token.c)}</strong>;
@@ -40,7 +38,7 @@ function renderToken(token: MdToken, key: number): ReactNode {
       const href = safeHref(token.href);
       if (href === null) return <span key={key}>{renderTokens(token.c)}</span>;
       return (
-        <a key={key} href={href} rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>
+        <a key={key} href={href} rel="noopener noreferrer">
           {renderTokens(token.c)}
         </a>
       );

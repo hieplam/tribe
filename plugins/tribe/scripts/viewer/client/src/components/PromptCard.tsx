@@ -8,12 +8,9 @@ import { Markdown } from './Markdown.tsx';
 
 function ChipMarker({ chip }: { chip: Chip }) {
   return (
-    <span
-      data-chip-kind={chip.kind}
-      style={{ background: 'var(--badge-bg)', color: 'var(--ink-soft)', borderRadius: 'var(--badge-radius)' }}
-    >
+    <span className="chip" data-chip-kind={chip.kind}>
       <span data-chip-label>{chip.label}</span>
-      {chip.detail !== null && <span data-chip-detail style={{ color: 'var(--ink-soft)' }}>{chip.detail}</span>}
+      {chip.detail !== null && <span data-chip-detail>{chip.detail}</span>}
     </span>
   );
 }
@@ -26,7 +23,8 @@ export interface PromptCardProps {
 
 export function PromptCard({ node, sessionId, agentId }: PromptCardProps) {
   return (
-    <div className="prompt" style={{ background: 'var(--surface)', color: 'var(--ink)' }}>
+    <div className="prompt">
+      <div className="prompt__role">you</div>
       {node.chips.length > 0 && (
         <div className="prompt__chips">
           {node.chips.map((chip, i) => (

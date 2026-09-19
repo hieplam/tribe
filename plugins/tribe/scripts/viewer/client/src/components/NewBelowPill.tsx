@@ -13,9 +13,8 @@ export function NewBelowPill({ count, onClick }: NewBelowPillProps) {
     <button
       type="button"
       data-testid="new-below-pill"
-      className="pill"
+      className="pill pill--new-below"
       onClick={onClick}
-      style={{ background: 'var(--accent)', color: 'var(--paper)', borderRadius: 'var(--radius-8)' }}
     >
       {count} new below
     </button>

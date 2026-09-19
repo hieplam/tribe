@@ -47,12 +47,12 @@ export function BlockExpander({ at, i, sessionId, agentId }: BlockExpanderProps)
 
   return (
     <>
-      <button type="button" data-testid="block-expand" onClick={toggle} style={{ color: 'var(--ink-soft)' }}>
+      <button type="button" className="btn" data-testid="block-expand" onClick={toggle}>
         {expanded ? 'hide' : 'expand'}
       </button>
-      {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load the full payload</span>}
+      {failed && <span className="expand-error" data-testid="expand-error">could not load the full payload</span>}
       {expanded && loaded && (
-        <pre className="block-expander__body" style={{ fontFamily: 'var(--font-mono)' }}>{JSON.stringify(block)}</pre>
+        <pre className="block-expander__body">{JSON.stringify(block)}</pre>
       )}
     </>
   );

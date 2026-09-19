@@ -44,13 +44,13 @@ export function OrphanResultCard({ node, sessionId, agentId }: OrphanResultCardP
   }
 
   return (
-    <div className="orphan-result" style={{ color: 'var(--warn)', borderColor: 'var(--rule)' }}>
-      <button type="button" data-testid="orphan-expand" onClick={expand} style={{ color: 'var(--warn)' }}>
+    <div className="orphan-result">
+      <button type="button" className="btn" data-testid="orphan-expand" onClick={expand}>
         tool result — call is above the window
       </button>
-      {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load result</span>}
+      {failed && <span className="expand-error" data-testid="expand-error">could not load result</span>}
       {expanded && loaded && (
-        <pre className="orphan-result__body" style={{ fontFamily: 'var(--font-mono)' }}>{JSON.stringify(block)}</pre>
+        <pre className="orphan-result__body">{JSON.stringify(block)}</pre>
       )}
     </div>
   );

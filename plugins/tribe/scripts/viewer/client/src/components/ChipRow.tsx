@@ -9,13 +9,13 @@ import { safeHref } from './Markdown.tsx';
 export function ChipRow({ node }: { node: Extract<RenderNode, { k: 'chip' }> }) {
   const href = node.href === null ? null : safeHref(node.href);
   return (
-    <div className="chip" style={{ background: 'var(--badge-bg)', color: 'var(--ink-soft)', borderRadius: 'var(--badge-radius)' }}>
+    <div className="chip">
       {href !== null ? (
-        <a data-chip-label href={href} rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>{node.label}</a>
+        <a data-chip-label href={href} rel="noopener noreferrer">{node.label}</a>
       ) : (
         <span data-chip-label>{node.label}</span>
       )}
-      {node.detail !== null && <span data-chip-detail style={{ color: 'var(--ink-soft)' }}>{node.detail}</span>}
+      {node.detail !== null && <span data-chip-detail>{node.detail}</span>}
     </div>
   );
 }

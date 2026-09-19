@@ -70,6 +70,28 @@ cd plugins/tribe/scripts/viewer && TRIBE_VIEWER_E2E=1 bun test e2e/live-tail.e2e
 cd plugins/tribe/scripts/viewer && TRIBE_VIEWER_E2E=1 bun test e2e/campaign-badge.e2e.test.ts
 ```
 
+## Visual parity evidence (a script, not a test)
+
+`visual-parity.ts` is a **capture tool**, not a test — it is named without `.test.` so `bun test`
+never picks it up. It produces the before/after side-by-side screenshot set the owner compares
+against the sea-salt reference (`docs/tribe/planning/viewer-consolidation/design/sea-salt/preview.html`
+§C/§D). It builds a fresh `homeA` fixture from nothing, starts the real `serve.ts` against it, drives
+headless Chromium at 1280×900, and shoots the list, project, and session pages (plus the session with
+its first tool card expanded) in both `light` and `dark`, each paired with the matching preview
+`.screen` reference. It requires a built `dist/` and a real Chromium, and refuses with one line (no
+stack trace) if either is missing.
+
+```sh
+cd plugins/tribe/scripts/viewer
+bun run build
+bun e2e/visual-parity.ts --out ../../../../docs/tribe/planning/viewer-visual-parity/evidence/before
+# optional: also capture the owner's real session (read-only, against the real ~/.claude/projects)
+bun e2e/visual-parity.ts --out <dir> --session <session-id>
+```
+
+The output (`index.html` + PNGs) is committed under
+`docs/tribe/planning/viewer-visual-parity/evidence/before/`; open `index.html` to view the pairs.
+
 ## `output/`
 
 Git-ignored (`e2e/output/`, see the package `.gitignore`). Holds artifacts written by the opt-in

@@ -3,8 +3,6 @@ import type { RenderNode } from '../../../core/model.ts';
 
 export function Divider({ node }: { node: Extract<RenderNode, { k: 'divider' }> }) {
   return (
-    <div className="divider" style={{ color: 'var(--ink-soft)', borderColor: 'var(--rule)' }}>
-      {node.label}
-    </div>
+    <div className="divider">{node.label}</div>
   );
 }

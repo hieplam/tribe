@@ -65,13 +65,13 @@ export function ImageCard({ node, sessionId, agentId }: ImageCardProps) {
   }
 
   return (
-    <div className="image" style={{ color: 'var(--ink-soft)', borderColor: 'var(--rule)' }}>
+    <div className="image">
       {!expanded && (
-        <button type="button" data-testid="image-expand" onClick={expand} style={{ color: 'var(--ink-soft)' }}>
+        <button type="button" className="btn" data-testid="image-expand" onClick={expand}>
           image ({node.mediaType})
         </button>
       )}
-      {failed && <span data-testid="expand-error" style={{ color: 'var(--warn)' }}>could not load image</span>}
+      {failed && <span className="expand-error" data-testid="expand-error">could not load image</span>}
       {expanded && loaded && src !== null && <img className="image__full" src={src} alt={node.mediaType} />}
     </div>
   );
