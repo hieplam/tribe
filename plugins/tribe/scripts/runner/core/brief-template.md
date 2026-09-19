@@ -68,8 +68,9 @@ Your agent Method already carries these; they are walls here because campaigns
 starve them silently:
 
 - Dispatch the Tracker at every audit round (Method step 6.0b), and give every dispatch its
-  own report-file path under the BASE tribe home's `reports/` directory that Method step 6.0b
-  names — the one `gap-gate.ts` globs, NOT the campaign-nested `reports/` of {{REPORT_PATH}} above — named
+  own report-file path under the CAMPAIGN home's `reports/` directory — the same directory
+  {{REPORT_PATH}} above lives in, and the one `gap-gate.ts` globs when it is run with `--home`
+  set to that campaign home (see Method step 7 below) — named
   `tracker-<your card slug>-<round>.md` (`<round>` = `task-3`, `wave-2`, `fix-1`,
   `final`). You never read those files yourself.
   Your card slug is the value you put in every `Tribe-Card:` trailer (the runner accepts that
