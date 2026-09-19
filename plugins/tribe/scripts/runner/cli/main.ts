@@ -6,7 +6,7 @@
 // SDK spawn from session.adapter.ts) and hands it to `runLoop`. `main()` is deliberately NOT
 // unit-tested: the logic it depends on (`runLoop`, `deriveCardPhase`, ...) is fully covered
 // without touching a real binary or the network (same precedent as the adapters themselves).
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import {
   liveLockHolder,
@@ -572,8 +572,14 @@ export function renderRerunCommand(subArgv: string[]): string {
  * `supervise` flags, exactly as `parseSupervisorArgs` itself consumed them. `watchdogEntrypoint`
  * is `run.ts`'s own resolved path (mirrors `ports.ts`'s `RunnerSpawnPort.runnerCommand()` — only
  * the composition root can resolve `import.meta.dir`). Exported for `cli/main.test.ts`. */
+/** R11 (Task 20, spec §5.4 item 4): `verifyShippedPluginDir` arrives ALREADY resolved and
+ * existence-checked — `null` means absent — from the actual composition root caller below
+ * (`main()`'s `supervise` block), the one impure edge allowed to touch `import.meta.dir` and a
+ * filesystem existence check. This function stays pure so it (and the resolved-dir-or-null
+ * threading) is unit-testable without spinning up the whole CLI (`pure-core.md`). */
 export function buildSupervisorLoopConfig(
   parsed: SupervisorConfig, subArgv: string[], homeDir: string, watchdogEntrypoint: string,
+  verifyShippedPluginDir: string | null,
 ): SupervisorLoopConfig {
   return {
     repoRoot: parsed.repoRoot,
@@ -588,6 +594,7 @@ export function buildSupervisorLoopConfig(
     // `RUNNER_ENTRYPOINT` — resolved from THIS file's own location, never from cwd.
     watchdogCommand: ['bun', watchdogEntrypoint],
     rerunCommand: renderRerunCommand(subArgv),
+    verifyShippedPluginDir,
   };
 }
 
@@ -852,8 +859,22 @@ export async function main(): Promise<void> {
       realpath: watchdogIo.realpath,
     };
 
+    // R11 (Task 20, spec §5.4 item 4): resolved from THIS FILE'S OWN LOCATION — never cwd, never
+    // `~/.claude`, never a literal — mirroring `watchdogEntrypoint` just above. This file lives
+    // at `plugins/tribe/scripts/runner/cli/main.ts`; `import.meta.dir` therefore ends in `/cli`,
+    // and four levels up is `plugins/`, which is where the separate `plugins/verify-shipped/`
+    // plugin (the skill `closing` must resolve BY NAME) actually lives. Existence-checked via
+    // the SAME fs seam this composition root already uses elsewhere (`watchdogIo.fileExists`,
+    // built from `existsSync` in `adapters/watchdog-io.adapter.ts`) — never a direct `node:fs`
+    // import here (`structure.test.ts`'s world-touching sweep bans it from `cli/main.ts`).
+    const verifyShippedPluginDirCandidate = resolve(import.meta.dir, '../../../../verify-shipped');
+    const verifyShippedPluginDir = watchdogIo.fileExists(verifyShippedPluginDirCandidate)
+      ? verifyShippedPluginDirCandidate
+      : null;
+
     const config: SupervisorLoopConfig = buildSupervisorLoopConfig(
       parsed.config, argv.slice(1), home.homeDir, join(import.meta.dir, '..', 'run.ts'),
+      verifyShippedPluginDir,
     );
 
     // Mirrors the watchdog block's own B2 fix above: a real I/O failure inside the

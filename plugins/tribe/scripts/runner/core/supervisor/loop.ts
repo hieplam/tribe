@@ -119,6 +119,13 @@ export interface SupervisorLoopConfig {
   watchdogCommand: string[];
   /** The exact `supervise` argv the owner re-runs after resolving a park. */
   rerunCommand: string;
+  /** R11 (Task 20, spec §5.4 item 4): the `verify-shipped` plugin directory, resolved and
+   * existence-checked by the composition root FROM ITS OWN LOCATION (never cwd, never
+   * `~/.claude`, never a literal — `cli/main.ts`'s `buildSupervisorLoopConfig` caller does this).
+   * `null` means absent: `observe()` reads that as `verifyShippedPluginAvailable: false`, and
+   * `decide()`'s R11 guard fails closed rather than spawn a `closing` session that cannot
+   * verify any card. */
+  verifyShippedPluginDir: string | null;
 }
 
 export interface SupervisorTerminal {
@@ -458,6 +465,10 @@ function observe(
     state: supState,
     limits: config.limits,
     lastSessionOutcome,
+    // R11 (Task 20): the composition root's own resolved-and-existence-checked fact, threaded
+    // through verbatim — `observe()` never re-resolves or re-checks it (that is the edge's job,
+    // done once in `cli/main.ts`).
+    verifyShippedPluginAvailable: config.verifyShippedPluginDir !== null,
   };
 }
 
@@ -838,6 +849,13 @@ export async function runSupervisor(
           realpath: (p: string) => io.realpath(p),
           ...(action.session === 'ruling' || action.session === 'closing'
             ? { repoRoot: config.repoRoot }
+            : {}),
+          // R11 (Task 20, spec §5.4 item 4): only `closing` ever loads a plugin; `decide()`'s
+          // own R11 guard already refused to spawn `closing` when this is `null` (the observation
+          // this tick's `spawn_session(closing)` action was decided FROM), so this branch is only
+          // ever reached with a real, existing directory.
+          ...(action.session === 'closing' && config.verifyShippedPluginDir !== null
+            ? { verifyShippedPluginDir: config.verifyShippedPluginDir }
             : {}),
         };
         const before = io.readFileOrEmpty(paths.answers);

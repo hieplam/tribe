@@ -11,6 +11,10 @@ const base = (over: Partial<SupervisorObservation> = {}): SupervisorObservation 
   limits: { maxRulingRounds: 2, maxRatifyRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20,
             sessionRetries: 1 },
   lastSessionOutcome: null,
+  // R11 (Task 20): the composition root resolved the verify-shipped plugin dir and it exists —
+  // the ordinary case every OTHER test in this file relies on, so it defaults to available here
+  // rather than forcing every existing `runner_done` fixture to opt in.
+  verifyShippedPluginAvailable: true,
   ...over,
 });
 
@@ -60,6 +64,17 @@ test('rows 1-3: runner_done closes, ratifies, or closes-out', () => {
     .toEqual({ kind: 'spawn_session', session: 'ratify', cardId: null });
   expect(decide(base({ lastWatchdog: { terminal: { status: 'done', reason: 'runner_done', exitCode: 0 }, ownedExitCode: 0 } })))
     .toEqual({ kind: 'spawn_session', session: 'closing', cardId: null });
+});
+
+// R11 (Task 20, spec §5.4 item 4): fail-closed park. A `closing` spawn without the
+// verify-shipped plugin dir cannot verify any card, so row 3 must never fire in that case.
+test('row 3 (R11): runner_done with the verify-shipped plugin dir UNAVAILABLE parks '
+  + 'closing_failed instead of spawning closing', () => {
+  expect(decide(base({
+    lastWatchdog: { terminal: { status: 'done', reason: 'runner_done', exitCode: 0 }, ownedExitCode: 0 },
+    verifyShippedPluginAvailable: false,
+  })))
+    .toEqual({ kind: 'park', reason: 'closing_failed', detail: expect.any(String) });
 });
 
 test('row 4: a watchdog-reported stop_requested exits done, same as P3', () => {

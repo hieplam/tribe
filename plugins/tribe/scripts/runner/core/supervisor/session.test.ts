@@ -106,9 +106,39 @@ describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () =>
     expect(options.hooks).toBeUndefined();
   });
 
-  test('closing carries no disallowedTools wall — the full Claude Code set, Bash included', () => {
+  // R11 (owner ruling, Task 20): `settingSources: ['project']` grants NOTHING when the target
+  // repo has no committed `.claude/settings.json` (this repo has none), so `closing` could not
+  // run headless at all. R11 REPLACES the old "no grant/deny list — the full Claude Code set"
+  // shape (the assertion this test used to pin) with an EXPLICIT allowedTools/disallowedTools
+  // pair naming exactly the tools Stage D uses — brief-contracts.md: an assertion the governing
+  // ruling changed is updated, not preserved.
+  test('closing carries R11\'s explicit tool grant — Stage D\'s tools allowed, subagents/network/wait-tool denied', () => {
     const options = buildOneShotOptions('closing', fixtureConfig(), new AbortController());
-    expect(options.disallowedTools).toBeUndefined();
+    expect(options.allowedTools).toEqual(['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash', 'Skill']);
+    expect(options.disallowedTools).toEqual([
+      'Task', 'Agent', 'WebFetch', 'WebSearch', 'Monitor', 'ScheduleWakeup',
+    ]);
+  });
+
+  test('closing carries plugins: [{type: local, path}] when verifyShippedPluginDir is set (R11 item 4)', () => {
+    const options = buildOneShotOptions(
+      'closing', fixtureConfig({ verifyShippedPluginDir: '/abs/plugins/verify-shipped' }), new AbortController(),
+    );
+    expect(options.plugins).toEqual([{ type: 'local', path: '/abs/plugins/verify-shipped' }]);
+  });
+
+  test('closing carries no plugins field when verifyShippedPluginDir is not set', () => {
+    const options = buildOneShotOptions('closing', fixtureConfig(), new AbortController());
+    expect(options.plugins).toBeUndefined();
+  });
+
+  test('ruling/ratify never carry plugins, even when verifyShippedPluginDir happens to be set', () => {
+    for (const kind of ['ruling', 'ratify'] as SessionKind[]) {
+      const options = buildOneShotOptions(
+        kind, fixtureConfig({ verifyShippedPluginDir: '/abs/plugins/verify-shipped' }), new AbortController(),
+      );
+      expect(options.plugins).toBeUndefined();
+    }
   });
 
   for (const kind of ['ruling', 'ratify'] as SessionKind[]) {

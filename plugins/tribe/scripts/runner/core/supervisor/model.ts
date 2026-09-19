@@ -155,6 +155,12 @@ export interface SupervisorObservation {
    * `decide()` evaluates ONLY the post-session rows and returns — they run "before any other
    * row" (§3.4). */
   lastSessionOutcome: SessionOutcome | null;
+  /** R11 (Task 20, spec §5.4 item 4): the composition root resolved the verify-shipped plugin
+   * dir from THE RUNNER'S OWN LOCATION (never cwd, never `~/.claude`, never a literal) and it
+   * exists on disk. A `closing` spawn without it cannot verify any card — Stage D's
+   * `verify-shipped` skill would resolve to nothing, so `decide()` fails closed instead of
+   * spawning a session that cannot do its job. */
+  verifyShippedPluginAvailable: boolean;
 }
 
 /** §3.4's post-session rows (V1-V5): a one-shot session's verdict, decided by the postcondition

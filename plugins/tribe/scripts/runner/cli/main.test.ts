@@ -1212,7 +1212,7 @@ describe('buildSupervisorLoopConfig — the supervise composition root\'s config
     + '(fixtures-mirror-reality.md: the shape an owner\'s shell actually parses)', () => {
     const subArgv = ['--repo', '/some path/with space', '--model', 'claude', '--home', '/h'];
     const config = buildSupervisorLoopConfig(
-      fixtureSupervisorConfig(), subArgv, '/h/.tribe/k/campaigns/c', '/abs/run.ts',
+      fixtureSupervisorConfig(), subArgv, '/h/.tribe/k/campaigns/c', '/abs/run.ts', '/abs/plugins/verify-shipped',
     );
     const prefix = 'bun run.ts supervise ';
     expect(config.rerunCommand.startsWith(prefix)).toBe(true);
@@ -1231,13 +1231,30 @@ describe('buildSupervisorLoopConfig — the supervise composition root\'s config
   test('watchdogCommand and repoRoot/model/limits/sessionMaxTurns still flow through unchanged', () => {
     const config = buildSupervisorLoopConfig(
       fixtureSupervisorConfig({ campaignSlug: 'c', sessionMaxTurns: 17 }),
-      ['--campaign', 'c'], '/h/.tribe/k/campaigns/c', '/abs/run.ts',
+      ['--campaign', 'c'], '/h/.tribe/k/campaigns/c', '/abs/run.ts', '/abs/plugins/verify-shipped',
     );
     expect(config.repoRoot).toBe('/some/repo');
     expect(config.model).toBe('claude-fixture');
     expect(config.campaign).toBe('c');
     expect(config.sessionMaxTurns).toBe(17);
     expect(config.watchdogCommand).toEqual(['bun', '/abs/run.ts']);
+  });
+
+  // R11 (Task 20, spec §5.4 item 4): `buildSupervisorLoopConfig` stays pure — the resolved-dir-
+  // or-null is resolved+existence-checked by the actual composition root caller (the impure
+  // edge, `main()`) and handed in as a parameter, never re-derived here.
+  test('R11: the resolved verify-shipped plugin dir flows into verifyShippedPluginDir', () => {
+    const config = buildSupervisorLoopConfig(
+      fixtureSupervisorConfig(), [], '/h/.tribe/k/campaigns/c', '/abs/run.ts', '/abs/plugins/verify-shipped',
+    );
+    expect(config.verifyShippedPluginDir).toBe('/abs/plugins/verify-shipped');
+  });
+
+  test('R11: an absent verify-shipped plugin dir flows through as null, not a default/guess', () => {
+    const config = buildSupervisorLoopConfig(
+      fixtureSupervisorConfig(), [], '/h/.tribe/k/campaigns/c', '/abs/run.ts', null,
+    );
+    expect(config.verifyShippedPluginDir).toBeNull();
   });
 });
 

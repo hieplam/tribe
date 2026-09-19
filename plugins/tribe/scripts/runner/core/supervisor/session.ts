@@ -18,8 +18,11 @@ import type { SessionKind } from './model.ts';
 import type { LedgerEntryUsage } from './model.ts';
 import { buildContainmentHook } from './permit.ts';
 
-/** spec §5.2/§5.3: the tool grant for a `ruling`/`ratify` session. `closing` (§5.4) gets no
- * grant/deny list at all — the full Claude Code set, named as the exception. */
+/** spec §5.2/§5.3: the tool grant for a `ruling`/`ratify` session. `closing` (§5.4) carries its
+ * OWN, wider grant — R11 (Task 20), below `CLOSING_ALLOWED_TOOLS`/`CLOSING_DISALLOWED_TOOLS` —
+ * because `settingSources: ['project']` alone grants nothing when the target repo has no
+ * committed `.claude/settings.json` (this repo has none): an un-granted `closing` session cannot
+ * run headless at all. */
 const JUDGMENT_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit'];
 
 /** spec §5.1: no shell, no subagents, no network, and no wait-tool for a ruling/ratify session —
@@ -27,6 +30,21 @@ const JUDGMENT_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit'];
  * Monitor dies before the notification can ever reach it), restated here rather than imported
  * because this envelope is otherwise unrelated to the executor's `PinnedSessionOptions`. */
 const JUDGMENT_DISALLOWED_TOOLS = ['Bash', 'Task', 'Agent', 'WebFetch', 'WebSearch', 'Monitor', 'ScheduleWakeup'];
+
+/** R11 (owner ruling, Task 20, spec §5.4): the `closing` session's own explicit tool grant —
+ * exactly the tools Stage D uses, nothing more. Before R11, `closing` carried NO
+ * allowedTools/disallowedTools at all, relying on `settingSources: ['project']` to load the
+ * target repo's own `.claude/settings.json` for a grant; but that file grants NOTHING when the
+ * target repo has none committed (this repo has none), so the session could not run headless.
+ * `allowedTools`/`disallowedTools` here still do not "confine" anything by themselves (§5.1's
+ * own hook-is-the-enforcement-layer finding) — they are what makes a `'default'`-permissionMode
+ * session headless in the first place (an allowlisted tool never prompts). */
+const CLOSING_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash', 'Skill'];
+
+/** R11: no subagents, no network, no wait-tool for `closing` either — `Bash` stays granted
+ * (above) because `closing` legitimately runs `verify-shipped` and lands the governance PR
+ * (§5.4's named exception); this list only removes the tools nothing in Stage D needs. */
+const CLOSING_DISALLOWED_TOOLS = ['Task', 'Agent', 'WebFetch', 'WebSearch', 'Monitor', 'ScheduleWakeup'];
 
 /** spec §5.1's envelope, for the three one-shot kinds. Deliberately has NO `resume` field at
  * all — not even optional — because G3 says every one-shot session starts from a rendered brief,
@@ -40,6 +58,11 @@ export interface OneShotSessionOptions {
   allowedTools?: string[];
   disallowedTools?: string[];
   additionalDirectories?: string[];
+  /** R11 (Task 20, spec §5.4 item 4): the SDK's local-plugin option, set on `closing` only, so
+   * `verify-shipped` resolves BY NAME inside the session instead of failing `Unknown skill` —
+   * the skill ships in the separate `plugins/verify-shipped/` plugin, which `settingSources`
+   * alone never loads. `ruling`/`ratify` never carry this field. */
+  plugins?: Array<{ type: 'local'; path: string }>;
   abortController: AbortController;
   hooks?: { PreToolUse: Array<{ hooks: Array<(input: unknown) => Promise<HookDecision>> }> };
   /** Fix 2 (skinner audit): spec §5.1's bounded-TURN guard, distinct from the wall-clock
@@ -64,6 +87,13 @@ export interface OneShotSessionConfig {
   maxTurns: number;
   repoRoot?: string;
   realpath: (path: string) => string;
+  /** R11 (Task 20, spec §5.4 item 4): the `verify-shipped` plugin directory, resolved and
+   * existence-checked by the composition root from ITS OWN location (never cwd, never
+   * `~/.claude`, never a literal). Read only for `kind === 'closing'`; `undefined` for
+   * `ruling`/`ratify`, which never load plugins. The edge (`decide.ts`/`loop.ts`) fails closed
+   * before a `closing` session is ever spawned without it — this field, when present, is
+   * therefore always a real, existing directory. */
+  verifyShippedPluginDir?: string;
 }
 
 /** Builds spec §5.1's option block. `permissionMode` is `'default'` for every kind — never
@@ -87,9 +117,21 @@ export function buildOneShotOptions(
   };
 
   if (kind === 'closing') {
-    // §5.4's named exception: the full Claude Code toolset including Bash and repo write, and NO
-    // containment hook — this session legitimately lands the governance PR.
+    // R11 (Task 20): §5.4's named exception, now an EXPLICIT tool grant rather than "no
+    // list at all" — `settingSources: ['project']` above grants nothing when the target repo
+    // has no committed `.claude/settings.json` (this repo has none), so without this grant the
+    // session could not run headless. Still NO containment hook — this session legitimately
+    // lands the governance PR, and `Bash`/repo write are named IN the grant, not left ungoverned.
+    options.allowedTools = CLOSING_ALLOWED_TOOLS;
+    options.disallowedTools = CLOSING_DISALLOWED_TOOLS;
     if (config.repoRoot !== undefined) options.additionalDirectories = [config.repoRoot];
+    // R11 item 4: `verify-shipped` ships in its own plugin directory, which `settingSources`
+    // never loads — without this, Stage D's `verify-shipped` invocation fails `Unknown skill`
+    // inside the session. Absent only when the edge (`decide.ts`) has already fail-closed the
+    // spawn itself; see that module's `verifyShippedPluginAvailable` guard.
+    if (config.verifyShippedPluginDir !== undefined) {
+      options.plugins = [{ type: 'local', path: config.verifyShippedPluginDir }];
+    }
     return options;
   }
 

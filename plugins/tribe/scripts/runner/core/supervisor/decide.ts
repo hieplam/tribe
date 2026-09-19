@@ -144,6 +144,17 @@ export function decide(o: SupervisorObservation): SupervisorAction {
   if (reason === 'runner_done') {
     if (o.state.closingVerified) return { kind: 'exit', status: 'done', reason: 'campaign_closed' };
     if (o.unratifiedRulings.length > 0) return { kind: 'spawn_session', session: 'ratify', cardId: null };
+    // R11 (Task 20, spec §5.4 item 4): fail closed rather than spawn a `closing` session that
+    // cannot verify any card — checked BEFORE the spawn, never after (a session with no
+    // verify-shipped plugin loaded would fail `Unknown skill` mid-brief instead of parking with
+    // a reason an owner can act on).
+    if (!o.verifyShippedPluginAvailable) {
+      return park(
+        'closing_failed',
+        'the verify-shipped plugin dir was not found at the runner-resolved location; a closing '
+          + 'session cannot verify any card (R11)',
+      );
+    }
     return { kind: 'spawn_session', session: 'closing', cardId: null };
   }
 

@@ -44,6 +44,10 @@ function baseConfig(overrides: Partial<SupervisorLoopConfig> = {}): SupervisorLo
     pollSeconds: 30,
     watchdogCommand: ['bun', '/abs/run.ts'],
     rerunCommand: 'bun run.ts supervise --repo /repo --campaign c --model claude-fixture',
+    // R11 (Task 20): available by default — the ordinary case every OTHER test in this file
+    // relies on, so it defaults to available here rather than forcing every existing
+    // `runner_done` fixture to opt in (mirrors decide.test.ts's own `base()` default).
+    verifyShippedPluginDir: '/abs/plugins/verify-shipped',
     ...overrides,
   };
 }
@@ -519,6 +523,40 @@ describe('runSupervisor — Fix 3 (skinner audit): status.json carries the watch
       watchdog: { lastTerminalReason: string | null };
     };
     expect(last.watchdog.lastTerminalReason).toBe('escalations_pending');
+  });
+});
+
+describe('runSupervisor — R11 (Task 20, spec §5.4 item 4): verifyShippedPluginDir threads into '
+  + 'observe() and the closing one-shot config', () => {
+  test('a configured verifyShippedPluginDir flows through observe() as available=true and into '
+    + 'the closing spawn\'s own OneShotSessionOptions.plugins', async () => {
+    const seam = fakeSeam({
+      watchdogRuns: [{ reason: 'runner_done', exitCode: 0, report: reportShipped() }],
+      sessions: [
+        { effect: () => { seam.files.set(join(HOME, 'supervisor', 'final-report.md'), '# Final Report\n\nShipped c1.\n'); } },
+      ],
+    });
+    const result = await runSupervisor(
+      baseConfig({ verifyShippedPluginDir: '/abs/plugins/verify-shipped' }), HOME, seam.io,
+    );
+
+    expect(result.kind).toBe('done');
+    expect(seam.spawnedOptions.length).toBe(1); // closing only — no escalation, nothing to ratify
+    expect(seam.spawnedOptions[0]?.plugins).toEqual([{ type: 'local', path: '/abs/plugins/verify-shipped' }]);
+  });
+
+  test('verifyShippedPluginDir: null flows through observe() as available=false — the closing '
+    + 'spawn never happens, and decide()\'s R11 guard parks closing_failed instead (exit 20)', async () => {
+    const seam = fakeSeam({
+      watchdogRuns: [{ reason: 'runner_done', exitCode: 0, report: reportShipped() }],
+    });
+    const result = await runSupervisor(baseConfig({ verifyShippedPluginDir: null }), HOME, seam.io);
+
+    expect(result).toEqual({
+      exitCode: 20, kind: 'needs_owner', reason: 'closing_failed',
+      statusPath: join(HOME, 'supervisor', 'status.json'),
+    });
+    expect(seam.spawnedOptions.length).toBe(0); // never spawned — decide() fails closed first
   });
 });
 

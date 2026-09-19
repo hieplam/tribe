@@ -76,6 +76,8 @@ function baseConfig(): SupervisorLoopConfig {
     pollSeconds: 30,
     watchdogCommand: ['bun', '/abs/run.ts'],
     rerunCommand: `bun run.ts supervise --repo /repo --campaign ${CARD_ID} --model claude-fixture`,
+    // R11 (Task 20): available by default, same convention as `loop.test.ts`'s own `baseConfig`.
+    verifyShippedPluginDir: '/abs/plugins/verify-shipped',
   };
 }
 
