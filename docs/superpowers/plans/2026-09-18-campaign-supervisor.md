@@ -1821,7 +1821,7 @@ under `/Users/hip/.tribe/-Users-hip-repo-tribe/campaigns/` is read or written.
 
 **Steps**
 
-- [ ] **Step 1: Write the opt-in script.** It refuses to run unless `TRIBE_REAL_E2E=1`, prints the
+- [x] **Step 1: Write the opt-in script.** It refuses to run unless `TRIBE_REAL_E2E=1`, prints the
   estimated cost, builds the throwaway repo and campaign home, and runs:
 
 ```sh
@@ -1834,7 +1834,7 @@ echo "exit=$?"
 Expected: `exit=0`; `NEEDS_OWNER.md` does not exist; `answers.md` gained at least one ratified
 `## ` block; the escalation file is archived; `supervisor/final-report.md` exists and is non-empty.
 
-- [ ] **Step 2: Assert the G5 ledger mechanically.**
+- [x] **Step 2: Assert the G5 ledger mechanically.**
 
 ```sh
 python3 - "$HOME_DIR/supervisor/ledger.jsonl" <<'PY'
@@ -1852,7 +1852,7 @@ PY
 
 Expected: `ledger ok:` with between 1 and 4 spawns and no `failed`/`timeout` verdict.
 
-- [ ] **Step 3: Assert the G0 ratchet, and WRITE the measured ceilings** (S-P15). Collect every
+- [x] **Step 3: Assert the G0 ratchet, and WRITE the measured ceilings** (S-P15). Collect every
   session id from the ledger, measure them, assert the first two ratchet conditions, then turn the
   measured maxima into the committed per-kind ceilings.
 
@@ -1864,7 +1864,8 @@ python3 - "$TMP/e2e-metrics.json" "$HOME_DIR/supervisor/ledger.jsonl" \
   docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json <<'PY'
 import json, math, sys
 metrics, ledger, ratchet_path = sys.argv[1], sys.argv[2], sys.argv[3]
-m = {s["sessionId"]: s for s in json.load(open(metrics))["sessions"]}
+# `transcript-metrics --json` nests the numbers under each entry's `.metrics` (BaselineEntry).
+m = {s["sessionId"]: s["metrics"] for s in json.load(open(metrics))["sessions"]}
 kind = {json.loads(l)["sessionId"]: json.loads(l)["kind"] for l in open(ledger) if l.strip()}
 for sid, s in m.items():
     assert s["babysittingShare"] == 0, (sid, s["babysittingShare"])
@@ -1886,7 +1887,7 @@ Expected: every session reports `"babysittingShare": 0` and `"monitorArms": 0`; 
 the measured maxima per kind and the ceilings it wrote (each `measured × 1.5`, rounded up). A kind
 with no session in this run keeps its `0` and stays on the baseline fallback — do not invent one.
 
-- [ ] **Step 3a: Re-run the ceiling gate against the file just written.**
+- [x] **Step 3a: Re-run the ceiling gate against the file just written.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/metrics/ceiling.test.ts
@@ -1897,7 +1898,7 @@ Expected: the ceiling tests pass against real values, the diff shows only `ceili
 changing, and no ceiling was raised relative to a previously measured value (the first measurement
 moves them off `0`, which the test treats as the initial set, not a raise).
 
-- [ ] **Step 4: Prove G6 in the viewer.** Start the viewer, open it, and record BOTH:
+- [x] **Step 4: Prove G6 in the viewer.** Start the viewer, open it, and record BOTH:
   the project directory listing (reproducible) and a screenshot (what the card asks for).
 
 ```sh
@@ -1909,7 +1910,7 @@ cd plugins/tribe/scripts/viewer && bun serve.ts --port 4321
 Expected: exactly one project directory whose name ends in the campaign slug, containing one
 `.jsonl` per ledger spawn, and the viewer listing that project with those sessions.
 
-- [ ] **Step 5: Write the evidence file** at
+- [x] **Step 5: Write the evidence file** at
   `docs/superpowers/evidence/2026-09-18-campaign-supervisor-e2e.md`, carrying:
   **BEFORE** — the baseline table from Task 4 (174 turns, 26.5M cache-read, 0.3168 babysitting
   share for one campaign's supervision) with the three rulings it produced.
@@ -1918,7 +1919,7 @@ Expected: exactly one project directory whose name ends in the campaign slug, co
   from step 4, and `final-report.md`.
   Both live in the repo so every PR link resolves from the repo itself.
 
-- [ ] **Step 6: Commit** — `test(supervisor): real unattended end-to-end run on haiku with evidence (task 20/24)`.
+- [x] **Step 6: Commit** — `test(supervisor): real unattended end-to-end run on haiku with evidence (task 20/24)`.
 
 ---
 

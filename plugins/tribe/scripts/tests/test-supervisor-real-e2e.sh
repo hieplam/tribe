@@ -212,7 +212,11 @@ RATCHET_OUT="$(python3 - "$TMP/e2e-metrics.json" "$HOME_DIR/supervisor/ledger.js
   "$REPO_ROOT/docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json" <<'PY'
 import json, math, sys
 metrics, ledger, ratchet_path = sys.argv[1], sys.argv[2], sys.argv[3]
-m = {s["sessionId"]: s for s in json.load(open(metrics))["sessions"]}
+# `transcript-metrics --json` emits `sessions: [{sessionId, path, cut, metrics}]` — the per-session
+# numbers (babysittingShare/monitorArms/maxContext) live INSIDE `.metrics`, not at the entry's top
+# level (BaselineEntry in cli/main.ts). The plan's Task 20 Step 3 code block read them flat; the
+# real tool schema is nested. Fixed here (and in the plan) per R6/brief-contracts.
+m = {s["sessionId"]: s["metrics"] for s in json.load(open(metrics))["sessions"]}
 kind = {json.loads(l)["sessionId"]: json.loads(l)["kind"] for l in open(ledger) if l.strip()}
 for sid, s in m.items():
     assert s["babysittingShare"] == 0, (sid, s["babysittingShare"])
