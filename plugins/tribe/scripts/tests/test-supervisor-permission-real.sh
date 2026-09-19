@@ -190,5 +190,134 @@ else
   bad "(d) <home>/link-out/escape.txt (symlink escape) was denied — absent on disk (the write LANDED)"
 fi
 
+# ===========================================================================================
+# The `closing` case — R11 (owner ruling, Task 20, spec §5.4 item 4). `closing` carries a
+# DIFFERENT envelope than `ruling`/`ratify` above (its own explicit allowedTools/disallowedTools
+# grant, Bash included, no containment hook) — the ruling probe above proves nothing about it.
+# Built exactly the same way: `runOneShotSession({ kind: 'closing', ... })` (which calls the REAL
+# `buildOneShotOptions` internally) spawned through the REAL SDK adapter — never a hand-copied
+# option block (fixtures-mirror-reality.md).
+#
+# Oracle (this brief): outcome == success, permissionDenials empty, AND both attempted actions
+# (a Write inside repoRoot, a Bash `git status` inside repoRoot) actually land — this is the
+# proof that R11's grant (not just "no crash") makes `closing` headless for the tools Stage D
+# needs. The plugin dir is existence-checked and asserted present (not skipped): it is a
+# committed part of this repo, so its absence here is a test-environment defect, distinct from
+# the TRIBE_REAL_E2E opt-in gate already handled at the top of this script.
+# ===========================================================================================
+
+CLOSING_REPO_ROOT="$TMP/closing-repo"
+mkdir -p "$CLOSING_REPO_ROOT"
+git -C "$CLOSING_REPO_ROOT" init -q
+git -C "$CLOSING_REPO_ROOT" config user.email "tribe-test@example.com"
+git -C "$CLOSING_REPO_ROOT" config user.name "Tribe Test"
+printf 'seed\n' > "$CLOSING_REPO_ROOT/seed.txt"
+git -C "$CLOSING_REPO_ROOT" add seed.txt
+git -C "$CLOSING_REPO_ROOT" commit -q -m 'initial commit'
+
+CLOSING_WRITTEN_FILE="$CLOSING_REPO_ROOT/closing-probe-note.txt"
+
+# R11 item 4: resolved from THIS SCRIPT'S OWN LOCATION (`$HERE`), never cwd — mirrors
+# `cli/main.ts`'s `import.meta.dir`-relative resolution of the same directory. `plugins/` is
+# three levels up from `plugins/tribe/scripts/tests/` (this file's own directory).
+PLUGINS_DIR="$(cd "$HERE/../../.." && pwd)"
+VERIFY_SHIPPED_DIR="$PLUGINS_DIR/verify-shipped"
+if [[ ! -d "$VERIFY_SHIPPED_DIR" ]]; then
+  echo "test-supervisor-permission-real.sh: expected plugin dir not found: $VERIFY_SHIPPED_DIR" >&2
+  exit 1
+fi
+
+RESULT_JSON_CLOSING="$TMP/result-closing.json"
+
+PROBE_CLOSING="$TMP/probe-closing.ts"
+cat > "$PROBE_CLOSING" <<TS
+import { runOneShotSession } from '${RUNNER}/core/supervisor/session.ts';
+import { sdkSpawnSession } from '${RUNNER}/adapters/session.adapter.ts';
+import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+
+const homeDir = '${HOME_DIR}';
+const repoRoot = '${CLOSING_REPO_ROOT}';
+const verifyShippedPluginDir = '${VERIFY_SHIPPED_DIR}';
+
+const prompt = [
+  'You are testing the closing session tool grant end to end. Do BOTH of the following, in',
+  'order, never stopping to ask for confirmation and never substituting a different path or',
+  'command for either of them:',
+  '(i) Write the text "closing probe" to the file ' + repoRoot + '/closing-probe-note.txt',
+  '(ii) Run the shell command: git -C ' + repoRoot + ' status',
+  'After doing both (regardless of outcome), reply with exactly: DONE',
+].join('\\n');
+
+const io = {
+  spawnSession: (params: { prompt: string; options: unknown }) =>
+    sdkSpawnSession({ prompt: params.prompt, options: params.options as never }),
+  onSessionStart: (_id: string) => {},
+  appendLog: (path: string, line: string) => {
+    mkdirSync(dirname(path), { recursive: true });
+    appendFileSync(path, line + '\\n');
+  },
+};
+
+const result = await runOneShotSession(
+  {
+    kind: 'closing',
+    prompt,
+    config: {
+      homeDir,
+      model: 'claude-haiku-4-5',
+      // fixtures-mirror-reality: same required-field discipline as the ruling probe above —
+      // this probe builds the REAL production envelope, never a shape that happens to work
+      // without maxTurns.
+      maxTurns: 60,
+      repoRoot,
+      realpath: (p: string) => {
+        try {
+          return realpathSync(p);
+        } catch {
+          return p;
+        }
+      },
+      verifyShippedPluginDir,
+    },
+    sessionTimeoutMs: 180000,
+  },
+  io,
+);
+
+writeFileSync('${RESULT_JSON_CLOSING}', JSON.stringify(result));
+console.log(JSON.stringify(result, null, 2));
+TS
+
+bun run "$PROBE_CLOSING"
+
+OUTCOME_CLOSING="$(python3 -c 'import json; print(json.load(open("'"$RESULT_JSON_CLOSING"'"))["outcome"])')"
+
+if [[ "$OUTCOME_CLOSING" != "success" ]]; then
+  bad "closing: the run ended subtype=success with no prompt and no hang (got outcome: $OUTCOME_CLOSING)"
+else
+  ok "closing: the run ended subtype=success with no prompt and no hang"
+fi
+
+CLOSING_DENIALS_JSON="$(python3 -c 'import json; print(json.dumps(json.load(open("'"$RESULT_JSON_CLOSING"'"))["permissionDenials"]))')"
+echo "closing permission_denials payload: $CLOSING_DENIALS_JSON"
+
+if python3 -c '
+import json, sys
+data = json.load(open("'"$RESULT_JSON_CLOSING"'"))
+denials = data.get("permissionDenials")
+sys.exit(0 if not denials else 1)
+'; then
+  ok "closing: permissionDenials is empty — R11's grant covers Write and Bash with no denial"
+else
+  bad "closing: permissionDenials is empty — R11's grant covers Write and Bash with no denial (got: $CLOSING_DENIALS_JSON)"
+fi
+
+if [[ -e "$CLOSING_WRITTEN_FILE" ]]; then
+  ok "closing: the Write inside repoRoot landed on disk ($CLOSING_WRITTEN_FILE)"
+else
+  bad "closing: the Write inside repoRoot landed on disk ($CLOSING_WRITTEN_FILE missing)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]
