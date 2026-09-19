@@ -10,7 +10,7 @@
 // dependencies) — only path-joins are exported; the CALLER reads the committed asset through
 // its own IO and hands the content in via `facts.template`, exactly as `core/brief.ts`'s
 // `executorBrief` already does for its one template.
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { SessionKind } from './model.ts';
 
 export const RULING_TEMPLATE_PATH = join(import.meta.dir, 'brief-ruling.md');
@@ -153,10 +153,16 @@ function renderClosing(facts: ClosingBriefFacts): string {
     ),
     '(no cards)',
   );
+  // The verdict dir (`<home>/supervisor/verdicts/`) is this command's OWN output location, and
+  // `verify-shipped.sh` fail-closes (refuses, never creates) on a missing `--verdict-out` dir —
+  // so the command must create it, or a closing session run against a bare home dies before it
+  // can write a verdict the supervisor then reads as `verdict_missing`. `mkdir -p` is idempotent
+  // and safe to repeat per card even when several share the one dir.
   const shippedVerdicts = bulletList(
     facts.shippedVerdicts.map(
-      (v) => `${v.cardId}: bash "$script_path" --pr <${v.cardId}'s PR> `
-        + `--worktree <${v.cardId}'s worktree> --card ${v.cardId} --verdict-out ${v.verdictPath}`,
+      (v) => `${v.cardId}: mkdir -p "${dirname(v.verdictPath)}" && bash "$script_path" `
+        + `--pr <${v.cardId}'s PR> --worktree <${v.cardId}'s worktree> --card ${v.cardId} `
+        + `--verdict-out ${v.verdictPath}`,
     ),
     '(no shipped cards — no verdict files to write)',
   );

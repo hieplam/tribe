@@ -221,6 +221,10 @@ describe('renderBrief — closing', () => {
     expect(rendered).toContain('--card widget-export');
     expect(rendered).toContain('--verdict-out');
     expect(rendered).toContain('resolve-verify-shipped.sh');
+    // The command creates its OWN output dir — verify-shipped.sh refuses (never creates) a
+    // missing --verdict-out dir, so a closing session run against a bare home would otherwise
+    // die before writing the verdict the supervisor reads.
+    expect(rendered).toContain('mkdir -p "/th/campaigns/wc/supervisor/verdicts"');
   });
 
   test('states the oracle: the verdict file is the contract, the prose is not', () => {

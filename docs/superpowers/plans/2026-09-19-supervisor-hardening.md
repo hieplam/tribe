@@ -877,26 +877,51 @@ are both fully stated.
 **Contract:** card G3's oracle. **Depends on:** Task 19. **Model: `sonnet`** — one assertion added
 to an existing gated suite.
 
-**Files:** edit `plugins/tribe/scripts/tests/test-supervisor-real-e2e.sh`.
+**Files:** edit `plugins/tribe/scripts/tests/test-supervisor-real-e2e.sh`; edit
+`plugins/tribe/scripts/runner/core/supervisor/brief.ts` + `brief.test.ts` (see the coordinator
+note below — a production wiring gap the real E2E surfaced).
 
-- [ ] **Step 1: Add the assertion.**
+> **CN-20 (coordinator note, discovered by running Task 20 — fixtures-mirror-reality):** the plan
+> scoped this as "one assertion." Actually running the billed E2E showed the fixture could never
+> produce a verdict file, because Task 10's closing→verify-shipped wiring had never been exercised
+> E2E (the plan verified it by reading). Three real gaps, all inside the card fence
+> (`runner/**`), no data-shape/permission/product/privacy change:
+> 1. The fixture's pre-seeded `campaign-report.json` marks `c1` `escalated`; the ruling→watchdog
+>    re-run regenerates it `shipped` (from `campaign-state.json`), so the closing session IS
+>    required to write a verdict — no report hand-edit needed.
+> 2. `verify-shipped.sh` calls `gh pr view` and DIEs (exit 2, no verdict) with no GitHub remote.
+>    Fix: a hermetic `gh` shim on PATH stubbing ONLY that one GitHub edge (canned MERGED PR #1
+>    whose body carries a valid `gap-gate v1` stamp for `c1`) + a local bare `origin` remote so
+>    check 2 (master_in_sync) can pass. The REAL script, session and supervisor all run.
+> 3. `verify-shipped.sh --verdict-out` fail-closes (refuses, never creates) a missing verdict dir,
+>    and nothing in production creates `<home>/supervisor/verdicts/` — so a real closing session
+>    against a bare home would die before writing the verdict. Fix (`brief.ts`): the closing
+>    command the brief hands the session now creates its own output dir
+>    (`mkdir -p "<verdictsDir>" && bash …`), so it works from nothing.
+>
+> Result (billed run, `card=c1 verdict=PASS`): the real Haiku closing session ran verify-shipped.sh
+> to a script-emitted PASS verdict file on disk; campaign closed, `supervise` exit 0, 15/0.
+> Measured maxima fell (ruling 27534→20225, closing 93443→77751 after ×1.5) — the ratchet's own
+> Step 3 rewrite; reverted to keep this card's ceiling diff empty (R3/R5, Task 21 Step 1).
+
+- [x] **Step 1: Add the assertion (step 1b) and complete the wiring the E2E needs.**
   After the real closing session, assert `<home>/supervisor/verdicts/<card>.json` exists for the
   shipped card, parses as JSON, and carries a `card` field matching that card and a recognised
   `verdict` value. This is the card's "the real Haiku E2E re-run shows the script executed".
+  Plus the CN-20 fixture (gh shim + origin) and brief fix.
 
-- [ ] **Step 2: Prove it, opt-in.**
+- [x] **Step 2: Prove it, opt-in.**
 
   ```bash
   bash plugins/tribe/scripts/tests/test-supervisor-real-e2e.sh
   TRIBE_REAL_E2E=1 bash plugins/tribe/scripts/tests/test-supervisor-real-e2e.sh
   ```
 
-  Expected: the first prints its skip message and exits `0`; the second reports `0 failed`, with the
-  new verdict-file assertion passing and the existing ratchet step still writing ceilings that do
-  not rise. If a ceiling would rise, **stop and report** — raising it is forbidden without a ruling
-  id.
+  Ran: the first printed its skip message and exited `0`; the second reported `15 passed, 0 failed`
+  with `step1b … verdicts/c1.json … card=c1 verdict=PASS`. Ceilings FELL (good direction, no raise);
+  the ratchet-JSON rewrite was reverted so this card's committed ceiling diff stays empty.
 
-- [ ] **Step 3: Commit** — `test(supervisor): assert the closing session ran verify-shipped`.
+- [x] **Step 3: Commit** — `test(supervisor): assert the closing session ran verify-shipped`.
 
 ## Task 21: Final ratchet verification and the evidence document
 

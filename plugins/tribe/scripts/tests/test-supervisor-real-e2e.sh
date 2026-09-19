@@ -56,6 +56,39 @@ TMP="$(cd "$TMP" && pwd -P)"
 REPO="$TMP/repo"; git init -q -b master "$REPO"
 git -C "$REPO" -c user.email=t@t.test -c user.name=t commit -q --allow-empty -m init
 
+# A local BARE `origin` on disk (never the network) so the closing session's `verify-shipped.sh`
+# check 2 (master_in_sync) can reach an `origin/master` and see 0-ahead/0-behind. Nothing in this
+# run commits to master, so local master stays byte-equal to origin/master.
+ORIGIN="$TMP/origin.git"; git init -q --bare -b master "$ORIGIN"
+git -C "$REPO" remote add origin "$ORIGIN"
+git -C "$REPO" push -q origin master
+git -C "$REPO" branch --set-upstream-to=origin/master master >/dev/null 2>&1 || true
+
+# --- Hermetic `gh` shim: stub ONLY the GitHub network edge, run everything else for real -------
+# Card `supervisor-hardening` G3 requires the closing session to run `verify-shipped.sh` to a
+# script-emitted verdict FILE (never prose). That script calls `gh pr view` for check 1
+# (pr_merged) and check 4 (gap_gate_stamped); against a throwaway repo with no GitHub remote it
+# would DIE (exit 2) before writing any verdict, so the campaign could never close. This shim
+# answers exactly that one call with a canned MERGED PR whose body carries a valid `gap-gate v1`
+# stamp for card `c1` — so the REAL verify-shipped.sh, the REAL closing session and the REAL
+# supervisor all run; only the GitHub network edge is stubbed (pure-core.md / fail-closed-edges.md:
+# stub the outside world, exercise the logic). PATH-prepended so the closing session's Bash
+# subprocess — spawned by the supervisor, which inherits this env — resolves it.
+SHIM_DIR="$TMP/bin"; mkdir -p "$SHIM_DIR"
+cat > "$SHIM_DIR/gh" <<'GH'
+#!/usr/bin/env bash
+if [[ "$1" == "pr" && "$2" == "view" ]]; then
+  cat <<'JSON'
+{"number":1,"url":"https://github.com/example/repo/pull/1","state":"MERGED","commits":[],"baseRefName":"master","headRefName":"feat/c1","mergedAt":"2026-09-20T00:00:00Z","body":"Toy PR for the hermetic supervisor real-E2E fixture.\n\n<!-- gap-gate v1 card=c1 base=aaaaaaa head=bbbbbbb minted=0 matched=0 debt-delta=0 ledger=none -->\n"}
+JSON
+  exit 0
+fi
+echo "gh shim (supervisor real-e2e): unexpected invocation: $*" >&2
+exit 1
+GH
+chmod +x "$SHIM_DIR/gh"
+export PATH="$SHIM_DIR:$PATH"
+
 # The per-repo tribe home this throwaway repo derives — NEVER the real tribe repo's home (see
 # the module doc comment above). Deleted in the EXIT trap below.
 TRIBE_HOME="$(bash "$RUNNER/../tribe-home.sh" "$REPO")"
@@ -169,6 +202,45 @@ if [[ -s "$HOME_DIR/supervisor/final-report.md" ]]; then
   ok "step1: supervisor/final-report.md exists and is non-empty"
 else
   bad "step1: supervisor/final-report.md exists and is non-empty"
+fi
+
+# --- Step 1b: card G3's own oracle — the closing session actually ran verify-shipped ---------
+# `verifyClosing` (core/supervisor/verify.ts `checkShippedVerdict`) trusts ONLY the verdict FILE
+# the verify-shipped SCRIPT writes with `--verdict-out`, never the closing session's prose (spec
+# §4b). Resolving the skill NAME ("Launching skill: verify-shipped" in the transcript, R11 item 4)
+# is not proof the script itself ran to a verdict — this is that proof, for the one shipped card
+# this fixture names (`c1`, see `campaign-state.json` above).
+VERDICT_FILE="$HOME_DIR/supervisor/verdicts/c1.json"
+if [[ -f "$VERDICT_FILE" ]]; then
+  ok "step1b: supervisor/verdicts/c1.json exists"
+  set +e
+  VERDICT_CHECK_OUT="$(python3 - "$VERDICT_FILE" <<'PY'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1]))
+except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+    print(f"PARSE_ERROR: {exc}")
+    sys.exit(1)
+if not isinstance(data, dict):
+    print("PARSE_ERROR: not a JSON object")
+    sys.exit(1)
+card = data.get("card")
+verdict = data.get("verdict")
+if card != "c1":
+    print(f"CARD_MISMATCH: {card!r}")
+    sys.exit(1)
+if verdict not in ("PASS", "FAIL"):
+    print(f"VERDICT_UNRECOGNISED: {verdict!r}")
+    sys.exit(1)
+print(f"card={card} verdict={verdict}")
+PY
+)"
+  VERDICT_CHECK_RC=$?
+  set -e
+  echo "$VERDICT_CHECK_OUT"
+  check "step1b: verdicts/c1.json parses as JSON with card=c1 and a recognised verdict" "$VERDICT_CHECK_RC" "0"
+else
+  bad "step1b: supervisor/verdicts/c1.json exists"
 fi
 
 # --- Step 2: G5 — assert the ledger mechanically ---------------------------------------------
