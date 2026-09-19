@@ -28,6 +28,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { accumulate } from '../core/metrics/accumulate.ts';
 import { classifyLine } from '../core/metrics/parse.ts';
 import type { BaselineEntry, CutInfo, SessionMetrics, SkipReason, VerifyResult } from '../core/metrics/model.ts';
+import { errorCode } from '../core/errno.ts';
 
 const CHUNK_SIZE = 64 * 1024;
 
@@ -150,7 +151,7 @@ function firstMismatchedMetricField(remeasured: SessionMetrics, recorded: Sessio
  * (EISDIR — `entry.path` is a directory; EACCES; an ENOENT race after the exists-check; ELOOP —
  * a symlink cycle) becomes this typed per-entry status, never an escaping traceback. */
 function unreadableResult(sessionId: string, path: string, err: unknown): VerifyResult {
-  const code = err !== null && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : 'UNKNOWN';
+  const code = errorCode(err) ?? 'UNKNOWN';
   return { sessionId, status: 'unreadable', detail: `${path} could not be read (${code})` };
 }
 

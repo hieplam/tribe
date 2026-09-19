@@ -29,6 +29,7 @@ import {
 } from 'node:fs';
 import { spawn } from 'node:child_process';
 import type { SupervisorIO, WatchdogHandle } from '../ports/ports.ts';
+import { errorCode } from '../core/errno.ts';
 
 /** `plugins/tribe/scripts/runner/adapters/` -> `../..` -> `plugins/tribe/scripts/` ->
  * `tribe-home.sh` — resolved from THIS file's own location, never from `cwd` (the same wall
@@ -188,7 +189,7 @@ export function buildSupervisorIo(homeDir: string): SupervisorIO {
         writeFileSync(real, content, { flag: 'wx' });
         return true;
       } catch (err) {
-        if ((err as { code?: string }).code === 'EEXIST') return false;
+        if (errorCode(err) === 'EEXIST') return false;
         throw err;
       }
     },
@@ -198,7 +199,7 @@ export function buildSupervisorIo(homeDir: string): SupervisorIO {
       try {
         return readFileSync(real, 'utf8');
       } catch (err) {
-        const code = (err as { code?: string }).code;
+        const code = errorCode(err);
         if (code === 'ENOENT' || code === 'EACCES' || code === 'EISDIR') return '';
         throw err;
       }
@@ -218,7 +219,7 @@ export function buildSupervisorIo(homeDir: string): SupervisorIO {
       try {
         names = readdirSync(real);
       } catch (err) {
-        const code = (err as { code?: string }).code;
+        const code = errorCode(err);
         if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EACCES') return [];
         throw err;
       }
@@ -229,7 +230,7 @@ export function buildSupervisorIo(homeDir: string): SupervisorIO {
           out.push({ name, mtimeMs: stat.mtimeMs, isDir: stat.isDirectory() });
         } catch (err) {
           // Raced with a delete between readdir and stat: not an entry, not a crash.
-          if ((err as { code?: string }).code === 'ENOENT') continue;
+          if (errorCode(err) === 'ENOENT') continue;
           throw err;
         }
       }

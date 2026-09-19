@@ -12,6 +12,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { join } from 'node:path';
 import { classifyLine } from '../core/metrics/parse.ts';
 import type { TranscriptIO } from '../ports/ports.ts';
+import { errorCode } from '../core/errno.ts';
 
 const CHUNK_SIZE = 64 * 1024;
 
@@ -116,7 +117,7 @@ export function buildTranscriptIo(): TranscriptIO {
       try {
         names = readdirSync(root);
       } catch (err) {
-        const code = (err as { code?: string }).code;
+        const code = errorCode(err);
         if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EACCES') return [];
         throw err;
       }
@@ -126,7 +127,7 @@ export function buildTranscriptIo(): TranscriptIO {
         try {
           if (statSync(full).isDirectory()) dirs.push(full);
         } catch (err) {
-          if ((err as { code?: string }).code === 'ENOENT') continue; // raced with a delete
+          if (errorCode(err) === 'ENOENT') continue; // raced with a delete
           throw err;
         }
       }

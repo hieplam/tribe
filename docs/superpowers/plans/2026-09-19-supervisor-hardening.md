@@ -674,7 +674,7 @@ refactor under a green suite, with the one intended behavioural difference named
 > strict improvement and the only behaviour this task may change. Anything else that changes is a
 > bug — this is a refactor under a green suite.
 
-- [ ] **Step 1: Write the failing unit test first.**
+- [x] **Step 1: Write the failing unit test first.**
   `errorCode(err)` returns the string code for a real `Error` carrying one, `null` for `null`,
   `undefined`, a plain object with no `code`, a string, and a number. It never throws.
 
@@ -684,13 +684,13 @@ refactor under a green suite, with the one intended behavioural difference named
 
   Expected: fails — the module does not exist.
 
-- [ ] **Step 2: Write the parser and swap all fourteen call sites.**
+- [x] **Step 2: Write the parser and swap all fourteen call sites.**
   Two sites carry `G-004`'s exact fingerprint (`cli/main.ts` line 642, `adapters/cut.ts` line 153);
   twelve carry the lower-rigor bare cast (spec §5(b) lists each file and line). Both groups import
   the one parser. The two `'UNKNOWN'` callers keep their own `?? 'UNKNOWN'` at the call site, so
   their behaviour is unchanged.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   grep -rln "'code' in err" plugins/tribe/scripts/runner --include="*.ts" --exclude="*.test.ts" | wc -l
@@ -701,7 +701,7 @@ refactor under a green suite, with the one intended behavioural difference named
   Expected: both greps print `0`; `bun test` reports at least 1068 passing and 0 failing; `tsc`
   exits `0`. The first number reaching `0` is the card's G4 ratchet, measured from 2.
 
-- [ ] **Step 4: Commit** — `refactor(runner): narrow a caught error's code in one place`.
+- [x] **Step 4: Commit** — `refactor(runner): narrow a caught error's code in one place`.
 
 ## Task 15: The escalation-file shape's third read site
 

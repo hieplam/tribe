@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { spawn } from 'node:child_process';
 import type { LockInfo, RunnerHandle, WatchdogIO } from '../ports/ports.ts';
+import { errorCode } from '../core/errno.ts';
 
 /** The real runner entrypoint, resolved from THIS file's location — never from cwd. This
  * adapter lives at `<runner>/adapters/`, so `run.ts` is one level up: the exact path
@@ -42,7 +43,7 @@ export function buildWatchdogIo(): WatchdogIO {
       try {
         return readFileSync(p, 'utf8');
       } catch (err) {
-        const code = (err as { code?: string }).code;
+        const code = errorCode(err);
         if (code === 'ENOENT' || code === 'EACCES' || code === 'EISDIR') return '';
         throw err;
       }
@@ -66,7 +67,7 @@ export function buildWatchdogIo(): WatchdogIO {
       try {
         names = readdirSync(dirPath);
       } catch (err) {
-        const code = (err as { code?: string }).code;
+        const code = errorCode(err);
         if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EACCES') return [];
         throw err;
       }
@@ -77,7 +78,7 @@ export function buildWatchdogIo(): WatchdogIO {
           out.push({ name, mtimeMs: stat.mtimeMs, isDir: stat.isDirectory() });
         } catch (err) {
           // Raced with a delete between readdir and stat: not an entry, not a crash.
-          if ((err as { code?: string }).code === 'ENOENT') continue;
+          if (errorCode(err) === 'ENOENT') continue;
           throw err;
         }
       }
@@ -112,7 +113,7 @@ export function buildWatchdogIo(): WatchdogIO {
         const bytesRead = readSync(fd, buffer, 0, length, start);
         return buffer.subarray(0, bytesRead).toString('utf8');
       } catch (err) {
-        const code = (err as { code?: string }).code;
+        const code = errorCode(err);
         if (code === 'ENOENT' || code === 'EACCES' || code === 'EISDIR') return '';
         throw err;
       } finally {
@@ -124,7 +125,7 @@ export function buildWatchdogIo(): WatchdogIO {
       try {
         return realpathSync(p);
       } catch (err) {
-        if ((err as { code?: string }).code === 'ENOENT') return p;
+        if (errorCode(err) === 'ENOENT') return p;
         throw err;
       }
     },
@@ -216,7 +217,7 @@ export function withHome(io: WatchdogIO, homeDir: string): WatchdogIO {
       } catch (err) {
         // A half-written or corrupt lock is "no readable holder", never a crash.
         if (err instanceof SyntaxError) return null;
-        const code = (err as { code?: string }).code;
+        const code = errorCode(err);
         if (code === 'ENOENT' || code === 'EACCES') return null;
         throw err;
       }
