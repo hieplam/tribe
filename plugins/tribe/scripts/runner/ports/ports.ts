@@ -336,3 +336,93 @@ export interface WatchdogIO
     EnvPort,
     LockReadPort,
     LinePort {}
+
+// ---------------------------------------------------------------------------------------
+// Transcript reading edge (Task 3, spec §15, card `## Measure first`). Type declarations
+// only, same as the rest of this file — the real implementation is
+// `adapters/transcript-io.adapter.ts`.
+// ---------------------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------------------
+// The supervisor's edge seam (card `campaign-supervisor`, spec §3.1's "Seam" row, Task 12).
+// Type declarations only, same as the rest of this file — the real implementation is
+// `adapters/supervisor-io.adapter.ts`. Composed from the capability algebra above wherever the
+// shape genuinely matches (clock, append, process liveness); the members with no existing
+// match — the watchdog child spawn, the `tribe-home.sh` execution, and the git-repo-untouched
+// probe — are declared fresh, mirroring `adapters/watchdog-io.adapter.ts`'s own primitives.
+// ---------------------------------------------------------------------------------------
+
+/** A spawned watchdog child the supervisor OWNS. Deliberately no `kill` — S-P7 ("the
+ * supervisor never kills anything. Not a runner, not a watchdog, not a session"), the
+ * documented `fail-closed-edges` obligation-3 exception for THIS ONE spawn's unbounded
+ * lifetime (a campaign supervision run legitimately spans hours). Mirrors `RunnerHandle`'s
+ * shape for the identical reason `RunnerHandle` itself carries no `kill`. */
+export interface WatchdogHandle {
+  pid: number;
+  /** Resolves with the child's exit code, or `null` when `waitMs` elapsed first (the child is
+   * still running). Never rejects, never kills. Bounded per call. */
+  waitFor(waitMs: number): Promise<number | null>;
+}
+
+/** The full seam `core/supervisor/loop.ts` needs (Task 14), composed from the capability
+ * algebra above plus the members declared here. Every caller-supplied path arriving at any
+ * member below is resolved and proven to sit inside the campaign home BEFORE anything opens,
+ * writes, or renames through it (`fail-closed-edges.md` obligation 4) — enforced by the
+ * adapter's `buildSupervisorIo(homeDir)`, never expressed by this type. */
+export interface SupervisorIO extends ClockPort, MsClockPort, AppendFilePort, ProcessPort {
+  /** Crash-safe write: temp file inside the campaign home, then rename (spec §4) — never an
+   * observable half-written file, even to a reader racing the write. */
+  writeFileAtomic(resolvedPath: string, content: string): void;
+  /** Atomic exclusive create (spec §9's "atomic create"): creates `resolvedPath` with `content`
+   * ONLY if it does not already exist, returning `true` when THIS call created it and `false`
+   * when it already existed — the single-winner primitive two cold-start supervisors race on for
+   * the lock (Guardrail 6). Any other error (a containment escape, a real fs failure) is thrown,
+   * never swallowed (fail-closed-edges obligation 1). */
+  createFileExclusive(resolvedPath: string, content: string): boolean;
+  /** `''` for a missing or unreadable file — the caller decides what absence means. */
+  readFileOrEmpty(resolvedPath: string): string;
+  /** Archives the escalation file (S-P4: "the session rules, the supervisor archives"). A
+   * no-op — never a throw — when `fromPath` is already absent (a prior, crashed attempt may
+   * have already performed this exact rename). */
+  renameIfPresent(fromPath: string, toPath: string): void;
+  /** Non-recursive listing; a missing or unreadable directory is `[]`, never a throw. */
+  listEntries(dirPath: string): Array<{ name: string; mtimeMs: number; isDir: boolean }>;
+  /** Spawns the watchdog child. `argv[0]` is the program; stdout+stderr are appended to
+   * `opts.stdoutPath`. Returns a `WatchdogHandle` — see its own doc comment for why it has no
+   * `kill`. */
+  spawnWatchdog(
+    argv: string[],
+    opts: { cwd: string; stdoutPath: string; env?: Record<string, string | undefined> },
+  ): WatchdogHandle;
+  /** S-P10: resolves `--campaign` to a home by EXECUTING `tribe-home.sh` — the only thing that
+   * knows the `~/.tribe` key derivation (wall W1); `core/` never spells `.tribe`. A typed
+   * refusal, never a throw, when `repoRoot` is not a git repository or the subprocess fails. */
+  resolveTribeHome(repoRoot: string): Promise<{ ok: true; home: string } | { ok: false; error: string }>;
+  /** Card decision 4 / `core/supervisor/verify.ts`'s `repoStatus` input:
+   * `git -C <repoRoot> status --porcelain`, run with host git config neutralised
+   * (`fail-closed-edges.md` obligation 2) so a host `commit.gpgsign` cannot change the
+   * repo-untouched verdict. On success, returns git's raw stdout verbatim — legitimately `''`
+   * when the repo is clean, the expected common case. On any probe failure (the subprocess
+   * cannot start, times out, or exits non-zero), returns a fixed NON-EMPTY sentinel instead,
+   * so an unverifiable repo state fails closed as "touched" and is never silently read as
+   * "clean". */
+  gitStatusPorcelain(repoRoot: string): Promise<string>;
+}
+
+export interface TranscriptIO {
+  /** Streams `path` one line at a time — never the whole file in one buffer (measured: the
+   * largest single transcript line is 442,691 bytes; a real session is 4.6 MB). */
+  readLines(path: string): Iterable<string>;
+  /** Reads EXACTLY `min(bytes, currentSize)` bytes from the start of `path` and hashes
+   * exactly those bytes — never the whole file (S-P14: this is what makes a pinned cut
+   * reproducible). */
+  readPrefix(path: string, bytes: number): { text: string; sha256: string; actualBytes: number };
+  fileExists(path: string): boolean;
+  /** Absolute paths of `root`'s immediate subdirectories. Non-recursive; a missing or
+   * unreadable root is `[]`, never a throw. */
+  listProjectDirs(root: string): string[];
+  /** `$CLAUDE_CONFIG_DIR/projects` when `CLAUDE_CONFIG_DIR` is set and non-empty, else
+   * `$HOME/.claude/projects` (viewer README, "## Run it", verbatim). An empty
+   * `CLAUDE_CONFIG_DIR=` is treated as unset. */
+  projectsRoot(): string;
+}

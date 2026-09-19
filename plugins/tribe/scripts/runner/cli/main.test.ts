@@ -7,13 +7,20 @@
 // campaign's machine-local operational home — also a REQUIRED input, never derived here.
 import { describe, expect, mock, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { announceViewer, parseArgs, parseResetCardArgs, performResetCard, scrubTargetEnvLocal } from './main.ts';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
+import {
+  announceViewer, parseArgs, parseResetCardArgs, performResetCard, runTranscriptMetrics,
+  scrubTargetEnvLocal,
+} from './main.ts';
 import { campaignStatePathOf, escalationPathOf } from '../core/paths.ts';
 import { WATCHDOG_EXIT_NEEDS_HUMAN } from '../core/watchdog/model.ts';
 import type { ViewerLaunchDecision } from '../core/viewer-launch.ts';
+import { buildTranscriptIo } from '../adapters/transcript-io.adapter.ts';
+import { measureAtCut } from '../adapters/cut.ts';
+import type { TranscriptMetricsConfig } from '../core/metrics/args.ts';
+import type { TranscriptIO } from '../ports/ports.ts';
 
 const RUN_ID = '2026-07-24T00-00-00-000Z-beef';
 
@@ -783,5 +790,489 @@ describe('announceViewer (Task 27, spec §10.2)', () => {
     expect(out.error).toHaveBeenCalledTimes(1);
     expect(String(out.error.mock.calls[0]?.[0])).toContain('campaign viewer: failed to start (continuing): boom');
     expect(result).toBeNull();
+  });
+});
+
+function baseTranscriptConfig(overrides: Partial<TranscriptMetricsConfig> = {}): TranscriptMetricsConfig {
+  return { sessions: [], project: null, json: true, cutBytes: null, verifyPath: null, ...overrides };
+}
+
+describe('runTranscriptMetrics — the transcript-metrics subcommand (Task 3, fail-closed)', () => {
+  test('a session with no matching transcript is a typed refusal naming it, exit 1', async () => {
+    const io: TranscriptIO = {
+      readLines: () => [],
+      readPrefix: () => ({ text: '', sha256: '', actualBytes: 0 }),
+      fileExists: () => false,
+      listProjectDirs: () => ['/nowhere/project-a'],
+      projectsRoot: () => '/nowhere',
+    };
+    const { result, errors } = await captureConsole(() =>
+      runTranscriptMetrics(baseTranscriptConfig({ sessions: ['no-such-session'] }), io),
+    );
+    expect(result).toBe(1);
+    expect(errors.some((e) => e.includes('transcript-metrics') && e.includes('no-such-session'))).toBe(true);
+  });
+
+  test('a found session prints a cut-pinned entry and exits 0', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-'));
+    try {
+      const sessionId = 'sess-1';
+      writeFileSync(join(dir, `${sessionId}.jsonl`), `${JSON.stringify({ type: 'assistant', message: { id: 'a' } })}\n`);
+      const io: TranscriptIO = { ...buildTranscriptIo(), listProjectDirs: () => [dir] };
+
+      const { result, logs } = await captureConsole(() =>
+        runTranscriptMetrics(baseTranscriptConfig({ sessions: [sessionId] }), io),
+      );
+
+      expect(result).toBe(0);
+      const output = JSON.parse(logs.join(''));
+      expect(output.sessions).toHaveLength(1);
+      expect(output.sessions[0].sessionId).toBe(sessionId);
+      expect(output.sessions[0].cut.sha256).toHaveLength(64);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('--project filters which project directory is searched', async () => {
+    const dirA = mkdtempSync(join(tmpdir(), 'cli-transcript-a-'));
+    const dirB = mkdtempSync(join(tmpdir(), 'cli-transcript-b-'));
+    try {
+      const sessionId = 'sess-2';
+      writeFileSync(join(dirB, `${sessionId}.jsonl`), `${JSON.stringify({ type: 'assistant', message: { id: 'a' } })}\n`);
+      const io: TranscriptIO = { ...buildTranscriptIo(), listProjectDirs: () => [dirA, dirB] };
+
+      const wrongProject = await captureConsole(() =>
+        runTranscriptMetrics(baseTranscriptConfig({ sessions: [sessionId], project: basename(dirA) }), io),
+      );
+      expect(wrongProject.result).toBe(1);
+
+      const rightProject = await captureConsole(() =>
+        runTranscriptMetrics(baseTranscriptConfig({ sessions: [sessionId], project: basename(dirB) }), io),
+      );
+      expect(rightProject.result).toBe(0);
+    } finally {
+      rmSync(dirA, { recursive: true, force: true });
+      rmSync(dirB, { recursive: true, force: true });
+    }
+  });
+
+  test('--verify against a missing baseline file is a typed refusal, exit 1', async () => {
+    const io: TranscriptIO = { ...buildTranscriptIo(), fileExists: () => false };
+    const { result, errors } = await captureConsole(() =>
+      runTranscriptMetrics(baseTranscriptConfig({ verifyPath: '/nope/baseline.json' }), io),
+    );
+    expect(result).toBe(1);
+    expect(errors.some((e) => e.includes('transcript-metrics') && e.includes('/nope/baseline.json'))).toBe(true);
+  });
+
+  test('--verify against unparseable JSON is a typed refusal, exit 1, never a throw', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-verify-bad-'));
+    try {
+      const baselinePath = join(dir, 'baseline.json');
+      writeFileSync(baselinePath, 'not json{');
+      const io = buildTranscriptIo();
+
+      const { result, errors } = await captureConsole(() =>
+        runTranscriptMetrics(baseTranscriptConfig({ verifyPath: baselinePath }), io),
+      );
+
+      expect(result).toBe(1);
+      expect(errors.some((e) => e.includes('transcript-metrics') && e.includes('not valid JSON'))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Fix 4 (fail-closed-edges.md obligation 1): three DISTINCT typed messages for three
+  // distinct failure classes — a raw fs read error must never be confused with a JSON parse
+  // error, and neither with a structural validation error.
+  test('--verify against a file that cannot be read (fs error) is a typed refusal, distinct from the JSON/validation messages', async () => {
+    const io: TranscriptIO = {
+      ...buildTranscriptIo(),
+      fileExists: () => true,
+      readLines: () => { throw new Error('EACCES: permission denied'); },
+    };
+    const { result, errors } = await captureConsole(() =>
+      runTranscriptMetrics(baseTranscriptConfig({ verifyPath: '/some/baseline.json' }), io),
+    );
+    expect(result).toBe(1);
+    expect(errors.some((e) => e.includes('transcript-metrics') && e.includes('could not be read'))).toBe(true);
+    expect(errors.some((e) => e.includes('not valid JSON'))).toBe(false);
+    expect(errors.some((e) => e.includes('is invalid'))).toBe(false);
+  });
+
+  test('--verify against structurally invalid (but syntactically valid) JSON is a typed refusal, distinct from the read/JSON-syntax messages', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-verify-structural-'));
+    try {
+      const baselinePath = join(dir, 'baseline.json');
+      writeFileSync(baselinePath, JSON.stringify({ v: 2, tool: 'transcript-metrics', generatedAt: 'x', sessions: [] }));
+      const io = buildTranscriptIo();
+
+      const { result, errors } = await captureConsole(() =>
+        runTranscriptMetrics(baseTranscriptConfig({ verifyPath: baselinePath }), io),
+      );
+
+      expect(result).toBe(1);
+      expect(errors.some((e) => e.includes('transcript-metrics') && e.includes('is invalid'))).toBe(true);
+      expect(errors.some((e) => e.includes('not valid JSON'))).toBe(false);
+      expect(errors.some((e) => e.includes('could not be read'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('--verify re-measures every entry at its recorded cut and exits 0 only when all verify', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-verify-'));
+    try {
+      const transcriptPath = join(dir, 'sess-3.jsonl');
+      writeFileSync(transcriptPath, `${JSON.stringify({ type: 'assistant', message: { id: 'a' } })}\n`);
+      const { cut, metrics } = measureAtCut(transcriptPath, null);
+      metrics.sessionId = 'sess-3';
+      const baseline = {
+        v: 1,
+        tool: 'transcript-metrics',
+        generatedAt: new Date().toISOString(),
+        sessions: [{ sessionId: 'sess-3', path: transcriptPath, cut, metrics }],
+      };
+      const baselinePath = join(dir, 'baseline.json');
+      writeFileSync(baselinePath, JSON.stringify(baseline));
+      const io = buildTranscriptIo();
+
+      const { result, logs } = await captureConsole(() =>
+        runTranscriptMetrics(baseTranscriptConfig({ verifyPath: baselinePath }), io),
+      );
+
+      expect(result).toBe(0);
+      expect(JSON.parse(logs.join(''))).toEqual([{ sessionId: 'sess-3', status: 'verified' }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// Blocker fix (fail-closed-edges.md obligation 1, mirrors Fix 4's --verify guard): the
+// `--session` measurement path called `measureAtCut(found, ...)` with no fs-error guard, so an
+// unreadable transcript escaped `runTranscriptMetrics` as an UNCAUGHT stack trace, out of
+// `main()`. Real subprocess e2e (CLAUDE.md: reproduce the way an end user experiences it, plus
+// this file's own precedent at "piped stdout is never truncated" / the C2 watchdog tests):
+// `buildTranscriptIo()`'s `projectsRoot()` reads real `CLAUDE_CONFIG_DIR`, and `measureAtCut`
+// always touches the real filesystem directly (adapters/cut.ts's own doc comment) — neither is
+// reachable through an injected fake `TranscriptIO`.
+describe('transcript-metrics subcommand: an unreadable --session transcript is fail-closed, not a stack trace', () => {
+  test('a transcript path that is an existing DIRECTORY (EISDIR) produces one typed "transcript-metrics:" line naming the session, exit 1, no stack trace', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'cli-transcript-session-eisdir-'));
+    try {
+      const projectDir = join(tmp, 'projects', 'myproj');
+      mkdirSync(projectDir, { recursive: true });
+      mkdirSync(join(projectDir, 'sess123.jsonl')); // the transcript "file" is actually a directory
+
+      const runnerEntry = join(import.meta.dir, '..', 'run.ts');
+      const result = spawnSync(
+        'bun',
+        [runnerEntry, 'transcript-metrics', '--session', 'sess123', '--project', 'myproj'],
+        { cwd: import.meta.dir + '/..', encoding: 'utf8', timeout: 600000, env: { ...process.env, CLAUDE_CONFIG_DIR: tmp } },
+      );
+
+      const combined = `${result.stdout}${result.stderr}`;
+      const stackFramePattern = /\n\s+at /; // Node/Bun stack trace frame, e.g. "\n    at foo (bar.ts:1:1)"
+      expect(result.status).toBe(1);
+      expect(combined).not.toMatch(stackFramePattern);
+      expect(combined).not.toContain('at measureWindow');
+      expect(combined).not.toContain('EISDIR: illegal operation on a directory');
+      expect(combined).not.toContain('Bun v');
+      const stderrLines = result.stderr.trim().split('\n').filter((l) => l.length > 0);
+      expect(stderrLines.filter((l) => l.startsWith('transcript-metrics:'))).toHaveLength(1);
+      expect(result.stderr).toContain('transcript-metrics:');
+      expect(result.stderr).toContain('sess123');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+/** A structurally-valid baseline whose every entry points at a transcript that was never
+ * created — each re-measures to `absent`, so the emitted JSON result array is large (one
+ * entry's worth of message text per session) without needing a real, large transcript file. */
+function bogusAbsentBaseline(dir: string, count: number) {
+  const sessions = Array.from({ length: count }, (_, i) => ({
+    sessionId: `s${i}`,
+    path: join(dir, `never-created-${i}.jsonl`),
+    cut: { lines: 1, bytes: 1, sha256: '0'.repeat(64) },
+    metrics: {},
+  }));
+  return { v: 1, tool: 'transcript-metrics', generatedAt: 'x', sessions };
+}
+
+// Fix 6: `main()`'s transcript-metrics branch used to call `process.exit(exitCode)`
+// immediately after `console.log(...)`, which can truncate a large payload written to a pipe
+// (Node/Bun stdout writes to a PIPE are asynchronous; `process.exit()` does not wait for them
+// to flush). This is a real subprocess e2e test (CLAUDE.md: reproduce the way an end user
+// experiences it, over `bun run.ts ... | consumer`) because `main()` wires its own real
+// process.exit and is deliberately not unit-tested (this file's own top-of-file convention).
+describe('transcript-metrics subcommand: piped stdout is never truncated (Fix 6)', () => {
+  test('a >64KiB --verify JSON result array is captured in full through a pipe, with no entry lost', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-drain-'));
+    try {
+      const baselinePath = join(dir, 'baseline.json');
+      const ENTRY_COUNT = 900;
+      writeFileSync(baselinePath, JSON.stringify(bogusAbsentBaseline(dir, ENTRY_COUNT)));
+
+      const result = spawnSync(
+        'bun',
+        ['run.ts', 'transcript-metrics', '--verify', baselinePath],
+        { cwd: import.meta.dir + '/..', encoding: 'utf8', timeout: 600000, maxBuffer: 10 * 1024 * 1024 },
+      );
+
+      expect(result.stdout.length).toBeGreaterThan(64 * 1024); // the truncation this guards against
+      const parsed = JSON.parse(result.stdout); // truncated JSON would fail to parse at all
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed).toHaveLength(ENTRY_COUNT); // every entry present, none lost to truncation
+      expect(parsed.every((r: { status: string }) => r.status === 'absent')).toBe(true);
+      expect(result.status).toBe(1); // absent is a verify failure
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+// Fix 13 (fixtures-mirror-reality.md: the shape a person actually types — cd somewhere, name
+// the file bare). Paired with the absolute-path shape so both are exercised, matching that
+// rule's own golden pattern.
+describe('transcript-metrics subcommand: --verify accepts BOTH a relative and an absolute path (Fix 13)', () => {
+  test('a bare relative filename resolves against the process cwd (not a "file not found")', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-relative-'));
+    try {
+      const transcriptPath = join(dir, 'sess-rel.jsonl');
+      writeFileSync(transcriptPath, `${JSON.stringify({ type: 'assistant', message: { id: 'a' } })}\n`);
+      const { cut, metrics } = measureAtCut(transcriptPath, null);
+      metrics.sessionId = 'sess-rel';
+      const baseline = {
+        v: 1, tool: 'transcript-metrics', generatedAt: 'x',
+        sessions: [{ sessionId: 'sess-rel', path: transcriptPath, cut, metrics }],
+      };
+      const relativeName = 'baseline-rel.json';
+      writeFileSync(join(dir, relativeName), JSON.stringify(baseline));
+      const runnerEntry = join(import.meta.dir, '..', 'run.ts');
+
+      // The shape a person types: relative to their own cwd, not the runner's.
+      const relResult = spawnSync('bun', [runnerEntry, 'transcript-metrics', '--verify', relativeName],
+        { cwd: dir, encoding: 'utf8', timeout: 600000 });
+      expect(relResult.status).toBe(0);
+      expect(JSON.parse(relResult.stdout)).toEqual([{ sessionId: 'sess-rel', status: 'verified' }]);
+
+      // Paired absolute-path run — both shapes reach the same result.
+      const absResult = spawnSync('bun', [runnerEntry, 'transcript-metrics', '--verify', join(dir, relativeName)],
+        { cwd: dir, encoding: 'utf8', timeout: 600000 });
+      expect(absResult.status).toBe(0);
+      expect(JSON.parse(absResult.stdout)).toEqual([{ sessionId: 'sess-rel', status: 'verified' }]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+// Blocker fix (fail-closed-edges.md obligation 1): a baseline entry with `metrics` deleted
+// (path/cut/sha still valid) used to sail past validateBaselineFile, then reach
+// firstMismatchedMetricField(remeasured, recorded) where `recorded` is `undefined`, and
+// `recorded[field]` threw an uncaught TypeError that escaped main() as a stack trace. Real
+// subprocess e2e (CLAUDE.md: reproduce the way an end user experiences it) because this is
+// exactly the way a user would see the crash — through `bun run.ts ...`, not a unit call.
+describe('transcript-metrics subcommand: a --verify entry with metrics deleted is fail-closed, not a stack trace', () => {
+  test('one typed line, non-zero exit, no TypeError/stack trace in stdout or stderr', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-transcript-no-metrics-'));
+    try {
+      const transcriptPath = join(dir, 'sess-nometrics.jsonl');
+      writeFileSync(transcriptPath, `${JSON.stringify({ type: 'assistant', message: { id: 'a' } })}\n`);
+      const { cut } = measureAtCut(transcriptPath, null);
+      const baseline = {
+        v: 1, tool: 'transcript-metrics', generatedAt: 'x',
+        sessions: [{ sessionId: 'sess-nometrics', path: transcriptPath, cut }], // metrics deleted
+      };
+      const baselinePath = join(dir, 'baseline.json');
+      writeFileSync(baselinePath, JSON.stringify(baseline));
+      const runnerEntry = join(import.meta.dir, '..', 'run.ts');
+
+      const result = spawnSync('bun', [runnerEntry, 'transcript-metrics', '--verify', baselinePath],
+        { cwd: dir, encoding: 'utf8', timeout: 600000 });
+
+      const stackFramePattern = /\n\s+at /; // Node/Bun stack trace frame, e.g. "\n    at foo (bar.ts:1:1)"
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).not.toContain('TypeError');
+      expect(result.stdout).not.toMatch(stackFramePattern);
+      expect(result.stderr).not.toContain('TypeError');
+      expect(result.stderr).not.toMatch(stackFramePattern);
+      expect(result.stderr.includes('metrics')).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+// Task 15 (campaign-supervisor, spec §5.1/§14): the `supervise` subcommand's composition root.
+import { resolveSupervisorHome } from './main.ts';
+
+describe('resolveSupervisorHome — the supervise subcommand gate (fail-closed, Task 15)', () => {
+  // Same values `resolveWatchdogHome`'s own test above uses, plus an injected `resolveTribeHome`
+  // seam (never a real `tribe-home.sh` subprocess) — the composition-root function this task
+  // adds is the only place allowed to call it.
+  function fakeIo(tribeHomeResult: { ok: true; home: string } | { ok: false; error: string }) {
+    return {
+      realpath: (p: string) => p.replace(/^\/var\//, '/private/var/'),
+      userHome: () => '/var/t/home',
+      cwd: () => '/private/var/t/home/.tribe/k/campaigns',
+      fileExists: (p: string) => p === '/private/var/t/home/.tribe/k/campaigns/c/campaign-state.json',
+      resolveTribeHome: async (_repoRoot: string) => tribeHomeResult,
+    };
+  }
+
+  test('a --home outside the tribe root is refused with a typed "supervise:" message, not a throw', async () => {
+    const io = fakeIo({ ok: false, error: 'unreachable — --home is used, resolveTribeHome is never called' });
+    const got = await resolveSupervisorHome(
+      { campaignSlug: null, rawHome: '/tmp/elsewhere', repoRoot: '/some/repo' },
+      io,
+    );
+    expect('error' in got && got.error.startsWith('supervise:')).toBe(true);
+    expect('error' in got && got.error).toContain('is outside the tribe root');
+  });
+
+  test('a --home with no campaign-state.json is refused by name, prefixed "supervise:" not "watchdog:"', async () => {
+    const io = fakeIo({ ok: false, error: 'unreachable' });
+    const got = await resolveSupervisorHome(
+      { campaignSlug: null, rawHome: '/var/t/home/.tribe/k/campaigns/other', repoRoot: '/some/repo' },
+      io,
+    );
+    expect(got).toEqual({
+      error:
+        'supervise: --home "/private/var/t/home/.tribe/k/campaigns/other" has no ' +
+        'campaign-state.json — a campaign home is authored by the orchestrate-campaign ' +
+        'skill before any runner or watchdog is started',
+    });
+  });
+
+  test('a good --home is accepted, symlink-resolved (W-P10)', async () => {
+    const io = fakeIo({ ok: false, error: 'unreachable' });
+    const got = await resolveSupervisorHome(
+      { campaignSlug: null, rawHome: '/var/t/home/.tribe/k/campaigns/c', repoRoot: '/some/repo' },
+      io,
+    );
+    expect(got).toEqual({ homeDir: '/private/var/t/home/.tribe/k/campaigns/c' });
+  });
+
+  test('--campaign plus --repo derives the SAME home as an equivalent --home, via the injected resolveTribeHome seam', async () => {
+    const calls: string[] = [];
+    const io = fakeIo({ ok: true, home: '/var/t/home/.tribe/k' });
+    io.resolveTribeHome = async (repoRoot: string) => {
+      calls.push(repoRoot);
+      return { ok: true, home: '/var/t/home/.tribe/k' };
+    };
+    const got = await resolveSupervisorHome(
+      { campaignSlug: 'c', rawHome: null, repoRoot: '/some/repo' },
+      io,
+    );
+    expect(calls).toEqual(['/some/repo']);
+    expect(got).toEqual({ homeDir: '/private/var/t/home/.tribe/k/campaigns/c' });
+  });
+
+  test('a failed resolveTribeHome (--campaign) is a typed "supervise:" refusal, never a throw', async () => {
+    const io = fakeIo({ ok: false, error: 'not a git repository' });
+    const got = await resolveSupervisorHome(
+      { campaignSlug: 'c', rawHome: null, repoRoot: '/not-a-repo' },
+      io,
+    );
+    expect('error' in got && got.error.startsWith('supervise:')).toBe(true);
+    expect('error' in got && got.error).toContain('not a git repository');
+  });
+});
+
+// Fix 4 (skinner audit): `rerunCommand` had no shell quoting — joined argv with plain spaces,
+// so an argument containing a space produced a broken owner-facing re-run command in
+// NEEDS_OWNER.md. `buildSupervisorLoopConfig` is the extracted, testable composition-root
+// function this fix routes the quoting through (`main()`'s own inline literal, made pure).
+import { buildSupervisorLoopConfig, quoteShellArg, renderRerunCommand } from './main.ts';
+import type { SupervisorConfig } from '../core/supervisor/args.ts';
+
+function fixtureSupervisorConfig(overrides: Partial<SupervisorConfig> = {}): SupervisorConfig {
+  return {
+    repoRoot: '/some/repo',
+    model: 'claude-fixture',
+    watchdogModel: null,
+    campaignSlug: null,
+    rawHome: '/h/.tribe/k/campaigns/c',
+    limits: { maxRulingRounds: 2, maxRatifyRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20, sessionRetries: 1 },
+    sessionTimeoutSeconds: 1800,
+    sessionMaxTurns: 60,
+    pollSeconds: 30,
+    ...overrides,
+  };
+}
+
+describe('buildSupervisorLoopConfig — the supervise composition root\'s config (Fix 4)', () => {
+  test('Fix 4: an argv element containing a space round-trips through a REAL shell unchanged '
+    + '(fixtures-mirror-reality.md: the shape an owner\'s shell actually parses)', () => {
+    const subArgv = ['--repo', '/some path/with space', '--model', 'claude', '--home', '/h'];
+    const config = buildSupervisorLoopConfig(
+      fixtureSupervisorConfig(), subArgv, '/h/.tribe/k/campaigns/c', '/abs/run.ts', '/abs/plugins/verify-shipped',
+    );
+    const prefix = 'bun run.ts supervise ';
+    expect(config.rerunCommand.startsWith(prefix)).toBe(true);
+    const renderedArgs = config.rerunCommand.slice(prefix.length);
+
+    // `set -- <rendered>` re-splits the rendered, already-quoted args exactly the way a real
+    // shell would when the owner pastes the line — then each positional param is NUL-delimited
+    // back out so embedded spaces inside a single token are never mistaken for a delimiter.
+    const script = `set -- ${renderedArgs}\nfor a in "$@"; do printf '%s\\0' "$a"; done`;
+    const result = spawnSync('bash', ['-c', script], { encoding: 'utf8', timeout: 5_000 });
+    expect(result.status).toBe(0);
+    const roundTripped = result.stdout.split('\0').filter((s) => s.length > 0);
+    expect(roundTripped).toEqual(subArgv);
+  });
+
+  test('watchdogCommand and repoRoot/model/limits/sessionMaxTurns still flow through unchanged', () => {
+    const config = buildSupervisorLoopConfig(
+      fixtureSupervisorConfig({ campaignSlug: 'c', sessionMaxTurns: 17 }),
+      ['--campaign', 'c'], '/h/.tribe/k/campaigns/c', '/abs/run.ts', '/abs/plugins/verify-shipped',
+    );
+    expect(config.repoRoot).toBe('/some/repo');
+    expect(config.model).toBe('claude-fixture');
+    expect(config.campaign).toBe('c');
+    expect(config.sessionMaxTurns).toBe(17);
+    expect(config.watchdogCommand).toEqual(['bun', '/abs/run.ts']);
+  });
+
+  // R11 (Task 20, spec §5.4 item 4): `buildSupervisorLoopConfig` stays pure — the resolved-dir-
+  // or-null is resolved+existence-checked by the actual composition root caller (the impure
+  // edge, `main()`) and handed in as a parameter, never re-derived here.
+  test('R11: the resolved verify-shipped plugin dir flows into verifyShippedPluginDir', () => {
+    const config = buildSupervisorLoopConfig(
+      fixtureSupervisorConfig(), [], '/h/.tribe/k/campaigns/c', '/abs/run.ts', '/abs/plugins/verify-shipped',
+    );
+    expect(config.verifyShippedPluginDir).toBe('/abs/plugins/verify-shipped');
+  });
+
+  test('R11: an absent verify-shipped plugin dir flows through as null, not a default/guess', () => {
+    const config = buildSupervisorLoopConfig(
+      fixtureSupervisorConfig(), [], '/h/.tribe/k/campaigns/c', '/abs/run.ts', null,
+    );
+    expect(config.verifyShippedPluginDir).toBeNull();
+  });
+});
+
+describe('quoteShellArg / renderRerunCommand — unit-level (Fix 4)', () => {
+  test('a bare-safe token is left unquoted', () => {
+    expect(quoteShellArg('--repo')).toBe('--repo');
+    expect(quoteShellArg('/some/path')).toBe('/some/path');
+  });
+
+  test('a token with a space is single-quoted', () => {
+    expect(quoteShellArg('/some path/here')).toBe("'/some path/here'");
+  });
+
+  test('a token containing a single quote is escaped with the POSIX idiom', () => {
+    expect(quoteShellArg("it's here")).toBe("'it'\\''s here'");
+  });
+
+  test('renderRerunCommand joins the quoted tokens with the fixed prefix', () => {
+    expect(renderRerunCommand(['--repo', '/r'])).toBe('bun run.ts supervise --repo /r');
   });
 });

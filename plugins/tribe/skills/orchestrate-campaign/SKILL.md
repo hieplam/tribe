@@ -319,6 +319,53 @@ ruling UC-3).
    notification itself as the "report is ready" signal for this fallback path. Do not poll or
    guess; wait for it.
 
+2b. **Or, launch the SUPERVISOR instead — the recommended default for a whole campaign.**
+   `run.ts watchdog` (step 2 above) supervises exactly ONE runner pass and hands back to you the
+   moment a human decision point is reached; you then drive Stage C's round-trip by hand and
+   re-trigger it yourself. The supervisor is a layer above that: it drives the entire Stage
+   B → Stage C loop *for you* — rules on escalations within Shaman authority, appends to
+   `answers.md`, re-triggers the watchdog, repeats — and only returns control to you when a
+   question genuinely needs the owner, or the campaign is done. Prefer it whenever you would
+   otherwise be round-tripping Stage C by hand across multiple runner passes; the bare watchdog
+   launch stays the right choice for a single scoped pass.
+
+   Launch `run.ts supervise` **detached**, the same double-fork one-liner as the watchdog above
+   (subshell, `nohup`, `</dev/null`) — the naming flag is `--campaign`, never a hand-built home
+   path:
+
+   ```sh
+   ( nohup bun "$runner_dir/run.ts" supervise \
+       --repo <target-repo> \
+       --campaign <campaign-slug> \
+       --model <model> \
+       --watchdog-model <model> \
+       </dev/null >"$(plugins/tribe/scripts/tribe-home.sh <target-repo>)/campaigns/<campaign-slug>/supervisor/launch.log" 2>&1 & )
+   ```
+
+   Then arm a wake-up loop on the supervisor's OWN status file — `supervisor/status.json`, sibling
+   to (never the same file as) the watchdog's — the identical `until` shape as Stage B's watchdog
+   loop above:
+
+   ```sh
+   until [ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["terminal"] is not None)' \
+     "<campaign-home>/supervisor/status.json" 2>/dev/null)" = "True" ]; do sleep 60; done
+   ```
+
+   **Exit codes.**
+
+   | Code | Meaning |
+   | --- | --- |
+   | `0` | The campaign closed: the closing session ran and its postconditions verified — go to Stage D. |
+   | `1` | Usage error (bad/missing/unknown flag, a `--home`/`--campaign` that fails containment). |
+   | `20` | `needs_owner` — `<campaign-home>/NEEDS_OWNER.md` was written; see "The doorbell session" below. |
+   | `21` | `supervisor_running` — a live supervisor already holds this campaign's lock; nothing was written. |
+
+   On `20`, do not resume Stage C by hand over the supervisor's state — go straight to "The
+   doorbell session" below, which is the supervised campaign's own resume path. The manual
+   Stage C round-trip documented next stays the fallback: use it when you are driving a campaign
+   WITHOUT the supervisor (the bare watchdog launch from step 2), or when you deliberately want to
+   intervene by hand instead of letting the supervisor keep going.
+
 3. **On the wake-up, read `<campaign-home>/watchdog/status.json` FIRST, then
    `campaign-report.json`.** The watchdog's `terminal.reason` says why supervision ended
    (`runner_done` · `escalations_pending` · `rulings_unratified` · `session_incomplete` ·
@@ -380,6 +427,16 @@ the owner's manual brake: drop it there to have the next run exit cleanly before
 or to have an in-flight run finish its current card and stop before starting the next.
 
 ### Stage C — Round-trip: answer, re-trigger, cap (per design §O6)
+
+**If you launched the supervisor (Stage B step 2b), the supervisor does this ENTIRE stage for
+you** — reading each escalation, ruling within Shaman authority, appending to `answers.md`
+under the same W3/W7 boundaries below, archiving the escalation file, and re-triggering the
+watchdog — automatically, without you round-tripping by hand. It hands back to you **only** when
+a question is genuinely owner-only (exit `20`, `NEEDS_OWNER.md`) — go to "The doorbell session"
+below when that happens, not through the manual steps here. What follows is the hand-driven
+version of this same loop: it is what the supervisor does internally, and it stays the
+documented fallback for a campaign you are driving without the supervisor, or a round you choose
+to answer yourself instead of letting the supervisor continue.
 
 On every exit notification where the report shows `pending` cards:
 
@@ -467,8 +524,17 @@ On every exit notification where the report shows `pending` cards:
 
 ## Stage D — The one final owner report
 
-Once nothing more is answerable or progressable, read the **last** `campaign-report.json` and
-build the single message the owner reads:
+**If the supervisor ran this campaign to `0` (done), a closing session may already have run.**
+Check `<campaign-home>/supervisor/final-report.md` before doing anything below — its existence
+means the ratification pass, the `verify-shipped` re-checks, and the owner report were already
+produced by that closing session. **Verify it, do not repeat it**: read it exactly as you would
+your own draft of this stage, confirm each `shipped` card's `verify-shipped` verdict is actually
+present, and relay it — do not re-run Stage D's steps and produce a second, competing report over
+the same campaign.
+
+Once nothing more is answerable or progressable (or no `supervisor/final-report.md` exists —
+you are driving by hand), read the **last** `campaign-report.json` and build the single message
+the owner reads:
 
 1. **For every card the report marks `shipped`, independently re-verify it before repeating the
    claim.** Invoke the **`verify-shipped` skill by name** (never by reading or calling its script
@@ -519,6 +585,79 @@ build the single message the owner reads:
 
 This is the ONE message the owner reads — no partial status updates in between beyond the
 irreversible escalations the register requires.
+
+## The doorbell session (optional — the supervisor's owner-ruling procedure)
+
+When you launched the supervisor (Stage B step 2b) and it exits `20` (`needs_owner`), the
+resume path is this procedure — a small session with the owner present, documented here as
+instructions, not code (spec §12). Anyone can be the doorbell: the session that launched the
+supervisor, a fresh session the owner opens later, or the owner asking you to check.
+
+**The doorbell never rules on its own authority.** It never decides a question, never writes a
+park marker, and never arms a Monitor on campaign files. It does exactly three things: start the
+supervisor, wait for it to go terminal, and relay what it finds. Its entire cost is bounded to
+one start, one wake, and — only if the owner is present and rules — one transcription round. The
+supervisor behaves identically with no doorbell session at all: `NEEDS_OWNER.md` plus the exit
+code are the truth; the doorbell is a convenience layered on top, never a requirement.
+
+1. **Start the supervisor detached**, the identical double-fork one-liner Stage B step 2b already
+   uses — the portable form of process detachment on this stack (see Stage B step 2's own note on
+   why).
+2. **Block on the supervisor's own status file** — the identical `until` loop Stage B step 2b
+   arms:
+
+   ```sh
+   until [ "$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["terminal"] is not None)' \
+     "<campaign-home>/supervisor/status.json" 2>/dev/null)" = "True" ]; do sleep 60; done
+   ```
+
+3. **On wake, read `<campaign-home>/NEEDS_OWNER.md`** (or `supervisor/final-report.md`, if the
+   terminal state was `done`) and relay it to the owner verbatim.
+
+**Exit codes** (the same table as Stage B step 2b): `0` done (go to Stage D); `20` needs_owner
+(`NEEDS_OWNER.md` names the question); `21` supervisor_running (another instance already holds
+the lock); `1` usage error.
+
+### Transcribing an owner ruling
+
+`answers.md` is written only by a session **or the owner** (wall W3, unchanged) — a doorbell
+forbidden from writing it would leave the owner hand-editing markdown after every owner-only
+park. So when the owner states their decision in the doorbell session, the doorbell **transcribes
+it, verbatim** — it is a transcriber, never a judge:
+
+1. **Relay the park** — `NEEDS_OWNER.md`, plus the escalation's own `**Reason:**` line and
+   `## Context` section.
+2. **Wait for the owner's words.** If the owner does not rule right now, stop here and change
+   nothing — this is not an escalation the doorbell may answer on the owner's behalf.
+3. **Append the ruling to `answers.md`** as the next `R<n>`, carrying the owner's decision
+   verbatim (never summarised, never improved), with two machine-readable fields:
+
+   ```markdown
+   ## R<n> · <ISO date> · card <cardId> · <owner's own title or the escalation's reason>
+
+   ruled-by: owner
+   ratified-as: <the owner's own disposition, or `pending` if they gave none>
+
+   <the owner's decision, verbatim>
+   ```
+
+   `ratified-as: pending` is a legitimate outcome here — if the owner rules the substance but
+   not the disposition, `pending` is the honest value, and the runner's own exit-`5` gate is the
+   backstop that surfaces it at closing time. The doorbell never invents a disposition just to
+   make a gate go green. The same append-only rule as every other `answers.md` write applies:
+   every prior byte stays.
+4. **Archive** `escalations/<cardId>.md` to `.resolved-R<n>` — same as the hand-driven Stage C
+   round-trip above.
+5. **Delete `<home>/NEEDS_OWNER.md`.** That file is a latch, not a notice — deleting it is the
+   owner's explicit "I have handled it" signal, and the supervisor refuses to resume while it
+   exists.
+6. **Restart the supervisor**, detached, with the exact command `NEEDS_OWNER.md` printed.
+
+The `ruled-by: owner` marker is never load-bearing for W7 — W7's counter increments only when the
+supervisor itself spawns a ruling session, and an owner ruling involves no spawn, so it can never
+be miscounted as one of the two bounded auto-answer rounds. The marker exists so the supervisor's
+reports can say "2 of 2 auto-answer rounds used, plus one owner ruling" honestly, rather than
+reading as a forbidden third auto-answer.
 
 ## A campaign can outlive this session
 

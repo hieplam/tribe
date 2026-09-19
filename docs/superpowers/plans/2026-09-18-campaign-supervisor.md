@@ -226,7 +226,7 @@ nothing, and touches no existing module.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test.** `core/metrics/classify.test.ts`, table-driven:
+- [x] **Step 1: Write the failing test.** `core/metrics/classify.test.ts`, table-driven:
 
 ```ts
 import { describe, expect, test } from 'bun:test';
@@ -278,7 +278,7 @@ describe('userText', () => {
 
 Run it and watch it fail with a module-not-found error — that is the expected red.
 
-- [ ] **Step 2: Write `core/metrics/model.ts`** — types only, importing nothing local:
+- [x] **Step 2: Write `core/metrics/model.ts`** — types only, importing nothing local:
   `TriggerClass = 'human' | 'monitor-event' | 'monitor-expiry' | 'task-notification'`;
   `TokenSums { input: number; cacheRead: number; cacheWrite: number; output: number }`;
   `ClassMetrics { turns: number; tokens: TokenSums }`;
@@ -287,12 +287,12 @@ Run it and watch it fail with a module-not-found error — that is the expected 
   babysittingShare, sidechain: ClassMetrics }`;
   `BaselineFile { v: 1; tool: string; generatedAt: string; sessions: SessionMetrics[] }`.
 
-- [ ] **Step 3: Write `core/metrics/classify.ts`** — three pure functions, no imports:
+- [x] **Step 3: Write `core/metrics/classify.ts`** — three pure functions, no imports:
   `userText(message: unknown): string`, `isToolResultCarrier(message: unknown): boolean`,
   `classifyTrigger(text: string): TriggerClass`. Every one tolerates `null`/`undefined`/wrong
   shapes and returns a value rather than throwing.
 
-- [ ] **Step 4: Gate.**
+- [x] **Step 4: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/metrics/ && bunx tsc --noEmit
@@ -301,7 +301,7 @@ cd plugins/tribe/scripts/runner && bun test core/metrics/ && bunx tsc --noEmit
 Expected: the new file's tests pass (11 of them), `tsc` silent. Then `bun test` overall: expected
 `695 pass, 0 fail`.
 
-- [ ] **Step 5: Commit** — `feat(metrics): transcript trigger vocabulary and classifier (task 1/24)`.
+- [x] **Step 5: Commit** — `feat(metrics): transcript trigger vocabulary and classifier (task 1/24)`.
 
 ---
 
@@ -334,7 +334,7 @@ distinct turn is the other. Context size for a turn is `input + cache_read + cac
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test.** `core/metrics/accumulate.test.ts` — build rows as literal
+- [x] **Step 1: Write the failing test.** `core/metrics/accumulate.test.ts` — build rows as literal
   objects (no file IO) covering, at minimum:
 
 ```ts
@@ -400,11 +400,11 @@ test('Monitor arms are counted from assistant tool_use blocks', () => {
 });
 ```
 
-- [ ] **Step 2: Write `core/metrics/accumulate.ts`.** One exported pure function
+- [x] **Step 2: Write `core/metrics/accumulate.ts`.** One exported pure function
   `accumulate(rows: unknown[]): SessionMetrics`, walking rows in order, holding the current trigger
   class and a `Set` of seen message ids. No clock, no fs, no throw.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/metrics/ && bunx tsc --noEmit
@@ -412,7 +412,7 @@ cd plugins/tribe/scripts/runner && bun test core/metrics/ && bunx tsc --noEmit
 
 Expected: all Task-1 and Task-2 tests pass (about 18), `tsc` silent.
 
-- [ ] **Step 4: Commit** — `feat(metrics): pure turn accumulation with message-id de-duplication (task 2/24)`.
+- [x] **Step 4: Commit** — `feat(metrics): pure turn accumulation with message-id de-duplication (task 2/24)`.
 
 ---
 
@@ -450,7 +450,7 @@ and the viewer README, `## Run it`, verbatim:
 
 **Steps**
 
-- [ ] **Step 1: Write the failing tests.** `core/metrics/args.test.ts` mirrors
+- [x] **Step 1: Write the failing tests.** `core/metrics/args.test.ts` mirrors
   `core/watchdog/args.test.ts`'s shape: every unknown flag rejected by name, `--session` repeatable
   and required at least once, `--json` boolean, `--project` optional, `--cut-bytes` a bounded
   positive integer, `--verify <path>` mutually exclusive with `--session`.
@@ -459,16 +459,16 @@ and the viewer README, `## Run it`, verbatim:
   then asserts `skippedLines === 2` (the array and the malformed line; a blank line is not a skip),
   `skippedReasons` names both kinds, and that no exception escaped.
 
-- [ ] **Step 2: Append `TranscriptIO` to `ports/ports.ts`** — `readLines(path): Iterable<string>`,
+- [x] **Step 2: Append `TranscriptIO` to `ports/ports.ts`** — `readLines(path): Iterable<string>`,
   `readPrefix(path, bytes): { text: string; sha256: string; actualBytes: number }`,
   `fileExists(path): boolean`, `listProjectDirs(root): string[]`, `projectsRoot(): string`. Type
   declarations only, as that file requires. `readPrefix` is what makes S-P14's cut possible: it
   reads **exactly** `bytes` bytes and hashes exactly those, never the whole file.
 
-- [ ] **Step 3: Write the adapter and the pure arg parser**, then the `cli/main.ts` dispatch block
+- [x] **Step 3: Write the adapter and the pure arg parser**, then the `cli/main.ts` dispatch block
   mirroring the `watchdog` one: parse, resolve, run, print, `process.exit`.
 
-- [ ] **Step 4: Write the cut and `--verify`** (S-P14, spec §15). A run with `--cut-bytes n`
+- [x] **Step 4: Write the cut and `--verify`** (S-P14, spec §15). A run with `--cut-bytes n`
   measures only the first `n` bytes and emits a `cut` object. A run with `--verify <baseline.json>`
   re-measures every session at its recorded cut and compares, emitting one typed status per
   session — `verified` / `prefix_mismatch` / `truncated` / `absent` — and exiting `1` if any is not
@@ -535,7 +535,7 @@ test('a missing file is absent, not a throw', () => {
 });
 ```
 
-- [ ] **Step 5: Gate — run it against a REAL transcript** (`fixtures-mirror-reality.md` rule 2):
+- [x] **Step 5: Gate — run it against a REAL transcript** (`fixtures-mirror-reality.md` rule 2):
 
 ```sh
 cd plugins/tribe/scripts/runner
@@ -549,7 +549,7 @@ object with a `sha256`; the missing session prints one typed line naming the id 
 no stack trace. **Do not expect a particular turn count here** — that transcript is live and moves;
 the pinned number is Task 4's business.
 
-- [ ] **Step 6: Commit** — `feat(metrics): transcript reading edge, pinned cuts, and the transcript-metrics subcommand (task 3/24)`.
+- [x] **Step 6: Commit** — `feat(metrics): transcript reading edge, pinned cuts, and the transcript-metrics subcommand (task 3/24)`.
 
 ---
 
@@ -585,14 +585,14 @@ re-run of that same cut.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing check.** Add `core/metrics/baseline.test.ts` asserting the
+- [x] **Step 1: Write the failing check.** Add `core/metrics/baseline.test.ts` asserting the
   baseline file exists, parses, has `v: 1`, carries exactly the two session ids, and that **every
   entry has a `cut` with a positive `bytes`, a positive `lines` and a 64-hex-character `sha256`** —
   an unpinned entry is a failed baseline (S-P14). Also assert its serialized text contains none of
   the strings `"content"`, `"text"`, `"prompt"` (the privacy wall, mechanically enforced). It fails
   now because the file does not exist.
 
-- [ ] **Step 2: Generate the PINNED baseline.** Take the cut at each transcript's current length.
+- [x] **Step 2: Generate the PINNED baseline.** Take the cut at each transcript's current length.
 
 ```sh
 cd plugins/tribe/scripts/runner
@@ -610,7 +610,7 @@ planning measurements below but need not equal them — both sessions were live 
 | `6a8a8fe4-f716-43f2-936f-0da47662d9d9` | 174 | 26,469,777 | 258,795 | 0.3168 |
 | `ba6e93f0-72e4-4e08-9c64-03d7ea6fb917` | 154 | 28,075,416 | 307,375 | 0.5357 |
 
-- [ ] **Step 3: Prove the pin holds.** This is what makes it a ratchet rather than a snapshot:
+- [x] **Step 3: Prove the pin holds.** This is what makes it a ratchet rather than a snapshot:
 
 ```sh
 bun run.ts transcript-metrics --verify \
@@ -620,7 +620,7 @@ bun run.ts transcript-metrics --verify \
 Expected: both sessions report `"status": "verified"` with identical metrics and `exit=0` — even if
 either transcript has grown since step 2, because each is re-measured only over its recorded cut.
 
-- [ ] **Step 4: Create the ceiling file** at
+- [x] **Step 4: Create the ceiling file** at
   `docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json` with
   `{"v":1,"headroomFactor":1.5,"source":"unmeasured — task 20 writes these","ceilings":
   {"ruling":0,"ratify":0,"closing":0,"doorbell":0}}`. A `0` means "not yet measured": the checker
@@ -629,12 +629,12 @@ either transcript has grown since step 2, because each is re-measured only over 
   ceiling is used; **lowering a ceiling is accepted and raising one is refused** unless the entry
   carries a `raisedBy` ruling id — with the refusal naming both the old and the new value.
 
-- [ ] **Step 5: Write the `.md` twin** — the measured table, the per-class breakdown, the cut for
+- [x] **Step 5: Write the `.md` twin** — the measured table, the per-class breakdown, the cut for
   each session, the ratchet assertion (spec §15), and a "Deltas from the card's table" section
   recording spec §21's discrepancies **with D2's corrected explanation**: the turn/token deltas are
   a moving-file effect, not a classifier error; only the class-bucket deltas were mis-bucketed.
 
-- [ ] **Step 6: Gate.**
+- [x] **Step 6: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/metrics/ && bunx tsc --noEmit
@@ -645,7 +645,7 @@ python3 -c "import json;d=json.load(open('../../../../docs/superpowers/evidence/
 Expected: tests green including the baseline and ceiling tests; `grep -c` prints `0`; the python
 line prints `True`.
 
-- [ ] **Step 7: Commit** — `docs(evidence): pinned transcript baseline and the ratchet ceiling file (task 4/24)`.
+- [x] **Step 7: Commit** — `docs(evidence): pinned transcript baseline and the ratchet ceiling file (task 4/24)`.
 
 ---
 
@@ -675,7 +675,7 @@ the supervisor is NOT described yet — it does not exist.
 
 **Steps**
 
-- [ ] **Step 1: File-context gate, then author the ADR body outside `.c3/`.**
+- [x] **Step 1: File-context gate, then author the ADR body outside `.c3/`.**
 
 ```sh
 cd /Users/hip/repo/tribe-wt/campaign-supervisor
@@ -690,7 +690,7 @@ measurably wrong in six ways), the decision (a committed, tested, token-free sub
 numbers-only baseline file, landing before any supervisor code), and the evidence (the two gate
 commands and their measured outputs).
 
-- [ ] **Step 2: Cite, scaffold, patch, apply.**
+- [x] **Step 2: Cite, scaffold, patch, apply.**
 
 ```sh
 C3X_MODE=agent bash "$C3X_BIN" read c3-215 --section Contract --cite
@@ -705,7 +705,7 @@ C3X_MODE=agent bash "$C3X_BIN" check
 Expected: `change view` shows one pending patch with no drift; `apply` lands it; `check` prints
 `total: 53` (the entity count grows by the ADR) with `ok: true`.
 
-- [ ] **Step 3: Commit** — `docs(c3): ADR and c3-215 contract row for the transcript ratchet (task 5/24)`.
+- [x] **Step 3: Commit** — `docs(c3): ADR and c3-215 contract row for the transcript ratchet (task 5/24)`.
 
 ---
 
@@ -744,22 +744,22 @@ the *shape* and validates it.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test** covering, at minimum: `--campaign` and `--home` mutually
+- [x] **Step 1: Write the failing test** covering, at minimum: `--campaign` and `--home` mutually
   exclusive; exactly one required; `--repo` and `--model` required; every flag in spec §8 parsed
   with its default and refused outside its bounds; `--max-spawns --repo` refused as
   "requires a value, got flag"; an unknown flag refused by name; and
   `supervisorHomeFromCampaign('/abs/tribe/home', 'slug')` returning `/abs/tribe/home/campaigns/slug`.
 
-- [ ] **Step 2: Write `core/supervisor/model.ts`** — the complete vocabulary from spec §3.2, §3.3,
+- [x] **Step 2: Write `core/supervisor/model.ts`** — the complete vocabulary from spec §3.2, §3.3,
   §6.2, §8, §11, §13: `SupervisorObservation`, `EscalationFact`, `SupervisorAction`, `SessionKind`,
   `ParkReason` (all 20 values), `ParkMarkerKind` (both values), `SupervisorLimits`,
   `SupervisorState`, `SupervisorStatus`, `LedgerEntry`, and the four exit constants
   `SUPERVISOR_EXIT_DONE = 0`, `SUPERVISOR_EXIT_USAGE = 1`, `SUPERVISOR_EXIT_NEEDS_OWNER = 20`,
   `SUPERVISOR_EXIT_RUNNING = 21`. Imports nothing local.
 
-- [ ] **Step 3: Write `core/supervisor/args.ts`.**
+- [x] **Step 3: Write `core/supervisor/args.ts`.**
 
-- [ ] **Step 4: Gate.**
+- [x] **Step 4: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bunx tsc --noEmit
@@ -769,7 +769,7 @@ bun test structure.test.ts
 Expected: the new tests pass (about 30), `tsc` silent, and the structural contract still green —
 including "no interface `*IO`/`*Port` declaration outside `ports/`".
 
-- [ ] **Step 5: Commit** — `feat(supervisor): vocabulary, argument parsing and home path math (task 6/24)`.
+- [x] **Step 5: Commit** — `feat(supervisor): vocabulary, argument parsing and home path math (task 6/24)`.
 
 ---
 
@@ -802,7 +802,7 @@ No clock (`nowMs` arrives on the observation), no fs, no throw, no `Math.random`
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test** as ONE table, one case per row of spec §3.4 — 4 pre-loop
+- [x] **Step 1: Write the failing test** as ONE table, one case per row of spec §3.4 — 4 pre-loop
   rows plus 28 main rows, plus the tie-break cases below. Build a `base()` observation factory so
   each row states only its own differences:
 
@@ -924,10 +924,10 @@ test('the function is pure: the same observation decides the same action every t
 Write one such case for **every** row of spec §3.4 — the list above is the shape and the hard cases,
 not the whole set.
 
-- [ ] **Step 2: Write `core/supervisor/decide.ts`** as a straight-line reading of spec §3.4, with a
+- [x] **Step 2: Write `core/supervisor/decide.ts`** as a straight-line reading of spec §3.4, with a
   section comment per group of rows naming the spec row numbers.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/decide.test.ts && bunx tsc --noEmit
@@ -937,7 +937,7 @@ grep -nE "readFile|node:fs|child_process|Date\.now|Math\.random" core/supervisor
 Expected: about 40 tests pass; `tsc` silent; the `grep` prints **nothing** (purity, checked
 directly as well as by `structure.test.ts`).
 
-- [ ] **Step 4: Commit** — `feat(supervisor): the pure decision table (task 7/24)`.
+- [x] **Step 4: Commit** — `feat(supervisor): the pure decision table (task 7/24)`.
 
 ---
 
@@ -973,7 +973,7 @@ Note S-P4: the archive half is performed by the supervisor after this check, not
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test.** Cases: a new ratified block → `ruled` with its id;
+- [x] **Step 1: Write the failing test.** Cases: a new ratified block → `ruled` with its id;
   a new block with `ratified-as: pending` → failed (the existing `isRulingRatified` says so);
   a new block with no `ratified-as:` at all → failed; no new block → failed; an unchanged
   `answers.md` plus a valid park marker → `parked` with the marker kind; a park marker with
@@ -981,7 +981,7 @@ Note S-P4: the archive half is performed by the supervisor after this check, not
   the same, never a throw; a non-empty `git status --porcelain` → `failed` with reason
   `repo_touched`, **even when a valid ruling landed** (decision 4: a violation is a failed ruling).
 
-- [ ] **Step 2: Write the failing integrity tests** (S-P13, spec §5.2/§5.3) — this is the half the
+- [x] **Step 2: Write the failing integrity tests** (S-P13, spec §5.2/§5.3) — this is the half the
   original postconditions missed:
 
 ```ts
@@ -1030,12 +1030,12 @@ test('ratify that drops a ruling id entirely parks out_of_scope', () => {
 });
 ```
 
-- [ ] **Step 3: Write `core/supervisor/verify.ts`** — `verifyRuling`, `verifyRatify`,
+- [x] **Step 3: Write `core/supervisor/verify.ts`** — `verifyRuling`, `verifyRatify`,
   `verifyClosing`, `parseParkMarker`, all pure, importing `parseRulings`/`isRulingRatified` from
   `../rulings.ts`. Every returned verdict carries a `retryable: boolean`; the two integrity
   outcomes are the only ones that set it `false`.
 
-- [ ] **Step 4: Gate.**
+- [x] **Step 4: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bunx tsc --noEmit
@@ -1044,7 +1044,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bunx tsc --noEmi
 Expected: about 22 new tests pass, including all six integrity cases; everything from Tasks 6-7
 still green; `tsc` silent.
 
-- [ ] **Step 5: Commit** — `feat(supervisor): disk postconditions, ruling integrity and park markers (task 8/24)`.
+- [x] **Step 5: Commit** — `feat(supervisor): disk postconditions, ruling integrity and park markers (task 8/24)`.
 
 ---
 
@@ -1078,7 +1078,7 @@ makes no decision; identical inputs render byte-identical output.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test.** Assert, for the `ruling` brief: it contains the escalation
+- [x] **Step 1: Write the failing test.** Assert, for the `ruling` brief: it contains the escalation
   file content verbatim; it contains the `ownerOnlyEscalations` entries verbatim; it contains the
   W3 and W7 quotes **byte-identical** to the strings in `SKILL.md` (the test reads `SKILL.md` and
   greps its own rendered output for those exact substrings — this is what makes a future
@@ -1087,11 +1087,11 @@ makes no decision; identical inputs render byte-identical output.
   Assert for the `ratify` brief that it names every unratified id. Assert for the `closing` brief
   that it contains Stage D's four numbered steps.
 
-- [ ] **Step 2: Write the templates and `core/supervisor/brief.ts`** — one exported
+- [x] **Step 2: Write the templates and `core/supervisor/brief.ts`** — one exported
   `renderBrief(kind, facts): string`. The governing quotes live in the template files as literal
   text; the test above is what keeps them honest against `SKILL.md`.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/brief.test.ts && bunx tsc --noEmit
@@ -1100,7 +1100,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/brief.test.ts && bun
 Expected: about 12 tests pass, including the byte-identical-quote checks against the real
 `SKILL.md`; `tsc` silent.
 
-- [ ] **Step 4: Commit** — `feat(supervisor): pure brief renderer for the three session kinds (task 9/24)`.
+- [x] **Step 4: Commit** — `feat(supervisor): pure brief renderer for the three session kinds (task 9/24)`.
 
 ---
 
@@ -1114,12 +1114,16 @@ Expected: about 12 tests pass, including the byte-identical-quote checks against
 **Oracle.** `core/watchdog/status.ts`'s contract: timestamps arrive as arguments, a non-finite
 millisecond value renders `(invalid-timestamp)` rather than throwing, and serialization is total.
 The `NEEDS_OWNER.md` sentence table is frozen: exactly one "what happened" sentence and one "what
-unblocks it" instruction per `ParkReason`, all 20.
+unblocks it" instruction per `ParkReason`, all 22 (task-10 fix: spec §11's own template text says
+"20", but spec §6.2 — "Twenty-two values, each produced by exactly one row..." — and the already-
+committed `model.ts`'s `ParkReason` union are the authoritative count; §11's figure is a stale
+leftover from before §5.2/§5.3's two integrity parks were added, per the dispatch brief's own
+"the spec wins" instruction).
 
 **Fence by intent.** Pure shaping. `state.ts` parses, applies one outcome, and serializes; it never
 decides anything (that is `decide.ts`).
 
-**Governing quote** — spec §11, `NEEDS_OWNER.md` format, and spec §6.2's 20-value `ParkReason`
+**Governing quote** — spec §11, `NEEDS_OWNER.md` format, and spec §6.2's 22-value `ParkReason`
 union. The `ratified-as:` vocabulary quoted in any rendered text comes verbatim from
 `core/rulings.ts`'s own documented set: `rule <path>` | `debt <id>` | `roadmap <ref>` |
 `operational` | `dismissed`.
@@ -1131,17 +1135,17 @@ union. The `ratified-as:` vocabulary quoted in any rendered text comes verbatim 
 
 **Steps**
 
-- [ ] **Step 1: Write the failing tests.** For `state.ts`: an absent state file parses to the zero
+- [x] **Step 1: Write the failing tests.** For `state.ts`: an absent state file parses to the zero
   state; an unknown-version file is a typed refusal; applying a `ruling` outcome increments that
   card's round and appends the content hash; serialize→parse round-trips byte-identically.
   For `status.ts`: `exitCodeOf` maps all four terminal shapes; `buildStatus` fills every field of
   spec §13; `renderNeedsOwner` produces a document containing the reason, the campaign home, the
-  ledger lines, and a re-run command — and a table-driven case asserts **all 20** `ParkReason`
+  ledger lines, and a re-run command — and a table-driven case asserts **all 22** `ParkReason`
   values render a non-empty "what unblocks it" instruction.
 
-- [ ] **Step 2: Write both modules.**
+- [x] **Step 2: Write both modules.**
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bunx tsc --noEmit
@@ -1149,7 +1153,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bunx tsc --noEmi
 
 Expected: about 30 new tests pass; `tsc` silent; the whole suite still green.
 
-- [ ] **Step 4: Commit** — `feat(supervisor): persisted state, status publishing and the owner park document (task 10/24)`.
+- [x] **Step 4: Commit** — `feat(supervisor): persisted state, status publishing and the owner park document (task 10/24)`.
 
 ---
 
@@ -1176,7 +1180,7 @@ described yet — it lands in Task 16, with the phase that builds it.
 
 **Steps**
 
-- [ ] **Step 1: Cite, scaffold, patch, apply.**
+- [x] **Step 1: Cite, scaffold, patch, apply.**
 
 ```sh
 cd /Users/hip/repo/tribe-wt/campaign-supervisor
@@ -1195,7 +1199,7 @@ C3X_MODE=agent bash "$C3X_BIN" check
 Expected: one pending patch, no drift, `apply` lands it, `check` prints `total: 53` with
 `ok: true`.
 
-- [ ] **Step 2: Commit** — `docs(c3): change-safety row for the supervisor core (task 11/24)`.
+- [x] **Step 2: Commit** — `docs(c3): change-safety row for the supervisor core (task 11/24)`.
 
 ---
 
@@ -1235,16 +1239,16 @@ child spawn, the `tribe-home.sh` execution, and the `git status --porcelain` pro
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test.** Against a `mktemp -d` tree: an atomic write survives a
+- [x] **Step 1: Write the failing test.** Against a `mktemp -d` tree: an atomic write survives a
   concurrent read (temp-then-rename, never a truncated read); `renameIfPresent` on an absent file is
   a no-op, not a throw; a path containing `..` that escapes the home is refused **before** the file
   is opened; `readFileOrEmpty` on an unreadable file returns `''`; `listEntries` on a missing
   directory returns `[]`; the `git` probe sets both config env vars and carries a timeout.
 
-- [ ] **Step 2: Append the port, write the adapter.** Note in the port's doc comment that
+- [x] **Step 2: Append the port, write the adapter.** Note in the port's doc comment that
   `spawnWatchdog` returns a handle with no `kill` — S-P7.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test adapters/supervisor-io.adapter.test.ts && bun test structure.test.ts && bunx tsc --noEmit
@@ -1253,7 +1257,7 @@ cd plugins/tribe/scripts/runner && bun test adapters/supervisor-io.adapter.test.
 Expected: about 12 new tests pass; the structural contract still green (the adapter is the only new
 file naming `node:fs`/`node:child_process`); `tsc` silent.
 
-- [ ] **Step 4: Commit** — `feat(supervisor): the IO seam and its fail-closed adapter (task 12/24)`.
+- [x] **Step 4: Commit** — `feat(supervisor): the IO seam and its fail-closed adapter (task 12/24)`.
 
 ---
 
@@ -1306,7 +1310,7 @@ imports the SDK.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test** for `permit.ts` as a table:
+- [x] **Step 1: Write the failing test** for `permit.ts` as a table:
 
 ```ts
 import { expect, test } from 'bun:test';
@@ -1347,13 +1351,13 @@ builder gets its own test with an injected fake `realpath`, including the symlin
 under `<home>/link-out/x` whose `link-out` resolves outside the home must DENY, and the same path
 whose `link-out` resolves inside must ALLOW. That pair is the one a lexical-only check gets wrong.
 
-- [ ] **Step 2: Write `core/supervisor/permit.ts`** — the pure `containPath` reusing `containHome`'s
+- [x] **Step 2: Write `core/supervisor/permit.ts`** — the pure `containPath` reusing `containHome`'s
   segment logic from `core/watchdog/args.ts` rather than duplicating it, plus
   `buildContainmentHook(homeDir, io)` which resolves the target's deepest existing ancestor through
   `io.realpath` before calling it. A non-absolute path, or one that cannot be resolved at all, is
   denied.
 
-- [ ] **Step 3: Write `core/supervisor/session.ts`** — `buildOneShotOptions(kind, config,
+- [x] **Step 3: Write `core/supervisor/session.ts`** — `buildOneShotOptions(kind, config,
   abortController)` producing spec §5.1's envelope (`cwd` = the campaign home per S-P9,
   `settingSources: []`, `resume` never set, `permissionMode: 'default'`, the `disallowedTools`
   list, the containment hook for `ruling`/`ratify` only), and `runOneShotSession(...)` consuming
@@ -1364,7 +1368,7 @@ whose `link-out` resolves inside must ALLOW. That pair is the one a lexical-only
   spawn that throws resolves to a typed failure rather than rejecting; a timeout resolves to
   `timeout`.
 
-- [ ] **Step 4: Write the opt-in REAL-session test** —
+- [x] **Step 4: Write the opt-in REAL-session test** —
   `plugins/tribe/scripts/tests/test-supervisor-permission-real.sh`, gated behind `TRIBE_REAL_E2E=1`
   so `bun test` never bills anybody. It reproduces spec §19.4 exactly: a throwaway `HOME`, a fake
   repo root, a symlink inside the home pointing out of it, one live Haiku session under the REAL
@@ -1387,7 +1391,7 @@ whose `link-out` resolves inside must ALLOW. That pair is the one a lexical-only
 Expected: `4 passed, 0 failed`, and the script prints the `permission_denials` payload so a reader
 can see the three refusals. Skipped with a clear message when `TRIBE_REAL_E2E` is unset.
 
-- [ ] **Step 5: Gate.**
+- [x] **Step 5: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/ && bun test structure.test.ts && bunx tsc --noEmit
@@ -1397,9 +1401,17 @@ TRIBE_REAL_E2E=1 bash ../tests/test-supervisor-permission-real.sh
 
 Expected: about 30 new tests pass; the structural contract green; `tsc` silent; the `grep` prints
 **nothing** — `adapters/session.adapter.ts` remains the only SDK importer, as the card's fence
-requires; and the real-session test reports `4 passed, 0 failed`.
+requires; and the real-session test reports `4 passed, 0 failed`. **Result (Warchief, 2026-09-19):**
+the containment hook was proven against a LIVE Haiku session — the real-token test reports
+`5 passed, 0 failed` (the four write outcomes plus the run-success check; "4" was the plan's count of
+the write assertions only, the substance R5 requires — all three escapes denied, the one contained
+write allowed — holds). The contained `<home>/answers.md` write SUCCEEDED (history preserved as a
+byte prefix); the repo write, the `/tmp` write, and the **symlink-escape** write (`<home>/link-out/…`
+resolving outside the home — the case a lexical check misses) were each DENIED and absent on disk;
+`permission_denials` named exactly those three; the run ended `subtype=success`, no hang, ~$0.073.
+Evidence: `docs/superpowers/evidence/2026-09-19-supervisor-permission-real.txt`.
 
-- [ ] **Step 6: Commit** — `feat(supervisor): least-privilege permission model, proven against a live session (task 13/24)`.
+- [x] **Step 6: Commit** — `feat(supervisor): least-privilege permission model, proven against a live session (task 13/24)`.
 
 ---
 
@@ -1431,7 +1443,7 @@ park reason.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test** with a fully scripted fake `SupervisorIO` (no real fs, no
+- [x] **Step 1: Write the failing test** with a fully scripted fake `SupervisorIO` (no real fs, no
   real spawn). Assert, at minimum: the happy path `run_watchdog → escalations_pending → ruling
   spawn → verified → archive → run_watchdog → runner_done → closing → exit 0`; that `events.jsonl`
   records the intent line **before** the effect for every action; that the ruling round increments
@@ -1440,9 +1452,9 @@ park reason.
   retries exactly once and then parks; that the write surface touched by the whole run is exactly
   S-P5's three locations.
 
-- [ ] **Step 2: Write `core/supervisor/loop.ts`.**
+- [x] **Step 2: Write `core/supervisor/loop.ts`.**
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/loop.test.ts && bunx tsc --noEmit
@@ -1450,7 +1462,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/loop.test.ts && bunx
 
 Expected: about 20 tests pass; `tsc` silent.
 
-- [ ] **Step 4: Commit** — `feat(supervisor): the observe-decide-perform-persist loop (task 14/24)`.
+- [x] **Step 4: Commit** — `feat(supervisor): the observe-decide-perform-persist loop (task 14/24)`.
 
 ---
 
@@ -1479,13 +1491,13 @@ regardless of cause.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test** in `cli/main.test.ts`: `resolveSupervisorHome` refuses a
+- [x] **Step 1: Write the failing test** in `cli/main.test.ts`: `resolveSupervisorHome` refuses a
   home outside the tribe root, refuses one with no `campaign-state.json`, and accepts a good one;
   `--campaign` plus `--repo` derives the home through the injected `tribeHome` seam.
 
-- [ ] **Step 2: Write the dispatch block.**
+- [x] **Step 2: Write the dispatch block.**
 
-- [ ] **Step 3: Gate — run the real CLI's refusal paths.**
+- [x] **Step 3: Gate — run the real CLI's refusal paths.**
 
 ```sh
 cd plugins/tribe/scripts/runner
@@ -1497,7 +1509,7 @@ bun run.ts supervise --repo /tmp --campaign x --model m --nonsense ; echo "exit=
 Expected: tests green; the first prints `supervise: missing required flag: --repo` with `exit=1`;
 the second prints `supervise: unknown flag: --nonsense` with `exit=1`; neither prints a stack trace.
 
-- [ ] **Step 4: Commit** — `feat(supervisor): the supervise subcommand (task 15/24)`.
+- [x] **Step 4: Commit** — `feat(supervisor): the supervise subcommand (task 15/24)`.
 
 ---
 
@@ -1526,7 +1538,7 @@ row for the `run.ts supervise` surface, a Business Flow amendment for the judgme
 
 **Steps**
 
-- [ ] **Step 1: File-context gate and author the ADR.**
+- [x] **Step 1: File-context gate and author the ADR.**
 
 ```sh
 cd /Users/hip/repo/tribe-wt/campaign-supervisor
@@ -1544,7 +1556,7 @@ containment hook, the repo-untouched probe, and the `closing` exception), the co
 becomes mechanical; `autoAnswerRounds` is documented as vestigial, FU-CS-1), and the alternatives
 rejected in spec §17.
 
-- [ ] **Step 2: Cite, scaffold, patch, apply.**
+- [x] **Step 2: Cite, scaffold, patch, apply.**
 
 ```sh
 C3X_MODE=agent bash "$C3X_BIN" read c3-215 --section Contract --cite
@@ -1570,7 +1582,7 @@ Expected: three pending patches with no drift; `apply` lands them atomically; `c
 re-author — **never hand-edit the sealed doc**; if a seal is already broken, run
 `C3X_MODE=agent bash "$C3X_BIN" repair` and re-apply.
 
-- [ ] **Step 3: Commit** — `docs(c3): ADR and c3-215 sync including the least-privilege model (task 16/24)`.
+- [x] **Step 3: Commit** — `docs(c3): ADR and c3-215 sync including the least-privilege model (task 16/24)`.
 
 ---
 
@@ -1606,7 +1618,7 @@ session double is a shell script the `SessionIO` seam is pointed at through an e
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test script.** Structure it exactly like
+- [x] **Step 1: Write the failing test script.** Structure it exactly like
   `test-watchdog-e2e.sh` (`ok`/`bad`/`check`/`contains` helpers, `export HOME="$TMP/home"`,
   `TMP="$(cd "$TMP" && pwd -P)"` for the macOS symlink). Probes:
 
@@ -1630,12 +1642,12 @@ session double is a shell script the `SessionIO` seam is pointed at through an e
 #          campaign-state.json exits 1 with a typed refusal; neither prints a stack trace.
 ```
 
-- [ ] **Step 2: Write the session double.** It reads a `DOUBLE_PLAN` env var (the same scripting
+- [x] **Step 2: Write the session double.** It reads a `DOUBLE_PLAN` env var (the same scripting
   shape `fixtures/watchdog/runner-double.sh` already uses), appends a ruling to `answers.md` or
   writes a park marker or does nothing, bumps a counter file **outside** the campaign home, and
   exits. It never spawns anything.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh
@@ -1644,7 +1656,7 @@ bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh
 Expected: every probe `ok`, final line `N passed, 0 failed` with `N` at least 24, and the script
 exits 0. Run it twice in a row to prove it is repeatable and leaves no state behind.
 
-- [ ] **Step 4: Commit** — `test(supervisor): end-to-end against a session double from an empty home (task 17/24)`.
+- [x] **Step 4: Commit** — `test(supervisor): end-to-end against a session double from an empty home (task 17/24)`.
 
 ---
 
@@ -1676,7 +1688,7 @@ Warchief, not an edit to the test's expectations.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test script.** Three scenarios, using the double's sentinel-file
+- [x] **Step 1: Write the failing test script.** Three scenarios, using the double's sentinel-file
   block so the kill lands at a known instant (there is no `timeout` binary; poll for the sentinel
   in a bounded loop):
 
@@ -1688,8 +1700,14 @@ Warchief, not an edit to the test's expectations.
 #         un-killed control run.
 # Kill B  mid-ruling-session: the double blocks on a sentinel AFTER writing the ruling to
 #         answers.md; kill -9 the supervisor there; remove the sentinel; restart.
-#         Expect: answers.md has EXACTLY ONE new ## block (never two); the restart ARCHIVES the
-#         escalation rather than spawning a second ruling; the double's counter did not grow.
+#         Expect (R6 amendment, 2026-09-19): answers.md has EXACTLY ONE new ## block (never
+#         two); no data is lost (the ruling stays durable in answers.md AND the escalation file
+#         is still present); the restart PARKS with reason repeat_escalation — the accepted
+#         safe-but-manual outcome for the ruling-landed-pre-archive crash window — rather than
+#         spawning a second ruling session; the double's counter did not grow. (An automatic
+#         archive-self-heal here would need a new persisted field — landedRulingId — recorded
+#         through core/state.ts, which is FROZEN/fenced; that self-heal is accepted debt, not
+#         built by this task.)
 # Kill C  mid-re-trigger: kill -9 between the archive and the next run_watchdog.
 #         Expect: the restart re-observes, sees the archive already done, and re-triggers once;
 #         the escalation file is not renamed twice and no .resolved-R<n>.resolved-R<n> exists.
@@ -1697,7 +1715,7 @@ Warchief, not an edit to the test's expectations.
 
 Each scenario ends by asserting `grep -c '^## ' answers.md` equals the control run's value.
 
-- [ ] **Step 2: Gate.**
+- [x] **Step 2: Gate.**
 
 ```sh
 bash plugins/tribe/scripts/tests/test-supervisor-kill.sh
@@ -1706,7 +1724,7 @@ bash plugins/tribe/scripts/tests/test-supervisor-kill.sh
 Expected: `N passed, 0 failed` with all three scenarios green, and the explicit "exactly one `## `
 block" assertion visible in the output for Kill B.
 
-- [ ] **Step 3: Commit** — `test(supervisor): G4 kill-and-restart safety across three instants (task 18/24)`.
+- [x] **Step 3: Commit** — `test(supervisor): G4 kill-and-restart safety across three instants (task 18/24)`.
 
 ---
 
@@ -1743,7 +1761,7 @@ no real escalation body and no real ruling prose into the repo (the same privacy
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test.** Drive the pure loop with a scripted fake `SupervisorIO`
+- [x] **Step 1: Write the failing test.** Drive the pure loop with a scripted fake `SupervisorIO`
   over the fixture: three escalation rounds each answered by a ruling, then `runner_done` with one
   unratified ruling (mirroring the real campaign's exit-5 shape), then a closing. Assert:
 
@@ -1754,9 +1772,9 @@ expect(spawnLog.every((s) => s.resume === undefined)).toBe(true);
 expect(ledger.every((l) => typeof l.usage.input_tokens === 'number')).toBe(true);
 ```
 
-- [ ] **Step 2: Build the fixture and make it pass.**
+- [x] **Step 2: Build the fixture and make it pass.**
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/replay.test.ts
@@ -1766,7 +1784,7 @@ grep -rl "viewer-consolidation" fixtures/supervisor/ | head
 Expected: the replay assertions pass with exactly 5 spawns and no `resume`; the `grep` shows only
 the fixture's own directory name, never a copied ruling body.
 
-- [ ] **Step 4: Commit** — `test(supervisor): the viewer-consolidation replay fixture bounds spawns at five (task 19/24)`.
+- [x] **Step 4: Commit** — `test(supervisor): the viewer-consolidation replay fixture bounds spawns at five (task 19/24)`.
 
 ---
 
@@ -1803,7 +1821,7 @@ under `/Users/hip/.tribe/-Users-hip-repo-tribe/campaigns/` is read or written.
 
 **Steps**
 
-- [ ] **Step 1: Write the opt-in script.** It refuses to run unless `TRIBE_REAL_E2E=1`, prints the
+- [x] **Step 1: Write the opt-in script.** It refuses to run unless `TRIBE_REAL_E2E=1`, prints the
   estimated cost, builds the throwaway repo and campaign home, and runs:
 
 ```sh
@@ -1816,7 +1834,7 @@ echo "exit=$?"
 Expected: `exit=0`; `NEEDS_OWNER.md` does not exist; `answers.md` gained at least one ratified
 `## ` block; the escalation file is archived; `supervisor/final-report.md` exists and is non-empty.
 
-- [ ] **Step 2: Assert the G5 ledger mechanically.**
+- [x] **Step 2: Assert the G5 ledger mechanically.**
 
 ```sh
 python3 - "$HOME_DIR/supervisor/ledger.jsonl" <<'PY'
@@ -1834,7 +1852,7 @@ PY
 
 Expected: `ledger ok:` with between 1 and 4 spawns and no `failed`/`timeout` verdict.
 
-- [ ] **Step 3: Assert the G0 ratchet, and WRITE the measured ceilings** (S-P15). Collect every
+- [x] **Step 3: Assert the G0 ratchet, and WRITE the measured ceilings** (S-P15). Collect every
   session id from the ledger, measure them, assert the first two ratchet conditions, then turn the
   measured maxima into the committed per-kind ceilings.
 
@@ -1846,7 +1864,8 @@ python3 - "$TMP/e2e-metrics.json" "$HOME_DIR/supervisor/ledger.jsonl" \
   docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json <<'PY'
 import json, math, sys
 metrics, ledger, ratchet_path = sys.argv[1], sys.argv[2], sys.argv[3]
-m = {s["sessionId"]: s for s in json.load(open(metrics))["sessions"]}
+# `transcript-metrics --json` nests the numbers under each entry's `.metrics` (BaselineEntry).
+m = {s["sessionId"]: s["metrics"] for s in json.load(open(metrics))["sessions"]}
 kind = {json.loads(l)["sessionId"]: json.loads(l)["kind"] for l in open(ledger) if l.strip()}
 for sid, s in m.items():
     assert s["babysittingShare"] == 0, (sid, s["babysittingShare"])
@@ -1868,7 +1887,7 @@ Expected: every session reports `"babysittingShare": 0` and `"monitorArms": 0`; 
 the measured maxima per kind and the ceilings it wrote (each `measured × 1.5`, rounded up). A kind
 with no session in this run keeps its `0` and stays on the baseline fallback — do not invent one.
 
-- [ ] **Step 3a: Re-run the ceiling gate against the file just written.**
+- [x] **Step 3a: Re-run the ceiling gate against the file just written.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/metrics/ceiling.test.ts
@@ -1879,7 +1898,7 @@ Expected: the ceiling tests pass against real values, the diff shows only `ceili
 changing, and no ceiling was raised relative to a previously measured value (the first measurement
 moves them off `0`, which the test treats as the initial set, not a raise).
 
-- [ ] **Step 4: Prove G6 in the viewer.** Start the viewer, open it, and record BOTH:
+- [x] **Step 4: Prove G6 in the viewer.** Start the viewer, open it, and record BOTH:
   the project directory listing (reproducible) and a screenshot (what the card asks for).
 
 ```sh
@@ -1891,7 +1910,7 @@ cd plugins/tribe/scripts/viewer && bun serve.ts --port 4321
 Expected: exactly one project directory whose name ends in the campaign slug, containing one
 `.jsonl` per ledger spawn, and the viewer listing that project with those sessions.
 
-- [ ] **Step 5: Write the evidence file** at
+- [x] **Step 5: Write the evidence file** at
   `docs/superpowers/evidence/2026-09-18-campaign-supervisor-e2e.md`, carrying:
   **BEFORE** — the baseline table from Task 4 (174 turns, 26.5M cache-read, 0.3168 babysitting
   share for one campaign's supervision) with the three rulings it produced.
@@ -1900,7 +1919,7 @@ Expected: exactly one project directory whose name ends in the campaign slug, co
   from step 4, and `final-report.md`.
   Both live in the repo so every PR link resolves from the repo itself.
 
-- [ ] **Step 6: Commit** — `test(supervisor): real unattended end-to-end run on haiku with evidence (task 20/24)`.
+- [x] **Step 6: Commit** — `test(supervisor): real unattended end-to-end run on haiku with evidence (task 20/24)`.
 
 ---
 
@@ -1912,7 +1931,7 @@ Expected: exactly one project directory whose name ends in the campaign slug, co
 
 **Oracle.** As Task 5. Baseline after Task 16 is `total: 54`, `ok: true`.
 
-**Fence by intent.** ONE change-unit adding the Enforcement Surfaces rows for the three new test
+**Fence by intent.** ONE change-unit adding the Change Safety rows for the three new test
 suites. No new ADR — the supervisor's ADR already exists and its decision did not change.
 
 **Governing quote** — as Task 11 (`brief-contracts.md`'s phase-end sequencing rule).
@@ -1923,11 +1942,11 @@ suites. No new ADR — the supervisor's ADR already exists and its decision did 
 
 **Steps**
 
-- [ ] **Step 1: Patch and apply.**
+- [x] **Step 1: Patch and apply.**
 
 ```sh
 cd /Users/hip/repo/tribe-wt/campaign-supervisor
-C3X_MODE=agent bash "$C3X_BIN" read c3-215 --section 'Enforcement Surfaces' --cite
+C3X_MODE=agent bash "$C3X_BIN" read c3-215 --section 'Change Safety' --cite
 C3X_MODE=agent bash "$C3X_BIN" change new <adr-id>
 # 04-enforcement-supervisor-tests.patch.md: scope insert — test-supervisor-e2e.sh,
 # test-supervisor-kill.sh, and the opt-in test-supervisor-real-e2e.sh with its env gate.
@@ -1939,7 +1958,7 @@ C3X_MODE=agent bash "$C3X_BIN" check
 
 Expected: one pending patch, no drift, `check` prints `total: 54` with `ok: true`.
 
-- [ ] **Step 2: Commit** — `docs(c3): enforcement-surface rows for the supervisor test suites (task 21/24)`.
+- [x] **Step 2: Commit** — `docs(c3): enforcement-surface rows for the supervisor test suites (task 21/24)`.
 
 ---
 
@@ -1982,7 +2001,7 @@ the supervisor. Document the procedure exactly as spec §12.1 numbers it, includ
 
 **Steps**
 
-- [ ] **Step 1: Write the failing check** as a grep gate in the same script style the
+- [x] **Step 1: Write the failing check** as a grep gate in the same script style the
   detached-launch test uses — a new `plugins/tribe/scripts/tests/test-supervisor-docs.sh`:
 
 ```sh
@@ -2000,11 +2019,11 @@ grep -q 'W7 — bounded auto-answer.\*\* At most 2 auto-answer rounds per card' 
 grep -q 'W3 — judgment stays in sessions' "$SKILL" || bad "W3 unchanged"
 ```
 
-- [ ] **Step 2: Make the edits**, including the doorbell procedure from spec §12 with the `until`
+- [x] **Step 2: Make the edits**, including the doorbell procedure from spec §12 with the `until`
   loop pointed at `supervisor/status.json`, and the exit-code table (`0` done, `20` needs owner,
   `21` already running, `1` usage).
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 bash plugins/tribe/scripts/tests/test-supervisor-docs.sh
@@ -2015,7 +2034,7 @@ Expected: the docs test reports `N passed, 0 failed`, and the pre-existing detac
 whose wall 2 greps this same file — is still green, proving the edits did not disturb Stage B's
 one-liner.
 
-- [ ] **Step 4: Commit** — `docs(skill): supervisor path and doorbell in Stages B, C and D (task 22/24)`.
+- [x] **Step 4: Commit** — `docs(skill): supervisor path and doorbell in Stages B, C and D (task 22/24)`.
 
 ---
 
@@ -2042,7 +2061,7 @@ reproduces rather than reinterprets.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing check** — extend `test-supervisor-docs.sh` with a flags-parity
+- [x] **Step 1: Write the failing check** — extend `test-supervisor-docs.sh` with a flags-parity
   wall in the style the watchdog's own docs test uses: every flag the README's table names must be
   accepted by the parser, and every flag the parser accepts must appear in the table.
 
@@ -2052,12 +2071,12 @@ for f in $(grep -oE '^\| `--[a-z-]+`' "$RUNNER_README" | tr -d '|` '); do
 done
 ```
 
-- [ ] **Step 2: Write both sections**, including the Known limitations entries: `autoAnswerRounds`
+- [x] **Step 2: Write both sections**, including the Known limitations entries: `autoAnswerRounds`
   is never incremented by the runner (FU-CS-1); a supervisor session gets no viewer badge chip, only
   its own project directory (FU-CS-2); and a crash of the supervisor itself is recovered by
   re-running it, exactly as the watchdog's own limitation reads.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 bash plugins/tribe/scripts/tests/test-supervisor-docs.sh
@@ -2067,7 +2086,7 @@ bash plugins/tribe/scripts/tests/test-fresh-machine.sh
 Expected: the docs test green including flags parity, and `test-fresh-machine.sh` unmoved (the
 supervisor adds no installable and no resolver).
 
-- [ ] **Step 4: Commit** — `docs(runner): supervisor sections in the runner and tribe READMEs (task 23/24)`.
+- [x] **Step 4: Commit** — `docs(runner): supervisor sections in the runner and tribe READMEs (task 23/24)`.
 
 ---
 
@@ -2092,7 +2111,7 @@ under `docs/superpowers/**`), and any drift the four earlier change-units left. 
 
 **Steps**
 
-- [ ] **Step 1: Reconcile and verify.**
+- [x] **Step 1: Reconcile and verify.**
 
 ```sh
 cd /Users/hip/repo/tribe-wt/campaign-supervisor
@@ -2107,7 +2126,7 @@ git status --short .c3
 Expected: `check` prints `total: 54` with `ok: true` both before and after, and `git status` shows
 only the change-unit and document files this plan authored (`.c3/c3.db` is git-ignored).
 
-- [ ] **Step 2: Commit** — `docs(c3): final governance reconciliation for the campaign supervisor (task 24/24)`.
+- [x] **Step 2: Commit** — `docs(c3): final governance reconciliation for the campaign supervisor (task 24/24)`.
 
 ---
 
@@ -2192,8 +2211,8 @@ session**:
      wonder, and never claim a green check that does not exist. `gh run watch` and `timeout` are
      both unusable here.
 2. **Before/after evidence in the PR body**, captured by the Warchief, never claimed by a Hunter:
-   **BEFORE** is the Task-4 baseline (174 turns, 26.5M cache-read, 0.3168 babysitting share, three
-   rulings); **AFTER** is the Task-20 evidence file (one command, exit 0, the ledger, the ratchet
+   **BEFORE** is the Task-4 baseline (173 turns, 26.5M cache-read, 0.3168 babysitting share, three
+   rulings — re-measured at the pinned cut in the R7 fix round); **AFTER** is the Task-20 evidence file (one command, exit 0, the ledger, the ratchet
    assertion at share 0, the viewer project directory). Both live under
    `docs/superpowers/evidence/`, so every PR link resolves from the repo itself.
 3. **Audit recorded:** two independent skinners dispatched concurrently in one message — the
@@ -2207,10 +2226,12 @@ session**:
 
 **Scope-fence self-check before opening the PR.** `git diff --name-only master...HEAD` must be a
 subset of:
-`plugins/tribe/scripts/runner/{core/metrics/**,core/supervisor/**,ports/ports.ts,adapters/supervisor-io.adapter.ts,adapters/supervisor-io.adapter.test.ts,adapters/transcript-io.adapter.ts,adapters/transcript-io.adapter.test.ts,cli/main.ts,cli/main.test.ts,fixtures/supervisor/**,README.md}`,
+`plugins/tribe/scripts/runner/{core/metrics/**,core/supervisor/**,ports/ports.ts,adapters/supervisor-io.adapter.ts,adapters/supervisor-io.adapter.test.ts,adapters/transcript-io.adapter.ts,adapters/transcript-io.adapter.test.ts,adapters/cut.ts,adapters/cut.test.ts,adapters/session-double.adapter.ts,cli/main.ts,cli/main.test.ts,fixtures/supervisor/**,README.md}`,
 `plugins/tribe/scripts/tests/{test-supervisor-e2e.sh,test-supervisor-kill.sh,test-supervisor-real-e2e.sh,test-supervisor-docs.sh,test-supervisor-permission-real.sh}`,
 `plugins/tribe/skills/orchestrate-campaign/SKILL.md`, `plugins/tribe/README.md`,
-`docs/superpowers/{specs,plans,evidence}/**`, `.c3/**`.
+`docs/superpowers/{specs,plans,evidence}/**`, `.c3/**`, and the mandated gap-gate registry
+`.tribe/harness-gaps.jsonl` (the harness-gaps reconciliation every card's PR commits with the
+`Tribe-Milestone: gap-gate` trailer — a governance artifact, not card scope creep).
 Note what is NOT there: `core/types.ts`, `core/state.ts`, `core/watchdog/**`, and the entire
 `plugins/tribe/scripts/viewer/` tree. Anything else in the diff is a fence breach — stop and report,
 do not tidy it.

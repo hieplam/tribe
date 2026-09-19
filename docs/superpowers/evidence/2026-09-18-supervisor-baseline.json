@@ -1,0 +1,161 @@
+{
+  "v": 1,
+  "tool": "transcript-metrics",
+  "generatedAt": "2026-09-19T00:00:00.000Z",
+  "sessions": [
+    {
+      "sessionId": "6a8a8fe4-f716-43f2-936f-0da47662d9d9",
+      "path": "/Users/hip/.claude/projects/-Users-hip-repo-tribe/6a8a8fe4-f716-43f2-936f-0da47662d9d9.jsonl",
+      "cut": {
+        "lines": 1508,
+        "bytes": 4597864,
+        "sha256": "788353f184db913e41e23ef27108fe61b982e4a325c2d188e88c0b4ebe356a15"
+      },
+      "metrics": {
+        "sessionId": "6a8a8fe4-f716-43f2-936f-0da47662d9d9",
+        "lines": 1508,
+        "skippedLines": 0,
+        "skippedReasons": [],
+        "turns": 173,
+        "tokens": {
+          "input": 346,
+          "cacheRead": 26469777,
+          "cacheWrite": 934272,
+          "output": 102960
+        },
+        "perClass": {
+          "human": {
+            "turns": 79,
+            "tokens": {
+              "input": 158,
+              "cacheRead": 14002197,
+              "cacheWrite": 703384,
+              "output": 48664
+            }
+          },
+          "monitor-event": {
+            "turns": 37,
+            "tokens": {
+              "input": 74,
+              "cacheRead": 4460444,
+              "cacheWrite": 34589,
+              "output": 17077
+            }
+          },
+          "monitor-expiry": {
+            "turns": 34,
+            "tokens": {
+              "input": 68,
+              "cacheRead": 4017115,
+              "cacheWrite": 164757,
+              "output": 19190
+            }
+          },
+          "task-notification": {
+            "turns": 23,
+            "tokens": {
+              "input": 46,
+              "cacheRead": 3990021,
+              "cacheWrite": 31542,
+              "output": 18029
+            }
+          }
+        },
+        "firstContext": 41693,
+        "lastContext": 258795,
+        "maxContext": 258795,
+        "monitorArms": 8,
+        "monitorExpiries": 8,
+        "firstAt": "2026-09-18T02:11:46.605Z",
+        "lastAt": "2026-09-18T15:03:54.206Z",
+        "babysittingShare": 0.31676306209739175,
+        "sidechain": {
+          "turns": 0,
+          "tokens": {
+            "input": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "output": 0
+          }
+        }
+      }
+    },
+    {
+      "sessionId": "ba6e93f0-72e4-4e08-9c64-03d7ea6fb917",
+      "path": "/Users/hip/.claude/projects/-Users-hip-repo-tribe/ba6e93f0-72e4-4e08-9c64-03d7ea6fb917.jsonl",
+      "cut": {
+        "lines": 1480,
+        "bytes": 2353326,
+        "sha256": "9b482f8ff1aa7bbb3f66c333ca751ba7dd57089555efc7428be3c60fb831c90c"
+      },
+      "metrics": {
+        "sessionId": "ba6e93f0-72e4-4e08-9c64-03d7ea6fb917",
+        "lines": 1480,
+        "skippedLines": 0,
+        "skippedReasons": [],
+        "turns": 152,
+        "tokens": {
+          "input": 2890,
+          "cacheRead": 28075416,
+          "cacheWrite": 1267340,
+          "output": 125461
+        },
+        "perClass": {
+          "human": {
+            "turns": 47,
+            "tokens": {
+              "input": 878,
+              "cacheRead": 8324938,
+              "cacheWrite": 569079,
+              "output": 53598
+            }
+          },
+          "monitor-event": {
+            "turns": 84,
+            "tokens": {
+              "input": 1538,
+              "cacheRead": 15090043,
+              "cacheWrite": 647620,
+              "output": 49017
+            }
+          },
+          "monitor-expiry": {
+            "turns": 0,
+            "tokens": {
+              "input": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "output": 0
+            }
+          },
+          "task-notification": {
+            "turns": 21,
+            "tokens": {
+              "input": 474,
+              "cacheRead": 4660435,
+              "cacheWrite": 50641,
+              "output": 22846
+            }
+          }
+        },
+        "firstContext": 40845,
+        "lastContext": 307375,
+        "maxContext": 307375,
+        "monitorArms": 1,
+        "monitorExpiries": 0,
+        "firstAt": "2026-09-13T09:04:53.132Z",
+        "lastAt": "2026-09-17T14:40:23.104Z",
+        "babysittingShare": 0.5357185259447499,
+        "sidechain": {
+          "turns": 0,
+          "tokens": {
+            "input": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "output": 0
+          }
+        }
+      }
+    }
+  ]
+}

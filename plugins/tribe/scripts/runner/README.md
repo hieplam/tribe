@@ -874,6 +874,173 @@ outranks an overload signal (a quota wall has a known reset instant; a 529 is tr
   that faithfully to `needs_human:error`; it does not paper over it. Follow-up FU-i74-1 (runner
   card) is to treat a missing `answers.md` as "no rulings".
 
+## Supervisor (card `campaign-supervisor`)
+
+A **layer above the watchdog**, at zero token cost for its own control loop: it launches or
+adopts the watchdog (which launches or adopts the runner), and when the watchdog parks
+`needs_human`, the supervisor spawns a small, judgment-only Claude Code session — never the
+full executor — to rule on a card's escalation, ratify a harness-gap proposal, or run the
+closing report, then resumes the watchdog. It is a **subcommand of this same runner CLI**, not a
+separate installable, exactly like `watchdog` above:
+[`docs/superpowers/specs/2026-09-18-campaign-supervisor-design.md`](../../../../docs/superpowers/specs/2026-09-18-campaign-supervisor-design.md)
+is the design this section reproduces (§10 the CLI surface, §11 the on-disk layout) rather than
+reinterprets.
+
+```sh
+bun plugins/tribe/scripts/runner/run.ts supervise \
+  --repo <target-repo> --model <shaman-model> --campaign <campaign-slug> \
+  [budget/session flags below] [--watchdog-model <tier>]
+```
+
+`--repo` and `--model` are required, no defaults, exactly like the runner and the watchdog.
+Exactly one of `--campaign`/`--home` is required (mutually exclusive) — `--campaign <slug>`
+derives the home by **executing** `tribe-home.sh` (`"$(tribe-home.sh <repo>)/campaigns/<slug>"`,
+ratified decision 2, spec §10); `--home <path>` is the alternative for tests or a home that
+doesn't follow that convention. Either way the resolved home is resolved against `cwd` when
+relative, symlink-resolved, and refused (exit `1`) unless it sits inside
+`realpath("$HOME/.tribe")` and already contains a `campaign-state.json` — the identical
+containment gate `watchdog`'s own `--home` uses (`resolveWatchdogHome`, reused verbatim,
+`cli/main.ts`'s `resolveSupervisorHome`). Any flag `parseSupervisorArgs` doesn't recognize is
+rejected by name (`unknown flag: …`), never silently ignored (`core/supervisor/args.ts`).
+
+### Flags
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--repo` | none (required) | Target repo root, threaded to the watchdog it spawns. |
+| `--model` | none (required) | The Shaman model for the supervisor's own one-shot ruling/ratify/closing sessions, and the fallback value for `--watchdog-model` below. |
+| `--campaign` | none | Card id's slug, e.g. `--campaign widget-export`. Derives `--home` from it (see above). Mutually exclusive with `--home`; one of the two is required. |
+| `--home` | none | An explicit campaign home path instead of `--campaign`. Mutually exclusive with `--campaign`. |
+| `--watchdog-model` | the `--model` value | Executor tier passed to `run.ts watchdog --model` when the supervisor launches it. **Verified against `core/supervisor/loop.ts` (`config.watchdogModel ?? config.model`):** it always falls back to `--model` itself — never reads a campaign-configured value, despite `args.ts`'s own doc comment describing that as the intent; no code path enforces `--watchdog-model` as required. |
+| `--max-ruling-rounds` | `2` | Per-card cap on ruling-session rounds (W7). Bounded `0`-`10`. |
+| `--max-ratify-rounds` | `2` | Cap on ratify-session rounds. Bounded `0`-`10`. |
+| `--max-spawns` | `8` | Total one-shot session budget for this invocation. Bounded `0`-`100`. |
+| `--max-watchdog-runs` | `20` | Cap on how many times this invocation may (re)launch the watchdog. Bounded `1`-`500`. |
+| `--session-timeout-seconds` | `1800` | Wall-clock abort for one one-shot session. Bounded `60`-`21600`. |
+| `--session-max-turns` | `60` | Turn cap for one one-shot session. Bounded `1`-`500`. |
+| `--session-retries` | `1` | Bounded retries for a `failed`/`timeout` one-shot session before it parks. Bounded `0`-`3`. |
+| `--poll-seconds` | `30` | Wake-up slice while awaiting a live watchdog. Bounded `1`-`60`. |
+
+Every bounded numeric flag rejects a non-plain-decimal-integer value (no sign, no whitespace, no
+`0x`/scientific notation) as well as a value outside its bound, with a typed message naming the
+range (`core/supervisor/args.ts`'s `parseBoundedInt`). `--dry-run` is not a recognized flag here
+(unlike the runner) — a supervisor pass has no side-effect-free mode to run.
+
+### Exit codes
+
+Read from `SUPERVISOR_EXIT_*` in `core/supervisor/model.ts`:
+
+| Code | Constant | Meaning |
+| --- | --- | --- |
+| `0` | `SUPERVISOR_EXIT_DONE` | The campaign closed (the closing session ran and its postcondition verified), or the `STOP` file was honoured. |
+| `1` | `SUPERVISOR_EXIT_USAGE` | A CLI argument error (bad/missing/unknown flag), or `--home`/`--campaign` failed containment or has no `campaign-state.json`. |
+| `20` | `SUPERVISOR_EXIT_NEEDS_OWNER` | A human must act — `NEEDS_OWNER.md` was written; the reason is in it and in `supervisor/status.json`'s `terminal.reason`. Also the fallback for an unexpected internal I/O failure caught at the CLI edge (`cli/main.ts`'s `supervise` block), mirroring the watchdog's own B2 fix. |
+| `21` | `SUPERVISOR_EXIT_RUNNING` | A live supervisor already holds this campaign's `.supervisor.lock`; this process refused and wrote nothing. |
+
+`0` and `1` deliberately keep the meanings they already have in both the runner and the watchdog
+CLIs; `20`/`21` are chosen to sit clear of the runner's `0/1/2/3/5` and the watchdog's
+`0/1/10/11` (spec §10). Stdout carries one human line per action, plus a final `status: <path>`
+line — the watchdog's own contract, unchanged, so the same `until` wake-up loop works on both.
+
+### Files (all under `<home>/supervisor/` unless noted)
+
+The supervisor's complete write surface is `<home>/supervisor/**`, `<home>/NEEDS_OWNER.md`, and
+an escalation-file *rename* — nothing else (spec §11; a unit test, `loop.test.ts`'s
+`assertWriteSurface`, asserts exactly this set, and a second test asserts `answers.md` and
+`campaign-state.json`, and anything under `<home>/watchdog/` or `<home>/runs/`, are never
+written by the supervisor):
+
+- **`.supervisor.lock`** — `{pid, startedAt}` JSON, the single-instance lock (P1: a live foreign
+  holder refuses a second supervisor rather than starting one).
+- **`status.json`** — rewritten atomically on every state transition; `terminal === null` while
+  running — the doorbell's own wake-up signal (§12), shaped like the watchdog's `status.json` so
+  one reader serves both.
+- **`events.jsonl`** — append-only, one JSON line per intended action, each carrying its own ISO
+  `at`.
+- **`ledger.jsonl`** — append-only, one JSON line per one-shot session spawn (G5): kind, cardId,
+  sessionId, model, usage, costUsd, permissionDenials, and the disk-verified `verdict` (never the
+  session's own words).
+- **`state.json`** — the supervisor's own persisted counters: per-card ruling rounds, ratify
+  rounds, total spawns, watchdog runs, seen-escalation content hashes (the repeat-escalation
+  breaker), `closingVerified`, and per-reason retrigger counts.
+- **`park/<cardId>.json`** — a typed park marker (`kind: "owner_only" | "too_hard"`) a one-shot
+  *session* wrote for that card (§6.1); an unrecognised `kind` or unparseable JSON is read as
+  `too_hard` rather than crashing (`core/supervisor/verify.ts`'s `parseParkMarker`).
+- **`sessions/<sessionId>.log`** — the streamed SDK messages for one one-shot session
+  (`core/supervisor/session.ts`).
+- **`final-report.md`** — written by the closing session itself, per its own brief
+  (`core/supervisor/brief-closing.md`'s `{{FINAL_REPORT_PATH}}`), never by the loop.
+- **`<home>/NEEDS_OWNER.md`** (home root, **not** under `supervisor/`, for discoverability —
+  spec §11) — the owner-facing park artifact: park reason, what happened, the escalated card's
+  question (verbatim), what was already tried, what unblocks it, and the run's ledger lines.
+  **Deleting it is the owner's explicit "I have handled it" signal** — row P2 refuses to resume
+  while it exists.
+- **an escalation file renamed** `<home>/escalations/<card>.md` → `.resolved-R<n>` — performed
+  by the supervisor only after a ruling is verified against `answers.md` (§5.5), never by a
+  session.
+
+### The decision table (spec §3.4, `core/supervisor/decide.ts` — row numbers are that file's own
+comments; first match wins)
+
+| Observation | Action |
+| --- | --- |
+| A live foreign supervisor holds `.supervisor.lock` (P1) | `park(resume_blocked)` — never a second supervisor. |
+| `NEEDS_OWNER.md` is present (P2) | `park(resume_blocked)` — resume stays blocked until the owner deletes it. |
+| `STOP` file present (P3) | `exit(done:stop_requested)`. |
+| A watchdog is already live (P4) | `await_watchdog` — adopted, never relaunched. |
+| No watchdog has run yet this invocation (row 27) | `run_watchdog` over the whole campaign. |
+| Watchdog terminal `runner_done` (rows 1-3) | `spawn_session(ratify)` if `answers.md` carries unratified rulings, else `spawn_session(closing)` (failing closed to `park(closing_failed)` if the `verify-shipped` plugin dir is missing), else `exit(done:campaign_closed)` once `state.json.closingVerified` is true. |
+| Watchdog terminal `stop_requested` (row 4) | `exit(done:stop_requested)`. |
+| Watchdog terminal `escalations_pending` (rows 5-12) | For the next unanswered card: archive a ruling already landed in `answers.md` but not yet archived; else honour that card's own park marker; else `park(owner_only)` if its trigger is on `ownerOnlyEscalations`; else `park(repeat_escalation)` if this exact body was already ruled; else `park(w7_cap)`/`park(spawn_cap)` if a budget is spent; else `spawn_session(ruling)`. Once every escalated card is answered, `run_watchdog` scoped to just the answered + not-reached cards. |
+| Watchdog terminal `rulings_unratified` (rows 13-15) | `spawn_session(ratify)`, gated by `park(ratify_cap)`/`park(spawn_cap)`. |
+| Watchdog terminal `session_incomplete` (rows 16-17) | One bounded watchdog re-trigger, then `park(session_incomplete)`. |
+| Watchdog terminal `quota_cap` / `overloaded` / `stalled` / `lock_conflict` / `error` (rows 18-22) | `park` with the matching reason — never retried automatically. |
+| A one-shot session just returned `failed`/`timeout` (V5/V6) | One bounded retry (`--session-retries`), then `park(<kind>_failed)`. |
+| A one-shot session just returned `history_rewritten`/`ratify_out_of_scope` (V1/V2) | `park` immediately — an integrity violation, never retried. |
+| The watchdog-run cap is spent (row 28), or an unrecognised terminal reason | `park(watchdog_run_cap)` / `park(error)` — fail closed, never guess. |
+
+### What it never does
+
+- **Never decides from an LLM's own words.** `decide()` is a pure function of typed disk facts
+  only — a ruling, a ratify, or a closing verdict is a **postcondition check on disk**
+  (`core/supervisor/verify.ts`), never the session's own claim (guardrail 2, "Trust disk, not
+  the session's word").
+- **Never writes `answers.md` or `campaign-state.json`.** A one-shot session may append to
+  `answers.md`; the supervisor loop itself never does (spec §11, `loop.test.ts`).
+- **Never writes under `<home>/watchdog/` or `<home>/runs/`** — those stay the watchdog's and
+  the runner's own.
+- **Never spawns a second live process for the same job.** A live foreign supervisor refuses
+  (exit `21`); a live watchdog is only ever `await_watchdog`ed, never relaunched a second time
+  (P1/P4 above).
+- **Never rules on an owner-only trigger itself.** A card whose escalation reason is on
+  `ownerOnlyEscalations` parks with `owner_only` rather than spawning a ruling session.
+- **Never retries an integrity violation.** A `history_rewritten` or `ratify_out_of_scope`
+  verdict parks immediately, with no retry budget consulted at all.
+
+### Known limitations (supervisor)
+
+- **`autoAnswerRounds` (the state-file field, `campaign-state.json`) is never incremented by the
+  runner.** Verified by grep across the runner source: the field the skill once told a session
+  to read is permanently `0` (spec §21 D1). The supervisor keeps its **own** counter instead —
+  `state.json`'s `rulingRounds`, keyed per card — and W7's cap is enforced against that, not
+  against `autoAnswerRounds`. Follow-up **FU-CS-1** is to either wire the runner to increment the
+  field or delete it from the schema.
+- **A supervisor session gets no viewer badge chip** — the [live viewer](#live-viewer) reads
+  `campaign-state.json` and a run's `run.json` for its campaign badge, and the supervisor writes
+  neither. A one-shot ruling/ratify/closing session is visible only as its own entry under that
+  session's project directory in `~/.claude/projects/`, with no campaign association. Follow-up
+  **FU-CS-2**.
+- **A crash of the supervisor itself is not resumed automatically** — exactly the watchdog's own
+  limitation above. `status.json` is left with `terminal: null` and a dead `pid`. Relaunching the
+  supervisor is safe and is the intended recovery: P1's live-lock check only fires against a
+  genuinely alive pid, and P4 adopts a still-live watchdog rather than starting a second one.
+- **Spec §11 describes a `briefs/<kind>-<n>.md` artifact — the rendered brief saved verbatim as
+  evidence — that this implementation does not write.** Verified by grep: no `briefs` path
+  exists anywhere in `core/supervisor/` or `adapters/supervisor-io.adapter.ts` outside a test's
+  own comment. The rendered brief (`core/supervisor/brief.ts#renderBrief`) is used only as the
+  one-shot session's initial prompt; the only durable record of a session's content is its own
+  `sessions/<sessionId>.log` above.
+
 ## Structure
 
 The directory is a visible hierarchy — `ls runner/` answers "where is the CLI entrypoint,

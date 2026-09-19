@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "headroomFactor": 1.5,
+  "source": "measured by task 20 from 2 session(s); factor 1.5",
+  "ceilings": {
+    "ruling": 27534,
+    "ratify": 0,
+    "closing": 93443,
+    "doorbell": 0
+  }
+}

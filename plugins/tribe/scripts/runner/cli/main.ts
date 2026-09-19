@@ -6,7 +6,7 @@
 // SDK spawn from session.adapter.ts) and hands it to `runLoop`. `main()` is deliberately NOT
 // unit-tested: the logic it depends on (`runLoop`, `deriveCardPhase`, ...) is fully covered
 // without touching a real binary or the network (same precedent as the adapters themselves).
-import { join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import {
   liveLockHolder,
@@ -29,6 +29,22 @@ import { containHome, parseWatchdogArgs, resolveHomeArg } from '../core/watchdog
 import { runWatchdog } from '../core/watchdog/watch-loop.ts';
 import { buildWatchdogIo, withHome } from '../adapters/watchdog-io.adapter.ts';
 import { WATCHDOG_EXIT_NEEDS_HUMAN, WATCHDOG_EXIT_USAGE } from '../core/watchdog/model.ts';
+import { parseTranscriptMetricsArgs, type TranscriptMetricsConfig } from '../core/metrics/args.ts';
+import { buildTranscriptIo } from '../adapters/transcript-io.adapter.ts';
+import { measureAtCut, validateBaselineFile, verifyBaseline } from '../adapters/cut.ts';
+import type { BaselineEntry, BaselineFile } from '../core/metrics/model.ts';
+import type { TranscriptIO } from '../ports/ports.ts';
+// Task 15 (campaign-supervisor, spec §5.1/§14): the `supervise` subcommand — a composition
+// root exactly like the `watchdog` block above, assembling `SupervisorLoopSeam` from pieces
+// that already exist (see `runSupervisor`'s own module doc comment).
+import { parseSupervisorArgs, supervisorHomeFromCampaign, type SupervisorConfig } from '../core/supervisor/args.ts';
+import { runSupervisor, type SupervisorLoopConfig, type SupervisorLoopSeam } from '../core/supervisor/loop.ts';
+import { SUPERVISOR_EXIT_NEEDS_OWNER, SUPERVISOR_EXIT_USAGE, type SessionKind } from '../core/supervisor/model.ts';
+import type { OneShotSessionOptions } from '../core/supervisor/session.ts';
+import { buildSupervisorIo } from '../adapters/supervisor-io.adapter.ts';
+import { sdkSpawnSession } from '../adapters/session.adapter.ts';
+import { sessionDoubleScriptPath, spawnSessionDouble } from '../adapters/session-double.adapter.ts';
+import type { SpawnSessionParams } from '../core/session.ts';
 
 const DEFAULT_SESSION_TIMEOUT_MS = 3 * 60 * 60 * 1000; // spec §2: 3h protocol default.
 const DEFAULT_VIEWER_PORT = 4321; // spec D11.
@@ -490,8 +506,264 @@ export function resolveWatchdogHome(
   return { homeDir: absHome };
 }
 
+/** The `supervise` subcommand's fail-closed gate (Task 15, spec §5.1/§14): reuses
+ * `resolveWatchdogHome`'s own containment-plus-existence check for BOTH invocation shapes —
+ * per this task's adjudication rule, that symbol is never renamed, only called. When
+ * `--campaign` was given instead of `--home`, the campaign's home is derived FIRST (ratified
+ * decision 2: `$(tribe-home.sh <repo>)/campaigns/<slug>`, spec §10) through the injected
+ * `resolveTribeHome` seam — running `tribe-home.sh` is a subprocess concern banned from
+ * `core/**`, so this composition-root function is the only place allowed to call it — and the
+ * derived path is then run through the exact same gate a typed `--home` would be, so the two
+ * invocation shapes land on an identical home. Exported for `cli/main.test.ts`, like
+ * `resolveWatchdogHome` above. */
+export async function resolveSupervisorHome(
+  config: Pick<SupervisorConfig, 'campaignSlug' | 'rawHome' | 'repoRoot'>,
+  io: {
+    realpath(p: string): string;
+    userHome(): string;
+    cwd(): string;
+    fileExists(p: string): boolean;
+    resolveTribeHome(repoRoot: string): Promise<{ ok: true; home: string } | { ok: false; error: string }>;
+  },
+): Promise<{ homeDir: string } | { error: string }> {
+  let rawHome: string;
+  if (config.campaignSlug !== null) {
+    const tribeHome = await io.resolveTribeHome(config.repoRoot);
+    if (!tribeHome.ok) {
+      return {
+        error: `supervise: could not resolve the tribe home for --repo "${config.repoRoot}": ${tribeHome.error}`,
+      };
+    }
+    rawHome = supervisorHomeFromCampaign(tribeHome.home, config.campaignSlug);
+  } else {
+    rawHome = config.rawHome as string;
+  }
+  const result = resolveWatchdogHome(rawHome, io);
+  // `resolveWatchdogHome`'s own refusal text is hardcoded `watchdog:`-prefixed (never renamed
+  // per this task's adjudication rule) — rewrite the prefix so a `supervise` user is never
+  // told to look at the sibling subcommand's name.
+  if ('error' in result) return { error: result.error.replace(/^watchdog:/, 'supervise:') };
+  return result;
+}
+
+/** Fix 4 (skinner audit): shell-quotes a single argv token for safe copy-paste into a real
+ * shell — wraps it in single quotes (escaping any embedded single quote as `'\''`, the
+ * standard POSIX idiom) whenever the token is not already bare-safe. A bare-safe token
+ * (alphanumerics plus a small allowlist of punctuation that never needs quoting in any POSIX
+ * shell) is left unquoted so the common case stays readable. Exported for `cli/main.test.ts`. */
+export function quoteShellArg(token: string): string {
+  if (/^[A-Za-z0-9_./:=,-]+$/.test(token)) return token;
+  return `'${token.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Fix 4: renders the `supervise` argv (everything after the `supervise` token itself) as a
+ * copy-pasteable shell command line — every element that needs it is quoted, so an argument
+ * containing a space (e.g. `--home "/some path/home"`) round-trips through a real shell
+ * unchanged, instead of breaking `NEEDS_OWNER.md`'s own re-run line. Exported for
+ * `cli/main.test.ts`. */
+export function renderRerunCommand(subArgv: string[]): string {
+  return `bun run.ts supervise ${subArgv.map(quoteShellArg).join(' ')}`;
+}
+
+/** Builds `SupervisorLoopConfig` from the parsed CLI config and the composition root's own
+ * facts (Task 15's composition root, extracted into a pure function — `pure-core.md` — so its
+ * wiring, including the shell-quoted `rerunCommand` (Fix 4), is unit-testable without spinning
+ * up the whole CLI or mocking `process.argv`). `subArgv` is `argv.slice(1)` — the raw
+ * `supervise` flags, exactly as `parseSupervisorArgs` itself consumed them. `watchdogEntrypoint`
+ * is `run.ts`'s own resolved path (mirrors `ports.ts`'s `RunnerSpawnPort.runnerCommand()` — only
+ * the composition root can resolve `import.meta.dir`). Exported for `cli/main.test.ts`. */
+/** R11 (Task 20, spec §5.4 item 4): `verifyShippedPluginDir` arrives ALREADY resolved and
+ * existence-checked — `null` means absent — from the actual composition root caller below
+ * (`main()`'s `supervise` block), the one impure edge allowed to touch `import.meta.dir` and a
+ * filesystem existence check. This function stays pure so it (and the resolved-dir-or-null
+ * threading) is unit-testable without spinning up the whole CLI (`pure-core.md`). */
+export function buildSupervisorLoopConfig(
+  parsed: SupervisorConfig, subArgv: string[], homeDir: string, watchdogEntrypoint: string,
+  verifyShippedPluginDir: string | null,
+): SupervisorLoopConfig {
+  return {
+    repoRoot: parsed.repoRoot,
+    model: parsed.model,
+    watchdogModel: parsed.watchdogModel,
+    campaign: parsed.campaignSlug ?? basename(homeDir),
+    limits: parsed.limits,
+    sessionTimeoutSeconds: parsed.sessionTimeoutSeconds,
+    sessionMaxTurns: parsed.sessionMaxTurns,
+    pollSeconds: parsed.pollSeconds,
+    // Mirrors `ports.ts`'s `RunnerSpawnPort.runnerCommand()` / `watchdog-io.adapter.ts`'s own
+    // `RUNNER_ENTRYPOINT` — resolved from THIS file's own location, never from cwd.
+    watchdogCommand: ['bun', watchdogEntrypoint],
+    rerunCommand: renderRerunCommand(subArgv),
+    verifyShippedPluginDir,
+  };
+}
+
+/** Task 17 (card `campaign-supervisor`, `fixtures-mirror-reality.md`): infers which of the
+ * three one-shot kinds a spawn is for, FROM THE OPTIONS THEMSELVES — `OneShotSpawnParams`
+ * (`core/supervisor/session.ts`) carries only `prompt`/`options`, no `kind` field, and this
+ * seam exists precisely so a real subprocess double can stand in for `spawnSession` without
+ * `core/supervisor/loop.ts` (outside this task's fence) ever being asked to pass one.
+ * `buildOneShotOptions`'s own branches (`session.ts`) make the inference exact, not a guess:
+ * `closing` is the ONLY kind whose `settingSources` is non-empty (§5.4's named exception); of
+ * the remaining two, only `ruling` carries `additionalDirectories` (repo read access, §5.2) —
+ * `ratify` never does (§5.3: "no repo access at all"). Exercised end-to-end by
+ * `tests/test-supervisor-e2e.sh`; deliberately not unit-tested, like the rest of this
+ * composition root. */
+export function inferOneShotKind(options: OneShotSessionOptions): SessionKind {
+  if (options.settingSources.length > 0) return 'closing';
+  return options.additionalDirectories !== undefined ? 'ruling' : 'ratify';
+}
+
+// ---------------------------------------------------------------------------------------
+// `transcript-metrics` subcommand (Task 3, spec §15, card `## Measure first`). Token-free by
+// construction: it spawns nothing and reads nothing but transcript files.
+// ---------------------------------------------------------------------------------------
+
+/** Searches `io.listProjectDirs(root)` for a `<sessionId>.jsonl` file, honoring an optional
+ * `--project` filter (matched against each candidate directory's basename). `null` means no
+ * transcript was found anywhere searched — the caller turns that into a named, typed
+ * refusal, never a throw. */
+function findTranscriptPath(io: TranscriptIO, root: string, sessionId: string, project: string | null): string | null {
+  for (const dir of io.listProjectDirs(root)) {
+    if (project !== null && basename(dir) !== project) continue;
+    const candidate = join(dir, `${sessionId}.jsonl`);
+    if (io.fileExists(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** Blocker fix (fail-closed-edges.md obligation 1): the `--session` measurement path called
+ * `measureAtCut` with no guard, so an unreadable transcript (EISDIR — `found` resolves to a
+ * directory; EACCES; an ENOENT race after `findTranscriptPath`'s own exists-check; ELOOP — a
+ * symlink cycle) escaped `runTranscriptMetrics` as an uncaught stack trace, out of `main()`.
+ * Mirrors `adapters/cut.ts#unreadableResult`'s own error-code extraction (Fix 4), which already
+ * guards the sibling `--verify` path the same way. */
+function fsErrorCode(err: unknown): string {
+  return err !== null && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : 'UNKNOWN';
+}
+
+function formatEntryHuman(entry: BaselineEntry): string {
+  const m = entry.metrics;
+  return [
+    `session ${entry.sessionId} (${entry.path})`,
+    `  turns=${m.turns} tokens(input=${m.tokens.input} cacheRead=${m.tokens.cacheRead} ` +
+      `cacheWrite=${m.tokens.cacheWrite} output=${m.tokens.output})`,
+    `  maxContext=${m.maxContext} babysittingShare=${m.babysittingShare.toFixed(4)} skippedLines=${m.skippedLines}`,
+    `  cut: lines=${entry.cut.lines} bytes=${entry.cut.bytes} sha256=${entry.cut.sha256}`,
+  ].join('\n');
+}
+
+/** The subcommand's execution, apart from argv parsing/`process.exit` (mirrors
+ * `performResetCard`'s shape) — exported so `cli/main.test.ts` can inject a fake
+ * `TranscriptIO` instead of touching a real `~/.claude/projects`. `measureAtCut`/
+ * `verifyBaseline` (`adapters/cut.ts`) always touch the real filesystem directly (see that
+ * file's own doc comment) — this function's `io` parameter governs only path discovery
+ * (`listProjectDirs`/`fileExists`) and the `--verify` baseline file's own read. */
+export async function runTranscriptMetrics(config: TranscriptMetricsConfig, io: TranscriptIO): Promise<number> {
+  if (config.verifyPath !== null) {
+    if (!io.fileExists(config.verifyPath)) {
+      console.error(`transcript-metrics: --verify file not found: ${config.verifyPath}`);
+      return 1;
+    }
+
+    // Fix 4 (fail-closed-edges.md obligation 1): three DISTINCT typed diagnostics for three
+    // distinct failure classes — a raw fs read error, a JSON syntax error, and a structural
+    // validation error must never be confused with one another, and none of them may ever
+    // surface as a raw exception message (a `SyntaxError`/`TypeError` string can echo
+    // transcript bytes back at the user).
+    let raw: string;
+    try {
+      raw = [...io.readLines(config.verifyPath)].join('\n');
+    } catch (err) {
+      console.error(
+        `transcript-metrics: --verify file ${config.verifyPath} could not be read: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      return 1;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      console.error(
+        `transcript-metrics: --verify file ${config.verifyPath} is not valid JSON: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      return 1;
+    }
+
+    const validated = validateBaselineFile(parsed);
+    if ('error' in validated) {
+      console.error(`transcript-metrics: --verify file ${config.verifyPath} is invalid: ${validated.error}`);
+      return 1;
+    }
+
+    const results = verifyBaseline(validated.entries);
+    console.log(JSON.stringify(results, null, 2));
+    return results.every((r) => r.status === 'verified') ? 0 : 1;
+  }
+
+  const root = io.projectsRoot();
+  const entries: BaselineEntry[] = [];
+  for (const sessionId of config.sessions) {
+    const found = findTranscriptPath(io, root, sessionId, config.project);
+    if (found === null) {
+      console.error(
+        `transcript-metrics: no transcript found for session "${sessionId}"` +
+          `${config.project !== null ? ` under project "${config.project}"` : ''} (searched ${root})`,
+      );
+      return 1;
+    }
+    let measured: ReturnType<typeof measureAtCut>;
+    try {
+      measured = measureAtCut(found, config.cutBytes);
+    } catch (err) {
+      console.error(
+        `transcript-metrics: session "${sessionId}" transcript ${found} could not be read (${fsErrorCode(err)})`,
+      );
+      return 1;
+    }
+    const { cut, metrics } = measured;
+    metrics.sessionId = sessionId;
+    entries.push({ sessionId, path: found, cut, metrics });
+  }
+
+  if (config.json) {
+    const output: BaselineFile = {
+      v: 1,
+      tool: 'transcript-metrics',
+      generatedAt: new Date().toISOString(),
+      sessions: entries,
+    };
+    console.log(JSON.stringify(output, null, 2));
+  } else {
+    for (const entry of entries) console.log(formatEntryHuman(entry));
+  }
+  return 0;
+}
+
 export async function main(): Promise<void> {
   const argv = process.argv.slice(2);
+
+  if (argv[0] === 'transcript-metrics') {
+    const parsed = parseTranscriptMetricsArgs(argv.slice(1));
+    if ('error' in parsed) {
+      console.error(`transcript-metrics: ${parsed.error}`);
+      process.exit(1);
+      return;
+    }
+    const io = buildTranscriptIo();
+    const exitCode = await runTranscriptMetrics(parsed.config, io);
+    // Fix 6: never call `process.exit()` synchronously right after printing a payload that
+    // may exceed a pipe's buffer — a piped stdout write is not guaranteed to have drained by
+    // the time `process.exit()` runs, and `process.exit()` does not wait for it. Setting
+    // `process.exitCode` and letting `main()` return lets the event loop drain stdout before
+    // the process exits on its own (this subcommand does no other async work, so nothing else
+    // keeps the process alive).
+    process.exitCode = exitCode;
+    return;
+  }
 
   if (argv[0] === 'watchdog') {
     const parsed = parseWatchdogArgs(argv.slice(1));
@@ -524,6 +796,105 @@ export async function main(): Promise<void> {
     }
     console.log(`status: ${outcome.statusPath}`);
     process.exit(outcome.exitCode);
+    return;
+  }
+
+  if (argv[0] === 'supervise') {
+    const parsed = parseSupervisorArgs(argv.slice(1));
+    if ('error' in parsed) {
+      console.error(`supervise: ${parsed.error}`);
+      process.exit(SUPERVISOR_EXIT_USAGE);
+      return;
+    }
+    // `structure.test.ts`'s world-touching sweep bans `node:fs`/`child_process`/the SDK from
+    // `cli/main.ts` by module specifier, same as every other subcommand here — every primitive
+    // below is reached through an adapter, never a direct Node import.
+    const watchdogIo = buildWatchdogIo();
+    // `resolveSupervisorHome` needs `resolveWatchdogHome`'s narrow io slice (realpath/userHome/
+    // cwd/fileExists — `watchdogIo` already supplies all four) PLUS `resolveTribeHome`, which
+    // only `buildSupervisorIo` provides. `resolveTribeHome`'s own closure never reads `homeDir`
+    // at all (see its body in `adapters/supervisor-io.adapter.ts`), so the throwaway argument
+    // below is never touched before the REAL `buildSupervisorIo(home.homeDir)` runs.
+    const homeResolverIo = { ...watchdogIo, resolveTribeHome: buildSupervisorIo('').resolveTribeHome };
+    const home = await resolveSupervisorHome(parsed.config, homeResolverIo);
+    if ('error' in home) {
+      console.error(home.error);
+      process.exit(SUPERVISOR_EXIT_USAGE);
+      return;
+    }
+
+    const supervisorIo = buildSupervisorIo(home.homeDir);
+    // Task 17 (`fixtures-mirror-reality.md`): when `TRIBE_SUPERVISOR_SESSION_DOUBLE` names a
+    // script, every one-shot spawn below goes to THAT real subprocess instead of the SDK —
+    // resolved ONCE, outside the seam object, so the env is read exactly once per invocation
+    // (mirrors `unsetAnthropicApiKeyEnv`'s own single-read convention). Unset — the ordinary,
+    // production case — leaves `spawnSession` wired to `sdkSpawnSession`, byte-identical to
+    // before this task.
+    const doubleScript = sessionDoubleScriptPath();
+    const loopSeam: SupervisorLoopSeam = {
+      ...supervisorIo,
+      // `sdkSpawnSession` is typed against `SpawnSessionParams` (`options: PinnedSessionOptions`,
+      // the card loop's envelope); the one-shot seam's own `OneShotSpawnParams` carries
+      // `OneShotSessionOptions` instead — deliberately a DIFFERENT, incompatible TS envelope
+      // over the SAME underlying SDK `query()` call (`core/supervisor/session.ts`'s own doc
+      // comment: "permissionMode alone conflicts"). Both are narrowings of the one real SDK
+      // options shape `sdkSpawnSession` forwards verbatim, so the cast is a type-boundary
+      // adaptation at the composition root, never a behavior change.
+      spawnSession: doubleScript === null
+        ? (params) => sdkSpawnSession(params as unknown as SpawnSessionParams)
+        : (params) => spawnSessionDouble(doubleScript, home.homeDir, inferOneShotKind(params.options)),
+      // Unlike the card loop's `buildSessionIOForCard`, the supervisor keeps no per-card
+      // session object to crash-safely persist here — the session id is already carried by
+      // `verify.ts`'s postcondition checks and the ledger line `runSupervisor` writes once the
+      // session completes, so there is nothing more for this callback to record.
+      onSessionStart: () => {},
+      // `SupervisorIO.appendFile` already mkdir's, appends verbatim, AND proves containment
+      // (fail-closed-edges obligation 4) before touching disk — `appendLog` only needs to add
+      // the newline `appendFile`'s own callers are expected to supply (mirrors
+      // `adapters/run-io.adapter.ts`'s own `appendLog` contract).
+      appendLog: (logPath, line) => supervisorIo.appendFile(logPath, `${line}\n`),
+      // `SupervisorLoopSeam`'s own contract ("returns its input unchanged when the path does
+      // not exist") is `watchdogIo.realpath`'s contract verbatim (mirrored from
+      // `adapters/watchdog-io.adapter.ts`) — reused rather than reimplemented.
+      realpath: watchdogIo.realpath,
+    };
+
+    // R11 (Task 20, spec §5.4 item 4): resolved from THIS FILE'S OWN LOCATION — never cwd, never
+    // `~/.claude`, never a literal — mirroring `watchdogEntrypoint` just above. This file lives
+    // at `plugins/tribe/scripts/runner/cli/main.ts`; `import.meta.dir` therefore ends in `/cli`,
+    // and four levels up is `plugins/`, which is where the separate `plugins/verify-shipped/`
+    // plugin (the skill `closing` must resolve BY NAME) actually lives. Existence-checked via
+    // the SAME fs seam this composition root already uses elsewhere (`watchdogIo.fileExists`,
+    // built from `existsSync` in `adapters/watchdog-io.adapter.ts`) — never a direct `node:fs`
+    // import here (`structure.test.ts`'s world-touching sweep bans it from `cli/main.ts`).
+    const verifyShippedPluginDirCandidate = resolve(import.meta.dir, '../../../../verify-shipped');
+    const verifyShippedPluginDir = watchdogIo.fileExists(verifyShippedPluginDirCandidate)
+      ? verifyShippedPluginDirCandidate
+      : null;
+
+    const config: SupervisorLoopConfig = buildSupervisorLoopConfig(
+      parsed.config, argv.slice(1), home.homeDir, join(import.meta.dir, '..', 'run.ts'),
+      verifyShippedPluginDir,
+    );
+
+    // Mirrors the watchdog block's own B2 fix above: a real I/O failure inside the
+    // supervisor's edge must never escape as an uncaught traceback. `SUPERVISOR_EXIT_NEEDS_OWNER`
+    // (not `SUPERVISOR_EXIT_USAGE`, which means "you typed the CLI wrong") is the closest fit of
+    // the four spec-frozen supervisor exit codes for an unexpected internal failure — the same
+    // reasoning the watchdog block's own comment gives for its `WATCHDOG_EXIT_NEEDS_HUMAN` choice.
+    let terminal: Awaited<ReturnType<typeof runSupervisor>>;
+    try {
+      terminal = await runSupervisor(config, home.homeDir, loopSeam);
+    } catch (err) {
+      console.error(`supervise: unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(SUPERVISOR_EXIT_NEEDS_OWNER);
+      return;
+    }
+    // `terminal.exitCode` is already `exitCodeOf(terminal.kind)` — computed once, inside
+    // `runSupervisor` itself (see its own `already_running` return, `core/supervisor/loop.ts`).
+    // Re-deriving it here would duplicate that mapping outside the module that owns it.
+    console.log(`status: ${terminal.statusPath}`);
+    process.exit(terminal.exitCode);
     return;
   }
 

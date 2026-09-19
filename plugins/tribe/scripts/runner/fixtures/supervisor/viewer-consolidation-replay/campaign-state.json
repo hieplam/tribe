@@ -1,0 +1,9 @@
+{
+  "ownerOnlyEscalations": [],
+  "cards": {
+    "viewer-consolidation": {
+      "spec": "docs/tribe/planning/viewer-consolidation/spec.md",
+      "plan": "docs/tribe/planning/viewer-consolidation/plan.md"
+    }
+  }
+}
