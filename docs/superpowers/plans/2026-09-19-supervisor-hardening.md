@@ -104,7 +104,7 @@ task.
 
 **Files:** create `plugins/tribe/scripts/tests/test-supervisor-repro.sh`.
 
-- [ ] **Step 1: Write the gated suite and G1's failing reproduction.**
+- [x] **Step 1: Write the gated suite and G1's failing reproduction.**
   Model the file on `test-supervisor-e2e.sh` (same `ok`/`bad`/`check`/`contains` helpers, same
   `mktemp -d` + `pwd -P` symlink resolution, same `trap` cleanup, same `new_campaign` fixture
   builder, same `printf '\n%s passed, %s failed\n'` tally at the end). Gate it at the top exactly
@@ -127,7 +127,7 @@ task.
   contains "G1: NEEDS_OWNER.md carries the escalation's own Context text" "$(cat "$H/NEEDS_OWNER.md")" "$MARKER"
   ```
 
-- [ ] **Step 2: Observe it fail — this is the red.**
+- [x] **Step 2: Observe it fail — this is the red.**
 
   ```bash
   TRIBE_REPRO=1 bash plugins/tribe/scripts/tests/test-supervisor-repro.sh
@@ -137,7 +137,7 @@ task.
   and the tally reads `1 passed, 1 failed`. If the Context assertion passes, the fixture is wrong —
   the marker is not reaching the escalation file; fix the fixture, not the assertion.
 
-- [ ] **Step 3: Prove the ordinary gate stays green.**
+- [x] **Step 3: Prove the ordinary gate stays green.**
 
   ```bash
   bash plugins/tribe/scripts/tests/test-supervisor-repro.sh
@@ -145,7 +145,7 @@ task.
 
   Expected: the skip message, exit `0`.
 
-- [ ] **Step 4: Commit** — `test(supervisor): reproduce the park document losing the question`.
+- [x] **Step 4: Commit** — `test(supervisor): reproduce the park document losing the question`.
 
 ## Task 2: G3's reproduction — the unchecked closing verdict
 
