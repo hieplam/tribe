@@ -1761,7 +1761,7 @@ no real escalation body and no real ruling prose into the repo (the same privacy
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test.** Drive the pure loop with a scripted fake `SupervisorIO`
+- [x] **Step 1: Write the failing test.** Drive the pure loop with a scripted fake `SupervisorIO`
   over the fixture: three escalation rounds each answered by a ruling, then `runner_done` with one
   unratified ruling (mirroring the real campaign's exit-5 shape), then a closing. Assert:
 
@@ -1772,9 +1772,9 @@ expect(spawnLog.every((s) => s.resume === undefined)).toBe(true);
 expect(ledger.every((l) => typeof l.usage.input_tokens === 'number')).toBe(true);
 ```
 
-- [ ] **Step 2: Build the fixture and make it pass.**
+- [x] **Step 2: Build the fixture and make it pass.**
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/replay.test.ts
@@ -1784,7 +1784,7 @@ grep -rl "viewer-consolidation" fixtures/supervisor/ | head
 Expected: the replay assertions pass with exactly 5 spawns and no `resume`; the `grep` shows only
 the fixture's own directory name, never a copied ruling body.
 
-- [ ] **Step 4: Commit** — `test(supervisor): the viewer-consolidation replay fixture bounds spawns at five (task 19/24)`.
+- [x] **Step 4: Commit** — `test(supervisor): the viewer-consolidation replay fixture bounds spawns at five (task 19/24)`.
 
 ---
 
