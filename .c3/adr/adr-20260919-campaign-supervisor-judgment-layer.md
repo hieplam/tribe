@@ -1,6 +1,6 @@
 ---
 id: adr-20260919-campaign-supervisor-judgment-layer
-c3-seal: bafdfbeb9f8b357c8fe807fc982429239b8b9fdd97826a6a1d422a43e3845cab
+c3-seal: 78f2349e58c944d4ad44d8010ebfb240bdec302ec1bc5b02d677258684793baf
 title: campaign-supervisor-judgment-layer
 type: adr
 goal: |-

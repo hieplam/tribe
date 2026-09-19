@@ -1931,7 +1931,7 @@ Expected: exactly one project directory whose name ends in the campaign slug, co
 
 **Oracle.** As Task 5. Baseline after Task 16 is `total: 54`, `ok: true`.
 
-**Fence by intent.** ONE change-unit adding the Enforcement Surfaces rows for the three new test
+**Fence by intent.** ONE change-unit adding the Change Safety rows for the three new test
 suites. No new ADR — the supervisor's ADR already exists and its decision did not change.
 
 **Governing quote** — as Task 11 (`brief-contracts.md`'s phase-end sequencing rule).
@@ -1942,11 +1942,11 @@ suites. No new ADR — the supervisor's ADR already exists and its decision did 
 
 **Steps**
 
-- [ ] **Step 1: Patch and apply.**
+- [x] **Step 1: Patch and apply.**
 
 ```sh
 cd /Users/hip/repo/tribe-wt/campaign-supervisor
-C3X_MODE=agent bash "$C3X_BIN" read c3-215 --section 'Enforcement Surfaces' --cite
+C3X_MODE=agent bash "$C3X_BIN" read c3-215 --section 'Change Safety' --cite
 C3X_MODE=agent bash "$C3X_BIN" change new <adr-id>
 # 04-enforcement-supervisor-tests.patch.md: scope insert — test-supervisor-e2e.sh,
 # test-supervisor-kill.sh, and the opt-in test-supervisor-real-e2e.sh with its env gate.
@@ -1958,7 +1958,7 @@ C3X_MODE=agent bash "$C3X_BIN" check
 
 Expected: one pending patch, no drift, `check` prints `total: 54` with `ok: true`.
 
-- [ ] **Step 2: Commit** — `docs(c3): enforcement-surface rows for the supervisor test suites (task 21/24)`.
+- [x] **Step 2: Commit** — `docs(c3): enforcement-surface rows for the supervisor test suites (task 21/24)`.
 
 ---
 
