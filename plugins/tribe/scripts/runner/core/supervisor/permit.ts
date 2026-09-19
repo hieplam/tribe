@@ -29,12 +29,21 @@ const CONTAINMENT_DENIED_REASON =
   'decision 4): the target either falls outside the campaign home or could not be verified. ' +
   'Only Write/Edit under the campaign home are permitted; Read is unrestricted.';
 
-function deny(): HookDecision {
+// R13.1: a denial's `permissionDecisionReason` must name the ACTUAL reason (readable-code.md
+// symptom 6 — one message standing in for two different facts is exactly the trap). A tool that
+// is simply not on the grant at all (spec §5.1's allowedTools row) is a DIFFERENT fact than a
+// Write/Edit whose resolved target escaped the campaign home — so it gets its own message, never
+// borrowing `CONTAINMENT_DENIED_REASON`.
+const NOT_GRANTED_REASON =
+  'This judgment session is not granted this tool; only Read, Grep, Glob and Write/Edit under ' +
+  'the campaign home are permitted.';
+
+function deny(reason: string = CONTAINMENT_DENIED_REASON): HookDecision {
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
-      permissionDecisionReason: CONTAINMENT_DENIED_REASON,
+      permissionDecisionReason: reason,
     },
   };
 }
@@ -50,20 +59,22 @@ export function containPath(target: string, homeDir: string): boolean {
   return containHome(normalize(target), homeDir).ok;
 }
 
-/** PURE: the containment decision table. Fails CLOSED by default — the only two shapes ever
- * ALLOWED are a `Read` (any location: spec §5.1/§5.2, "Read access to the target repo is
- * granted via `additionalDirectories`") and a `Write`/`Edit` whose `tool_input.file_path` passes
- * `containPath`. Every other tool — including `Bash`, which is also on `disallowedTools`, denied
- * here too as the ordinary fail-closed default rather than a special-cased carve-out — and every
- * malformed/absent event denies rather than throwing. This table operates on `file_path`
- * LEXICALLY (no filesystem access): it is what `buildContainmentHook` below calls, once for the
- * fast Read/Bash/malformed cases and once more with a symlink-RESOLVED `file_path` for
- * `Write`/`Edit`. */
+/** PURE: the containment decision table. Fails CLOSED by default — the shapes ever ALLOWED are
+ * `Read`/`Grep`/`Glob` (any location: spec §5.1's allowedTools row grants all three to
+ * ruling/ratify; they are read-only, so — same as `Read` — no `path`/`file_path` argument of
+ * theirs can ever write, hence no containment check applies to them) and a `Write`/`Edit` whose
+ * `tool_input.file_path` passes `containPath`. Every other tool — including `Bash`, which is also
+ * on `disallowedTools`, denied here too as the ordinary fail-closed default rather than a
+ * special-cased carve-out — and every malformed/absent event denies rather than throwing, with
+ * `NOT_GRANTED_REASON` (never the write-containment message, which would misstate the reason).
+ * This table operates on `file_path` LEXICALLY (no filesystem access): it is what
+ * `buildContainmentHook` below calls, once for the fast Read/Grep/Glob/Bash/malformed cases and
+ * once more with a symlink-RESOLVED `file_path` for `Write`/`Edit`. */
 export function decideContainmentHook(homeDir: string, input: unknown): HookDecision {
   const event = (input ?? {}) as { tool_name?: unknown; tool_input?: unknown };
   const toolName = typeof event.tool_name === 'string' ? event.tool_name : '';
 
-  if (toolName === 'Read') return {};
+  if (toolName === 'Read' || toolName === 'Grep' || toolName === 'Glob') return {};
 
   if (toolName === 'Write' || toolName === 'Edit') {
     const toolInput = (event.tool_input ?? {}) as { file_path?: unknown };
@@ -71,7 +82,7 @@ export function decideContainmentHook(homeDir: string, input: unknown): HookDeci
     return filePath !== '' && containPath(filePath, homeDir) ? {} : deny();
   }
 
-  return deny();
+  return deny(NOT_GRANTED_REASON);
 }
 
 /** Climbs from `target` up through its ancestors (deepest first) until `realpath` reports a
@@ -100,10 +111,12 @@ function resolveExistingAncestor(realpath: (path: string) => string, target: str
 
 /** IMPURE EDGE (the hook cannot be pure — catching a symlink escape needs the filesystem):
  * resolves a `Write`/`Edit` target's deepest existing ancestor through `io.realpath` BEFORE
- * `decideContainmentHook` runs its (pure) table over the result. `Read`, `Bash`, and every
- * malformed event skip filesystem access entirely and go straight to the pure table — there is
- * nothing to resolve. A non-absolute `file_path`, or a `realpath` call that throws (e.g. a
- * broken symlink), denies rather than crashing the hook (`fail-closed-edges.md`). */
+ * `decideContainmentHook` runs its (pure) table over the result. `Read`, `Grep`, `Glob`, `Bash`,
+ * and every malformed event skip filesystem access entirely and go straight to the pure table —
+ * there is nothing to resolve. A non-absolute `file_path`, or a `realpath` call that throws (e.g.
+ * a broken symlink), denies with the write-containment reason rather than crashing the hook
+ * (`fail-closed-edges.md`) — this branch is reached only for `Write`/`Edit`, so that reason is
+ * accurate here. */
 export function buildContainmentHook(
   homeDir: string,
   io: { realpath(path: string): string },

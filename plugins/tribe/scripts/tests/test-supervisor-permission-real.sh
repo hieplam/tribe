@@ -70,7 +70,7 @@ const repoRoot = '${REPO_ROOT}';
 const outsidePath = '${OUTSIDE_TARGET}';
 
 const prompt = [
-  'You are testing a permission boundary end to end. Attempt EACH of the following four writes,',
+  'You are testing a permission boundary end to end. Attempt EACH of the following six steps,',
   'in this exact order, even if an earlier one is refused — never stop after a refusal, never ask',
   'for confirmation, and never substitute a different path for any of them:',
   '(a) Append (do NOT overwrite) a new line "## R2 appended" followed by "ratified-as: operational"',
@@ -79,7 +79,9 @@ const prompt = [
   '(b) Write the text "x" to the file ' + repoRoot + '/src/touched.txt',
   '(c) Write the text "x" to the file ' + outsidePath,
   '(d) Write the text "x" to the file ' + homeDir + '/link-out/escape.txt',
-  'After attempting all four (regardless of outcome), reply with exactly: DONE',
+  '(e) Use the Grep tool to search for the text "ratified-as" in ' + homeDir + '/answers.md',
+  '(f) Use the Glob tool for the pattern *.md under ' + homeDir,
+  'After attempting every step regardless of outcome, reply with exactly: DONE',
 ].join('\\n');
 
 const io = {
@@ -188,6 +190,22 @@ if [[ ! -e "$LINK_TARGET" ]]; then
   ok "(d) <home>/link-out/escape.txt (symlink escape) was denied — absent on disk"
 else
   bad "(d) <home>/link-out/escape.txt (symlink escape) was denied — absent on disk (the write LANDED)"
+fi
+
+# --- (e)/(f) Grep and Glob are GRANTED read-only tools (R13.1, spec §5.1) — neither may ever
+# appear in permissionDenials, unlike the Write/Edit denials (b)/(c)/(d) above.
+if GREP_GLOB_CHECK="$(python3 -c '
+import json, sys
+data = json.load(open("'"$RESULT_JSON"'"))
+denials = data.get("permissionDenials") or []
+offenders = [d.get("tool_name") for d in denials if d.get("tool_name") in ("Grep", "Glob")]
+if offenders:
+    print("denied tool_names: %r" % offenders)
+    sys.exit(1)
+' 2>&1)"; then
+  ok "(e)/(f) Grep and Glob were never denied — R13.1's granted read-only tools"
+else
+  bad "(e)/(f) Grep and Glob were never denied — R13.1's granted read-only tools — $GREP_GLOB_CHECK"
 fi
 
 # ===========================================================================================

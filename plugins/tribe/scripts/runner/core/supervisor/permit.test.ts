@@ -38,6 +38,47 @@ test('an undefined event denies rather than throwing', () => {
   expect(denied(decideContainmentHook(HOME, undefined))).toBe(true);
 });
 
+// R13.1 (spec §5.1's allowedTools row grants `Grep`/`Glob` to ruling/ratify sessions, verbatim:
+// "`Read`, `Grep`, `Glob`, `Write`, `Edit` (ruling/ratify)"). They are read-only — cannot write —
+// so, like `Read`, they must be ALLOWED regardless of any `path` argument. Under-granting a
+// granted read-only tool is the bug (see this file's header comment on the Oracle direction).
+describe('Grep/Glob — granted, read-only tools (R13.1)', () => {
+  test('Grep with no path is allowed', () => {
+    expect(decideContainmentHook(HOME, ev('Grep', {}))).toEqual({});
+  });
+
+  test('Grep with a path OUTSIDE the home is still allowed — it is read-only', () => {
+    expect(decideContainmentHook(HOME, ev('Grep', { path: '/abs/repo/src' }))).toEqual({});
+  });
+
+  test('Glob with no path is allowed', () => {
+    expect(decideContainmentHook(HOME, ev('Glob', {}))).toEqual({});
+  });
+
+  test('Glob with a path OUTSIDE the home is still allowed — it is read-only', () => {
+    expect(decideContainmentHook(HOME, ev('Glob', { path: '/abs/repo/src' }))).toEqual({});
+  });
+});
+
+// R13.1 message accuracy: a denial must name the ACTUAL reason. A default-deny (a tool that is
+// not granted at all, e.g. Bash) must NOT claim the write-containment reason — the two denial
+// paths carry distinct text.
+describe('deny() reason accuracy (R13.1)', () => {
+  test('a Write/Edit outside the home carries the containment reason', () => {
+    const decision = decideContainmentHook(HOME, ev('Write', { file_path: '/abs/repo/src/index.ts' }));
+    expect(decision.hookSpecificOutput?.permissionDecisionReason).toMatch(/campaign home/i);
+  });
+
+  test('a non-granted tool (Bash) carries a DIFFERENT reason — not the write-containment message', () => {
+    const decision = decideContainmentHook(HOME, ev('Bash', { command: 'rm -rf /' }));
+    const writeDecision = decideContainmentHook(HOME, ev('Write', { file_path: '/abs/repo/src/index.ts' }));
+    expect(decision.hookSpecificOutput?.permissionDecisionReason).not.toBe(
+      writeDecision.hookSpecificOutput?.permissionDecisionReason,
+    );
+    expect(decision.hookSpecificOutput?.permissionDecisionReason).toMatch(/not granted/i);
+  });
+});
+
 describe('containPath — the pure decision (segment containment, never a string prefix)', () => {
   test('a target under the home is contained', () => {
     expect(containPath(`${HOME}/answers.md`, HOME)).toBe(true);
