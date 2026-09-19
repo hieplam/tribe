@@ -502,6 +502,26 @@ describe('runSupervisor — Fix 2 (skinner audit): sessionMaxTurns reaches build
   });
 });
 
+describe('runSupervisor — Fix 3 (skinner audit): status.json carries the watchdog\'s own last '
+  + 'terminal reason', () => {
+  test('after a watchdog run reports a terminal reason, the next published status.json is not '
+    + 'left with lastTerminalReason: null', async () => {
+    const seam = fakeSeam({
+      initialFiles: {
+        [join(HOME, 'escalations', 'c1.md')]: escalationFile('data_shape_change'),
+        [join(HOME, 'campaign-state.json')]: JSON.stringify({ ownerOnlyEscalations: ['data_shape_change'] }),
+      },
+      watchdogRuns: [{ reason: 'escalations_pending', exitCode: 12, report: reportEscalated() }],
+    });
+    await runSupervisor(baseConfig(), HOME, seam.io);
+
+    const last = JSON.parse(seam.statusHistory[seam.statusHistory.length - 1] as string) as {
+      watchdog: { lastTerminalReason: string | null };
+    };
+    expect(last.watchdog.lastTerminalReason).toBe('escalations_pending');
+  });
+});
+
 describe('extractRulingBlockVerbatim — the ratify brief\'s verbatim-block extractor', () => {
   const answers = [
     '## R1 — first ruling',

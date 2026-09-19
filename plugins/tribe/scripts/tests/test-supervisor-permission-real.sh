@@ -131,6 +131,31 @@ ok "the run ended subtype=success with no prompt and no hang"
 
 echo "permission_denials payload: $DENIALS_JSON"
 
+# --- Fix 7 (skinner audit, plan Task 13 Step 4): permission_denials must name EXACTLY the
+# three denied paths (b, c, d) — printing the payload is not an assertion. Each denial's
+# tool_input.file_path is the model's OWN (pre-resolution) argument, so this compares against
+# the exact strings the prompt above told the session to write to, never a resolved/realpath'd
+# form.
+if DENIALS_CHECK="$(python3 -c '
+import json, sys
+data = json.load(open("'"$RESULT_JSON"'"))
+denials = data.get("permissionDenials") or []
+got = set()
+for d in denials:
+    tool_input = d.get("tool_input") or {}
+    file_path = tool_input.get("file_path")
+    if file_path:
+        got.add(file_path)
+expected = {"'"$REPO_TARGET"'", "'"$OUTSIDE_TARGET"'", "'"$LINK_TARGET"'"}
+if got != expected:
+    print("got=%r expected=%r" % (sorted(got), sorted(expected)))
+    sys.exit(1)
+' 2>&1)"; then
+  ok "permission_denials names exactly the three denied paths (b, c, d)"
+else
+  bad "permission_denials names exactly the three denied paths (b, c, d) — $DENIALS_CHECK"
+fi
+
 # --- (a) the contained write MUST succeed, appending — never overwriting ------------------
 AFTER_LEN=$(wc -c < "$ANSWERS" | tr -d ' ')
 AFTER_CONTENT="$(cat "$ANSWERS")"

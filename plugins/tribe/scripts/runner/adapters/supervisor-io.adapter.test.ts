@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -109,6 +110,24 @@ describe('buildSupervisorIo — the real edge', () => {
 
     expect(() => io.renameIfPresent(join(home, 'inside.md'), escapee)).toThrow(PathEscapesHomeError);
     expect(io.readFileOrEmpty(join(home, 'inside.md'))).toBe('x'); // the source was never moved
+  });
+
+  // Fix 6 (skinner audit): `containedPath` claims symlink protection (its own doc comment: "a
+  // symlinked ancestor can never be used to escape", enforced via `realpathSync`) but only the
+  // literal `..`-escape shape was ever exercised. This is that missing shape — an ancestor
+  // DIRECTORY under the home that is itself a symlink pointing OUTSIDE it (never a `..` token
+  // anywhere in the path string, so a check that only guarded against `..` would miss it).
+  test('a write THROUGH a symlinked ancestor that resolves outside the home is refused BEFORE '
+    + 'the file is opened, and the outside file is never created', () => {
+    const home = tmp();
+    const outside = tmp(); // a SEPARATE real directory, never nested under `home`
+    const io = buildSupervisorIo(home);
+    const link = join(home, 'escape-link');
+    symlinkSync(outside, link);
+    const target = join(link, 'sup-io-symlink-escape.txt');
+
+    expect(() => io.writeFileAtomic(target, 'should never land')).toThrow(PathEscapesHomeError);
+    expect(existsSync(join(outside, 'sup-io-symlink-escape.txt'))).toBe(false);
   });
 
   test('readFileOrEmpty returns "" for an unreadable path (a directory, not a file) and for a missing one', () => {

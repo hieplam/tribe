@@ -544,6 +544,51 @@ export async function resolveSupervisorHome(
   return result;
 }
 
+/** Fix 4 (skinner audit): shell-quotes a single argv token for safe copy-paste into a real
+ * shell — wraps it in single quotes (escaping any embedded single quote as `'\''`, the
+ * standard POSIX idiom) whenever the token is not already bare-safe. A bare-safe token
+ * (alphanumerics plus a small allowlist of punctuation that never needs quoting in any POSIX
+ * shell) is left unquoted so the common case stays readable. Exported for `cli/main.test.ts`. */
+export function quoteShellArg(token: string): string {
+  if (/^[A-Za-z0-9_./:=,-]+$/.test(token)) return token;
+  return `'${token.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Fix 4: renders the `supervise` argv (everything after the `supervise` token itself) as a
+ * copy-pasteable shell command line — every element that needs it is quoted, so an argument
+ * containing a space (e.g. `--home "/some path/home"`) round-trips through a real shell
+ * unchanged, instead of breaking `NEEDS_OWNER.md`'s own re-run line. Exported for
+ * `cli/main.test.ts`. */
+export function renderRerunCommand(subArgv: string[]): string {
+  return `bun run.ts supervise ${subArgv.map(quoteShellArg).join(' ')}`;
+}
+
+/** Builds `SupervisorLoopConfig` from the parsed CLI config and the composition root's own
+ * facts (Task 15's composition root, extracted into a pure function — `pure-core.md` — so its
+ * wiring, including the shell-quoted `rerunCommand` (Fix 4), is unit-testable without spinning
+ * up the whole CLI or mocking `process.argv`). `subArgv` is `argv.slice(1)` — the raw
+ * `supervise` flags, exactly as `parseSupervisorArgs` itself consumed them. `watchdogEntrypoint`
+ * is `run.ts`'s own resolved path (mirrors `ports.ts`'s `RunnerSpawnPort.runnerCommand()` — only
+ * the composition root can resolve `import.meta.dir`). Exported for `cli/main.test.ts`. */
+export function buildSupervisorLoopConfig(
+  parsed: SupervisorConfig, subArgv: string[], homeDir: string, watchdogEntrypoint: string,
+): SupervisorLoopConfig {
+  return {
+    repoRoot: parsed.repoRoot,
+    model: parsed.model,
+    watchdogModel: parsed.watchdogModel,
+    campaign: parsed.campaignSlug ?? basename(homeDir),
+    limits: parsed.limits,
+    sessionTimeoutSeconds: parsed.sessionTimeoutSeconds,
+    sessionMaxTurns: parsed.sessionMaxTurns,
+    pollSeconds: parsed.pollSeconds,
+    // Mirrors `ports.ts`'s `RunnerSpawnPort.runnerCommand()` / `watchdog-io.adapter.ts`'s own
+    // `RUNNER_ENTRYPOINT` — resolved from THIS file's own location, never from cwd.
+    watchdogCommand: ['bun', watchdogEntrypoint],
+    rerunCommand: renderRerunCommand(subArgv),
+  };
+}
+
 // ---------------------------------------------------------------------------------------
 // `transcript-metrics` subcommand (Task 3, spec §15, card `## Measure first`). Token-free by
 // construction: it spawns nothing and reads nothing but transcript files.
@@ -780,23 +825,9 @@ export async function main(): Promise<void> {
       realpath: watchdogIo.realpath,
     };
 
-    const config: SupervisorLoopConfig = {
-      repoRoot: parsed.config.repoRoot,
-      model: parsed.config.model,
-      watchdogModel: parsed.config.watchdogModel,
-      campaign: parsed.config.campaignSlug ?? basename(home.homeDir),
-      limits: parsed.config.limits,
-      sessionTimeoutSeconds: parsed.config.sessionTimeoutSeconds,
-      // Fix 2 (skinner audit): `--session-max-turns` was parsed by args.ts but wired to
-      // nothing — threaded into `SupervisorLoopConfig` here, then into every one-shot
-      // session's `OneShotSessionConfig.maxTurns` (`loop.ts`).
-      sessionMaxTurns: parsed.config.sessionMaxTurns,
-      pollSeconds: parsed.config.pollSeconds,
-      // Mirrors `ports.ts`'s `RunnerSpawnPort.runnerCommand()` / `watchdog-io.adapter.ts`'s own
-      // `RUNNER_ENTRYPOINT` — resolved from THIS file's own location, never from cwd.
-      watchdogCommand: ['bun', join(import.meta.dir, '..', 'run.ts')],
-      rerunCommand: `bun run.ts supervise ${argv.slice(1).join(' ')}`,
-    };
+    const config: SupervisorLoopConfig = buildSupervisorLoopConfig(
+      parsed.config, argv.slice(1), home.homeDir, join(import.meta.dir, '..', 'run.ts'),
+    );
 
     // Mirrors the watchdog block's own B2 fix above: a real I/O failure inside the
     // supervisor's edge must never escape as an uncaught traceback. `SUPERVISOR_EXIT_NEEDS_OWNER`

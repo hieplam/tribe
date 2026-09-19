@@ -1184,3 +1184,78 @@ describe('resolveSupervisorHome — the supervise subcommand gate (fail-closed, 
     expect('error' in got && got.error).toContain('not a git repository');
   });
 });
+
+// Fix 4 (skinner audit): `rerunCommand` had no shell quoting — joined argv with plain spaces,
+// so an argument containing a space produced a broken owner-facing re-run command in
+// NEEDS_OWNER.md. `buildSupervisorLoopConfig` is the extracted, testable composition-root
+// function this fix routes the quoting through (`main()`'s own inline literal, made pure).
+import { buildSupervisorLoopConfig, quoteShellArg, renderRerunCommand } from './main.ts';
+import type { SupervisorConfig } from '../core/supervisor/args.ts';
+
+function fixtureSupervisorConfig(overrides: Partial<SupervisorConfig> = {}): SupervisorConfig {
+  return {
+    repoRoot: '/some/repo',
+    model: 'claude-fixture',
+    watchdogModel: null,
+    campaignSlug: null,
+    rawHome: '/h/.tribe/k/campaigns/c',
+    limits: { maxRulingRounds: 2, maxRatifyRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20, sessionRetries: 1 },
+    sessionTimeoutSeconds: 1800,
+    sessionMaxTurns: 60,
+    pollSeconds: 30,
+    ...overrides,
+  };
+}
+
+describe('buildSupervisorLoopConfig — the supervise composition root\'s config (Fix 4)', () => {
+  test('Fix 4: an argv element containing a space round-trips through a REAL shell unchanged '
+    + '(fixtures-mirror-reality.md: the shape an owner\'s shell actually parses)', () => {
+    const subArgv = ['--repo', '/some path/with space', '--model', 'claude', '--home', '/h'];
+    const config = buildSupervisorLoopConfig(
+      fixtureSupervisorConfig(), subArgv, '/h/.tribe/k/campaigns/c', '/abs/run.ts',
+    );
+    const prefix = 'bun run.ts supervise ';
+    expect(config.rerunCommand.startsWith(prefix)).toBe(true);
+    const renderedArgs = config.rerunCommand.slice(prefix.length);
+
+    // `set -- <rendered>` re-splits the rendered, already-quoted args exactly the way a real
+    // shell would when the owner pastes the line — then each positional param is NUL-delimited
+    // back out so embedded spaces inside a single token are never mistaken for a delimiter.
+    const script = `set -- ${renderedArgs}\nfor a in "$@"; do printf '%s\\0' "$a"; done`;
+    const result = spawnSync('bash', ['-c', script], { encoding: 'utf8', timeout: 5_000 });
+    expect(result.status).toBe(0);
+    const roundTripped = result.stdout.split('\0').filter((s) => s.length > 0);
+    expect(roundTripped).toEqual(subArgv);
+  });
+
+  test('watchdogCommand and repoRoot/model/limits/sessionMaxTurns still flow through unchanged', () => {
+    const config = buildSupervisorLoopConfig(
+      fixtureSupervisorConfig({ campaignSlug: 'c', sessionMaxTurns: 17 }),
+      ['--campaign', 'c'], '/h/.tribe/k/campaigns/c', '/abs/run.ts',
+    );
+    expect(config.repoRoot).toBe('/some/repo');
+    expect(config.model).toBe('claude-fixture');
+    expect(config.campaign).toBe('c');
+    expect(config.sessionMaxTurns).toBe(17);
+    expect(config.watchdogCommand).toEqual(['bun', '/abs/run.ts']);
+  });
+});
+
+describe('quoteShellArg / renderRerunCommand — unit-level (Fix 4)', () => {
+  test('a bare-safe token is left unquoted', () => {
+    expect(quoteShellArg('--repo')).toBe('--repo');
+    expect(quoteShellArg('/some/path')).toBe('/some/path');
+  });
+
+  test('a token with a space is single-quoted', () => {
+    expect(quoteShellArg('/some path/here')).toBe("'/some path/here'");
+  });
+
+  test('a token containing a single quote is escaped with the POSIX idiom', () => {
+    expect(quoteShellArg("it's here")).toBe("'it'\\''s here'");
+  });
+
+  test('renderRerunCommand joins the quoted tokens with the fixed prefix', () => {
+    expect(renderRerunCommand(['--repo', '/r'])).toBe('bun run.ts supervise --repo /r');
+  });
+});

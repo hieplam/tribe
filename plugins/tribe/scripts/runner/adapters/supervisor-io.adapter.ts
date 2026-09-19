@@ -86,6 +86,12 @@ function containedPath(homeDir: string, target: string): string {
   const realAncestor = realpathSync(cursor);
   const resolved = remainder.length > 0 ? join(realAncestor, ...remainder) : realAncestor;
   const rel = relative(realHome, resolved);
+  // Fix 6 (skinner audit): `rel === ''` (target === homeDir, e.g. a caller resolving the home
+  // directory itself) is deliberately NOT an escape here, unlike `core/supervisor/permit.ts`'s
+  // `containPath` (which denies a proper-descendant check on the judgment-session write wall —
+  // see that module's own doc comment). Benign: every caller through THIS adapter passes a FILE
+  // path under the home, never the home directory itself, so the two containment checks
+  // disagreeing on this one unreachable edge never changes behaviour.
   const escapes = rel !== '' && (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel));
   if (escapes) throw new PathEscapesHomeError(target, homeDir);
   return resolved;

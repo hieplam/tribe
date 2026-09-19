@@ -169,8 +169,6 @@ function supervisorPathsOf(homeDir: string): SupervisorPaths {
   };
 }
 
-const MAX_WAIT_MS = 2_147_000_000; // ~24.8 days — safely under the 32-bit setTimeout overflow.
-
 // ---------------------------------------------------------------------------------------
 // Small, narrow, fail-closed edge parsers. Every one degrades to a typed "absent"/`null` value
 // on malformed input — never a throw reaching the tick loop (`fail-closed-edges.md`
@@ -744,6 +742,14 @@ export async function runSupervisor(
     loopState.lastSessionOutcome = null; // consumed; re-set below only if THIS tick spawns again
 
     const observation = observe(config, homeDir, io, paths, loopState, supState, currentLastSessionOutcome);
+
+    // Fix 3 (skinner audit): `status.json`'s own `watchdog.lastTerminalReason` field must carry
+    // the REAL last terminal reason this loop has observed, not the `null` it is declared with —
+    // the loop already reads this fact (`observation.lastWatchdog.terminal.reason`) every tick;
+    // this only carries it into the variable `publish()` closes over.
+    if (observation.lastWatchdog !== null && observation.lastWatchdog.terminal !== null) {
+      watchdogLastTerminalReason = observation.lastWatchdog.terminal.reason;
+    }
 
     // The loop carries out decisions; it makes none (Task 14 oracle) — `decide()` alone owns
     // V7/V8, same as every other row (task 7 fix).
