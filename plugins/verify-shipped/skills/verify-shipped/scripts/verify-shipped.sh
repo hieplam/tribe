@@ -15,11 +15,14 @@
 #   4. gap_gate_stamped       — the merged PR's body carries a `gap-gate v1`
 #                                stamp whose `card=` matches --card
 #
-# Output: JSON summary on stdout only. Logs go to stderr.
+# Output: JSON summary on stdout only. Logs go to stderr. With --verdict-out <path>, the
+# same JSON (byte-identical) is also written to that path, atomically (temp file in the
+# target directory, then renamed into place) so a reader never sees a half-written file.
 # Exit codes: 0 = ran to completion (regardless of pass/fail); 2 = setup error.
 #
 # Usage:
-#   verify-shipped.sh --pr <number|url> --worktree <path> --card <slug> [--base master] [--repo owner/repo]
+#   verify-shipped.sh --pr <number|url> --worktree <path> --card <slug> [--base master]
+#                      [--repo owner/repo] [--verdict-out <path>]
 #
 # Requires: gh (GitHub CLI, authenticated), git, python3.
 
@@ -33,22 +36,31 @@ WORKTREE_ARG=""
 BASE_BRANCH="master"
 REPO_ARG=""
 CARD_ARG=""
+VERDICT_OUT_ARG=""
+VERDICT_OUT_SEEN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --pr)        PR_ARG="$2"; shift 2 ;;
-    --worktree)  WORKTREE_ARG="$2"; shift 2 ;;
-    --base)      BASE_BRANCH="$2"; shift 2 ;;
-    --repo)      REPO_ARG="$2"; shift 2 ;;
-    --card)      CARD_ARG="${2:-}"; shift $(( $# >= 2 ? 2 : 1 )) ;;
-    -h|--help)   sed -n '2,25p' "$0"; exit 0 ;;
-    *)           DIE "unknown arg: $1" ;;
+    --pr)          PR_ARG="$2"; shift 2 ;;
+    --worktree)    WORKTREE_ARG="$2"; shift 2 ;;
+    --base)        BASE_BRANCH="$2"; shift 2 ;;
+    --repo)        REPO_ARG="$2"; shift 2 ;;
+    --card)        CARD_ARG="${2:-}"; shift $(( $# >= 2 ? 2 : 1 )) ;;
+    --verdict-out) VERDICT_OUT_SEEN=1; VERDICT_OUT_ARG="${2:-}"; shift $(( $# >= 2 ? 2 : 1 )) ;;
+    -h|--help)     sed -n '2,26p' "$0"; exit 0 ;;
+    *)             DIE "unknown arg: $1" ;;
   esac
 done
 
 [[ -n "$PR_ARG" ]]       || DIE "--pr <number|url> is required"
 [[ -n "$WORKTREE_ARG" ]] || DIE "--worktree <path> is required (all four checks must run)"
 [[ -n "$CARD_ARG" ]] || DIE "--card <slug> is required (all four checks must run)"
+# VERDICT_OUT_SEEN distinguishes "flag not given" (skip the file write, VERDICT_OUT_ARG stays
+# "") from "flag given with no following value" (refuse — never silently fall through with an
+# empty path, and never consume the next flag's own token as this flag's value).
+if [[ "$VERDICT_OUT_SEEN" == "1" && -z "$VERDICT_OUT_ARG" ]]; then
+  DIE "--verdict-out <path> requires a value"
+fi
 
 command -v gh >/dev/null 2>&1      || DIE "gh (GitHub CLI) not found — required for PR checks"
 command -v git >/dev/null 2>&1     || DIE "git not found"
@@ -160,7 +172,7 @@ fi
 # Pass every value as an argv element (not interpolated into the heredoc) so
 # that commit titles / branch names containing quotes, backticks or $(...)
 # can never be interpreted by the shell or break the JSON.
-python3 - \
+JSON_OUTPUT=$(python3 - \
   "$PR_NUMBER" "$BASE_BRANCH" "$WORKTREE_ARG" "$VERDICT" \
   "$CHECK1_STATUS" "$CHECK1_DETAIL" \
   "$CHECK2_STATUS" "$CHECK2_DETAIL" \
@@ -189,3 +201,19 @@ print(json.dumps({
     "verdict": verdict,
 }, indent=2))
 PY
+)
+
+printf '%s\n' "$JSON_OUTPUT"
+
+# ---------- optional: write the verdict file (byte-identical to stdout) ----------
+# Written by this script, never by the model — the campaign supervisor's postcondition trusts
+# only this file, not a session's prose (spec §4a). Temp file in the TARGET directory + mv, so
+# a reader never observes a partially-written file (fail-closed-edges.md obligation: no
+# half-written state visible to a concurrent reader).
+if [[ -n "$VERDICT_OUT_ARG" ]]; then
+  VERDICT_OUT_DIR=$(dirname "$VERDICT_OUT_ARG")
+  [[ -d "$VERDICT_OUT_DIR" ]] || DIE "--verdict-out directory does not exist: $VERDICT_OUT_DIR"
+  VERDICT_TMP=$(mktemp "$VERDICT_OUT_DIR/.verdict-shipped.XXXXXX")
+  printf '%s\n' "$JSON_OUTPUT" > "$VERDICT_TMP"
+  mv "$VERDICT_TMP" "$VERDICT_OUT_ARG"
+fi

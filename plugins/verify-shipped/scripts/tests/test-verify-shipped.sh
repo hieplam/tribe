@@ -92,5 +92,31 @@ code=$?
 set -e
 check "valueless --card (no following value) -> setup error, exit 2 (not an unbound-variable crash)" "$code" "2"
 
+# --- --verdict-out: writes a byte-identical verdict file on request ---
+
+repo7="$TMP/r7"; make_repo "$repo7"; bin7="$TMP/bin7"
+stub_gh "$bin7" "$STAMP"
+verdict7="$TMP/verdict7.json"
+out7="$(run_vs "$repo7" "$bin7" --card C1 --verdict-out "$verdict7" || true)"
+check "--verdict-out writes a file at the given path" "$([[ -f "$verdict7" ]] && echo yes || echo no)" "yes"
+check "--verdict-out file is byte-identical to stdout" "$(cat "$verdict7")" "$out7"
+check "--verdict-out file's card field equals --card" "$(jget "$verdict7" card)" "C1"
+
+repo8="$TMP/r8"; make_repo "$repo8"; bin8="$TMP/bin8"
+stub_gh "$bin8" "$STAMP"
+verdict8="$TMP/verdict8.json"
+out5_again="$(run_vs "$repo5" "$bin5" --card C1 || true)"
+out8="$(run_vs "$repo8" "$bin8" --card C1 || true)"
+check "without --verdict-out, no file is written" "$([[ -e "$verdict8" ]] && echo yes || echo no)" "no"
+check "without --verdict-out, stdout is unchanged (same as a prior no-flag run)" "$out8" "$out5_again"
+
+repo9="$TMP/r9"; make_repo "$repo9"; bin9="$TMP/bin9"
+stub_gh "$bin9" "$STAMP"
+set +e
+( cd "$repo9" && PATH="$bin9:$PATH" bash "$SCRIPT" --pr 42 --worktree "$TMP/gone-worktree" --card C1 --verdict-out >/dev/null 2>&1 )
+code9=$?
+set -e
+check "valueless --verdict-out (no following value) -> setup error, exit 2 (not an unbound-variable crash)" "$code9" "2"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 exit $((FAIL > 0))

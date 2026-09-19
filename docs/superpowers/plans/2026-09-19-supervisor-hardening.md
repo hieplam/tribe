@@ -418,7 +418,7 @@ specified shape; no design judgment inside.
 **Files:** edit `plugins/verify-shipped/skills/verify-shipped/scripts/verify-shipped.sh` and
 `plugins/verify-shipped/scripts/tests/test-verify-shipped.sh`.
 
-- [ ] **Step 1: Write the failing test first.**
+- [x] **Step 1: Write the failing test first.**
   Assert that with `--verdict-out <path>` the script writes a file at that path whose contents are
   byte-identical to its stdout JSON, that the file's `card` field equals `--card`, and that without
   the flag no file is written and stdout is unchanged.
@@ -429,13 +429,13 @@ specified shape; no design judgment inside.
 
   Expected: the new assertions fail; the pre-existing ones still pass.
 
-- [ ] **Step 2: Add the flag.**
+- [x] **Step 2: Add the flag.**
   Parse `--verdict-out` the same way the existing flags are parsed, and refuse with a message if its
   value is missing rather than consuming the next argv token. Write the JSON to a temp file in the
   target directory and `mv` it into place, so a reader never sees a half-written file. Do not change
   the four checks, the stdout contract, or the exit codes.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   bash plugins/verify-shipped/scripts/tests/test-verify-shipped.sh
@@ -443,7 +443,7 @@ specified shape; no design judgment inside.
 
   Expected: `0 failed`.
 
-- [ ] **Step 4: Commit** — `feat(verify-shipped): write the verdict JSON to a file on request`.
+- [x] **Step 4: Commit** — `feat(verify-shipped): write the verdict JSON to a file on request`.
 
 ## Task 9: G3b — the skill resolves its own script path (FU-CS-4)
 
