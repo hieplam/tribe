@@ -192,20 +192,47 @@ else
   bad "(d) <home>/link-out/escape.txt (symlink escape) was denied — absent on disk (the write LANDED)"
 fi
 
-# --- (e)/(f) Grep and Glob are GRANTED read-only tools (R13.1, spec §5.1) — neither may ever
-# appear in permissionDenials, unlike the Write/Edit denials (b)/(c)/(d) above.
+# --- (e)/(f) Grep and Glob are GRANTED read-only tools (R13.1, spec §5.1). A denial list alone
+# cannot prove a call happened — a model that never touches Grep/Glob at all would also leave
+# them absent from permissionDenials, a vacuous pass. This checks BOTH halves: (1) the session's
+# own per-message transcript (io.appendLog's JSONL log, one line per SDK message, written by
+# runOneShotSession as it streams — see core/supervisor/session.ts) shows an actual `tool_use`
+# block named Grep and one named Glob, proving the probe's prompt (e)/(f) steps were genuinely
+# attempted; (2) neither name appears in permissionDenials, proving the grant held. Either half
+# missing fails the check.
+SESSION_ID="$(python3 -c 'import json; print(json.load(open("'"$RESULT_JSON"'"))["sessionId"])')"
+SESSION_LOG="$HOME_DIR/supervisor/sessions/$SESSION_ID.log"
 if GREP_GLOB_CHECK="$(python3 -c '
 import json, sys
-data = json.load(open("'"$RESULT_JSON"'"))
-denials = data.get("permissionDenials") or []
-offenders = [d.get("tool_name") for d in denials if d.get("tool_name") in ("Grep", "Glob")]
-if offenders:
-    print("denied tool_names: %r" % offenders)
+
+result = json.load(open("'"$RESULT_JSON"'"))
+denials = result.get("permissionDenials") or []
+denied_names = {d.get("tool_name") for d in denials}
+
+attempted = set()
+with open("'"$SESSION_LOG"'") as f:
+    for line in f:
+        line = line.strip()
+        if not line:
+            continue
+        message = json.loads(line)
+        if message.get("type") != "assistant":
+            continue
+        content = (message.get("message") or {}).get("content") or []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                attempted.add(block.get("name"))
+
+never_called = {"Grep", "Glob"} - attempted
+denied_anyway = {"Grep", "Glob"} & denied_names
+if never_called or denied_anyway:
+    print("never_called=%r denied_anyway=%r attempted=%r denied_names=%r" % (
+        sorted(never_called), sorted(denied_anyway), sorted(attempted), sorted(denied_names)))
     sys.exit(1)
 ' 2>&1)"; then
-  ok "(e)/(f) Grep and Glob were never denied — R13.1's granted read-only tools"
+  ok "(e)/(f) Grep and Glob were both attempted (per the session transcript) and never denied — R13.1's granted read-only tools"
 else
-  bad "(e)/(f) Grep and Glob were never denied — R13.1's granted read-only tools — $GREP_GLOB_CHECK"
+  bad "(e)/(f) Grep and Glob were both attempted (per the session transcript) and never denied — R13.1's granted read-only tools — $GREP_GLOB_CHECK"
 fi
 
 # ===========================================================================================

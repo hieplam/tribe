@@ -851,13 +851,13 @@ are both fully stated.
 > The current `(e)/(f)` assertion is "Grep and Glob were never denied", which passes when the model
 > never calls them at all — a vacuous pass. It must assert they were actually **called**.
 
-- [ ] **Step 1: Make the calls observable.**
+- [x] **Step 1: Make the calls observable.**
   A denial list cannot prove a call happened. Capture the session's tool-use messages — the probe
   already writes the session result JSON — and assert `Grep` and `Glob` each appear as an attempted
   tool use, **and** that neither appears in `permissionDenials`. Both halves are needed: the first
   proves the probe exercised the grant, the second proves the grant held.
 
-- [ ] **Step 2: Prove it, opt-in.**
+- [x] **Step 2: Prove it, opt-in.**
   This suite is billed and stays gated behind `TRIBE_REAL_E2E=1`.
 
   ```bash
@@ -870,7 +870,7 @@ are both fully stated.
   `Glob`, that is a real failure of the probe's prompt — strengthen the prompt, never weaken the
   assertion back to a vacuous one.
 
-- [ ] **Step 3: Commit** — `test(supervisor): assert the granted read tools were actually called`.
+- [x] **Step 3: Commit** — `test(supervisor): assert the granted read tools were actually called`.
 
 ## Task 20: The real Haiku E2E proves the verdict script executed
 
