@@ -1491,13 +1491,13 @@ regardless of cause.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test** in `cli/main.test.ts`: `resolveSupervisorHome` refuses a
+- [x] **Step 1: Write the failing test** in `cli/main.test.ts`: `resolveSupervisorHome` refuses a
   home outside the tribe root, refuses one with no `campaign-state.json`, and accepts a good one;
   `--campaign` plus `--repo` derives the home through the injected `tribeHome` seam.
 
-- [ ] **Step 2: Write the dispatch block.**
+- [x] **Step 2: Write the dispatch block.**
 
-- [ ] **Step 3: Gate — run the real CLI's refusal paths.**
+- [x] **Step 3: Gate — run the real CLI's refusal paths.**
 
 ```sh
 cd plugins/tribe/scripts/runner
@@ -1509,7 +1509,7 @@ bun run.ts supervise --repo /tmp --campaign x --model m --nonsense ; echo "exit=
 Expected: tests green; the first prints `supervise: missing required flag: --repo` with `exit=1`;
 the second prints `supervise: unknown flag: --nonsense` with `exit=1`; neither prints a stack trace.
 
-- [ ] **Step 4: Commit** — `feat(supervisor): the supervise subcommand (task 15/24)`.
+- [x] **Step 4: Commit** — `feat(supervisor): the supervise subcommand (task 15/24)`.
 
 ---
 

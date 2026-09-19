@@ -1108,3 +1108,79 @@ describe('transcript-metrics subcommand: a --verify entry with metrics deleted i
     }
   }, 30_000);
 });
+
+// Task 15 (campaign-supervisor, spec §5.1/§14): the `supervise` subcommand's composition root.
+import { resolveSupervisorHome } from './main.ts';
+
+describe('resolveSupervisorHome — the supervise subcommand gate (fail-closed, Task 15)', () => {
+  // Same values `resolveWatchdogHome`'s own test above uses, plus an injected `resolveTribeHome`
+  // seam (never a real `tribe-home.sh` subprocess) — the composition-root function this task
+  // adds is the only place allowed to call it.
+  function fakeIo(tribeHomeResult: { ok: true; home: string } | { ok: false; error: string }) {
+    return {
+      realpath: (p: string) => p.replace(/^\/var\//, '/private/var/'),
+      userHome: () => '/var/t/home',
+      cwd: () => '/private/var/t/home/.tribe/k/campaigns',
+      fileExists: (p: string) => p === '/private/var/t/home/.tribe/k/campaigns/c/campaign-state.json',
+      resolveTribeHome: async (_repoRoot: string) => tribeHomeResult,
+    };
+  }
+
+  test('a --home outside the tribe root is refused with a typed "supervise:" message, not a throw', async () => {
+    const io = fakeIo({ ok: false, error: 'unreachable — --home is used, resolveTribeHome is never called' });
+    const got = await resolveSupervisorHome(
+      { campaignSlug: null, rawHome: '/tmp/elsewhere', repoRoot: '/some/repo' },
+      io,
+    );
+    expect('error' in got && got.error.startsWith('supervise:')).toBe(true);
+    expect('error' in got && got.error).toContain('is outside the tribe root');
+  });
+
+  test('a --home with no campaign-state.json is refused by name, prefixed "supervise:" not "watchdog:"', async () => {
+    const io = fakeIo({ ok: false, error: 'unreachable' });
+    const got = await resolveSupervisorHome(
+      { campaignSlug: null, rawHome: '/var/t/home/.tribe/k/campaigns/other', repoRoot: '/some/repo' },
+      io,
+    );
+    expect(got).toEqual({
+      error:
+        'supervise: --home "/private/var/t/home/.tribe/k/campaigns/other" has no ' +
+        'campaign-state.json — a campaign home is authored by the orchestrate-campaign ' +
+        'skill before any runner or watchdog is started',
+    });
+  });
+
+  test('a good --home is accepted, symlink-resolved (W-P10)', async () => {
+    const io = fakeIo({ ok: false, error: 'unreachable' });
+    const got = await resolveSupervisorHome(
+      { campaignSlug: null, rawHome: '/var/t/home/.tribe/k/campaigns/c', repoRoot: '/some/repo' },
+      io,
+    );
+    expect(got).toEqual({ homeDir: '/private/var/t/home/.tribe/k/campaigns/c' });
+  });
+
+  test('--campaign plus --repo derives the SAME home as an equivalent --home, via the injected resolveTribeHome seam', async () => {
+    const calls: string[] = [];
+    const io = fakeIo({ ok: true, home: '/var/t/home/.tribe/k' });
+    io.resolveTribeHome = async (repoRoot: string) => {
+      calls.push(repoRoot);
+      return { ok: true, home: '/var/t/home/.tribe/k' };
+    };
+    const got = await resolveSupervisorHome(
+      { campaignSlug: 'c', rawHome: null, repoRoot: '/some/repo' },
+      io,
+    );
+    expect(calls).toEqual(['/some/repo']);
+    expect(got).toEqual({ homeDir: '/private/var/t/home/.tribe/k/campaigns/c' });
+  });
+
+  test('a failed resolveTribeHome (--campaign) is a typed "supervise:" refusal, never a throw', async () => {
+    const io = fakeIo({ ok: false, error: 'not a git repository' });
+    const got = await resolveSupervisorHome(
+      { campaignSlug: 'c', rawHome: null, repoRoot: '/not-a-repo' },
+      io,
+    );
+    expect('error' in got && got.error.startsWith('supervise:')).toBe(true);
+    expect('error' in got && got.error).toContain('not a git repository');
+  });
+});

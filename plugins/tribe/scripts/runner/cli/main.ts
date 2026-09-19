@@ -34,6 +34,15 @@ import { buildTranscriptIo } from '../adapters/transcript-io.adapter.ts';
 import { measureAtCut, validateBaselineFile, verifyBaseline } from '../adapters/cut.ts';
 import type { BaselineEntry, BaselineFile } from '../core/metrics/model.ts';
 import type { TranscriptIO } from '../ports/ports.ts';
+// Task 15 (campaign-supervisor, spec §5.1/§14): the `supervise` subcommand — a composition
+// root exactly like the `watchdog` block above, assembling `SupervisorLoopSeam` from pieces
+// that already exist (see `runSupervisor`'s own module doc comment).
+import { parseSupervisorArgs, supervisorHomeFromCampaign, type SupervisorConfig } from '../core/supervisor/args.ts';
+import { runSupervisor, type SupervisorLoopConfig, type SupervisorLoopSeam } from '../core/supervisor/loop.ts';
+import { SUPERVISOR_EXIT_NEEDS_OWNER, SUPERVISOR_EXIT_USAGE } from '../core/supervisor/model.ts';
+import { buildSupervisorIo } from '../adapters/supervisor-io.adapter.ts';
+import { sdkSpawnSession } from '../adapters/session.adapter.ts';
+import type { SpawnSessionParams } from '../core/session.ts';
 
 const DEFAULT_SESSION_TIMEOUT_MS = 3 * 60 * 60 * 1000; // spec §2: 3h protocol default.
 const DEFAULT_VIEWER_PORT = 4321; // spec D11.
@@ -495,6 +504,46 @@ export function resolveWatchdogHome(
   return { homeDir: absHome };
 }
 
+/** The `supervise` subcommand's fail-closed gate (Task 15, spec §5.1/§14): reuses
+ * `resolveWatchdogHome`'s own containment-plus-existence check for BOTH invocation shapes —
+ * per this task's adjudication rule, that symbol is never renamed, only called. When
+ * `--campaign` was given instead of `--home`, the campaign's home is derived FIRST (ratified
+ * decision 2: `$(tribe-home.sh <repo>)/campaigns/<slug>`, spec §10) through the injected
+ * `resolveTribeHome` seam — running `tribe-home.sh` is a subprocess concern banned from
+ * `core/**`, so this composition-root function is the only place allowed to call it — and the
+ * derived path is then run through the exact same gate a typed `--home` would be, so the two
+ * invocation shapes land on an identical home. Exported for `cli/main.test.ts`, like
+ * `resolveWatchdogHome` above. */
+export async function resolveSupervisorHome(
+  config: Pick<SupervisorConfig, 'campaignSlug' | 'rawHome' | 'repoRoot'>,
+  io: {
+    realpath(p: string): string;
+    userHome(): string;
+    cwd(): string;
+    fileExists(p: string): boolean;
+    resolveTribeHome(repoRoot: string): Promise<{ ok: true; home: string } | { ok: false; error: string }>;
+  },
+): Promise<{ homeDir: string } | { error: string }> {
+  let rawHome: string;
+  if (config.campaignSlug !== null) {
+    const tribeHome = await io.resolveTribeHome(config.repoRoot);
+    if (!tribeHome.ok) {
+      return {
+        error: `supervise: could not resolve the tribe home for --repo "${config.repoRoot}": ${tribeHome.error}`,
+      };
+    }
+    rawHome = supervisorHomeFromCampaign(tribeHome.home, config.campaignSlug);
+  } else {
+    rawHome = config.rawHome as string;
+  }
+  const result = resolveWatchdogHome(rawHome, io);
+  // `resolveWatchdogHome`'s own refusal text is hardcoded `watchdog:`-prefixed (never renamed
+  // per this task's adjudication rule) — rewrite the prefix so a `supervise` user is never
+  // told to look at the sibling subcommand's name.
+  if ('error' in result) return { error: result.error.replace(/^watchdog:/, 'supervise:') };
+  return result;
+}
+
 // ---------------------------------------------------------------------------------------
 // `transcript-metrics` subcommand (Task 3, spec §15, card `## Measure first`). Token-free by
 // construction: it spawns nothing and reads nothing but transcript files.
@@ -677,6 +726,92 @@ export async function main(): Promise<void> {
     }
     console.log(`status: ${outcome.statusPath}`);
     process.exit(outcome.exitCode);
+    return;
+  }
+
+  if (argv[0] === 'supervise') {
+    const parsed = parseSupervisorArgs(argv.slice(1));
+    if ('error' in parsed) {
+      console.error(`supervise: ${parsed.error}`);
+      process.exit(SUPERVISOR_EXIT_USAGE);
+      return;
+    }
+    // `structure.test.ts`'s world-touching sweep bans `node:fs`/`child_process`/the SDK from
+    // `cli/main.ts` by module specifier, same as every other subcommand here — every primitive
+    // below is reached through an adapter, never a direct Node import.
+    const watchdogIo = buildWatchdogIo();
+    // `resolveSupervisorHome` needs `resolveWatchdogHome`'s narrow io slice (realpath/userHome/
+    // cwd/fileExists — `watchdogIo` already supplies all four) PLUS `resolveTribeHome`, which
+    // only `buildSupervisorIo` provides. `resolveTribeHome`'s own closure never reads `homeDir`
+    // at all (see its body in `adapters/supervisor-io.adapter.ts`), so the throwaway argument
+    // below is never touched before the REAL `buildSupervisorIo(home.homeDir)` runs.
+    const homeResolverIo = { ...watchdogIo, resolveTribeHome: buildSupervisorIo('').resolveTribeHome };
+    const home = await resolveSupervisorHome(parsed.config, homeResolverIo);
+    if ('error' in home) {
+      console.error(home.error);
+      process.exit(SUPERVISOR_EXIT_USAGE);
+      return;
+    }
+
+    const supervisorIo = buildSupervisorIo(home.homeDir);
+    const loopSeam: SupervisorLoopSeam = {
+      ...supervisorIo,
+      // `sdkSpawnSession` is typed against `SpawnSessionParams` (`options: PinnedSessionOptions`,
+      // the card loop's envelope); the one-shot seam's own `OneShotSpawnParams` carries
+      // `OneShotSessionOptions` instead — deliberately a DIFFERENT, incompatible TS envelope
+      // over the SAME underlying SDK `query()` call (`core/supervisor/session.ts`'s own doc
+      // comment: "permissionMode alone conflicts"). Both are narrowings of the one real SDK
+      // options shape `sdkSpawnSession` forwards verbatim, so the cast is a type-boundary
+      // adaptation at the composition root, never a behavior change.
+      spawnSession: (params) => sdkSpawnSession(params as unknown as SpawnSessionParams),
+      // Unlike the card loop's `buildSessionIOForCard`, the supervisor keeps no per-card
+      // session object to crash-safely persist here — the session id is already carried by
+      // `verify.ts`'s postcondition checks and the ledger line `runSupervisor` writes once the
+      // session completes, so there is nothing more for this callback to record.
+      onSessionStart: () => {},
+      // `SupervisorIO.appendFile` already mkdir's, appends verbatim, AND proves containment
+      // (fail-closed-edges obligation 4) before touching disk — `appendLog` only needs to add
+      // the newline `appendFile`'s own callers are expected to supply (mirrors
+      // `adapters/run-io.adapter.ts`'s own `appendLog` contract).
+      appendLog: (logPath, line) => supervisorIo.appendFile(logPath, `${line}\n`),
+      // `SupervisorLoopSeam`'s own contract ("returns its input unchanged when the path does
+      // not exist") is `watchdogIo.realpath`'s contract verbatim (mirrored from
+      // `adapters/watchdog-io.adapter.ts`) — reused rather than reimplemented.
+      realpath: watchdogIo.realpath,
+    };
+
+    const config: SupervisorLoopConfig = {
+      repoRoot: parsed.config.repoRoot,
+      model: parsed.config.model,
+      watchdogModel: parsed.config.watchdogModel,
+      campaign: parsed.config.campaignSlug ?? basename(home.homeDir),
+      limits: parsed.config.limits,
+      sessionTimeoutSeconds: parsed.config.sessionTimeoutSeconds,
+      pollSeconds: parsed.config.pollSeconds,
+      // Mirrors `ports.ts`'s `RunnerSpawnPort.runnerCommand()` / `watchdog-io.adapter.ts`'s own
+      // `RUNNER_ENTRYPOINT` — resolved from THIS file's own location, never from cwd.
+      watchdogCommand: ['bun', join(import.meta.dir, '..', 'run.ts')],
+      rerunCommand: `bun run.ts supervise ${argv.slice(1).join(' ')}`,
+    };
+
+    // Mirrors the watchdog block's own B2 fix above: a real I/O failure inside the
+    // supervisor's edge must never escape as an uncaught traceback. `SUPERVISOR_EXIT_NEEDS_OWNER`
+    // (not `SUPERVISOR_EXIT_USAGE`, which means "you typed the CLI wrong") is the closest fit of
+    // the four spec-frozen supervisor exit codes for an unexpected internal failure — the same
+    // reasoning the watchdog block's own comment gives for its `WATCHDOG_EXIT_NEEDS_HUMAN` choice.
+    let terminal: Awaited<ReturnType<typeof runSupervisor>>;
+    try {
+      terminal = await runSupervisor(config, home.homeDir, loopSeam);
+    } catch (err) {
+      console.error(`supervise: unexpected error: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(SUPERVISOR_EXIT_NEEDS_OWNER);
+      return;
+    }
+    // `terminal.exitCode` is already `exitCodeOf(terminal.kind)` — computed once, inside
+    // `runSupervisor` itself (see its own `already_running` return, `core/supervisor/loop.ts`).
+    // Re-deriving it here would duplicate that mapping outside the module that owns it.
+    console.log(`status: ${terminal.statusPath}`);
+    process.exit(terminal.exitCode);
     return;
   }
 
