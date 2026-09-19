@@ -4,3 +4,4 @@
 {"id":"G-002","event":"ruled","disposition":"rule","ref":"rule-temp-dir-cleanup","ratified_by":"shaman"}
 {"id":"G-003","event":"ruled","disposition":"rule","ref":"rule-composed-tree-coverage","ratified_by":"shaman"}
 {"id":"G-004","event":"opened","category":"error-handling","paths":["plugins/tribe/scripts/runner","adapters/cut.ts","cli/main.ts","plugins/tribe/scripts/runner/cli/main.ts"],"fingerprint":"grep -rln \"'code' in err\" plugins/tribe/scripts/runner --include=\"*.ts\" --exclude=\"*.test.ts\"","hits_at_detection":2,"first_seen_pr":0}
+{"id":"G-004","event":"ruled","disposition":"rule","ref":"rule-one-parser-per-edge-shape","ratified_by":"shaman"}
