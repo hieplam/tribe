@@ -67,6 +67,15 @@ function fakeSeam(opts: {
   sessions?: ScriptedSession[];
   initialFiles?: Record<string, string>;
   gitStatus?: string;
+  /** Fix 1 regression harness ONLY (busy-spawn, skinner audit): bounds a deliberately-unfixed
+   * `decide()`/`observe()` loop so a RED run against the pre-fix code terminates instead of
+   * spinning forever. `spawnWatchdog` never writes `status.json` synchronously (a real child
+   * does not — `fixtures-mirror-reality.md`); when this is set, the Nth spawn's status finally
+   * appears on disk (mirroring the real child EVENTUALLY managing to publish), which is what
+   * lets an un-fixed loop stop respawning after exactly N attempts instead of never. Left
+   * `undefined` for every ordinary scenario — none of them need it against the FIXED loop.ts.
+   */
+  rescueWatchdogStatusAfterSpawns?: number;
 }) {
   const files = new Map<string, string>([...Object.entries(REAL_TEMPLATES), ...Object.entries(opts.initialFiles ?? {})]);
   const writes: string[] = []; // every writeFileAtomic/appendFile/renameIfPresent(to) target
@@ -78,6 +87,7 @@ function fakeSeam(opts: {
   const watchdogQueue = [...(opts.watchdogRuns ?? [])];
   const sessionQueue = [...(opts.sessions ?? [])];
   const spawnedPrompts: string[] = []; // one entry per spawnSession call, in order — the RENDERED brief
+  let spawnWatchdogCalls = 0; // total spawnWatchdog invocations this seam has served
   let sessionCounter = 0;
   const watchdogStatusPath = join(HOME, 'watchdog', 'status.json');
   const statusPath = join(HOME, 'supervisor', 'status.json');
@@ -121,9 +131,18 @@ function fakeSeam(opts: {
     listEntries,
     spawnWatchdog: (_argv, _opts): WatchdogHandle => {
       const pid = nextPid++;
-      // A freshly spawned watchdog is alive with no terminal yet — visible to the very next
-      // observe() (P4 adoption), mirroring a real child process's own first status.json write.
-      files.set(watchdogStatusPath, JSON.stringify({ pid, terminal: null }));
+      spawnWatchdogCalls += 1;
+      // Fix 1 (skinner audit, `fixtures-mirror-reality.md`): a REAL watchdog child does NOT
+      // write `status.json` synchronously inside the spawn call — it writes it later,
+      // asynchronously, after it actually starts. This fake reproduces that shape: nothing is
+      // written here. `status.json` only appears once `waitFor` below resolves (the loop's own
+      // NEXT await), or — only for the dedicated Fix-1 regression test — once
+      // `rescueWatchdogStatusAfterSpawns` spawns have happened (simulating the real child
+      // eventually managing to publish, bounding what would otherwise be a genuinely infinite
+      // busy-spawn loop against un-fixed code).
+      if (opts.rescueWatchdogStatusAfterSpawns !== undefined && spawnWatchdogCalls >= opts.rescueWatchdogStatusAfterSpawns) {
+        files.set(watchdogStatusPath, JSON.stringify({ pid, terminal: null }));
+      }
       callLog.push('effect');
       return {
         pid,
@@ -171,7 +190,10 @@ function fakeSeam(opts: {
     },
   };
 
-  return { io, files, writes, callLog, statusHistory, spawnedPrompts };
+  return {
+    io, files, writes, callLog, statusHistory, spawnedPrompts,
+    get spawnWatchdogCalls(): number { return spawnWatchdogCalls; },
+  };
 }
 
 /** Every write this loop performs must land in one of S-P5's three locations. */
@@ -418,6 +440,36 @@ describe('runSupervisor — a verified ratify (V7) drives run_watchdog via decid
     // the session ran — proof the brief carries the real block, not a description of it.
     expect(ratifyPrompt).toContain('## R1');
     expect(ratifyPrompt).toContain('Some earlier context.');
+  });
+});
+
+describe('runSupervisor — Fix 1 (Blocker, skinner audit): the busy-spawn guard', () => {
+  test('spawnWatchdog is called exactly once for a single logical watchdog run, and the loop '
+    + 'transitions to await_watchdog — even though status.json has not been published yet on '
+    + 'the very next tick (a real child publishes it ASYNCHRONOUSLY, never synchronously inside '
+    + 'the spawn call — fixtures-mirror-reality.md). `rescueWatchdogStatusAfterSpawns` bounds '
+    + 'what would otherwise be a genuinely infinite busy-spawn loop against un-fixed code (a '
+    + 'disk-only liveness check never sees a live child until this rescue write lands) — against '
+    + 'the FIXED loop.ts the rescue never even matters, because the in-flight spawn handle this '
+    + 'loop itself holds is recognised as live on the very next tick.', async () => {
+    const seam = fakeSeam({
+      watchdogRuns: [{ reason: 'stop_requested', exitCode: 0 }],
+      rescueWatchdogStatusAfterSpawns: 3,
+    });
+
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+
+    expect(result).toEqual({
+      exitCode: 0, kind: 'done', reason: 'stop_requested', statusPath: join(HOME, 'supervisor', 'status.json'),
+    });
+    // The defect: `observe()` read `watchdogLive` from disk ONLY, so the tick immediately after
+    // a spawn (before a real child has had a chance to publish `status.json`) saw `null` and
+    // `decide()`'s row 27 (`lastWatchdog === null`) re-issued `run_watchdog` — a SECOND (then
+    // THIRD, ...) spawn, while the first child was already alive and in flight the whole time.
+    expect(seam.spawnWatchdogCalls).toBe(1);
+    const events = (seam.files.get(join(HOME, 'supervisor', 'events.jsonl')) ?? '').trim().split('\n');
+    const kinds = events.map((l) => (JSON.parse(l) as { action: string }).action);
+    expect(kinds).toEqual(['run_watchdog', 'await_watchdog', 'exit']);
   });
 });
 

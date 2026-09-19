@@ -126,7 +126,10 @@ export interface SupervisorObservation {
   /** `<home>/NEEDS_OWNER.md` from an earlier park. */
   needsOwnerPresent: boolean;
   supervisorLock: { pid: number; alive: boolean } | null;
-  /** `status.json` `terminal === null` && pid alive. */
+  /** `status.json` `terminal === null` && pid alive — OR, when the disk has not caught up yet,
+   * a spawn this loop itself has in flight (its handle not yet reaped) whose pid is alive. A
+   * real watchdog child does not publish `status.json` synchronously at spawn time (Fix 1,
+   * `fixtures-mirror-reality.md`), so the in-flight spawn is an equally valid liveness source. */
   watchdogLive: { pid: number; alive: boolean } | null;
   lastWatchdog: {
     terminal: { status: string; reason: string; exitCode: number } | null;

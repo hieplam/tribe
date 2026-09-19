@@ -403,10 +403,25 @@ function observe(
   const supervisorLock = foreignLock === null ? null : { pid: foreignLock.pid, alive: foreignLock.alive };
 
   const watchdogStatus = parseWatchdogStatusFacts(io.readFileOrEmpty(paths.watchdogStatus));
-  const watchdogAlive = watchdogStatus !== null
+  const diskWatchdogAlive = watchdogStatus !== null
     && watchdogStatus.terminal === null
     && io.isProcessAlive(watchdogStatus.pid);
-  const watchdogLive = watchdogAlive ? { pid: watchdogStatus!.pid, alive: true } : null;
+  // Fix 1 (Blocker, skinner audit): a REAL watchdog child does not write `status.json`
+  // synchronously inside `spawnWatchdog` — it writes it later, asynchronously, after it starts
+  // (`fixtures-mirror-reality.md`). Reading `watchdogLive` from disk alone therefore reports
+  // `null` for the tick(s) immediately after a spawn, `decide()`'s P4 never fires, and the loop
+  // re-issues `run_watchdog` — busy-spawning children until the run cap parks it, even though the
+  // FIRST child is alive and in flight the whole time. The in-flight spawn handle this loop
+  // already holds (`loopState.watchdogHandle`, not yet reaped — `watchdogOwnedExitCode === null`)
+  // is therefore an equally valid liveness source, checked whenever the disk has not caught up
+  // yet: `observe()` reflects reality either way, so `decide()` never has to re-derive it.
+  const handleInFlight = loopState.watchdogHandle !== null && loopState.watchdogOwnedExitCode === null;
+  const handleAlive = handleInFlight && io.isProcessAlive((loopState.watchdogHandle as WatchdogHandle).pid);
+  const watchdogLive = diskWatchdogAlive
+    ? { pid: (watchdogStatus as WatchdogStatusFacts).pid, alive: true }
+    : handleAlive
+      ? { pid: (loopState.watchdogHandle as WatchdogHandle).pid, alive: true }
+      : null;
   const lastWatchdog = watchdogStatus === null
     ? null
     : { terminal: watchdogStatus.terminal, ownedExitCode: loopState.watchdogOwnedExitCode };
