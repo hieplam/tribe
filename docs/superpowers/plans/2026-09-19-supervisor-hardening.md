@@ -790,7 +790,7 @@ in the spec; this task carries it out.
 > deleting it is off the table and incrementing it is an owner-only data-shape decision. The Shaman
 > pre-ruled the remaining option: document it as vestigial and make the report say so.
 
-- [ ] **Step 1: Write the failing test first.**
+- [x] **Step 1: Write the failing test first.**
   Assert the rendered campaign report no longer prints a permanently-zero `- Auto-answer rounds: 0`
   line, and instead states the field's real status.
 
@@ -800,12 +800,12 @@ in the spec; this task carries it out.
 
   Expected: fails — the current line is rendered.
 
-- [ ] **Step 2: Render it honestly, and comment the read sites.**
+- [x] **Step 2: Render it honestly, and comment the read sites.**
   Change the one line in `core/report.ts` (line 307). Add a comment naming the field vestigial, with
   a pointer to the spec's §7, at `core/supervisor/model.ts` line 69 and `core/supervisor/loop.ts`
   line 375. Change no behaviour — nothing consults the value.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit
@@ -815,7 +815,7 @@ in the spec; this task carries it out.
   Expected: at least 1068 passing, 0 failing, `tsc` exit `0`, and the last grep prints `0` —
   proving the fence held.
 
-- [ ] **Step 4: Commit** — `docs(runner): mark autoAnswerRounds vestigial in the report`.
+- [x] **Step 4: Commit** — `docs(runner): mark autoAnswerRounds vestigial in the report`.
 
 ## Task 18: Phase 3 governance reconciliation
 

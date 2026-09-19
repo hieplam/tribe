@@ -386,6 +386,8 @@ function buildEscalationFacts(
       filePresent,
       contentSha256: sha256Hex(content),
       reason,
+      // FU-CS-1 (spec §7): vestigial — nothing in the runner ever increments this. Carried
+      // into `EscalationFact` for shape parity only; never consulted by `decide()`.
       autoAnswerRounds: card.autoAnswerRounds ?? 0,
       // Known simplification (see report to the Warchief): a durable card<->ruling-id link that
       // survives a supervisor crash between a ruling landing and its archive would need either a

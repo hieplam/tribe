@@ -320,7 +320,10 @@ export function renderReportMarkdown(report: CampaignReport): string {
     } else if (entry.outcome === 'escalated') {
       lines.push(`- Escalation file: ${entry.escalationFile}`);
       lines.push(`- Question: ${entry.question}`);
-      lines.push(`- Auto-answer rounds: ${entry.autoAnswerRounds}`);
+      // FU-CS-1 (spec §7): nothing in the runner ever increments `autoAnswerRounds`, so the
+      // number is permanently 0 — indistinguishable from "we tried zero times" when it
+      // actually means "nobody counts this". State that honestly rather than a stuck number.
+      lines.push('- Auto-answer rounds: not tracked (field is vestigial — see spec §7)');
     } else if (entry.outcome === 'blocked') {
       lines.push(`- Blocked on: ${entry.blockedOn}`);
     }

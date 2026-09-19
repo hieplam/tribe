@@ -313,6 +313,18 @@ describe('buildCampaignReport — escalated', () => {
       autoAnswerRounds: 2,
     });
   });
+
+  // FU-CS-1 (spec §7): nothing in the runner ever increments `autoAnswerRounds`, so the
+  // rendered markdown's number is permanently 0 — indistinguishable from "we tried zero
+  // times" when it actually means "nobody counts this". The line must say so honestly
+  // instead of printing a count that can never move.
+  test('the rendered "Auto-answer rounds" line states the field is vestigial, never a stuck-at-zero count (FU-CS-1)', async () => {
+    const state = fixtureState({ sequence: ['B4'], cards: { B4: fixtureCard({ status: 'escalated' }) } });
+    const report = await buildCampaignReport(state, fixtureRun(), fixtureConfig(), ioWith());
+    const md = renderReportMarkdown(report);
+    expect(md).not.toContain('- Auto-answer rounds: 0');
+    expect(md.toLowerCase()).toContain('vestigial');
+  });
 });
 
 describe('buildCampaignReport — blocked (Warchief ruling 1: derived status, blockedOn derived from dependsOn)', () => {
