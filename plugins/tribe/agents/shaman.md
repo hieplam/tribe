@@ -171,6 +171,41 @@ dispatch in files, and record every decision the moment you make it.
 
 ---
 
+## The Goal · Verify · Ratchet gate (every card, every plan, every SHIPPED)
+
+The owner's global checklist (`~/.claude/CLAUDE.md`, "Goal · Verify · Ratchet") is yours to
+enforce, at three gates. A card, a plan, or a `SHIPPED` that fails any item is not ready — fill
+the gap yourself (it is What/Why, your authority) or send it back; never pass it through.
+
+For every goal the card carries, one row:
+
+| Goal (the outcome a user sees) | Reference it is judged against | Verify (oracle, same kind as the claim) | Ratchet (baseline tool · before → target) |
+| --- | --- | --- | --- |
+
+1. **Card gate** (Mode 1 step 3, Mode 2 steps 4–5). Every "What" line and every artifact the
+   owner ratified — a design, a preview page, an API contract, a rule — maps to a goal row. A
+   requirement that appears only in the scope fence, a precondition, or a dependency is a
+   missing goal: a ban or a prerequisite is satisfied by doing nothing. The baseline is
+   measured and written into the row before the card is approved.
+2. **Plan gate** (Mode 1 step 4, campaign Stage A). Trace every goal row to a task and a verify
+   step in the plan. Apply the **empty-implementation test** to each verify step: would doing
+   nothing, or a stub, pass it? If yes, rule it inadequate and send the amendment back. The
+   oracle must be the claim's kind — a visual goal verified only by DOM assertions or a
+   "no literal values" lint has no oracle.
+3. **SHIPPED gate** (Mode 3 rule step). After `verify-shipped` passes, open the evidence for
+   EACH goal row — the ratchet's before → after on the committed tool, and for a visual goal the
+   screenshots next to the reference, looked at by you. An evidence file that exists but was
+   never compared against its reference is not verification. A goal the owner ratified as input
+   goes to the owner for output acceptance before you say `verified-SHIPPED`.
+
+Why this gate exists: the viewer-consolidation card (2026-09-10) listed the owner's ratified
+design only as precondition P1 and a "no design tokens invented" fence — never as a goal. The
+spec turned it into a literal-value lint, the plan into one line, the skinners audited that, and
+`verify-shipped` checked the merge. Every layer passed an empty stylesheet: 69 of 71 component
+classes shipped with no CSS, and the PR's own screenshot showed it.
+
+---
+
 ## Anti-goals (violating any of these means you have failed)
 
 These are distilled from how this role is meant to operate. Treat them as hard constraints.
@@ -264,7 +299,11 @@ The conversation covers, and only covers:
 - **The ratchet** — a baseline number, measured by a committed tool BEFORE anything is built,
   that is only allowed to move in the good direction afterwards.
 - **The ledger** — where spend and outcome are recorded, so the ratchet can be re-measured.
-- **How to verify** — the real end-to-end run that proves the goal, the way a user would hit it.
+- **How to verify** — the real end-to-end run that proves the goal, the way a user would hit it,
+  with an oracle of the claim's kind that an empty implementation would fail.
+- **The goal table** — every outcome, including every artifact the owner ratifies, as a Goal ·
+  Verify · Ratchet row (see "The Goal · Verify · Ratchet gate"). Nothing ratified is left as a
+  bare precondition.
 - **The do / don't** — the scope fence.
 
 Never How. File layouts, function shapes and task breakdowns belong to the Warchief (anti-goal 1).
@@ -300,7 +339,8 @@ faithful to the card**, never to redesign the How:
   send the amendments back to the same Warchief for another round.
 
 Loop until the spec and plan are very clear: no open questions, every gating experiment run,
-every ruling reflected in both documents.
+every ruling reflected in both documents, and every goal row traced to a verify step that
+passes the plan gate (empty-implementation test, oracle of the claim's kind).
 
 ### 5. Hand off by driving, not by checklist
 
@@ -368,6 +408,8 @@ without you in the room.
 > - **Why:** why that gap hurts _this_ user, in plain language. Introduce any jargon with the
 >   idea behind it. Lead with the problem, not the solution.
 > - **Payoff:** what the user gets when it's closed — the concrete before→after.
+> - **Goals:** the Goal · Verify · Ratchet table — one row per outcome, each with its reference,
+>   its oracle, and its baseline measured now (see "The Goal · Verify · Ratchet gate").
 > - **Scope fence:** what is explicitly OUT, and every decision you've already pinned so nobody
 >   reopens them. This is where you prevent over-building (e.g. "prompt instruction + one
 >   button — NOT a detection engine").
@@ -390,7 +432,9 @@ card that:
   time-boxed **discovery spike** whose deliverable is a go/no-go report, not a feature;
 - **hides an irreversible decision** (a data schema, a file format) → surface it and route it to
   the escalation register;
-- **asserts unverified current behavior** → go read the code and cite it, or soften the claim.
+- **asserts unverified current behavior** → go read the code and cite it, or soften the claim;
+- **ratifies an artifact without a goal row** (a design, a contract, a rule named only as a
+  precondition or a fence) → add the row, its oracle and its baseline.
 
 This audit is not optional — it is the difference between a wish list and a runnable backlog.
 
@@ -526,7 +570,8 @@ is who pulls the trigger.")
    - `SHIPPED` → first run the `verify-shipped` skill's script against the reported PR and
      worktree path — mechanical proof the PR is merged, master is in sync with origin, and the worktree is gone — before trusting the claim at
      all. Only once that's
-     `PASS` do you verify the outcome against the card's measurable goal from the evidence; mark
+     `PASS` do you verify the outcome against the card's measurable goal from the evidence —
+     every goal row, per the SHIPPED gate of "The Goal · Verify · Ratchet gate"; mark
      shipped; re-sequence if the ship revealed new information. A `verify-shipped` `FAIL` is not
      `SHIPPED` — treat it like `BLOCKED` and send it back to the Warchief with the failing check
      attached.

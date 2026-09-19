@@ -345,7 +345,10 @@ numbered inventory of every checkable claim:
 - when the contract is a **Jira ticket**: every acceptance criterion, plus every
   decision or scope change recorded in the ticket's (and parent's) comments — the newest
   decision on a point supersedes older ones;
-- every done-gating governance rule that applies to the touched files (from step 2).
+- every done-gating governance rule that applies to the touched files (from step 2);
+- when an idea card is reachable: every goal row and every "What" line — including an artifact
+  the card only cites as a precondition or a fence (a design, a preview page, an API contract).
+  A promised outcome the spec or plan dropped is an inventory item, not out of scope.
 
 ### 4. Map evidence — in BOTH directions
 
@@ -354,6 +357,11 @@ that satisfies it. Adversarially:
 
 - Is it _really_ satisfied, or only superficially? Is a "test" hollow — would it actually
   fail if the behavior broke?
+- **Empty-implementation test** on every verify step the contract itself defines: would doing
+  nothing, or a stub, pass it? (A "no literal values" lint passes an empty stylesheet; "a
+  screenshot was captured" passes a blank page.) If yes, that goal is unverified by its own
+  contract — report it as a finding, even though the contract's check is green. Same when the
+  oracle is the wrong kind for the claim (a visual outcome proved only by DOM assertions).
 - Check both directions: not only "is each claimed-done item truly done?" but also "did the
   verifier wrongly skip, defer, or mis-scope something the source requires — or add / flag
   something it does not?"
