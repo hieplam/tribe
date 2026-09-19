@@ -174,14 +174,32 @@ let browser: Browser;
 
 beforeAll(async () => {
   // Fail CLOSED (spec §16.0): no `test.skipIf`. If no browser resolves, this throws the one-line
-  // remedy and every test below reports that failure. Launched exactly like the other always-on
-  // browser suites (dom-kinds, real-transcript, served-build, url-refusals).
+  // remedy and every test below reports that failure. Launched like the other always-on browser
+  // suites (dom-kinds, real-transcript).
   browser = await chromium.launch({ executablePath: resolveChromiumExecutable(), headless: true });
 });
 
-afterAll(async () => {
-  await browser.close();
-});
+// Deliberately NO top-level `afterAll(browser.close())`. `bun test` runs the test FILES
+// concurrently in one process, and playwright-core serves every `chromium.launch()` in that
+// process over one shared driver transport; whichever file calls `browser.close()` first tears
+// that transport down and takes every OTHER file's browser with it ("Target page, context or
+// browser has been closed"). This file's tests are the fastest of the browser suites, so its close
+// reliably fired mid-run of `dom-kinds.e2e` and failed it. Proven: omitting the close makes the
+// pair pass; a settle delay after the close does not. The browser is reaped when the test process
+// exits (bun reports it as "killed N dangling processes"), so nothing is left running past the run.
+// The shared page and the spawned `serve.ts` ARE still closed explicitly in the describe's afterAll.
+
+/** Closes `p` if it is still open, swallowing the "already closed" error a concurrently-running
+ * suite's transport teardown can raise — this file must fail on a real style regression, never on
+ * a cross-file browser teardown it does not own. */
+async function closeQuietly(p: Page | undefined): Promise<void> {
+  if (!p) return;
+  try {
+    await p.close();
+  } catch {
+    // the page's browser was already torn down by another concurrently-running suite — nothing to do
+  }
+}
 
 describe('visual-contract.e2e — the session-list screen matches preview.html §C (plan Task 3, V2)', () => {
   let homeDir: string;
@@ -200,7 +218,7 @@ describe('visual-contract.e2e — the session-list screen matches preview.html �
   }, 30_000);
 
   afterAll(async () => {
-    await page.close();
+    await closeQuietly(page); // never `browser.close()` here — see the module-level note above
     await viewer.stop();
     rmSync(homeDir, { recursive: true, force: true });
   });
