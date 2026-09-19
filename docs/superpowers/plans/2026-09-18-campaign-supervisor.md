@@ -2001,7 +2001,7 @@ the supervisor. Document the procedure exactly as spec §12.1 numbers it, includ
 
 **Steps**
 
-- [ ] **Step 1: Write the failing check** as a grep gate in the same script style the
+- [x] **Step 1: Write the failing check** as a grep gate in the same script style the
   detached-launch test uses — a new `plugins/tribe/scripts/tests/test-supervisor-docs.sh`:
 
 ```sh
@@ -2019,11 +2019,11 @@ grep -q 'W7 — bounded auto-answer.\*\* At most 2 auto-answer rounds per card' 
 grep -q 'W3 — judgment stays in sessions' "$SKILL" || bad "W3 unchanged"
 ```
 
-- [ ] **Step 2: Make the edits**, including the doorbell procedure from spec §12 with the `until`
+- [x] **Step 2: Make the edits**, including the doorbell procedure from spec §12 with the `until`
   loop pointed at `supervisor/status.json`, and the exit-code table (`0` done, `20` needs owner,
   `21` already running, `1` usage).
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 bash plugins/tribe/scripts/tests/test-supervisor-docs.sh
@@ -2034,7 +2034,7 @@ Expected: the docs test reports `N passed, 0 failed`, and the pre-existing detac
 whose wall 2 greps this same file — is still green, proving the edits did not disturb Stage B's
 one-liner.
 
-- [ ] **Step 4: Commit** — `docs(skill): supervisor path and doorbell in Stages B, C and D (task 22/24)`.
+- [x] **Step 4: Commit** — `docs(skill): supervisor path and doorbell in Stages B, C and D (task 22/24)`.
 
 ---
 
