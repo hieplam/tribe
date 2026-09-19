@@ -1618,7 +1618,7 @@ session double is a shell script the `SessionIO` seam is pointed at through an e
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test script.** Structure it exactly like
+- [x] **Step 1: Write the failing test script.** Structure it exactly like
   `test-watchdog-e2e.sh` (`ok`/`bad`/`check`/`contains` helpers, `export HOME="$TMP/home"`,
   `TMP="$(cd "$TMP" && pwd -P)"` for the macOS symlink). Probes:
 
@@ -1642,12 +1642,12 @@ session double is a shell script the `SessionIO` seam is pointed at through an e
 #          campaign-state.json exits 1 with a typed refusal; neither prints a stack trace.
 ```
 
-- [ ] **Step 2: Write the session double.** It reads a `DOUBLE_PLAN` env var (the same scripting
+- [x] **Step 2: Write the session double.** It reads a `DOUBLE_PLAN` env var (the same scripting
   shape `fixtures/watchdog/runner-double.sh` already uses), appends a ruling to `answers.md` or
   writes a park marker or does nothing, bumps a counter file **outside** the campaign home, and
   exits. It never spawns anything.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh
@@ -1656,7 +1656,7 @@ bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh
 Expected: every probe `ok`, final line `N passed, 0 failed` with `N` at least 24, and the script
 exits 0. Run it twice in a row to prove it is repeatable and leaves no state behind.
 
-- [ ] **Step 4: Commit** — `test(supervisor): end-to-end against a session double from an empty home (task 17/24)`.
+- [x] **Step 4: Commit** — `test(supervisor): end-to-end against a session double from an empty home (task 17/24)`.
 
 ---
 

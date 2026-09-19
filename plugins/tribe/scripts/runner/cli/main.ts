@@ -39,9 +39,11 @@ import type { TranscriptIO } from '../ports/ports.ts';
 // that already exist (see `runSupervisor`'s own module doc comment).
 import { parseSupervisorArgs, supervisorHomeFromCampaign, type SupervisorConfig } from '../core/supervisor/args.ts';
 import { runSupervisor, type SupervisorLoopConfig, type SupervisorLoopSeam } from '../core/supervisor/loop.ts';
-import { SUPERVISOR_EXIT_NEEDS_OWNER, SUPERVISOR_EXIT_USAGE } from '../core/supervisor/model.ts';
+import { SUPERVISOR_EXIT_NEEDS_OWNER, SUPERVISOR_EXIT_USAGE, type SessionKind } from '../core/supervisor/model.ts';
+import type { OneShotSessionOptions } from '../core/supervisor/session.ts';
 import { buildSupervisorIo } from '../adapters/supervisor-io.adapter.ts';
 import { sdkSpawnSession } from '../adapters/session.adapter.ts';
+import { sessionDoubleScriptPath, spawnSessionDouble } from '../adapters/session-double.adapter.ts';
 import type { SpawnSessionParams } from '../core/session.ts';
 
 const DEFAULT_SESSION_TIMEOUT_MS = 3 * 60 * 60 * 1000; // spec §2: 3h protocol default.
@@ -589,6 +591,22 @@ export function buildSupervisorLoopConfig(
   };
 }
 
+/** Task 17 (card `campaign-supervisor`, `fixtures-mirror-reality.md`): infers which of the
+ * three one-shot kinds a spawn is for, FROM THE OPTIONS THEMSELVES — `OneShotSpawnParams`
+ * (`core/supervisor/session.ts`) carries only `prompt`/`options`, no `kind` field, and this
+ * seam exists precisely so a real subprocess double can stand in for `spawnSession` without
+ * `core/supervisor/loop.ts` (outside this task's fence) ever being asked to pass one.
+ * `buildOneShotOptions`'s own branches (`session.ts`) make the inference exact, not a guess:
+ * `closing` is the ONLY kind whose `settingSources` is non-empty (§5.4's named exception); of
+ * the remaining two, only `ruling` carries `additionalDirectories` (repo read access, §5.2) —
+ * `ratify` never does (§5.3: "no repo access at all"). Exercised end-to-end by
+ * `tests/test-supervisor-e2e.sh`; deliberately not unit-tested, like the rest of this
+ * composition root. */
+export function inferOneShotKind(options: OneShotSessionOptions): SessionKind {
+  if (options.settingSources.length > 0) return 'closing';
+  return options.additionalDirectories !== undefined ? 'ruling' : 'ratify';
+}
+
 // ---------------------------------------------------------------------------------------
 // `transcript-metrics` subcommand (Task 3, spec §15, card `## Measure first`). Token-free by
 // construction: it spawns nothing and reads nothing but transcript files.
@@ -799,6 +817,13 @@ export async function main(): Promise<void> {
     }
 
     const supervisorIo = buildSupervisorIo(home.homeDir);
+    // Task 17 (`fixtures-mirror-reality.md`): when `TRIBE_SUPERVISOR_SESSION_DOUBLE` names a
+    // script, every one-shot spawn below goes to THAT real subprocess instead of the SDK —
+    // resolved ONCE, outside the seam object, so the env is read exactly once per invocation
+    // (mirrors `unsetAnthropicApiKeyEnv`'s own single-read convention). Unset — the ordinary,
+    // production case — leaves `spawnSession` wired to `sdkSpawnSession`, byte-identical to
+    // before this task.
+    const doubleScript = sessionDoubleScriptPath();
     const loopSeam: SupervisorLoopSeam = {
       ...supervisorIo,
       // `sdkSpawnSession` is typed against `SpawnSessionParams` (`options: PinnedSessionOptions`,
@@ -808,7 +833,9 @@ export async function main(): Promise<void> {
       // comment: "permissionMode alone conflicts"). Both are narrowings of the one real SDK
       // options shape `sdkSpawnSession` forwards verbatim, so the cast is a type-boundary
       // adaptation at the composition root, never a behavior change.
-      spawnSession: (params) => sdkSpawnSession(params as unknown as SpawnSessionParams),
+      spawnSession: doubleScript === null
+        ? (params) => sdkSpawnSession(params as unknown as SpawnSessionParams)
+        : (params) => spawnSessionDouble(doubleScript, home.homeDir, inferOneShotKind(params.options)),
       // Unlike the card loop's `buildSessionIOForCard`, the supervisor keeps no per-card
       // session object to crash-safely persist here — the session id is already carried by
       // `verify.ts`'s postcondition checks and the ledger line `runSupervisor` writes once the

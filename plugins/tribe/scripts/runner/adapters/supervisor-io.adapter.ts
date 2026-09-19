@@ -97,6 +97,47 @@ function containedPath(homeDir: string, target: string): string {
   return resolved;
 }
 
+/**
+ * Task 17 (card `campaign-supervisor`, `fixtures-mirror-reality.md`): the SAME symlink-safe
+ * resolution `containedPath` performs, MINUS its home-containment refusal — for `readFileOrEmpty`
+ * ONLY, never the three write primitives below.
+ *
+ * `fail-closed-edges.md` obligation 4, verbatim: "Any path read from a MANIFEST, CONFIG, OR USER
+ * INPUT is resolved and proven to sit inside its declared root ... before anything opens,
+ * writes, or deletes through it." `readFileOrEmpty` is also the ONLY read primitive
+ * `SupervisorIO` exposes, and `core/supervisor/loop.ts#buildOneShotPrompt` legitimately calls it
+ * on two paths that are neither a manifest, a config, nor user/session input, and were never
+ * meant to be walled to the campaign home: the three committed judgment-session templates
+ * (`core/supervisor/brief.ts`'s `RULING_TEMPLATE_PATH`/`RATIFY_TEMPLATE_PATH`/
+ * `CLOSING_TEMPLATE_PATH` — fixed, compile-time constants under the plugin's own source tree)
+ * and the gap-gate report under the BASE tribe home (`readGapGateOpenIds`,
+ * `orchestrate-campaign/SKILL.md` Stage D step 2: "the BASE tribe home the gate writes to, NOT
+ * the campaign-nested `--home`"). Both were unreachable through the pre-Task-17 `readFileOrEmpty`
+ * (it always threw `PathEscapesHomeError`) — a defect invisible to every existing unit test
+ * (`supervisor-io.adapter.test.ts` exercises the write-side refusal only; `loop.test.ts`'s fake
+ * seam has no containment check at all) and only surfaced by `tests/test-supervisor-e2e.sh`'s
+ * REAL `readFileOrEmpty` against a REAL disk — exactly the class of gap
+ * `fixtures-mirror-reality.md` documents ("a defect ... invisible in unit tests ... obvious the
+ * first time the tool ran against a bare directory").
+ *
+ * The write surface (S-P5) — `writeFileAtomic`/`appendFile`/`renameIfPresent`, every one of
+ * which still calls `containedPath` and keeps its FULL refusal, unchanged — is the actual
+ * security boundary this adapter protects; a caller can now READ outside the campaign home
+ * (never write there), which is the asymmetry obligation 4's own wording already draws.
+ */
+function resolvedReadPath(target: string): string {
+  let cursor = resolve(target);
+  const remainder: string[] = [];
+  while (!existsSync(cursor)) {
+    const parent = dirname(cursor);
+    if (parent === cursor) return resolve(target); // filesystem root, nothing existed — as-is
+    remainder.unshift(basename(cursor));
+    cursor = parent;
+  }
+  const realAncestor = realpathSync(cursor);
+  return remainder.length > 0 ? join(realAncestor, ...remainder) : realAncestor;
+}
+
 /** Mirrors `watchdog-io.adapter.ts`'s own `isProcessAlive` exactly (same C5 guard: a lock
  * whose `pid` is `0`/negative/non-integer must never read back as "alive" — `process.kill`
  * signals a whole process GROUP for those values and never throws). Duplicated rather than
@@ -135,7 +176,7 @@ export function buildSupervisorIo(homeDir: string): SupervisorIO {
     },
 
     readFileOrEmpty: (p) => {
-      const real = containedPath(homeDir, p);
+      const real = resolvedReadPath(p);
       try {
         return readFileSync(real, 'utf8');
       } catch (err) {
