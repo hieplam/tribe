@@ -366,6 +366,14 @@
   overflow-wrap: anywhere;
 }
 
+/* An image / reference result carries only a count — soft mono metadata, like the other tool notes. */
+.tool__images,
+.tool__refs {
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+  color: var(--ink-soft);
+}
+
 /* A spilled result: the note, then the inline preview of the spill file's first lines. */
 .tool__spill .md {
   display: inline;

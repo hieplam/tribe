@@ -15,7 +15,9 @@
 // Usage (from V = plugins/tribe/scripts/viewer):
 //   bun run build
 //   bun e2e/visual-parity.ts --out ../../../../docs/tribe/planning/viewer-visual-parity/evidence/before
+//   bun e2e/visual-parity.ts --out ../../../../docs/tribe/planning/viewer-visual-parity/evidence/after --label after
 //   bun e2e/visual-parity.ts --out <dir> --session <session-id>   # + the owner's real session
+// `--label` is `before` (the default) or `after`; it only decides the page's title and headings.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -28,6 +30,9 @@ import { resolveChromiumExecutable } from './browser.ts';
 // ---------------------------------------------------------------------------------------------
 // PURE CORE — the comparison index.html. No I/O; everything it needs arrives as arguments.
 // ---------------------------------------------------------------------------------------------
+
+/** Which evidence set the page presents — decides the title, the heading and the live column's label. */
+export type EvidenceLabel = 'before' | 'after';
 
 /** One captured pair: a live screenshot and, when the preview shows the same surface, its
  * reference screenshot. `refPng` is null for a live screen the preview does not depict (e.g. the
@@ -56,7 +61,11 @@ function escapeHtml(s: string): string {
  * pairs with captions. Images are referenced RELATIVELY (bare filenames), so the page works from
  * whatever directory it is committed into. This file lives outside `client/`, so the tokens-only
  * literal ban does not apply; it is deliberately plain. */
-export function renderIndexHtml(blocks: SchemeBlock[]): string {
+export function renderIndexHtml(blocks: SchemeBlock[], label: EvidenceLabel = 'before'): string {
+  const heading =
+    label === 'before'
+      ? "Viewer visual parity — BEFORE (today's unstyled UI vs. the sea-salt reference)"
+      : 'Viewer visual parity — AFTER (the styled UI vs. the sea-salt reference)';
   const cell = (png: string | null, absentNote: string): string => {
     if (png === null) return `<td class="cell"><span class="absent">${escapeHtml(absentNote)}</span></td>`;
     return `<td class="cell"><img src="${escapeHtml(png)}" alt=""></td>`;
@@ -69,17 +78,17 @@ export function renderIndexHtml(blocks: SchemeBlock[]): string {
     `</tr>`;
   const blockHtml = (block: SchemeBlock): string =>
     `<h2>${escapeHtml(block.scheme)}</h2>` +
-    `<table><thead><tr><th></th><th>live (before)</th><th>preview reference</th></tr></thead>` +
+    `<table><thead><tr><th></th><th>live (${label})</th><th>preview reference</th></tr></thead>` +
     `<tbody>${block.rows.map(rowHtml).join('')}</tbody></table>`;
   return (
     `<!DOCTYPE html>\n<html lang="en"><head><meta charset="utf-8">` +
-    `<title>Viewer visual parity — BEFORE</title>` +
+    `<title>Viewer visual parity — ${label.toUpperCase()}</title>` +
     `<style>body{font-family:system-ui,sans-serif;margin:2rem;background:#111;color:#eee}` +
     `table{border-collapse:collapse;margin-bottom:2rem;width:100%}` +
     `th,td{border:1px solid #444;padding:8px;vertical-align:top;text-align:left}` +
     `img{max-width:100%;height:auto;display:block}` +
     `.caption{width:12ch}.absent{color:#888;font-style:italic}</style></head><body>` +
-    `<h1>Viewer visual parity — BEFORE (today's unstyled UI vs. the sea-salt reference)</h1>` +
+    `<h1>${heading}</h1>` +
     blocks.map(blockHtml).join('\n') +
     `</body></html>\n`
   );
@@ -226,6 +235,7 @@ async function expandFirstToolCard(page: Page): Promise<boolean> {
 interface Args {
   outDir: string;
   session: string | null;
+  label: EvidenceLabel;
 }
 
 class ArgError extends Error {}
@@ -233,22 +243,25 @@ class ArgError extends Error {}
 function parseArgs(argv: string[]): Args {
   let outDir: string | null = null;
   let session: string | null = null;
+  let label: EvidenceLabel = 'before';
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === '--out' || arg === '--session') {
+    if (arg === '--out' || arg === '--session' || arg === '--label') {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith('--')) {
         throw new ArgError(`${arg} needs a value`);
       }
       if (arg === '--out') outDir = value;
-      else session = value;
+      else if (arg === '--session') session = value;
+      else if (value === 'before' || value === 'after') label = value;
+      else throw new ArgError(`--label must be "before" or "after", got "${value}"`);
       i++;
     } else {
       throw new ArgError(`unknown argument: ${arg}`);
     }
   }
   if (outDir === null) throw new ArgError('--out <dir> is required');
-  return { outDir: resolve(outDir), session };
+  return { outDir: resolve(outDir), session, label };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -321,8 +334,8 @@ async function run(args: Args): Promise<void> {
       }
     }
 
-    writeFileSync(join(args.outDir, 'index.html'), renderIndexHtml(blocks));
-    console.log(`visual-parity: wrote before-set to ${args.outDir}`);
+    writeFileSync(join(args.outDir, 'index.html'), renderIndexHtml(blocks, args.label));
+    console.log(`visual-parity: wrote ${args.label}-set to ${args.outDir}`);
   } finally {
     await viewer?.stop();
     await realViewer?.stop();
@@ -332,7 +345,8 @@ async function run(args: Args): Promise<void> {
 }
 
 if (import.meta.main) {
-  run(parseArgs(process.argv.slice(2))).catch((err: unknown) => {
+  // `parseArgs` runs inside the promise chain so a refused argument reaches the same one-line catch below.
+  Promise.resolve().then(() => run(parseArgs(process.argv.slice(2)))).catch((err: unknown) => {
     // Fail closed: one line, never a stack trace, for the two operator-facing refusals (bad args,
     // missing dist, missing browser) and for any runtime failure alike.
     const message = err instanceof Error ? err.message : String(err);

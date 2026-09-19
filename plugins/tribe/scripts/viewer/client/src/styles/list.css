@@ -219,6 +219,22 @@
   color: var(--badge-ink);
 }
 
+/* The slug names the campaign, so it leads in semi-bold; a long slug wraps inside its own part rather
+ * than pushing the card / status / runner parts out of the badge. */
+.campaign-badge__slug {
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* card id, status and runner state are short words — one unbroken run each, so a narrow sidebar
+ * wraps between parts, never inside "runner dead". */
+.campaign-badge__card,
+.campaign-badge__status,
+.campaign-badge__runner {
+  white-space: nowrap;
+}
+
 /* ---- status dots (preview §C `.dot`): a 9-wide circle, filled when live, hollow when idle ---- */
 .live-dot,
 .idle-dot {

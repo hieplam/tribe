@@ -7,10 +7,10 @@ import { collectSources, findUnstyledClasses } from './unstyled-classes.ts';
 // Measured with `bun tools/unstyled-classes.ts`. Task 1 baseline: unstyled 70 of 74 (2026-09-19).
 // Task 3 (session-list screen) styled the shell, sidebar, project/session rows, badge and dots,
 // lowering it to: unstyled 49 of 86 (2026-09-19). Task 4 (session view) styled the header, tabs,
-// transcript rows, tool cards, pills and every other kind, lowering it to: unstyled 6 of 96. The six
-// left are pure structure hooks with no visual of their own (the campaign-badge part spans and the
-// tool images/refs count spans). The ratchet only ever moves DOWN.
-const UNSTYLED_CEILING = 6;
+// transcript rows, tool cards, pills and every other kind, lowering it to: unstyled 6 of 96. Task 5
+// styled the last six (the campaign-badge part spans and the tool images/refs count spans), closing
+// the ratchet at: unstyled 0 of 96. The ratchet only ever moves DOWN; a new class ships styled.
+const UNSTYLED_CEILING = 0;
 
 test('the real client stays at or below the committed unstyled-class ceiling', () => {
   const { tsxSources, cssSources } = collectSources();

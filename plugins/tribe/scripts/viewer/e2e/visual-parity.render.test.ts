@@ -59,4 +59,14 @@ describe('renderIndexHtml — the side-by-side comparison page', () => {
       expect(src.includes('://')).toBe(false);
     }
   });
+
+  test('is labelled BEFORE by default and AFTER when asked — the page never claims the wrong set', () => {
+    const before = renderIndexHtml(BLOCKS);
+    expect(before).toContain('— BEFORE');
+    expect(before).toContain('live (before)');
+    const after = renderIndexHtml(BLOCKS, 'after');
+    expect(after).toContain('— AFTER');
+    expect(after).toContain('live (after)');
+    expect(after).not.toMatch(/before/i);
+  });
 });

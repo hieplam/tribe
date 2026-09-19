@@ -329,6 +329,8 @@ describe('visual-contract.e2e — the list (§C) and session (§D) screens match
     expect(parseFloat(await cssProp(page, '.campaign-badge', 'border-top-left-radius'))).toBeCloseTo(await tokenPx(page, '--badge-radius'), 0);
     expect((await cssProp(page, '.campaign-badge', 'font-family')).toLowerCase()).toContain(mono);
     expect(await page.$eval('.campaign-badge', (el) => el.textContent ?? '')).toContain('·');
+    expect(parseInt(await cssProp(page, '.campaign-badge__slug', 'font-weight'), 10)).toBeGreaterThanOrEqual(600); // the slug leads
+    expect(await cssProp(page, '.campaign-badge__runner', 'white-space')).toBe('nowrap'); // "runner dead" never splits
 
     // live dot: a filled --live circle (width === height, radius ≥ half, non-trivial size).
     const liveBox = await box(page, '.live-dot');
@@ -562,6 +564,53 @@ describe('visual-contract.e2e — the list (§C) and session (§D) screens match
     for (const sel of ['[data-testid="load-earlier"]', '[data-testid="block-expand"]']) {
       await page.focus(sel);
       expect(await cssProp(page, sel, 'box-shadow')).toBe(focusRing);
+    }
+  }, 30_000);
+
+  // ==== dark mode (plan Task 5) — tokens.css switches on prefers-color-scheme; no toggle, no re-declared values ====
+
+  test('dark mode: the paper, sidebar, badge and tool card resolve to the DARK token values and differ from light', async () => {
+    try {
+      // Light first, so "differs from light" compares two real resolutions of the same tokens.
+      await page.emulateMedia({ colorScheme: 'light' });
+      await openList('/', true);
+      await waitFor(() => page.$$eval('.campaign-badge', (e) => (e.length > 0 ? e.length : null)), 15_000, 'badge');
+      const light = {
+        paper: await cssProp(page, 'body', 'background-color'),
+        sidebar: await cssProp(page, '.sidebar', 'background-color'),
+        badge: await cssProp(page, '.campaign-badge', 'background-color'),
+        paperToken: await canonColor(page, 'var(--paper)'),
+        surfaceToken: await canonColor(page, 'var(--surface)'),
+      };
+      expect(light.paper).toBe(light.paperToken); // the light page really is on --paper
+
+      await page.emulateMedia({ colorScheme: 'dark' });
+      // The token expressions are re-resolved by the probe in the now-dark page.
+      const darkPaper = await canonColor(page, 'var(--paper)');
+      const darkSurface = await canonColor(page, 'var(--surface)');
+      const darkBadge = await canonColor(page, 'var(--badge-bg)');
+      expect(darkPaper).not.toBe(light.paperToken); // the dark scheme really redefines --paper
+      expect(darkSurface).not.toBe(light.surfaceToken);
+
+      // body ground + sidebar: the dark values, not the light ones left hard-wired.
+      expect(await cssProp(page, 'body', 'background-color')).toBe(darkPaper);
+      expect(await cssProp(page, 'body', 'background-color')).not.toBe(light.paper);
+      expect(await cssProp(page, '.sidebar', 'background-color')).toBe(darkSurface);
+      expect(await cssProp(page, '.sidebar', 'background-color')).not.toBe(light.sidebar);
+
+      // a badge resolves to its dark --badge-bg / --badge-ink.
+      expect(await cssProp(page, '.campaign-badge', 'background-color')).toBe(darkBadge);
+      expect(await cssProp(page, '.campaign-badge', 'background-color')).not.toBe(light.badge);
+      expect(await cssProp(page, '.campaign-badge', 'color')).toBe(await canonColor(page, 'var(--badge-ink)'));
+
+      // a tool card (session view): dark --surface ground, dark --live outcome.
+      await openSession(SESSION_1_ID);
+      const tool = '[data-kind="tool"][data-state="ok"]';
+      expect(await cssProp(page, `${tool} .tool`, 'background-color')).toBe(darkSurface);
+      expect(await cssProp(page, `${tool} .tool__outcome`, 'color')).toBe(await canonColor(page, 'var(--live)'));
+      expect(await cssProp(page, `${tool} .tool`, 'border-top-color')).toBe(await canonColor(page, 'var(--rule)'));
+    } finally {
+      await page.emulateMedia({ colorScheme: null }); // the shared page goes back to the browser default
     }
   }, 30_000);
 });
