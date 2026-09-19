@@ -19,12 +19,13 @@
 # it means every ordinary commit on this branch stays green while the reproductions remain live
 # and runnable on demand — the same precedent test-supervisor-real-e2e.sh and
 # test-supervisor-permission-real.sh already established for TRIBE_REAL_E2E=1.
+set -euo pipefail
+
 if [[ "${TRIBE_REPRO:-}" != "1" ]]; then
   echo "skipped test-supervisor-repro.sh — set TRIBE_REPRO=1 to run the supervisor-hardening card's defect reproductions"
   exit 0
 fi
 
-set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER="$HERE/../runner"
 DOUBLE="$RUNNER/fixtures/supervisor/session-double.sh"
@@ -43,7 +44,16 @@ PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf 'ok - %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf 'not ok - %s\n' "$1"; }
 check()    { if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got: $2, want: $3)"; fi }
-contains() { if [[ "$2" == *"$3"* ]]; then ok "$1"; else bad "$1 (got: $2, want substring: $3)"; fi }
+# Phase-1 Tracker finding: `[[ "$2" == *""* ]]` is trivially true for EVERY haystack — an empty
+# needle (e.g. an id-extraction step that silently came back blank) would make this helper PASS
+# vacuously instead of catching the real regression. Refuse an empty needle as a failure, never
+# as a silent pass — a caller that means to assert absence has `absent`/other helpers for that.
+contains() {
+  if [[ -z "$3" ]]; then bad "$1 (empty needle — a vacuous \"contains\" check is not a valid assertion)"
+  elif [[ "$2" == *"$3"* ]]; then ok "$1"
+  else bad "$1 (got: $2, want substring: $3)"
+  fi
+}
 ok_if_file() { if [[ -f "$2" ]]; then ok "$1"; else bad "$1 (missing: $2)"; fi }
 
 # A throwaway machine: its own HOME, so the supervisor's `--home`/`--campaign` containment root
