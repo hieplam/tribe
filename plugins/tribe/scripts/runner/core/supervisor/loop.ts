@@ -586,10 +586,9 @@ function readShippedVerdicts(
 // prove the closing brief carries the gate's real open ids — the defect (spec §6) was that this
 // function handed `readGapGateOpenIds` the BASE tribe home (`io.resolveTribeHome`), while the gate
 // writes under the campaign home this function already holds as `homeDir`. The closing branch below
-// now reads that campaign home directly; `config` is retained only for this stable positional
-// signature (the reproduction and `runSupervisor` both call it positionally).
+// now reads that campaign home directly.
 export async function buildOneShotPrompt(
-  io: SupervisorLoopSeam, config: SupervisorLoopConfig, homeDir: string, paths: SupervisorPaths,
+  io: SupervisorLoopSeam, homeDir: string, paths: SupervisorPaths,
   observation: SupervisorObservation, action: { session: SessionKind; cardId: string | null }, before: string,
 ): Promise<string> {
   if (action.session === 'ruling') {
@@ -906,7 +905,7 @@ export async function runSupervisor(
             : {}),
         };
         const before = io.readFileOrEmpty(paths.answers);
-        const prompt = await buildOneShotPrompt(io, config, homeDir, paths, observation, action, before);
+        const prompt = await buildOneShotPrompt(io, homeDir, paths, observation, action, before);
         const startedAtIso = io.now();
         const result = await runOneShotSession(
           {

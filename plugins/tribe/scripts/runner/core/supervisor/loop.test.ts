@@ -693,13 +693,13 @@ describe('G5 (spec §6): the closing brief reads gap-gate results from the CAMPA
     campaignReport: join(HOME, 'campaign-report.json'),
     finalReport: join(HOME, 'supervisor', 'final-report.md'),
     verdictsDir: join(HOME, 'supervisor', 'verdicts'),
-  } as unknown as Parameters<typeof buildOneShotPrompt>[3];
+  } as unknown as Parameters<typeof buildOneShotPrompt>[2];
 
   // The closing branch consults only `observation.report.cards`' keys (one gap-gate lookup per
   // card id) — the rest of SupervisorObservation is irrelevant to this path.
   const closingObservation = {
     report: { cards: { c1: { outcome: 'shipped' } } },
-  } as unknown as Parameters<typeof buildOneShotPrompt>[4];
+  } as unknown as Parameters<typeof buildOneShotPrompt>[3];
 
   const closingAction = { session: 'closing' as const, cardId: null };
 
@@ -723,7 +723,7 @@ describe('G5 (spec §6): the closing brief reads gap-gate results from the CAMPA
     + 'never the base-home decoy (the real defect site: which home the reader is handed)', async () => {
     const seam = seamWithSplitHomes();
     const prompt = await buildOneShotPrompt(
-      seam.io, baseConfig(), HOME, closingPaths, closingObservation, closingAction, '',
+      seam.io, HOME, closingPaths, closingObservation, closingAction, '',
     );
     expect(prompt).toContain(CAMPAIGN_OPEN_ID);
     expect(prompt).not.toContain(BASE_DECOY_OPEN_ID);

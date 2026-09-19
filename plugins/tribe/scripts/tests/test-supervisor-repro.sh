@@ -166,7 +166,7 @@ set +e
 out_g3="$(bun "$RUNNER/run.ts" supervise --repo "$REPO" --model repro-model --home "$G3_HOME" "${SUPERVISE_ARGS[@]}" 2>&1)"
 rc_g3=$?
 set -e
-check "G3: a closing session that wrote no verdict file does not close the campaign" "$rc_g3" "20"
+check "G3: a closing session whose verdict file is not PASS does not close the campaign" "$rc_g3" "20"
 ok_if_file "G3: verify-shipped.sh writes a verdict file per shipped card" "$G3_HOME/supervisor/verdicts/c1.json"
 
 # FU-CS-4, same reproduction (spec §4d): the resolver `verify-shipped.sh`'s own `SKILL.md`
@@ -257,7 +257,6 @@ except Exception:
 # `buildOneShotPrompt`, over the campaign home the gate just wrote into for real — never a
 # re-implementation of the reader logic.
 export G5_HOME_ENV="$G5_HOME"
-export G5_REPO_ENV="$REPO"
 set +e
 brief_out="$(cd "$RUNNER" && bun -e '
 import { join } from "node:path";
@@ -265,12 +264,7 @@ import { buildSupervisorIo } from "./adapters/supervisor-io.adapter.ts";
 import { buildOneShotPrompt } from "./core/supervisor/loop.ts";
 
 const homeDir = process.env.G5_HOME_ENV;
-const repoRoot = process.env.G5_REPO_ENV;
 const io = buildSupervisorIo(homeDir);
-// Only `config.repoRoot` is read by the closing branch (`io.resolveTribeHome(config.repoRoot)`)
-// — every other SupervisorLoopConfig field is untouched by that branch, so this minimal object
-// is faithful, not a shortcut.
-const config = { repoRoot: repoRoot };
 // `SupervisorPaths` is a private type in loop.ts; only `.campaignReport`/`.finalReport` are read
 // by the closing branch, built the SAME way `supervisorPathsOf` builds them in production.
 const paths = {
@@ -281,7 +275,7 @@ const paths = {
 // each one'\''s gap-gate result) — the rest of `CampaignReportFacts` is irrelevant here.
 const observation = { report: { cards: { c1: {} } } };
 const action = { session: "closing", cardId: null };
-const prompt = await buildOneShotPrompt(io, config, homeDir, paths, observation, action, "");
+const prompt = await buildOneShotPrompt(io, homeDir, paths, observation, action, "");
 console.log(prompt);
 ' 2>&1)"
 brief_rc=$?
