@@ -710,7 +710,7 @@ onto a parser Task 6 already built and tested.
 
 **Files:** edit `plugins/tribe/scripts/runner/core/report.ts` and `core/report.test.ts`.
 
-- [ ] **Step 1: Confirm the shape is identical, then write the failing test.**
+- [x] **Step 1: Confirm the shape is identical, then write the failing test.**
   `report.ts`'s `extractQuestionDigest` (lines 130 to 135) reads the same `**Reason:**` line and
   `## Context` section the new parser reads. Add a test asserting the digest is unchanged for the
   cases the existing tests cover, plus one asserting it goes through `core/escalation.ts` rather
@@ -723,11 +723,11 @@ onto a parser Task 6 already built and tested.
 
   Expected: the new assertion fails; every existing digest assertion still passes.
 
-- [ ] **Step 2: Swap the call site.**
+- [x] **Step 2: Swap the call site.**
   `extractQuestionDigest` keeps its own signature and its own digest-joining behaviour — only the
   parsing moves. `## Context`'s first line is what the digest uses today; preserve that exactly.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit
@@ -735,7 +735,7 @@ onto a parser Task 6 already built and tested.
 
   Expected: at least 1068 passing, 0 failing, `tsc` exit `0`.
 
-- [ ] **Step 4: Commit** — `refactor(runner): read the escalation shape through one parser`.
+- [x] **Step 4: Commit** — `refactor(runner): read the escalation shape through one parser`.
 
 ## Task 16: The supervisor reads `campaign-state.json` through the schema
 

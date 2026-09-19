@@ -200,6 +200,28 @@ describe('extractQuestionDigest — best-effort one-line digest (Warchief ruling
       '(escalation file present but no recognizable question content)',
     );
   });
+
+  // Task 15 (spec §5(d)): this is the escalation-file shape's THIRD read site — the other two
+  // (`loop.ts`'s reason-line read and its park-document question) already go through
+  // `core/escalation.ts`'s `parseEscalationQuestion`, whose heading matcher
+  // (`/^##\s+(.+?)\s*$/`) accepts ANY run of whitespace after `##`. The pre-refactor digest found
+  // its `## Context` section with a literal-substring regex (`/## Context\n+.../`, one space,
+  // exactly) that a heading with EXTRA whitespace does not satisfy. Feeding that shape proves the
+  // parse now goes through the shared parser rather than the old regex: only `escalation.ts`'s
+  // matcher can find this heading. Before the swap this is RED — the old regex finds no `##
+  // Context` substring in this markdown at all, so the digest falls back to the reason alone.
+  test('a heading with extra whitespace after "##" parses via core/escalation.ts\'s matcher, not the old literal-substring regex', () => {
+    const markdown = [
+      '**Reason:** needs_direction',
+      '',
+      '##  Context', // two spaces after the hashes
+      'a loosely-formatted heading line still carries a real question',
+      '',
+    ].join('\n');
+    expect(extractQuestionDigest(markdown)).toBe(
+      'needs_direction: a loosely-formatted heading line still carries a real question',
+    );
+  });
 });
 
 // ===========================================================================================
