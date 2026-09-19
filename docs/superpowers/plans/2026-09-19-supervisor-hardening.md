@@ -595,7 +595,7 @@ edits with their replacement content specified.
 **Files:** edit `plugins/tribe/skills/orchestrate-campaign/SKILL.md` and
 `plugins/tribe/agents/warchief.md`.
 
-- [ ] **Step 1: Check the docs wall first.**
+- [x] **Step 1: Check the docs wall first.**
   `test-supervisor-docs.sh` holds byte-exact walls over some `SKILL.md` strings. Run it before
   editing and note which strings are walled, so the edit does not break one.
 
@@ -605,14 +605,14 @@ edits with their replacement content specified.
 
   Expected: `43 passed, 0 failed`.
 
-- [ ] **Step 2: Correct both sentences.**
+- [x] **Step 2: Correct both sentences.**
   `SKILL.md`'s Stage D step 2 sentence names the **campaign** home, with the reason recorded inline:
   the gate globs its Tracker-report inputs from the same home, and a campaign card's Tracker reports
   are written under the campaign home. `agents/warchief.md`'s gap-gate invocation gains one sentence
   saying that inside a campaign, the home passed to the gate is the campaign home the dispatch
   named, not the base home.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   bash plugins/tribe/scripts/tests/test-supervisor-docs.sh
@@ -621,7 +621,7 @@ edits with their replacement content specified.
 
   Expected: still `43 passed, 0 failed`, and the grep no longer reports the gap-gate line.
 
-- [ ] **Step 4: Commit** — `docs(campaign): name the campaign home as the gap-gate location`.
+- [x] **Step 4: Commit** — `docs(campaign): name the campaign home as the gap-gate location`.
 
 ## Task 13: Phase 2 governance reconciliation
 
