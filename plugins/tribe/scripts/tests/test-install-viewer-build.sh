@@ -46,7 +46,7 @@ if [ "$HAD_DIST" -eq 1 ]; then
 fi
 
 # --- 1. a clean install builds dist/index.html from nothing --------------------------------
-CLAUDE_DIR="$TMP/claude1" bash "$HOOK_SRC" >"$TMP/run1.out" 2>&1
+CLAUDE_DIR="$TMP/claude1" TRIBE_BIN_DIR="$TMP/bin1" bash "$HOOK_SRC" >"$TMP/run1.out" 2>&1
 if [ -f "$DIST/index.html" ]; then
   ok "install hook builds dist/index.html from a clean state"
 else
@@ -70,7 +70,7 @@ else
 fi
 
 set +e
-out2="$(PATH="$BUN_MASKED_PATH" CLAUDE_DIR="$TMP/claude2" bash "$HOOK_SRC" 2>&1)"
+out2="$(PATH="$BUN_MASKED_PATH" CLAUDE_DIR="$TMP/claude2" TRIBE_BIN_DIR="$TMP/bin2" bash "$HOOK_SRC" 2>&1)"
 rc2=$?
 set -e
 

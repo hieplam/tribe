@@ -27,6 +27,9 @@ touches the filesystem, the clock, the network, or `process.env`/`process.argv` 
 
 ## Run it
 
+The everyday way is the `tribe` command ([`../cli/README.md`](../cli/README.md)): it picks a free
+port, starts this server in the foreground, and opens the browser. Directly:
+
 ```sh
 bun serve.ts --port 4321
 ```
