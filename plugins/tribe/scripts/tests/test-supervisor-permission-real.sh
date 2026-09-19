@@ -99,6 +99,10 @@ const result = await runOneShotSession(
     config: {
       homeDir,
       model: 'claude-haiku-4-5',
+      // fixtures-mirror-reality: OneShotSessionConfig.maxTurns is a required field in
+      // production (args.ts's --session-max-turns, default 60) — this probe must build the
+      // REAL production envelope, not a shape that happens to still run without it.
+      maxTurns: 60,
       repoRoot,
       realpath: (p: string) => {
         try {
