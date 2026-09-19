@@ -32,6 +32,13 @@ export interface RulingBriefFacts {
   existingRulingIds: string[];
   specPath: string | null;
   planPath: string | null;
+  /** R13.2: the ABSOLUTE on-disk path the session must Read/append `answers.md` at — never a
+   * bare `answers.md` (Haiku's first two attempts against a bare name were `Read /answers.md`
+   * and `Write /answers.md`, i.e. filesystem root). */
+  answersPath: string;
+  /** R13.2: the ABSOLUTE on-disk path of `escalations/<cardId>.md` — same reason as
+   * `answersPath` above; a bare relative name leaves the session guessing its cwd. */
+  escalationPath: string;
 }
 
 /** §5.3: one unratified ruling's own block, verbatim from `answers.md`, keyed by its id — the
@@ -48,6 +55,9 @@ export interface RatifyBriefFacts {
   /** `run.unratifiedRulings`, verbatim. */
   unratifiedRulingIds: string[];
   rulingBlocks: RatifyBlockFact[];
+  /** R13.2: the ABSOLUTE on-disk path the session must Read/edit `answers.md` at — never a
+   * bare `answers.md`; see `RulingBriefFacts.answersPath` for the measured defect. */
+  answersPath: string;
 }
 
 /** §5.4: one ruling's disposition, for the closing session's context. */
@@ -103,6 +113,8 @@ function renderRuling(facts: RulingBriefFacts): string {
     ),
     SPEC_PATH: facts.specPath ?? '(missing)',
     PLAN_PATH: facts.planPath ?? '(missing)',
+    ANSWERS_PATH: facts.answersPath,
+    ESCALATION_PATH: facts.escalationPath,
   });
 }
 
@@ -113,6 +125,7 @@ function renderRatify(facts: RatifyBriefFacts): string {
   return renderTemplate(facts.template, {
     UNRATIFIED_IDS: bulletList(facts.unratifiedRulingIds, '(none)'),
     RULING_BLOCKS: blocks.length > 0 ? blocks : '(no ruling blocks supplied)',
+    ANSWERS_PATH: facts.answersPath,
   });
 }
 

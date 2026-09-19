@@ -564,6 +564,8 @@ async function buildOneShotPrompt(
       existingRulingIds: parseRulings(before).map((block) => block.id),
       specPath,
       planPath,
+      answersPath: answersPathOf(homeDir),
+      escalationPath: escalationPathOf(homeDir, cardId),
     };
     return renderBrief('ruling', facts);
   }
@@ -579,6 +581,7 @@ async function buildOneShotPrompt(
       template: io.readFileOrEmpty(RATIFY_TEMPLATE_PATH),
       unratifiedRulingIds: observation.unratifiedRulings,
       rulingBlocks,
+      answersPath: answersPathOf(homeDir),
     };
     return renderBrief('ratify', facts);
   }

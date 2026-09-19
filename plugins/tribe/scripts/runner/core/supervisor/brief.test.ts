@@ -75,6 +75,8 @@ function fixtureRulingFacts(overrides: Partial<RulingBriefFacts> = {}): RulingBr
     existingRulingIds: ['R1', 'R2'],
     specPath: 'docs/superpowers/specs/2026-01-01-widget-export.md',
     planPath: 'docs/superpowers/plans/2026-01-01-widget-export.md',
+    answersPath: '/tmp/campaign-home/answers.md',
+    escalationPath: '/tmp/campaign-home/escalations/widget-export.md',
     ...overrides,
   };
 }
@@ -88,6 +90,7 @@ function fixtureRatifyFacts(overrides: Partial<RatifyBriefFacts> = {}): RatifyBr
       { id: 'R3', content: '## R3 -- scope\n\nratified-as: pending\n' },
       { id: 'R5', content: '## R5 -- sequencing\n\nratified-as: pending\n' },
     ],
+    answersPath: '/tmp/campaign-home/answers.md',
     ...overrides,
   };
 }
@@ -136,8 +139,25 @@ describe('renderBrief — ruling', () => {
 
   test('names both exits, and only those two', () => {
     const rendered = renderBrief('ruling', fixtureRulingFacts());
-    expect(rendered).toContain('Append a ruling to `answers.md`');
+    expect(rendered).toContain('Append a ruling to `/tmp/campaign-home/answers.md`');
     expect(rendered).toContain('Write a park marker');
+  });
+
+  // R13.2: the rendered brief must name the ABSOLUTE path of `answers.md` — Haiku's first two
+  // attempts against a bare `answers.md` were `Read /answers.md` and `Write /answers.md`
+  // (filesystem root), because nothing in the brief said where the file actually is.
+  test('R13.2: contains the absolute path of answers.md, never a bare name', () => {
+    const rendered = renderBrief('ruling', fixtureRulingFacts({ answersPath: '/tmp/campaign-home/answers.md' }));
+    expect(rendered).toContain('/tmp/campaign-home/answers.md');
+  });
+
+  // R13.2: the escalation file, likewise, must be named by its absolute path.
+  test('R13.2: contains the absolute path of the escalation file, never a bare name', () => {
+    const rendered = renderBrief(
+      'ruling',
+      fixtureRulingFacts({ escalationPath: '/tmp/campaign-home/escalations/widget-export.md' }),
+    );
+    expect(rendered).toContain('/tmp/campaign-home/escalations/widget-export.md');
   });
 
   test('never contains the words "you may use bash" — a ruling session has no shell', () => {
@@ -161,6 +181,13 @@ describe('renderBrief — ratify', () => {
   test('is deterministic: two renders of the same facts are byte-identical', () => {
     const facts = fixtureRatifyFacts();
     expect(renderBrief('ratify', facts)).toBe(renderBrief('ratify', facts));
+  });
+
+  // R13.2: the ratify brief must also name the absolute path of `answers.md` — it is the file
+  // the session is repairing `ratified-as:` fields inside of.
+  test('R13.2: contains the absolute path of answers.md, never a bare name', () => {
+    const rendered = renderBrief('ratify', fixtureRatifyFacts({ answersPath: '/tmp/campaign-home/answers.md' }));
+    expect(rendered).toContain('/tmp/campaign-home/answers.md');
   });
 });
 

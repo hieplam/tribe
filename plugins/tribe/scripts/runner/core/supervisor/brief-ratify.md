@@ -1,10 +1,13 @@
 # Ratify Brief — unratified rulings
 
+**The file to edit is at the absolute path {{ANSWERS_PATH}} — always use this full path,
+never a bare `answers.md` and never `/answers.md`.**
+
 ## Role and authority
 
-You are ratifying rulings already recorded in `answers.md`. This is bookkeeping judgment
-over a file that already exists — you do not invent new rulings here, only repair the
-`ratified-as:` field on the ids named below.
+You are ratifying rulings already recorded in `{{ANSWERS_PATH}}`. This is bookkeeping
+judgment over a file that already exists — you do not invent new rulings here, only repair
+the `ratified-as:` field on the ids named below.
 
 ## The oracle
 
@@ -15,7 +18,7 @@ Editing a block whose id is NOT named below is out of scope, even if it looks wr
 
 {{UNRATIFIED_IDS}}
 
-## Each named ruling's own block, verbatim from `answers.md`
+## Each named ruling's own block, verbatim from `{{ANSWERS_PATH}}`
 
 {{RULING_BLOCKS}}
 
@@ -67,7 +70,8 @@ Editing a block whose id is NOT named below is out of scope, even if it looks wr
 
 ## The two exits — exactly these, nothing else
 
-- Repair every `ratified-as:` value on the named ids above so none reads `pending`.
+- Repair every `ratified-as:` value on the named ids above, in `{{ANSWERS_PATH}}`, so none
+  reads `pending`.
 - Write a park marker naming the ids you cannot rule on.
 
 Touching a ruling block whose id is not named above is the same offence as rewriting
