@@ -104,7 +104,7 @@ task.
 
 **Files:** create `plugins/tribe/scripts/tests/test-supervisor-repro.sh`.
 
-- [ ] **Step 1: Write the gated suite and G1's failing reproduction.**
+- [x] **Step 1: Write the gated suite and G1's failing reproduction.**
   Model the file on `test-supervisor-e2e.sh` (same `ok`/`bad`/`check`/`contains` helpers, same
   `mktemp -d` + `pwd -P` symlink resolution, same `trap` cleanup, same `new_campaign` fixture
   builder, same `printf '\n%s passed, %s failed\n'` tally at the end). Gate it at the top exactly
@@ -127,7 +127,7 @@ task.
   contains "G1: NEEDS_OWNER.md carries the escalation's own Context text" "$(cat "$H/NEEDS_OWNER.md")" "$MARKER"
   ```
 
-- [ ] **Step 2: Observe it fail — this is the red.**
+- [x] **Step 2: Observe it fail — this is the red.**
 
   ```bash
   TRIBE_REPRO=1 bash plugins/tribe/scripts/tests/test-supervisor-repro.sh
@@ -137,7 +137,7 @@ task.
   and the tally reads `1 passed, 1 failed`. If the Context assertion passes, the fixture is wrong —
   the marker is not reaching the escalation file; fix the fixture, not the assertion.
 
-- [ ] **Step 3: Prove the ordinary gate stays green.**
+- [x] **Step 3: Prove the ordinary gate stays green.**
 
   ```bash
   bash plugins/tribe/scripts/tests/test-supervisor-repro.sh
@@ -145,7 +145,7 @@ task.
 
   Expected: the skip message, exit `0`.
 
-- [ ] **Step 4: Commit** — `test(supervisor): reproduce the park document losing the question`.
+- [x] **Step 4: Commit** — `test(supervisor): reproduce the park document losing the question`.
 
 ## Task 2: G3's reproduction — the unchecked closing verdict
 
@@ -154,7 +154,7 @@ below and the suite already exists.
 
 **Files:** edit `plugins/tribe/scripts/tests/test-supervisor-repro.sh`.
 
-- [ ] **Step 1: Add three failing assertions.**
+- [x] **Step 1: Add three failing assertions.**
   Drive a campaign to a closing session with the session double (`DOUBLE_PLAN="rule:R1 close"`),
   then assert the behaviour the fix must produce:
 
@@ -173,7 +173,7 @@ below and the suite already exists.
     if (v.outcome === "closed") { console.error("G3: a BLOCKED report still closes"); process.exit(1); }'
   ```
 
-- [ ] **Step 2: Observe it fail — the red.**
+- [x] **Step 2: Observe it fail — the red.**
 
   ```bash
   TRIBE_REPRO=1 bash plugins/tribe/scripts/tests/test-supervisor-repro.sh
@@ -183,7 +183,7 @@ below and the suite already exists.
   exits `0` instead of `20`, no verdict file exists, `resolve-verify-shipped.sh` does not exist, and
   `verifyClosing` rejects the unknown `shippedVerdicts` argument or returns `closed`.
 
-- [ ] **Step 3: Commit** — `test(supervisor): reproduce the closing verdict nobody checks`.
+- [x] **Step 3: Commit** — `test(supervisor): reproduce the closing verdict nobody checks`.
 
 ## Task 3: G5's reproduction — writer and reader name different directories
 
@@ -192,7 +192,7 @@ below and the suite already exists.
 
 **Files:** edit `plugins/tribe/scripts/tests/test-supervisor-repro.sh`.
 
-- [ ] **Step 1: Add the failing reproduction.**
+- [x] **Step 1: Add the failing reproduction.**
   Build a bare campaign home, write a Tracker report at `$H/reports/tracker-c1-final.md` using the
   **real** candidate header shape the parser requires (`gap-candidates.ts` line 35's `HEADER_RE` —
   a plain bullet list does not parse and yields an empty `open_ids`, which would make this
@@ -217,7 +217,7 @@ below and the suite already exists.
   Render the brief by calling the supervisor's own exported reader and `renderBrief` through
   `bun -e`, so the assertion is about production code and not a re-implementation.
 
-- [ ] **Step 2: Observe it fail — the red.**
+- [x] **Step 2: Observe it fail — the red.**
 
   ```bash
   TRIBE_REPRO=1 bash plugins/tribe/scripts/tests/test-supervisor-repro.sh
@@ -228,7 +228,13 @@ below and the suite already exists.
   If `open_ids` comes back empty, the candidate block shape is wrong — fix the fixture, never the
   assertion.
 
-- [ ] **Step 3: Commit** — `test(supervisor): reproduce the gap-gate reader and writer disagreeing`.
+- [x] **Step 3: Commit** — `test(supervisor): reproduce the gap-gate reader and writer disagreeing`.
+
+> **RW1 (coordinator ruling, mid-task):** calling `readGapGateOpenIds` directly would reproduce
+> nothing (the defect is its caller `buildOneShotPrompt`'s choice of home). `buildOneShotPrompt`
+> was exported as a test seam in `core/supervisor/loop.ts` (one word, zero behavior change) so
+> this reproduction drives it directly with the real `buildSupervisorIo` adapter; Task 11 keeps
+> the export and fixes the one line. See this task's commit for the full reasoning.
 
 ## Task 4: G2's reproduction — an unjustified ceiling raise passes every gate
 
@@ -237,7 +243,7 @@ their expected exit codes are fully specified.
 
 **Files:** edit `plugins/tribe/scripts/tests/test-supervisor-repro.sh`.
 
-- [ ] **Step 1: Add the failing reproduction.**
+- [x] **Step 1: Add the failing reproduction.**
   In a throwaway `mktemp` git repo built from nothing, commit a ratchet file with
   `"ruling": 27534`, then commit a second version raising it to `999999` with no `raisedBy`, and
   assert the gate that must exist refuses it:
@@ -250,7 +256,7 @@ their expected exit codes are fully specified.
   Add the two companion cases in the same run: the same raise **with** `raisedBy.ruling` set must
   exit `0`, and a lowering must exit `0`.
 
-- [ ] **Step 2: Observe it fail — the red.**
+- [x] **Step 2: Observe it fail — the red.**
 
   ```bash
   TRIBE_REPRO=1 bash plugins/tribe/scripts/tests/test-supervisor-repro.sh
@@ -259,7 +265,7 @@ their expected exit codes are fully specified.
   Expected: all three G2 assertions fail because `plugins/tribe/scripts/ratchet-check.ts` does not
   exist yet, so `bun` exits with a module-resolution error rather than `1`, `0`, `0`.
 
-- [ ] **Step 3: Commit** — `test(supervisor): reproduce the ratchet accepting an unjustified raise`.
+- [x] **Step 3: Commit** — `test(supervisor): reproduce the ratchet accepting an unjustified raise`.
 
 ## Task 5: Phase 1 governance reconciliation
 
@@ -269,7 +275,7 @@ patches is a judgment act, not a mechanical edit.
 **Files:** `.c3/` entities, authored **only** through the wrapper CLI. Never open or edit a `.c3/`
 instance file by hand.
 
-- [ ] **Step 1: Author the card's ADR.**
+- [x] **Step 1: Author the card's ADR.**
   Record the four decisions spec §11 names: the verdict file's contract (§4a), the ratchet
   enforcement point (§3), the four named parsers (§5), and the campaign-home path truth (§6).
 
@@ -283,7 +289,7 @@ instance file by hand.
   yet — the code they would describe does not exist until Phase 2, and a patch authored against
   absent code is the drift this repo already has three units of.
 
-- [ ] **Step 2: Validate.**
+- [x] **Step 2: Validate.**
 
   ```bash
   C3X_MODE=agent bash "$C3/bin/c3x.sh" check
@@ -292,7 +298,7 @@ instance file by hand.
   Expected: `ok: true`. Record the `total:` count. If `ok` is false, the new ADR is malformed —
   repair it through the CLI, never by editing the file.
 
-- [ ] **Step 3: Commit** — `docs(c3): record the supervisor-hardening ADR`.
+- [x] **Step 3: Commit** — `docs(c3): record the supervisor-hardening ADR`.
 
 ---
 
@@ -307,7 +313,7 @@ boundary rule and the three-read-site placement decision are judgment inside the
 `core/escalation.test.ts`; edit `core/supervisor/loop.ts` and
 `plugins/tribe/scripts/tests/test-supervisor-e2e.sh`.
 
-- [ ] **Step 1: Write the failing unit test first.**
+- [x] **Step 1: Write the failing unit test first.**
   `core/escalation.test.ts` covers `parseEscalationQuestion`: a well-formed file returns both the
   `**Reason:**` line and the `## Context` body verbatim; a `## Context` followed by another `## `
   heading stops at the boundary; a file with neither returns `null`; malformed input never throws.
@@ -318,24 +324,24 @@ boundary rule and the three-read-site placement decision are judgment inside the
 
   Expected: fails — the module does not exist.
 
-- [ ] **Step 2: Write the parser, pure.**
+- [x] **Step 2: Write the parser, pure.**
   No fs, no clock, no throw. Signature per spec §2. Use the same heading-partition convention
   `verify.ts`'s `blocksById` and `loop.ts`'s `extractRulingBlockVerbatim` already use, so the repo
   has one boundary rule rather than a third.
 
-- [ ] **Step 3: Rewire the two supervisor read sites.**
+- [x] **Step 3: Rewire the two supervisor read sites.**
   `loop.ts`'s private `extractReasonLine` is replaced by a call into the new parser, and the `park`
   branch at `loop.ts:962` stops passing the literal `question: null`: it reads the escalation file
   for `cardIdHint`'s card and passes the parsed result, `null` only when there is no card-scoped
   escalation. **The wiring, not the renderer, is the defect** — `renderNeedsOwner` is already
   correct and must not be changed.
 
-- [ ] **Step 4: Add the permanent ungated assertion.**
+- [x] **Step 4: Add the permanent ungated assertion.**
   In `test-supervisor-e2e.sh`'s probe 3 (the owner-only park), assert the rendered `NEEDS_OWNER.md`
   contains the escalation's own `## Context` text. This is the card's G1 oracle and it must live in
   the ordinary suite, not only in the gated reproduction suite.
 
-- [ ] **Step 5: Prove it.**
+- [x] **Step 5: Prove it.**
 
   ```bash
   grep -c "question: null" plugins/tribe/scripts/runner/core/supervisor/loop.ts
@@ -348,7 +354,7 @@ boundary rule and the three-read-site placement decision are judgment inside the
   exits `0`; the e2e suite reports `0 failed`; and in the reproduction suite G1's assertions now
   pass while G2, G3 and G5 still fail.
 
-- [ ] **Step 6: Commit** — `fix(supervisor): show the card's own question in NEEDS_OWNER.md`.
+- [x] **Step 6: Commit** — `fix(supervisor): show the card's own question in NEEDS_OWNER.md`.
 
 ## Task 7: G2 — give the ratchet a caller
 
@@ -359,7 +365,7 @@ boundary rule and the three-read-site placement decision are judgment inside the
 `ratchet-gate.test.ts`; create `plugins/tribe/scripts/ratchet-check.ts`; create
 `plugins/tribe/scripts/tests/test-supervisor-ratchet.sh`.
 
-- [ ] **Step 1: Write the failing unit test first.**
+- [x] **Step 1: Write the failing unit test first.**
   `ratchet-gate.test.ts` covers `checkRatchetRevision(baseJson, headJson)` over two file contents:
   a raise with no `raisedBy` fails and the failure names the old value, the proposed value and
   `raisedBy`; the same raise with `raisedBy` set passes; a lowering passes; an unchanged file
@@ -371,25 +377,25 @@ boundary rule and the three-read-site placement decision are judgment inside the
 
   Expected: fails — the module does not exist.
 
-- [ ] **Step 2: Write the pure checker.**
+- [x] **Step 2: Write the pure checker.**
   Two strings in, `{ ok, failures[] }` out. No fs, no git, no clock. It calls the **existing**
   `reviseCeiling` once per ceiling kind; `reviseCeiling` itself is not modified — this task gives
   it the caller its own module header says it was waiting for.
 
-- [ ] **Step 3: Write the thin edge.**
+- [x] **Step 3: Write the thin edge.**
   `ratchet-check.ts` runs `git -C <repo> show <base>:<path>`, reads the working-tree version, hands
   both strings to the checker, prints each failure, and exits `0` or `1`. Every `git` call carries a
   timeout, and `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` are set to `/dev/null` so a host's git config
   cannot change a verdict — `fail-closed-edges.md` obligations 2 and 3. A missing flag value must
   refuse with a message, never consume the next argv token as its value.
 
-- [ ] **Step 4: Write the gate suite.**
+- [x] **Step 4: Write the gate suite.**
   `test-supervisor-ratchet.sh` drives the edge over a throwaway `mktemp` git repo built from
   nothing, covering the three fixture cases from spec §3, plus one case against the real repo and
   its real merge base which must exit `0`. `pre-gate.sh` enumerates suites by glob, so this file is
   swept automatically with no wiring step.
 
-- [ ] **Step 5: Prove it.**
+- [x] **Step 5: Prove it.**
 
   ```bash
   bash plugins/tribe/scripts/tests/test-supervisor-ratchet.sh
@@ -402,7 +408,7 @@ boundary rule and the three-read-site placement decision are judgment inside the
   the committed ratchet file to raise `ruling` to `999999`, re-run the ratchet suite, and confirm it
   now goes **red** — then restore the file with `git checkout --` before committing.
 
-- [ ] **Step 6: Commit** — `fix(supervisor): enforce the context ratchet against its merge base`.
+- [x] **Step 6: Commit** — `fix(supervisor): enforce the context ratchet against its merge base`.
 
 ## Task 8: G3a — `verify-shipped.sh` writes its own verdict file
 
@@ -412,7 +418,7 @@ specified shape; no design judgment inside.
 **Files:** edit `plugins/verify-shipped/skills/verify-shipped/scripts/verify-shipped.sh` and
 `plugins/verify-shipped/scripts/tests/test-verify-shipped.sh`.
 
-- [ ] **Step 1: Write the failing test first.**
+- [x] **Step 1: Write the failing test first.**
   Assert that with `--verdict-out <path>` the script writes a file at that path whose contents are
   byte-identical to its stdout JSON, that the file's `card` field equals `--card`, and that without
   the flag no file is written and stdout is unchanged.
@@ -423,13 +429,13 @@ specified shape; no design judgment inside.
 
   Expected: the new assertions fail; the pre-existing ones still pass.
 
-- [ ] **Step 2: Add the flag.**
+- [x] **Step 2: Add the flag.**
   Parse `--verdict-out` the same way the existing flags are parsed, and refuse with a message if its
   value is missing rather than consuming the next argv token. Write the JSON to a temp file in the
   target directory and `mv` it into place, so a reader never sees a half-written file. Do not change
   the four checks, the stdout contract, or the exit codes.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   bash plugins/verify-shipped/scripts/tests/test-verify-shipped.sh
@@ -437,7 +443,7 @@ specified shape; no design judgment inside.
 
   Expected: `0 failed`.
 
-- [ ] **Step 4: Commit** — `feat(verify-shipped): write the verdict JSON to a file on request`.
+- [x] **Step 4: Commit** — `feat(verify-shipped): write the verdict JSON to a file on request`.
 
 ## Task 9: G3b — the skill resolves its own script path (FU-CS-4)
 
@@ -448,7 +454,7 @@ existing file in this repo.
 `plugins/verify-shipped/skills/verify-shipped/SKILL.md` and
 `plugins/verify-shipped/scripts/tests/test-verify-shipped.sh`.
 
-- [ ] **Step 1: Write the failing test first.**
+- [x] **Step 1: Write the failing test first.**
   Assert the resolver prints an absolute path that exists and exits `0` when `CLAUDE_PLUGIN_ROOT`
   points at the plugin directory; that it also resolves with `CLAUDE_PLUGIN_ROOT` unset or pointing
   somewhere stale; that it prints **nothing** on stdout and exits `3` with a diagnostic on stderr
@@ -461,7 +467,7 @@ existing file in this repo.
 
   Expected: the new assertions fail.
 
-- [ ] **Step 2: Write the resolver.**
+- [x] **Step 2: Write the resolver.**
   Copy the contract and the two-tier structure of
   `plugins/tribe/skills/orchestrate-campaign/resolve-runner.sh` exactly: tier 1 honours
   `$CLAUDE_PLUGIN_ROOT` **only when the target file actually exists under it**, tier 2 locates
@@ -469,13 +475,13 @@ existing file in this repo.
   proven exists, and never prints a relative one. A stale or foreign `CLAUDE_PLUGIN_ROOT` must fall
   through to tier 2 rather than win on presence alone.
 
-- [ ] **Step 3: Fix `SKILL.md`.**
+- [x] **Step 3: Fix `SKILL.md`.**
   Replace the two `~/.claude/skills/verify-shipped/scripts/verify-shipped.sh` invocations (its
   Usage block and its Example) with the resolver form, and document `--verdict-out` alongside the
   existing flags. Say plainly, as the orchestrate-campaign skill does, that the resolution must not
   be hand-written.
 
-- [ ] **Step 4: Prove it.**
+- [x] **Step 4: Prove it.**
 
   ```bash
   bash plugins/verify-shipped/scripts/tests/test-verify-shipped.sh
@@ -484,7 +490,7 @@ existing file in this repo.
 
   Expected: `0 failed`, and the grep prints `0`.
 
-- [ ] **Step 5: Commit** — `fix(verify-shipped): resolve the script path under a plugin load`.
+- [x] **Step 5: Commit** — `fix(verify-shipped): resolve the script path under a plugin load`.
 
 ## Task 10: G3c — the supervisor checks the verdict on disk
 
@@ -495,7 +501,7 @@ the retry-versus-park choice, and the brief's oracle wording are judgment inside
 `core/supervisor/brief.ts`, `brief.test.ts`, `core/supervisor/loop.ts`, and
 `plugins/tribe/scripts/tests/test-supervisor-e2e.sh`.
 
-- [ ] **Step 1: Write the failing unit tests first.**
+- [x] **Step 1: Write the failing unit tests first.**
   Cover all five `verifyClosing` rows from spec §4b: `verdict_missing`, `verdict_malformed`,
   `verdict_card_mismatch`, `verdict_fail`, and the success path where every shipped card has a
   present, well-formed, matching `PASS` verdict. Include the spec's own reproduction — a report
@@ -507,24 +513,24 @@ the retry-versus-park choice, and the brief's oracle wording are judgment inside
 
   Expected: fails — `shippedVerdicts` is not a known input.
 
-- [ ] **Step 2: Widen the postcondition, keeping it pure.**
+- [x] **Step 2: Widen the postcondition, keeping it pure.**
   `verifyClosing` takes `shippedVerdicts: Array<{ cardId: string; raw: string | null }>` and parses
   each `raw` narrowly and fail-closed. It reads nothing from disk — the caller reads, this function
   decides. A `FAIL` verdict returns the ordinary retryable `failed` outcome with the typed reason;
   it does **not** introduce a new `ParkReason`, which the fence forbids.
 
-- [ ] **Step 3: Wire the loop and the brief.**
+- [x] **Step 3: Wire the loop and the brief.**
   The loop reads `<home>/supervisor/verdicts/<cardId>.json` for every card the campaign report marks
   `shipped` and passes the contents in. `brief.ts`'s closing template and `ClosingBriefFacts` gain
   the per-card verdict path and the exact command to run, and state the oracle in the brief: the
   verdict file the script writes is the contract, the session's own prose is not.
 
-- [ ] **Step 4: Add the permanent ungated probes.**
+- [x] **Step 4: Add the permanent ungated probes.**
   In `test-supervisor-e2e.sh`, one probe where the double writes a `final-report.md` but no verdict
   file — the supervisor must park, not exit `0` — and one where a well-formed `PASS` verdict file is
   present, which must exit `0`. Both drive the real composition root against a bare home.
 
-- [ ] **Step 5: Prove it.**
+- [x] **Step 5: Prove it.**
 
   ```bash
   cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit
@@ -535,7 +541,7 @@ the retry-versus-park choice, and the brief's oracle wording are judgment inside
   Expected: at least 1068 passing and 0 failing; `tsc` exits `0`; the e2e suite reports `0 failed`
   with both new probes passing; and G3's reproduction assertions now pass, leaving only G5 failing.
 
-- [ ] **Step 6: Commit** — `fix(supervisor): require verify-shipped's own verdict file to close`.
+- [x] **Step 6: Commit** — `fix(supervisor): require verify-shipped's own verdict file to close`.
 
 ## Task 11: G5 — the reader reads where the gate writes
 
@@ -545,7 +551,7 @@ no fallback, and deciding what to export for the test, is judgment inside the ta
 **Files:** edit `plugins/tribe/scripts/runner/core/supervisor/loop.ts` and
 `core/supervisor/loop.test.ts`.
 
-- [ ] **Step 1: Write the failing unit test first.**
+- [x] **Step 1: Write the failing unit test first.**
   Export `readGapGateOpenIds` and assert it finds a report written under the **campaign** home, and
   that a report under the base tribe home is **not** consulted. Over-checking here is by design: one
   path, no silent fallback, because a reader that quietly tries a second directory is how this
@@ -557,13 +563,13 @@ no fallback, and deciding what to export for the test, is judgment inside the ta
 
   Expected: fails — the reader still joins against the base home.
 
-- [ ] **Step 2: Fix the reader.**
+- [x] **Step 2: Fix the reader.**
   `readGapGateOpenIds` joins against `homeDir`, the campaign home it is already given.
   `buildOneShotPrompt` stops calling `io.resolveTribeHome` for this purpose. Update the module doc
   comment, which currently quotes the now-corrected `SKILL.md` sentence, so the code and its own
   citation agree.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   grep -n "resolveTribeHome" plugins/tribe/scripts/runner/core/supervisor/loop.ts
@@ -575,7 +581,7 @@ no fallback, and deciding what to export for the test, is judgment inside the ta
   failing; `tsc` exits `0`; and the reproduction suite now reports `0 failed` — every defect on the
   card is reproduced-then-fixed.
 
-- [ ] **Step 4: Commit** — `fix(supervisor): read gap-gate results from the campaign home`.
+- [x] **Step 4: Commit** — `fix(supervisor): read gap-gate results from the campaign home`.
 
 ## Task 12: G5 — the two documentation lines the fix falsifies `[Q1]`
 
@@ -589,7 +595,7 @@ edits with their replacement content specified.
 **Files:** edit `plugins/tribe/skills/orchestrate-campaign/SKILL.md` and
 `plugins/tribe/agents/warchief.md`.
 
-- [ ] **Step 1: Check the docs wall first.**
+- [x] **Step 1: Check the docs wall first.**
   `test-supervisor-docs.sh` holds byte-exact walls over some `SKILL.md` strings. Run it before
   editing and note which strings are walled, so the edit does not break one.
 
@@ -599,14 +605,14 @@ edits with their replacement content specified.
 
   Expected: `43 passed, 0 failed`.
 
-- [ ] **Step 2: Correct both sentences.**
+- [x] **Step 2: Correct both sentences.**
   `SKILL.md`'s Stage D step 2 sentence names the **campaign** home, with the reason recorded inline:
   the gate globs its Tracker-report inputs from the same home, and a campaign card's Tracker reports
   are written under the campaign home. `agents/warchief.md`'s gap-gate invocation gains one sentence
   saying that inside a campaign, the home passed to the gate is the campaign home the dispatch
   named, not the base home.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   bash plugins/tribe/scripts/tests/test-supervisor-docs.sh
@@ -615,7 +621,7 @@ edits with their replacement content specified.
 
   Expected: still `43 passed, 0 failed`, and the grep no longer reports the gap-gate line.
 
-- [ ] **Step 4: Commit** — `docs(campaign): name the campaign home as the gap-gate location`.
+- [x] **Step 4: Commit** — `docs(campaign): name the campaign home as the gap-gate location`.
 
 ## Task 13: Phase 2 governance reconciliation
 
@@ -624,7 +630,7 @@ frozen component is judgment.
 
 **Files:** `.c3/` entities, through the wrapper CLI only.
 
-- [ ] **Step 1: Author the patches against `c3-215`.**
+- [x] **Step 1: Author the patches against `c3-215`.**
   Now that Phase 2's code exists, author the change-unit patches the ADR from Task 5 describes.
 
   ```bash
@@ -637,7 +643,7 @@ frozen component is judgment.
   not repair the three older 2026-09-19 units' pre-existing drift — spec §11 records that as a
   follow-up, and it is not this card's damage.
 
-- [ ] **Step 2: Accept, apply, validate.**
+- [x] **Step 2: Accept, apply, validate.**
 
   ```bash
   C3X_MODE=agent bash "$C3/bin/c3x.sh" change accept adr-supervisor-hardening
@@ -648,7 +654,7 @@ frozen component is judgment.
   Expected: `ok: true`. If `apply` reports drift on this card's own patches, rebase them through the
   CLI and re-apply.
 
-- [ ] **Step 3: Commit** — `docs(c3): reconcile c3-215 with the supervisor-hardening fixes`.
+- [x] **Step 3: Commit** — `docs(c3): reconcile c3-215 with the supervisor-hardening fixes`.
 
 ---
 
@@ -668,7 +674,7 @@ refactor under a green suite, with the one intended behavioural difference named
 > strict improvement and the only behaviour this task may change. Anything else that changes is a
 > bug — this is a refactor under a green suite.
 
-- [ ] **Step 1: Write the failing unit test first.**
+- [x] **Step 1: Write the failing unit test first.**
   `errorCode(err)` returns the string code for a real `Error` carrying one, `null` for `null`,
   `undefined`, a plain object with no `code`, a string, and a number. It never throws.
 
@@ -678,13 +684,13 @@ refactor under a green suite, with the one intended behavioural difference named
 
   Expected: fails — the module does not exist.
 
-- [ ] **Step 2: Write the parser and swap all fourteen call sites.**
+- [x] **Step 2: Write the parser and swap all fourteen call sites.**
   Two sites carry `G-004`'s exact fingerprint (`cli/main.ts` line 642, `adapters/cut.ts` line 153);
   twelve carry the lower-rigor bare cast (spec §5(b) lists each file and line). Both groups import
   the one parser. The two `'UNKNOWN'` callers keep their own `?? 'UNKNOWN'` at the call site, so
   their behaviour is unchanged.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   grep -rln "'code' in err" plugins/tribe/scripts/runner --include="*.ts" --exclude="*.test.ts" | wc -l
@@ -695,7 +701,7 @@ refactor under a green suite, with the one intended behavioural difference named
   Expected: both greps print `0`; `bun test` reports at least 1068 passing and 0 failing; `tsc`
   exits `0`. The first number reaching `0` is the card's G4 ratchet, measured from 2.
 
-- [ ] **Step 4: Commit** — `refactor(runner): narrow a caught error's code in one place`.
+- [x] **Step 4: Commit** — `refactor(runner): narrow a caught error's code in one place`.
 
 ## Task 15: The escalation-file shape's third read site
 
@@ -704,7 +710,7 @@ onto a parser Task 6 already built and tested.
 
 **Files:** edit `plugins/tribe/scripts/runner/core/report.ts` and `core/report.test.ts`.
 
-- [ ] **Step 1: Confirm the shape is identical, then write the failing test.**
+- [x] **Step 1: Confirm the shape is identical, then write the failing test.**
   `report.ts`'s `extractQuestionDigest` (lines 130 to 135) reads the same `**Reason:**` line and
   `## Context` section the new parser reads. Add a test asserting the digest is unchanged for the
   cases the existing tests cover, plus one asserting it goes through `core/escalation.ts` rather
@@ -717,11 +723,11 @@ onto a parser Task 6 already built and tested.
 
   Expected: the new assertion fails; every existing digest assertion still passes.
 
-- [ ] **Step 2: Swap the call site.**
+- [x] **Step 2: Swap the call site.**
   `extractQuestionDigest` keeps its own signature and its own digest-joining behaviour — only the
   parsing moves. `## Context`'s first line is what the digest uses today; preserve that exactly.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit
@@ -729,7 +735,7 @@ onto a parser Task 6 already built and tested.
 
   Expected: at least 1068 passing, 0 failing, `tsc` exit `0`.
 
-- [ ] **Step 4: Commit** — `refactor(runner): read the escalation shape through one parser`.
+- [x] **Step 4: Commit** — `refactor(runner): read the escalation shape through one parser`.
 
 ## Task 16: The supervisor reads `campaign-state.json` through the schema
 
@@ -739,7 +745,7 @@ the non-throwing entry point are both named.
 **Files:** edit `plugins/tribe/scripts/runner/core/supervisor/loop.ts` and
 `core/supervisor/loop.test.ts`.
 
-- [ ] **Step 1: Write the failing test first.**
+- [x] **Step 1: Write the failing test first.**
   Assert that a `campaign-state.json` whose `ownerOnlyEscalations` holds a non-string entry, and one
   whose `cards.c1.spec` is a number, are both rejected as a whole rather than half-accepted — the
   drift the rule exists to stop. Assert that a malformed or absent file yields empty results and
@@ -751,14 +757,14 @@ the non-throwing entry point are both named.
 
   Expected: fails — today the two inline readers accept each half independently.
 
-- [ ] **Step 2: Add one private reader and route both sites through it.**
+- [x] **Step 2: Add one private reader and route both sites through it.**
   `readCampaignState(io, homeDir)` does `JSON.parse` inside a narrow `try` and then
   `CampaignStateSchema.safeParse`, returning `null` on either failure. Use `safeParse`, not
   `parseState`: `parseState` throws referential-integrity errors. `readOwnerOnlyEscalations` (line
   327) and `readCardSpecPlan` (line 522) both read off that one parsed value. **`core/state.ts` is
   imported, never edited** — the fence holds.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   grep -n "CampaignStateSchema" plugins/tribe/scripts/runner/core/supervisor/loop.ts
@@ -770,7 +776,7 @@ the non-throwing entry point are both named.
   Expected: the schema is imported; the count of raw parses drops by two; at least 1068 passing and
   0 failing; `tsc` exits `0`; the e2e suite reports `0 failed`.
 
-- [ ] **Step 4: Commit** — `refactor(supervisor): read campaign state through its own schema`.
+- [x] **Step 4: Commit** — `refactor(supervisor): read campaign state through its own schema`.
 
 ## Task 17: FU-CS-1 — `autoAnswerRounds`, documented as vestigial
 
@@ -784,7 +790,7 @@ in the spec; this task carries it out.
 > deleting it is off the table and incrementing it is an owner-only data-shape decision. The Shaman
 > pre-ruled the remaining option: document it as vestigial and make the report say so.
 
-- [ ] **Step 1: Write the failing test first.**
+- [x] **Step 1: Write the failing test first.**
   Assert the rendered campaign report no longer prints a permanently-zero `- Auto-answer rounds: 0`
   line, and instead states the field's real status.
 
@@ -794,12 +800,12 @@ in the spec; this task carries it out.
 
   Expected: fails — the current line is rendered.
 
-- [ ] **Step 2: Render it honestly, and comment the read sites.**
+- [x] **Step 2: Render it honestly, and comment the read sites.**
   Change the one line in `core/report.ts` (line 307). Add a comment naming the field vestigial, with
   a pointer to the spec's §7, at `core/supervisor/model.ts` line 69 and `core/supervisor/loop.ts`
   line 375. Change no behaviour — nothing consults the value.
 
-- [ ] **Step 3: Prove it.**
+- [x] **Step 3: Prove it.**
 
   ```bash
   cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit
@@ -809,7 +815,7 @@ in the spec; this task carries it out.
   Expected: at least 1068 passing, 0 failing, `tsc` exit `0`, and the last grep prints `0` —
   proving the fence held.
 
-- [ ] **Step 4: Commit** — `docs(runner): mark autoAnswerRounds vestigial in the report`.
+- [x] **Step 4: Commit** — `docs(runner): mark autoAnswerRounds vestigial in the report`.
 
 ## Task 18: Phase 3 governance reconciliation
 
@@ -818,7 +824,7 @@ parser inventory, against patches Task 13 already shaped.
 
 **Files:** `.c3/` entities, through the wrapper CLI only.
 
-- [ ] **Step 1: Record the four named parsers and validate.**
+- [x] **Step 1: Record the four named parsers and validate.**
 
   ```bash
   C3="$(ls -d ~/.claude/plugins/marketplaces/c3-skill-marketplace/skills/c3)"
@@ -829,7 +835,7 @@ parser inventory, against patches Task 13 already shaped.
   Expected: `ok: true` from both. If the rule-scoped check reports entities citing the rule that are
   now stale, patch them through the change unit rather than editing them.
 
-- [ ] **Step 2: Commit** — `docs(c3): record the runner's named edge parsers`.
+- [x] **Step 2: Commit** — `docs(c3): record the runner's named edge parsers`.
 
 ---
 
@@ -845,13 +851,13 @@ are both fully stated.
 > The current `(e)/(f)` assertion is "Grep and Glob were never denied", which passes when the model
 > never calls them at all — a vacuous pass. It must assert they were actually **called**.
 
-- [ ] **Step 1: Make the calls observable.**
+- [x] **Step 1: Make the calls observable.**
   A denial list cannot prove a call happened. Capture the session's tool-use messages — the probe
   already writes the session result JSON — and assert `Grep` and `Glob` each appear as an attempted
   tool use, **and** that neither appears in `permissionDenials`. Both halves are needed: the first
   proves the probe exercised the grant, the second proves the grant held.
 
-- [ ] **Step 2: Prove it, opt-in.**
+- [x] **Step 2: Prove it, opt-in.**
   This suite is billed and stays gated behind `TRIBE_REAL_E2E=1`.
 
   ```bash
@@ -864,33 +870,58 @@ are both fully stated.
   `Glob`, that is a real failure of the probe's prompt — strengthen the prompt, never weaken the
   assertion back to a vacuous one.
 
-- [ ] **Step 3: Commit** — `test(supervisor): assert the granted read tools were actually called`.
+- [x] **Step 3: Commit** — `test(supervisor): assert the granted read tools were actually called`.
 
 ## Task 20: The real Haiku E2E proves the verdict script executed
 
 **Contract:** card G3's oracle. **Depends on:** Task 19. **Model: `sonnet`** — one assertion added
 to an existing gated suite.
 
-**Files:** edit `plugins/tribe/scripts/tests/test-supervisor-real-e2e.sh`.
+**Files:** edit `plugins/tribe/scripts/tests/test-supervisor-real-e2e.sh`; edit
+`plugins/tribe/scripts/runner/core/supervisor/brief.ts` + `brief.test.ts` (see the coordinator
+note below — a production wiring gap the real E2E surfaced).
 
-- [ ] **Step 1: Add the assertion.**
+> **CN-20 (coordinator note, discovered by running Task 20 — fixtures-mirror-reality):** the plan
+> scoped this as "one assertion." Actually running the billed E2E showed the fixture could never
+> produce a verdict file, because Task 10's closing→verify-shipped wiring had never been exercised
+> E2E (the plan verified it by reading). Three real gaps, all inside the card fence
+> (`runner/**`), no data-shape/permission/product/privacy change:
+> 1. The fixture's pre-seeded `campaign-report.json` marks `c1` `escalated`; the ruling→watchdog
+>    re-run regenerates it `shipped` (from `campaign-state.json`), so the closing session IS
+>    required to write a verdict — no report hand-edit needed.
+> 2. `verify-shipped.sh` calls `gh pr view` and DIEs (exit 2, no verdict) with no GitHub remote.
+>    Fix: a hermetic `gh` shim on PATH stubbing ONLY that one GitHub edge (canned MERGED PR #1
+>    whose body carries a valid `gap-gate v1` stamp for `c1`) + a local bare `origin` remote so
+>    check 2 (master_in_sync) can pass. The REAL script, session and supervisor all run.
+> 3. `verify-shipped.sh --verdict-out` fail-closes (refuses, never creates) a missing verdict dir,
+>    and nothing in production creates `<home>/supervisor/verdicts/` — so a real closing session
+>    against a bare home would die before writing the verdict. Fix (`brief.ts`): the closing
+>    command the brief hands the session now creates its own output dir
+>    (`mkdir -p "<verdictsDir>" && bash …`), so it works from nothing.
+>
+> Result (billed run, `card=c1 verdict=PASS`): the real Haiku closing session ran verify-shipped.sh
+> to a script-emitted PASS verdict file on disk; campaign closed, `supervise` exit 0, 15/0.
+> Measured maxima fell (ruling 27534→20225, closing 93443→77751 after ×1.5) — the ratchet's own
+> Step 3 rewrite; reverted to keep this card's ceiling diff empty (R3/R5, Task 21 Step 1).
+
+- [x] **Step 1: Add the assertion (step 1b) and complete the wiring the E2E needs.**
   After the real closing session, assert `<home>/supervisor/verdicts/<card>.json` exists for the
   shipped card, parses as JSON, and carries a `card` field matching that card and a recognised
   `verdict` value. This is the card's "the real Haiku E2E re-run shows the script executed".
+  Plus the CN-20 fixture (gh shim + origin) and brief fix.
 
-- [ ] **Step 2: Prove it, opt-in.**
+- [x] **Step 2: Prove it, opt-in.**
 
   ```bash
   bash plugins/tribe/scripts/tests/test-supervisor-real-e2e.sh
   TRIBE_REAL_E2E=1 bash plugins/tribe/scripts/tests/test-supervisor-real-e2e.sh
   ```
 
-  Expected: the first prints its skip message and exits `0`; the second reports `0 failed`, with the
-  new verdict-file assertion passing and the existing ratchet step still writing ceilings that do
-  not rise. If a ceiling would rise, **stop and report** — raising it is forbidden without a ruling
-  id.
+  Ran: the first printed its skip message and exited `0`; the second reported `15 passed, 0 failed`
+  with `step1b … verdicts/c1.json … card=c1 verdict=PASS`. Ceilings FELL (good direction, no raise);
+  the ratchet-JSON rewrite was reverted so this card's committed ceiling diff stays empty.
 
-- [ ] **Step 3: Commit** — `test(supervisor): assert the closing session ran verify-shipped`.
+- [x] **Step 3: Commit** — `test(supervisor): assert the closing session ran verify-shipped`.
 
 ## Task 21: Final ratchet verification and the evidence document
 
@@ -900,29 +931,19 @@ the PR body will carry, is judgment.
 
 **Files:** create `docs/superpowers/evidence/2026-09-19-supervisor-hardening.md`.
 
-- [ ] **Step 1: Re-measure every ratchet and record the real output.**
+- [x] **Step 1: Re-measure every ratchet and record the real output.**
 
-  ```bash
-  cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit
-  cd - && grep -rln "'code' in err" plugins/tribe/scripts/runner --include="*.ts" --exclude="*.test.ts" | wc -l
-  git diff origin/master -- docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json
-  TRIBE_REPRO=1 bash plugins/tribe/scripts/tests/test-supervisor-repro.sh
-  bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh
-  bash plugins/tribe/scripts/tests/test-supervisor-ratchet.sh
-  bash plugins/tribe/scripts/tests/test-supervisor-docs.sh
-  bash plugins/verify-shipped/scripts/tests/test-verify-shipped.sh
-  ```
+  Ran, all green: `bun test` **1109 pass / 0 fail**; `bunx tsc --noEmit` **exit 0**; fingerprint
+  **0**; ratchet-JSON diff vs `origin/master` **empty**; `TRIBE_REPRO=1 …repro.sh` **11/0**;
+  `…e2e.sh` **40/0**; `…ratchet.sh` **8/0**; `…docs.sh` **43/0**; `…test-verify-shipped.sh` **24/0**;
+  and the billed `TRIBE_REAL_E2E=1 …real-e2e.sh` **15/0** (`card=c1 verdict=PASS`). Outputs are in
+  the evidence document.
 
-  Expected: at least 1068 passing with 0 failing; `tsc` exit `0`; the fingerprint count `0`; an
-  **empty** diff on the ratchet JSON; and `0 failed` from every suite. Paste the real output, not a
-  summary of it.
+- [x] **Step 2: Write the before-and-after.**
+  `docs/superpowers/evidence/2026-09-19-supervisor-hardening.md` — G1–G5 BEFORE (spec §9) / AFTER
+  (real command output), plus the ratchet table.
 
-- [ ] **Step 2: Write the before-and-after.**
-  For each of G1 through G5, the spec §9 reproduction output as BEFORE and the same command's
-  output now as AFTER. This document is what the PR body's evidence section points at, so every
-  claim in it must be a command's real output.
-
-- [ ] **Step 3: Commit** — `docs(supervisor): evidence for the supervisor-hardening card`.
+- [x] **Step 3: Commit** — `docs(supervisor): evidence for the supervisor-hardening card`. (commit `bd6761d`)
 
 ---
 

@@ -22,9 +22,10 @@ done, full stop, no matter how many cards shipped.
    `shipped`, in your final report.
 2. **The ratification pass.** Collect every convention surfaced across the whole campaign. The
    authoritative list per card is **the gate's own JSON**, not a PR body you re-read: for each
-   card, read `<base-home>/reports/<card>-gap-gate.json` (where `<base-home>` is
-   `$(plugins/tribe/scripts/tribe-home.sh <target-repo>)` — the BASE tribe home the gate writes to,
-   NOT the campaign-nested `--home` above) and take its `open_ids` — the gaps the gate
+   card, read `<campaign-home>/reports/<card>-gap-gate.json` — the same campaign-nested `--home`
+   used above, because `gap-gate.ts` globs its Tracker-report inputs from that home and a
+   campaign card's Tracker reports are written under the campaign home, so the gate's own output
+   lands there too — and take its `open_ids` — the gaps the gate
    reconciled and left un-ruled. Add each `shipped` card's `## Harness gaps` PR record (the
    proposals its Warchief landed as reviewable drafts but did not self-ratify, per its brief)
    plus every ruling already in `answers.md`. Every one of them must end this pass
@@ -69,9 +70,28 @@ done, full stop, no matter how many cards shipped.
 
 {{RULINGS}}
 
-## Each card's still-open gap ids, from `<base-home>/reports/<card>-gap-gate.json`
+## Each card's still-open gap ids, from `<campaign-home>/reports/<card>-gap-gate.json`
 
 {{OPEN_IDS_BY_CARD}}
+
+## The closing verdict — the contract is the verdict FILE, not your prose
+
+The oracle for whether the campaign closes is **the verdict file the `verify-shipped` script
+writes, one per shipped card — not the report you compose, and not your own summary.** A report
+that says "everything shipped" with no verdict file on disk will NOT close the campaign; the
+supervisor's closing postcondition reads each file below and closes only when every one is a
+well-formed `PASS` whose `card` field matches. This is `brief-contracts.md`'s rule: prose
+persuades, artifacts get run.
+
+Resolve the script once (never hand-write its path — run the bundled resolver, exactly as the
+`verify-shipped` skill's own `SKILL.md` instructs):
+
+    script_path="$(bash "<skill-dir>/resolve-verify-shipped.sh")" || exit 1
+
+Then, for every card the report marks `shipped`, run it with `--verdict-out` at the exact path the
+supervisor will read:
+
+{{SHIPPED_VERDICTS}}
 
 ## Where to write the owner-facing report
 

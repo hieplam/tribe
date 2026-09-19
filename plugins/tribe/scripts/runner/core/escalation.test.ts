@@ -1,0 +1,100 @@
+// The one named parser for the escalation-file shape (spec §2, §5(d)). A well-formed file yields
+// the `**Reason:**` value and the `## Context` body verbatim; a `## Context` followed by another
+// `## ` heading stops at that boundary (the same partition `verify.ts#blocksById` uses); a file
+// with neither shape returns `null`; and no input ever throws (fail-closed, per
+// `fail-closed-edges.md`).
+import { expect, test } from 'bun:test';
+import { extractReasonLine, parseEscalationQuestion } from './escalation.ts';
+
+const WELL_FORMED = `**Reason:** needs-a-product-call
+
+## Context
+CONTEXT-MARKER-4f2a9b — the owner must see THIS paragraph to rule on the question.
+`;
+
+test('a well-formed file returns the reason value and the Context body verbatim', () => {
+  const q = parseEscalationQuestion(WELL_FORMED);
+  expect(q).not.toBeNull();
+  expect(q!.reasonLine).toBe('needs-a-product-call');
+  expect(q!.context).toBe(
+    '## Context\n' +
+      'CONTEXT-MARKER-4f2a9b — the owner must see THIS paragraph to rule on the question.\n',
+  );
+});
+
+test('a ## Context followed by another ## heading stops at the boundary', () => {
+  const content = `**Reason:** r
+
+## Context
+first paragraph
+second line
+
+## Not context
+this line belongs to the next section, not the Context body
+`;
+  const q = parseEscalationQuestion(content);
+  expect(q).not.toBeNull();
+  expect(q!.context).toBe('## Context\nfirst paragraph\nsecond line\n');
+  // The verbatim body stops before the next `## ` heading — nothing after it leaks in.
+  expect(q!.context.includes('Not context')).toBe(false);
+  expect(q!.context.includes('belongs to the next section')).toBe(false);
+});
+
+test('a ### subheading inside Context is NOT a boundary (same convention as blocksById)', () => {
+  const content = `## Context
+intro line
+### a subheading
+still inside the context body
+`;
+  const q = parseEscalationQuestion(content);
+  expect(q).not.toBeNull();
+  expect(q!.context).toBe(
+    '## Context\nintro line\n### a subheading\nstill inside the context body\n',
+  );
+});
+
+test('a file with a reason but no Context returns just the reason', () => {
+  const q = parseEscalationQuestion('**Reason:** only-a-reason\n');
+  expect(q).not.toBeNull();
+  expect(q!.reasonLine).toBe('only-a-reason');
+  expect(q!.context).toBe('');
+});
+
+test('a file with a Context but no reason returns just the context', () => {
+  const q = parseEscalationQuestion('## Context\nonly a context body\n');
+  expect(q).not.toBeNull();
+  expect(q!.reasonLine).toBe('');
+  expect(q!.context).toBe('## Context\nonly a context body\n');
+});
+
+test('a file carrying neither a reason nor a Context returns null', () => {
+  expect(parseEscalationQuestion('# some heading\n\njust prose, no fields\n')).toBeNull();
+  expect(parseEscalationQuestion('')).toBeNull();
+});
+
+test('malformed input never throws (fail-closed to null / empty)', () => {
+  // A grab-bag of shapes an edge might feed the parser: partial markers, lone hashes, unicode,
+  // a very long line, CRLF. None may throw.
+  const inputs = [
+    '**Reason:**',
+    '**Reason:',
+    '## ',
+    '##Context',
+    '##  Context  ',
+    '\x00\x00',
+    'Reason: not-bold\n## Contextual\nnot the Context heading\n',
+    '\r\n**Reason:** r\r\n\r\n## Context\r\nbody\r\n',
+    'x'.repeat(100000),
+  ];
+  for (const input of inputs) {
+    expect(() => parseEscalationQuestion(input)).not.toThrow();
+    expect(() => extractReasonLine(input)).not.toThrow();
+  }
+});
+
+test('extractReasonLine is the reason-only convenience over the same parser', () => {
+  expect(extractReasonLine(WELL_FORMED)).toBe('needs-a-product-call');
+  // No reason line present anywhere -> empty string, matching the read site it replaces.
+  expect(extractReasonLine('## Context\nno reason here\n')).toBe('');
+  expect(extractReasonLine('')).toBe('');
+});

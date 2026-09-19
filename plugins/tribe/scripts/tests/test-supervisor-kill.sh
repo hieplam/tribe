@@ -140,7 +140,7 @@ last_event() { tail -n1 "$1/supervisor/events.jsonl" 2>/dev/null || echo ''; }
 # "grep -c '^## ' answers.md equals the control run's value").
 # =================================================================================================
 HCTL="$(new_campaign kill-control)"
-export DOUBLE_PLAN="rule:R1 close"
+export DOUBLE_PLAN="rule:R1 close-pass"
 export DOUBLE_STATE="$TMP/double-state-control"
 set +e
 outctl="$(bun "$RUNNER/run.ts" supervise --repo "$REPO" --model e2e-model --home "$HCTL" "${SUPERVISE_ARGS[@]}" 2>&1)"
@@ -174,7 +174,7 @@ contains "control: reaches campaign_closed" "$(last_event "$HCTL")" "campaign_cl
 # a genuine "alive, non-terminal" fact — exactly what a restarted supervisor's P4 adoption needs.
 # =================================================================================================
 HA="$(new_campaign kill-a)"
-export DOUBLE_PLAN="rule:R1 close"
+export DOUBLE_PLAN="rule:R1 close-pass"
 export DOUBLE_STATE="$TMP/double-state-a"
 
 FAKE_BIN="$TMP/fakebin-a"; mkdir -p "$FAKE_BIN"
@@ -253,7 +253,7 @@ check "killA: the double was invoked the SAME number of times as the control run
 # crash window, NOT a second ruling session; the double's counter did NOT grow across the kill.
 # =================================================================================================
 HB="$(new_campaign kill-b)"
-export DOUBLE_PLAN="rule-block:R1 close"
+export DOUBLE_PLAN="rule-block:R1 close-pass"
 export DOUBLE_STATE="$TMP/double-state-b"
 export DOUBLE_SENTINEL="$TMP/killB.sentinel"
 : > "$DOUBLE_SENTINEL"
@@ -313,7 +313,7 @@ check "killB: answers.md matches the control run's block count — no double-rul
 # is not renamed twice and no .resolved-R<n>.resolved-R<n> exists.
 # =================================================================================================
 HC="$(new_campaign kill-c)"
-export DOUBLE_PLAN="rule:R1 close"
+export DOUBLE_PLAN="rule:R1 close-pass"
 export DOUBLE_STATE="$TMP/double-state-c"
 
 bun "$RUNNER/run.ts" supervise --repo "$REPO" --model e2e-model --home "$HC" "${SUPERVISE_ARGS[@]}" \

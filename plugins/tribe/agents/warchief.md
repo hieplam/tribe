@@ -1190,6 +1190,11 @@ suspicious one — do not go hunting for something to change in order to feel li
     --card CARD-SLUG --base <merge-base-sha> --head HEAD
   ```
 
+  **Inside a campaign, `--home` above is the campaign home the dispatch named, never
+  `tribe-home.sh`'s base home** — the gate globs its Tracker-report inputs from that same home,
+  and a campaign card's Tracker reports are written under the campaign home, so `$HOME_DIR` in
+  the two steps below must be that campaign home too.
+
   1. **Its exit code is a gate, not a report** — same class as the pre-gate. `0` is green and the
      PR may open. `1` is red: a positive debt delta, or an unsafe fingerprint on a candidate this
      diff introduced — route the report's listed hits back to a fixer Hunter to remove, then

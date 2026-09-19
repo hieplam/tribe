@@ -15,11 +15,14 @@
 #   4. gap_gate_stamped       — the merged PR's body carries a `gap-gate v1`
 #                                stamp whose `card=` matches --card
 #
-# Output: JSON summary on stdout only. Logs go to stderr.
+# Output: JSON summary on stdout only. Logs go to stderr. With --verdict-out <path>, the
+# same JSON (byte-identical) is also written to that path, atomically (temp file in the
+# target directory, then renamed into place) so a reader never sees a half-written file.
 # Exit codes: 0 = ran to completion (regardless of pass/fail); 2 = setup error.
 #
 # Usage:
-#   verify-shipped.sh --pr <number|url> --worktree <path> --card <slug> [--base master] [--repo owner/repo]
+#   verify-shipped.sh --pr <number|url> --worktree <path> --card <slug> [--base master]
+#                      [--repo owner/repo] [--verdict-out <path>]
 #
 # Requires: gh (GitHub CLI, authenticated), git, python3.
 
@@ -33,16 +36,26 @@ WORKTREE_ARG=""
 BASE_BRANCH="master"
 REPO_ARG=""
 CARD_ARG=""
+VERDICT_OUT_ARG=""
 
+# A flag's value is "missing" when there is no next token, the next token is empty, OR the next
+# token is itself an option (`--…`): silently consuming an option token as a value is the
+# fail-closed-edges obligation-1 bug (campaign gap-gate-2026-09-10: `--card --base <sha>` read
+# `--base` as the card name). The two flags whose value is free-form text (`--card`,
+# `--verdict-out`) guard against it explicitly, exactly as the sibling `ratchet-check.ts` does.
+# `--verdict-out` left unset (VERDICT_OUT_ARG stays "") means "no file requested" — skip the write.
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --pr)        PR_ARG="$2"; shift 2 ;;
-    --worktree)  WORKTREE_ARG="$2"; shift 2 ;;
-    --base)      BASE_BRANCH="$2"; shift 2 ;;
-    --repo)      REPO_ARG="$2"; shift 2 ;;
-    --card)      CARD_ARG="${2:-}"; shift $(( $# >= 2 ? 2 : 1 )) ;;
-    -h|--help)   sed -n '2,25p' "$0"; exit 0 ;;
-    *)           DIE "unknown arg: $1" ;;
+    --pr)          PR_ARG="$2"; shift 2 ;;
+    --worktree)    WORKTREE_ARG="$2"; shift 2 ;;
+    --base)        BASE_BRANCH="$2"; shift 2 ;;
+    --repo)        REPO_ARG="$2"; shift 2 ;;
+    --card)        [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || DIE "--card <slug> requires a value"
+                   CARD_ARG="$2"; shift 2 ;;
+    --verdict-out) [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || DIE "--verdict-out <path> requires a value"
+                   VERDICT_OUT_ARG="$2"; shift 2 ;;
+    -h|--help)     sed -n '2,26p' "$0"; exit 0 ;;
+    *)             DIE "unknown arg: $1" ;;
   esac
 done
 
@@ -160,7 +173,7 @@ fi
 # Pass every value as an argv element (not interpolated into the heredoc) so
 # that commit titles / branch names containing quotes, backticks or $(...)
 # can never be interpreted by the shell or break the JSON.
-python3 - \
+JSON_OUTPUT=$(python3 - \
   "$PR_NUMBER" "$BASE_BRANCH" "$WORKTREE_ARG" "$VERDICT" \
   "$CHECK1_STATUS" "$CHECK1_DETAIL" \
   "$CHECK2_STATUS" "$CHECK2_DETAIL" \
@@ -189,3 +202,19 @@ print(json.dumps({
     "verdict": verdict,
 }, indent=2))
 PY
+)
+
+printf '%s\n' "$JSON_OUTPUT"
+
+# ---------- optional: write the verdict file (byte-identical to stdout) ----------
+# Written by this script, never by the model — the campaign supervisor's postcondition trusts
+# only this file, not a session's prose (spec §4a). Temp file in the TARGET directory + mv, so
+# a reader never observes a partially-written file (fail-closed-edges.md obligation: no
+# half-written state visible to a concurrent reader).
+if [[ -n "$VERDICT_OUT_ARG" ]]; then
+  VERDICT_OUT_DIR=$(dirname "$VERDICT_OUT_ARG")
+  [[ -d "$VERDICT_OUT_DIR" ]] || DIE "--verdict-out directory does not exist: $VERDICT_OUT_DIR"
+  VERDICT_TMP=$(mktemp "$VERDICT_OUT_DIR/.verdict-shipped.XXXXXX")
+  printf '%s\n' "$JSON_OUTPUT" > "$VERDICT_TMP"
+  mv "$VERDICT_TMP" "$VERDICT_OUT_ARG"
+fi

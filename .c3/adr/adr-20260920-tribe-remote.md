@@ -1,6 +1,6 @@
 ---
 id: adr-20260920-tribe-remote
-c3-seal: 07d99ed1870ee8704640f373bc254d9bfe3cdbdef4998ef472ad251af045a901
+c3-seal: 52a237c9fcbc122a4c66499f144fa7bd0b8f2a04d919401d0ab8173b7fd281f4
 title: tribe-remote
 type: adr
 goal: 'Let the owner open the session viewer from another device on the same network (a phone, a second laptop) with one flag, `tribe --remote`, exactly as kanna does: `--remote` is a shortcut for `--host 0.0.0.0`, and `--host <address>` binds a given address. There is no password.'

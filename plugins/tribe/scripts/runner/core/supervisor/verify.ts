@@ -47,10 +47,21 @@ export interface VerifyRatifyInput {
   named: string[];
 }
 
+/** One shipped card's verify-shipped verdict file (`<home>/supervisor/verdicts/<cardId>.json`),
+ * as read by the caller: `raw` is the file's raw contents, or `null` when the file does not
+ * exist. Parsed here (pure), never read here (`pure-core.md`). */
+export interface ShippedVerdict {
+  cardId: string;
+  raw: string | null;
+}
+
 export interface VerifyClosingInput {
   /** `<home>/supervisor/final-report.md`'s contents, or `null` when the file does not exist. */
   finalReport: string | null;
   answers: string;
+  /** One entry per card the campaign report marks `shipped` — the verify-shipped script's own
+   * verdict file, read by the caller and parsed here (spec §4b). */
+  shippedVerdicts: ShippedVerdict[];
 }
 
 export interface ParkMarkerParseResult {
@@ -193,18 +204,64 @@ export function verifyRatify(input: VerifyRatifyInput): VerifyVerdict {
   return { outcome: 'ratified', retryable: true };
 }
 
-/** §5.4's postcondition: the owner-facing report exists and is non-empty, and every ruling in
- * `answers.md` is still ratified. Neither failure is retryable-blocking (`closing`'s own bounded
- * retry, then `park(closing_failed)`, is the decision core's job — this function only reports
- * `failed`/`retryable: true`, same as every other ordinary failed attempt). */
+/** A closing report that self-declares a blocked/failed status must never close the campaign
+ * (spec §4's reproduction: `verifyClosing` was blind to a report whose body said
+ * `Status: BLOCKED`). This matches an explicit status DECLARATION line only — not a section
+ * heading like `## Escalated / blocked`, which a well-formed successful report legitimately
+ * carries (closing brief Stage D step 4). Over-checking here is by design; a real defect it
+ * catches is a session that wrote a "could not verify anything" report and expected it to close. */
+function finalReportDeclaresBlocked(report: string): boolean {
+  return /^[ \t]*#*[ \t]*status:[ \t]*(blocked|failed|fail|error)\b/im.test(report);
+}
+
+/** §4b: one shipped card's verdict file. Parses `raw` narrowly and fail-closed
+ * (`fail-closed-edges.md` obligation 1 — never throws). Returns the typed `reason` string when
+ * the verdict is not an acceptable `PASS`, or `null` when it is. The verdict FILE the
+ * verify-shipped script writes is the contract; the session's prose is not (spec §4). */
+function checkShippedVerdict(entry: ShippedVerdict): string | null {
+  if (entry.raw === null) return `verdict_missing:${entry.cardId}`;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(entry.raw);
+  } catch {
+    return `verdict_malformed:${entry.cardId}`;
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return `verdict_malformed:${entry.cardId}`;
+  }
+  const obj = parsed as Record<string, unknown>;
+  const card = obj['card'];
+  const verdict = obj['verdict'];
+  if (typeof card !== 'string' || typeof verdict !== 'string') {
+    return `verdict_malformed:${entry.cardId}`;
+  }
+  if (card !== entry.cardId) return `verdict_card_mismatch:${entry.cardId}`;
+  if (verdict !== 'PASS') return `verdict_fail:${entry.cardId}`;
+  return null;
+}
+
+/** §5.4/§4b's postcondition: the owner-facing report exists and is non-empty, it does not
+ * self-declare a blocked/failed status, every ruling in `answers.md` is still ratified, AND every
+ * card the campaign report marks `shipped` has a present, well-formed, matching, `PASS` verdict
+ * file the verify-shipped SCRIPT produced. A `FAIL` (or missing/malformed/mismatched) verdict is
+ * an ordinary retryable `failed` attempt with a typed `reason` — never a new `ParkReason`: the
+ * existing bounded-retry-then-`park(closing_failed)` path handles it (spec §4b). This function
+ * reads nothing from disk — the caller reads each file, this function decides (`pure-core.md`). */
 export function verifyClosing(input: VerifyClosingInput): VerifyVerdict {
-  const { finalReport, answers } = input;
+  const { finalReport, answers, shippedVerdicts } = input;
 
   if (finalReport === null || finalReport.trim().length === 0) {
     return { outcome: 'failed', retryable: true, reason: 'final_report_missing' };
   }
+  if (finalReportDeclaresBlocked(finalReport)) {
+    return { outcome: 'failed', retryable: true, reason: 'final_report_blocked' };
+  }
   if (unratifiedRulingIds(answers).length > 0) {
     return { outcome: 'failed', retryable: true, reason: 'rulings_unratified' };
+  }
+  for (const entry of shippedVerdicts) {
+    const reason = checkShippedVerdict(entry);
+    if (reason !== null) return { outcome: 'failed', retryable: true, reason };
   }
   return { outcome: 'closed', retryable: true };
 }

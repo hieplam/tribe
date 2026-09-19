@@ -103,6 +103,9 @@ function fixtureClosingFacts(overrides: Partial<ClosingBriefFacts> = {}): Closin
     rulings: [{ id: 'R1', ratifiedAs: 'operational' }],
     openIdsByCard: [{ cardId: 'widget-export', openIds: ['G-101'] }],
     finalReportPath: '/th/campaigns/widget-campaign/supervisor/final-report.md',
+    shippedVerdicts: [
+      { cardId: 'widget-export', verdictPath: '/th/campaigns/widget-campaign/supervisor/verdicts/widget-export.json' },
+    ],
     ...overrides,
   };
 }
@@ -203,6 +206,31 @@ describe('renderBrief — closing', () => {
   test('is deterministic: two renders of the same facts are byte-identical', () => {
     const facts = fixtureClosingFacts();
     expect(renderBrief('closing', facts)).toBe(renderBrief('closing', facts));
+  });
+
+  // Task 10 (spec §4c): the closing brief must name the per-card verdict path AND the exact
+  // command, and state the oracle — the verdict FILE the script writes is the contract, the
+  // session's own prose is not.
+  test('names each shipped card\'s verdict-file path and its --verdict-out command', () => {
+    const rendered = renderBrief('closing', fixtureClosingFacts({
+      shippedVerdicts: [
+        { cardId: 'widget-export', verdictPath: '/th/campaigns/wc/supervisor/verdicts/widget-export.json' },
+      ],
+    }));
+    expect(rendered).toContain('/th/campaigns/wc/supervisor/verdicts/widget-export.json');
+    expect(rendered).toContain('--card widget-export');
+    expect(rendered).toContain('--verdict-out');
+    expect(rendered).toContain('resolve-verify-shipped.sh');
+    // The command creates its OWN output dir — verify-shipped.sh refuses (never creates) a
+    // missing --verdict-out dir, so a closing session run against a bare home would otherwise
+    // die before writing the verdict the supervisor reads.
+    expect(rendered).toContain('mkdir -p "/th/campaigns/wc/supervisor/verdicts"');
+  });
+
+  test('states the oracle: the verdict file is the contract, the prose is not', () => {
+    const rendered = renderBrief('closing', fixtureClosingFacts());
+    expect(rendered.toLowerCase()).toContain('the verdict file');
+    expect(rendered.toLowerCase()).toContain('not');
   });
 });
 

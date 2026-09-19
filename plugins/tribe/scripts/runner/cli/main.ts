@@ -33,6 +33,7 @@ import { parseTranscriptMetricsArgs, type TranscriptMetricsConfig } from '../cor
 import { buildTranscriptIo } from '../adapters/transcript-io.adapter.ts';
 import { measureAtCut, validateBaselineFile, verifyBaseline } from '../adapters/cut.ts';
 import type { BaselineEntry, BaselineFile } from '../core/metrics/model.ts';
+import { errorCode } from '../core/errno.ts';
 import type { TranscriptIO } from '../ports/ports.ts';
 // Task 15 (campaign-supervisor, spec §5.1/§14): the `supervise` subcommand — a composition
 // root exactly like the `watchdog` block above, assembling `SupervisorLoopSeam` from pieces
@@ -639,7 +640,7 @@ function findTranscriptPath(io: TranscriptIO, root: string, sessionId: string, p
  * Mirrors `adapters/cut.ts#unreadableResult`'s own error-code extraction (Fix 4), which already
  * guards the sibling `--verify` path the same way. */
 function fsErrorCode(err: unknown): string {
-  return err !== null && typeof err === 'object' && 'code' in err ? String((err as { code: unknown }).code) : 'UNKNOWN';
+  return errorCode(err) ?? 'UNKNOWN';
 }
 
 function formatEntryHuman(entry: BaselineEntry): string {

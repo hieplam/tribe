@@ -66,6 +66,8 @@ export interface CampaignReportCardFact {
   outcome: 'shipped' | 'escalated' | 'blocked' | 'not_reached';
   escalationFile: string | null;
   question: string | null;
+  // FU-CS-1 (spec §7): vestigial — nothing in the runner ever increments this. Read here for
+  // shape parity with `core/report.ts`'s persisted field, never consulted by `decide()`.
   autoAnswerRounds: number | null;
 }
 

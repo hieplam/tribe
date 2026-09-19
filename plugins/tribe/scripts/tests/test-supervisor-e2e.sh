@@ -114,8 +114,11 @@ export DOUBLE_REPO="$REPO"
 SUPERVISE_ARGS=(--session-timeout-seconds 60 --session-max-turns 5 --poll-seconds 1)
 
 # --- Probe 1: absolute --home, a card that escalates, the double rules and ratifies it ------
+# `close-pass`: the closing session writes final-report.md AND (per spec §4b/Task 10) a PASS
+# verify-shipped verdict file for the one shipped card, which the closing postcondition now
+# requires before it will exit 0.
 H1="$(new_campaign e2e-abs generic-ruling-needed 0)"
-export DOUBLE_PLAN="rule:R1 close"
+export DOUBLE_PLAN="rule:R1 close-pass"
 export DOUBLE_STATE="$TMP/double-state-1"
 # Sub-second precision (python3, mirroring this suite's own JSON-reading convention below):
 # the whole probe1 run typically finishes in well under a second, so a whole-second `stat -f %m`
@@ -139,7 +142,7 @@ absent "probe1: NEEDS_OWNER.md does not exist" "$H1/NEEDS_OWNER.md"
 
 # --- Probe 2: the SAME campaign shape, but --campaign the way a person types it -------------
 H2="$(new_campaign e2e-rel generic-ruling-needed 0)"
-export DOUBLE_PLAN="rule:R1 close"
+export DOUBLE_PLAN="rule:R1 close-pass"
 export DOUBLE_STATE="$TMP/double-state-2"
 set +e
 out2="$(cd "$CAMPAIGNS" && bun "$RUNNER/run.ts" supervise --repo "$REPO" --model e2e-model \
@@ -170,9 +173,15 @@ absent "probe3: the double's own counter file was never created — zero invocat
 if [[ -f "$H3/NEEDS_OWNER.md" ]]; then
   ok "probe3: NEEDS_OWNER.md exists"
   contains "probe3: it names park reason owner_only" "$(cat "$H3/NEEDS_OWNER.md")" "**Park reason:** owner_only"
+  # G1 oracle (card supervisor-hardening): the park document must carry THIS card's own question —
+  # the `## Context` body of its escalation file — not a "(not applicable)" placeholder. The
+  # new_campaign fixture writes this exact Context line into escalations/c1.md.
+  contains "probe3: NEEDS_OWNER.md carries the escalation's own Context text" \
+    "$(cat "$H3/NEEDS_OWNER.md")" "The session double needs to make a call here."
 else
   bad "probe3: NEEDS_OWNER.md exists"
   bad "probe3: it names park reason owner_only"
+  bad "probe3: NEEDS_OWNER.md carries the escalation's own Context text"
 fi
 
 # --- Probe 4: a double that writes NOTHING — one bounded retry, then park -------------------
@@ -281,6 +290,50 @@ case "$out8b" in
   *"at "*"("*.ts:*) bad "probe8: no stack trace for a stateless --home" ;;
   *)                ok "probe8: no stack trace for a stateless --home" ;;
 esac
+
+# --- Probe 9: a closing session that writes NO verdict file must PARK, never exit 0 ----------
+# Card supervisor-hardening G3 oracle (spec §4b): the closing verdict is the verify-shipped
+# SCRIPT's own artifact, one `<home>/supervisor/verdicts/<card>.json` per shipped card — never
+# the model's prose. `close` writes a non-empty final-report.md but NO verdict file, so the one
+# shipped card (c1, marked shipped by the real runner re-verification pass) has a missing verdict:
+# one bounded retry, then park(closing_failed). This drives the REAL composition root.
+H9="$(new_campaign e2e-noverdict generic-ruling-needed 0)"
+export DOUBLE_PLAN="rule:R1 close-noverdict close-noverdict"
+export DOUBLE_STATE="$TMP/double-state-9"
+set +e
+out9="$(bun "$RUNNER/run.ts" supervise --repo "$REPO" --model e2e-model --home "$H9" "${SUPERVISE_ARGS[@]}" 2>&1)"
+rc9=$?
+set -e
+check "probe9: a closing session that wrote no verdict file exits 20, not 0" "$rc9" "20"
+absent "probe9: no verdict file was ever written for c1" "$H9/supervisor/verdicts/c1.json"
+if [[ -f "$H9/NEEDS_OWNER.md" ]]; then
+  contains "probe9: park reason is closing_failed" "$(cat "$H9/NEEDS_OWNER.md")" "**Park reason:** closing_failed"
+else
+  bad "probe9: park reason is closing_failed"
+fi
+
+# --- Probe 10: a well-formed PASS verdict file present must exit 0 ---------------------------
+# The mirror of probe 9: `close-pass` writes final-report.md AND a PASS verify-shipped verdict
+# file for the shipped card, so the closing postcondition reads a real artifact (spec §4b) and
+# closes. Asserts the file exists and carries a PASS verdict for the matching card.
+H10="$(new_campaign e2e-verdict generic-ruling-needed 0)"
+export DOUBLE_PLAN="rule:R1 close-pass"
+export DOUBLE_STATE="$TMP/double-state-10"
+set +e
+out10="$(bun "$RUNNER/run.ts" supervise --repo "$REPO" --model e2e-model --home "$H10" "${SUPERVISE_ARGS[@]}" 2>&1)"
+rc10=$?
+set -e
+check "probe10: a PASS verdict file present exits 0" "$rc10" "0"
+absent "probe10: NEEDS_OWNER.md does not exist" "$H10/NEEDS_OWNER.md"
+if [[ -f "$H10/supervisor/verdicts/c1.json" ]]; then
+  ok "probe10: the verify-shipped verdict file exists on disk"
+  contains "probe10: the verdict file carries card c1" "$(cat "$H10/supervisor/verdicts/c1.json")" '"card":"c1"'
+  contains "probe10: the verdict file carries a PASS verdict" "$(cat "$H10/supervisor/verdicts/c1.json")" '"verdict":"PASS"'
+else
+  bad "probe10: the verify-shipped verdict file exists on disk"
+  bad "probe10: the verdict file carries card c1"
+  bad "probe10: the verdict file carries a PASS verdict"
+fi
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

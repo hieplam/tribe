@@ -10,7 +10,7 @@
 // dependencies) — only path-joins are exported; the CALLER reads the committed asset through
 // its own IO and hands the content in via `facts.template`, exactly as `core/brief.ts`'s
 // `executorBrief` already does for its one template.
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { SessionKind } from './model.ts';
 
 export const RULING_TEMPLATE_PATH = join(import.meta.dir, 'brief-ruling.md');
@@ -72,6 +72,15 @@ export interface ClosingOpenIdsFact {
   openIds: string[];
 }
 
+/** §4c: one shipped card's verify-shipped verdict artifact. `verdictPath` is the ABSOLUTE
+ * `<home>/supervisor/verdicts/<cardId>.json` the closing session must have the script write with
+ * `--verdict-out` — the file the supervisor's closing postcondition then reads. The session's own
+ * prose is never the contract; this file is (spec §4, `brief-contracts.md` obligation 1). */
+export interface ClosingVerdictFact {
+  cardId: string;
+  verdictPath: string;
+}
+
 export interface ClosingBriefFacts {
   kind: 'closing';
   /** The committed asset at `CLOSING_TEMPLATE_PATH`, already read by the caller. */
@@ -82,6 +91,10 @@ export interface ClosingBriefFacts {
   openIdsByCard: ClosingOpenIdsFact[];
   /** `<home>/supervisor/final-report.md` — where Stage D step 4's report is written. */
   finalReportPath: string;
+  /** §4c: one entry per card the campaign report marks `shipped` — the verdict path the closing
+   * session must have `verify-shipped` write with `--verdict-out`. The postcondition reads these
+   * files; a `shipped` claim with no verdict file will not close the campaign. */
+  shippedVerdicts: ClosingVerdictFact[];
 }
 
 export type BriefFacts = RulingBriefFacts | RatifyBriefFacts | ClosingBriefFacts;
@@ -140,11 +153,25 @@ function renderClosing(facts: ClosingBriefFacts): string {
     ),
     '(no cards)',
   );
+  // The verdict dir (`<home>/supervisor/verdicts/`) is this command's OWN output location, and
+  // `verify-shipped.sh` fail-closes (refuses, never creates) on a missing `--verdict-out` dir —
+  // so the command must create it, or a closing session run against a bare home dies before it
+  // can write a verdict the supervisor then reads as `verdict_missing`. `mkdir -p` is idempotent
+  // and safe to repeat per card even when several share the one dir.
+  const shippedVerdicts = bulletList(
+    facts.shippedVerdicts.map(
+      (v) => `${v.cardId}: mkdir -p "${dirname(v.verdictPath)}" && bash "$script_path" `
+        + `--pr <${v.cardId}'s PR> --worktree <${v.cardId}'s worktree> --card ${v.cardId} `
+        + `--verdict-out ${v.verdictPath}`,
+    ),
+    '(no shipped cards — no verdict files to write)',
+  );
   return renderTemplate(facts.template, {
     CAMPAIGN_REPORT_CONTENT: facts.campaignReportContent,
     RULINGS: rulings,
     OPEN_IDS_BY_CARD: openIds,
     FINAL_REPORT_PATH: facts.finalReportPath,
+    SHIPPED_VERDICTS: shippedVerdicts,
   });
 }
 

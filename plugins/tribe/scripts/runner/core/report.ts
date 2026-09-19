@@ -23,6 +23,7 @@ import { EXIT_ESCALATED, EXIT_LOCKED, EXIT_RULINGS_UNRATIFIED, EXIT_SESSION_INCO
 import type { Card, CampaignState } from './types.ts';
 import type { ReportIO } from '../ports/ports.ts';
 import { ESCALATIONS_DIRNAME, escalationPathOf } from './paths.ts';
+import { parseEscalationQuestion } from './escalation.ts';
 
 export type { ReportIO };
 
@@ -123,16 +124,31 @@ export function deriveExitReason(params: {
   return 'done';
 }
 
+/** The digest's own `## Context` extraction (spec §5(d)): the FIRST line after the section's
+ * heading line, skipping any purely-blank lines in between — never the full multi-line body
+ * `parseEscalationQuestion` returns verbatim. Reproduces the pre-refactor
+ * `/## Context\n+([^\n]*)/` regex's exact semantics: `context` always begins with the heading
+ * line (`sectionVerbatim`'s own contract), so the first run of newlines anywhere in it is the
+ * one ending that heading line, and skipping it lands on the same line the old regex captured.
+ * A line of only whitespace and "no such line" both degrade to `undefined`, matching the old
+ * regex's own trim-to-empty behaviour. */
+function firstVerbatimContextLine(context: string): string | undefined {
+  const afterHeading = /\n+([^\n]*)/.exec(context);
+  const line = afterHeading?.[1]?.trim();
+  return line ? line : undefined;
+}
+
 /** Best-effort one-line digest of an escalation markdown file, matching the exact shape
  * `loop.ts`'s `buildEscalationMarkdown` produces (`**Reason:** <reason>` then a `## Context`
  * section). Never throws; unrecognizable content degrades to an honest fallback string rather
- * than inventing a question nobody asked. */
+ * than inventing a question nobody asked. This is the escalation-file shape's THIRD read site
+ * (spec §5(d)) — parsing goes through `core/escalation.ts`'s shared `parseEscalationQuestion`,
+ * the same parser `loop.ts`'s reason-line read and park-document question already use; only the
+ * join/truncation behaviour below stays local to this module. */
 export function extractQuestionDigest(markdown: string): string {
-  const reasonMatch = /\*\*Reason:\*\*\s*(.+)/.exec(markdown);
-  const reason = reasonMatch ? reasonMatch[1]?.trim() : undefined;
-
-  const contextMatch = /## Context\n+([^\n]*)/.exec(markdown);
-  const contextLine = contextMatch ? contextMatch[1]?.trim() : undefined;
+  const parsed = parseEscalationQuestion(markdown);
+  const reason = parsed && parsed.reasonLine !== '' ? parsed.reasonLine : undefined;
+  const contextLine = parsed ? firstVerbatimContextLine(parsed.context) : undefined;
 
   let digest: string;
   if (reason && contextLine) {
@@ -304,7 +320,10 @@ export function renderReportMarkdown(report: CampaignReport): string {
     } else if (entry.outcome === 'escalated') {
       lines.push(`- Escalation file: ${entry.escalationFile}`);
       lines.push(`- Question: ${entry.question}`);
-      lines.push(`- Auto-answer rounds: ${entry.autoAnswerRounds}`);
+      // FU-CS-1 (spec §7): nothing in the runner ever increments `autoAnswerRounds`, so the
+      // number is permanently 0 — indistinguishable from "we tried zero times" when it
+      // actually means "nobody counts this". State that honestly rather than a stuck number.
+      lines.push('- Auto-answer rounds: not tracked (field is vestigial — see spec §7)');
     } else if (entry.outcome === 'blocked') {
       lines.push(`- Blocked on: ${entry.blockedOn}`);
     }

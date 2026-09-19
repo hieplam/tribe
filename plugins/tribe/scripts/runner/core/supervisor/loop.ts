@@ -35,18 +35,21 @@
  * facts this loop gathers off disk at the moment of a `spawn_session` action (spec §5.2/§5.3/
  * §5.4) — the escalation file's content, the card's spec/plan paths (`campaign-state.json`'s
  * per-card `spec`/`plan` fields, read the same repo-relative way `core/brief.ts`'s executor
- * brief already reads them — never `core/types.ts`'s `Card`, which this module does not import),
+ * brief already reads them — Task 16: through `readCampaignState`, `../state.ts`'s own
+ * `CampaignStateSchema.safeParse`, imported read-only, never edited),
  * the unratified rulings' own verbatim blocks (`extractRulingBlockVerbatim` below — `../
  * rulings.ts#parseRulings` classifies a block's `ratified-as:` but deliberately never carries
- * its bytes), and the closing session's campaign-report/gap-gate facts (`SupervisorIO`'s
- * `resolveTribeHome` — the BASE tribe home, never the campaign-nested `homeDir` — is what the
- * gate's own JSON lives under, per `orchestrate-campaign/SKILL.md` Stage D step 2, verbatim:
- * "`<base-home>/reports/<card>-gap-gate.json` (... the BASE tribe home the gate writes to, NOT
- * the campaign-nested `--home`)").
+ * its bytes), and the closing session's campaign-report/gap-gate facts (each card's gap-gate JSON
+ * lives under the CAMPAIGN home — `<campaign-home>/reports/<card>-gap-gate.json` — because the gate
+ * writes beside the Tracker reports it consumes, which `core/brief.ts` puts under that same
+ * campaign home; the closing reader (`readGapGateOpenIds`) therefore reads `homeDir`, never
+ * `resolveTribeHome`'s base tribe home — spec §6).
  */
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { WatchdogHandle, SupervisorIO } from '../../ports/ports.ts';
+import { CampaignStateSchema } from '../state.ts';
+import type { CampaignState } from '../types.ts';
 import type {
   CampaignReportCardFact, CampaignReportFacts, EscalationFact, LedgerEntry, LedgerVerdict,
   ParkMarker, ParkReason, SessionKind, SessionOutcome, SupervisorAction, SupervisorLimits,
@@ -60,17 +63,18 @@ import {
 import {
   buildStatus, exitCodeOf, renderNeedsOwner, serializeStatus, type SupervisorTerminalKind,
 } from './status.ts';
-import { parseParkMarker, verifyClosing, verifyRatify, verifyRuling } from './verify.ts';
+import { parseParkMarker, verifyClosing, verifyRatify, verifyRuling, type ShippedVerdict } from './verify.ts';
 import {
   buildOneShotOptions as _buildOneShotOptions, runOneShotSession,
   type OneShotSessionConfig, type OneShotSessionSeam,
 } from './session.ts';
 import {
   CLOSING_TEMPLATE_PATH, RATIFY_TEMPLATE_PATH, RULING_TEMPLATE_PATH, renderBrief,
-  type ClosingBriefFacts, type ClosingOpenIdsFact, type ClosingRulingFact,
+  type ClosingBriefFacts, type ClosingOpenIdsFact, type ClosingRulingFact, type ClosingVerdictFact,
   type RatifyBlockFact, type RatifyBriefFacts, type RulingBriefFacts,
 } from './brief.ts';
 import { parseRulings, unratifiedRulingIds } from '../rulings.ts';
+import { extractReasonLine, parseEscalationQuestion } from '../escalation.ts';
 import { answersPathOf, campaignStatePathOf, escalationPathOf, escalationsDirOf } from '../paths.ts';
 import { REPORT_JSON_FILENAME } from '../report.ts';
 import { watchdogPathsOf } from '../watchdog/select.ts';
@@ -155,6 +159,7 @@ interface SupervisorPaths {
   answers: string;
   escalationsDir: string;
   finalReport: string;
+  verdictsDir: string;
 }
 
 function supervisorPathsOf(homeDir: string): SupervisorPaths {
@@ -173,6 +178,7 @@ function supervisorPathsOf(homeDir: string): SupervisorPaths {
     answers: answersPathOf(homeDir),
     escalationsDir: escalationsDirOf(homeDir),
     finalReport: join(dir, 'final-report.md'),
+    verdictsDir: join(dir, 'verdicts'),
   };
 }
 
@@ -315,24 +321,32 @@ export function parseCampaignReportFacts(raw: string): CampaignReportFacts | nul
   };
 }
 
-/** The escalation file's own `**Reason:**` line, verbatim (S-P3: a fixed-template field, never
- * prose interpretation — the same line `core/report.ts#extractQuestionDigest` already proves is
- * machine-readable, isolated here to just the reason value). */
-function extractReasonLine(content: string): string {
-  const match = /\*\*Reason:\*\*\s*(.+)/.exec(content);
-  return match?.[1]?.trim() ?? '';
+/** Task 16 (spec §5(c)): the ONE reader `readOwnerOnlyEscalations` and `readCardSpecPlan` both
+ * route `campaign-state.json` through — `../state.ts`'s full `CampaignStateSchema`, imported
+ * read-only (never edited), via `safeParse` (never the throwing `parseState`, which additionally
+ * enforces cross-card referential integrity this loop has no business refusing a whole campaign
+ * over). Before this, each site parsed its own field independently off the same raw JSON: a
+ * document with a malformed `ownerOnlyEscalations` entry still let `readCardSpecPlan` read a
+ * perfectly fine `cards.<id>.spec` right next to it, and vice versa — each half "worked" on its
+ * own, which is exactly the drift a schema exists to catch (a document that is malformed ANYWHERE
+ * is malformed, full stop). `null` on ANY structural failure — unreadable file, invalid JSON, or a
+ * schema mismatch anywhere in the document — never a throw reaching the tick loop
+ * (`fail-closed-edges.md` obligation 1). */
+function readCampaignState(io: SupervisorLoopSeam, homeDir: string): CampaignState | null {
+  const text = io.readFileOrEmpty(campaignStatePathOf(homeDir));
+  if (text === '') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const result = CampaignStateSchema.safeParse(parsed);
+  return result.success ? (result.data as CampaignState) : null;
 }
 
 function readOwnerOnlyEscalations(io: SupervisorLoopSeam, homeDir: string): string[] {
-  const raw = io.readFileOrEmpty(campaignStatePathOf(homeDir));
-  if (raw === '') return [];
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const list = parsed['ownerOnlyEscalations'];
-    return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : [];
-  } catch {
-    return [];
-  }
+  return readCampaignState(io, homeDir)?.ownerOnlyEscalations ?? [];
 }
 
 function readParkMarkers(io: SupervisorLoopSeam, parkDir: string): ParkMarker[] {
@@ -372,6 +386,8 @@ function buildEscalationFacts(
       filePresent,
       contentSha256: sha256Hex(content),
       reason,
+      // FU-CS-1 (spec §7): vestigial — nothing in the runner ever increments this. Carried
+      // into `EscalationFact` for shape parity only; never consulted by `decide()`.
       autoAnswerRounds: card.autoAnswerRounds ?? 0,
       // Known simplification (see report to the Warchief): a durable card<->ruling-id link that
       // survives a supervisor crash between a ruling landing and its archive would need either a
@@ -511,39 +527,31 @@ export function extractRulingBlockVerbatim(answersContent: string, id: string): 
 
 /** §5.2's brief needs the card's spec/plan paths, repo-relative — the same convention
  * `core/brief.ts`'s executor brief already uses (`card.spec ?? '(missing)'`, joined with
- * `repoRoot` only by whoever displays it, never here). Read directly off `campaign-state.json`'s
- * raw JSON — never `core/types.ts`'s `CampaignState`/`Card` (this module imports neither; the
- * scope fence keeps `core/types.ts` untouched). Fail-closed: any shape mismatch reads as
- * `null`, never a throw. */
+ * `repoRoot` only by whoever displays it, never here). Task 16: reads off the SAME
+ * `readCampaignState` result `readOwnerOnlyEscalations` reads — a card absent from a validly
+ * parsed document, or a document that failed to parse at all (anywhere in it, not just this
+ * card), both yield `missing`. Fail-closed: never a throw. */
 function readCardSpecPlan(
   io: SupervisorLoopSeam, homeDir: string, cardId: string,
 ): { specPath: string | null; planPath: string | null } {
   const missing = { specPath: null, planPath: null };
-  const raw = io.readFileOrEmpty(campaignStatePathOf(homeDir));
-  if (raw === '') return missing;
-  try {
-    const cards = (JSON.parse(raw) as Record<string, unknown>)['cards'];
-    if (cards === null || typeof cards !== 'object') return missing;
-    const card = (cards as Record<string, unknown>)[cardId];
-    if (card === null || typeof card !== 'object') return missing;
-    const c = card as Record<string, unknown>;
-    return {
-      specPath: typeof c['spec'] === 'string' ? c['spec'] : null,
-      planPath: typeof c['plan'] === 'string' ? c['plan'] : null,
-    };
-  } catch {
-    return missing;
-  }
+  const card = readCampaignState(io, homeDir)?.cards[cardId];
+  if (card === undefined) return missing;
+  return { specPath: card.spec, planPath: card.plan };
 }
 
 /** §5.4's closing brief needs each card's still-open gap ids, from **the gate's own JSON** —
- * `<base-home>/reports/<card>-gap-gate.json`'s `open_ids` (`orchestrate-campaign/SKILL.md`
- * Stage D step 2, quoted in the module doc comment). `baseHome` is `io.resolveTribeHome`'s
- * result, never `homeDir` (which is the campaign-NESTED home). Fail-closed: a missing or
- * unparseable report reads as zero open ids, never a throw — a card that never shipped (so the
- * gate never ran for it) is exactly this case, and is not an error. */
-function readGapGateOpenIds(io: SupervisorLoopSeam, baseHome: string, cardId: string): string[] {
-  const raw = io.readFileOrEmpty(join(baseHome, 'reports', `${cardId}-gap-gate.json`));
+ * `<campaign-home>/reports/<card>-gap-gate.json`'s `open_ids`. `homeDir` is the campaign-nested
+ * home the loop already holds (spec §6): the gate writes there because its Tracker inputs live
+ * there (`core/brief.ts`'s `reportPathFor(homeDir, …)`), so the reader must look there too — never
+ * the base tribe home. One path, no fallback: a reader that quietly tries a second directory is how
+ * the reader and writer end up disagreeing again. Fail-closed: a missing or unparseable report
+ * reads as zero open ids, never a throw — a card that never shipped (so the gate never ran for it)
+ * is exactly this case, and is not an error.
+ * Exported ONLY as a test seam (card `supervisor-hardening`, spec §6 oracle): a unit test asserts a
+ * report written under the campaign home is found and one under the base home is not consulted. */
+export function readGapGateOpenIds(io: SupervisorLoopSeam, homeDir: string, cardId: string): string[] {
+  const raw = io.readFileOrEmpty(join(homeDir, 'reports', `${cardId}-gap-gate.json`));
   if (raw === '') return [];
   try {
     const openIds = (JSON.parse(raw) as Record<string, unknown>)['open_ids'];
@@ -553,13 +561,43 @@ function readGapGateOpenIds(io: SupervisorLoopSeam, baseHome: string, cardId: st
   }
 }
 
+/** §4b: the ids of every card the campaign report marks `shipped`. Each one must have a
+ * verify-shipped verdict file before the campaign may close. */
+function shippedCardIds(report: CampaignReportFacts | null): string[] {
+  const cards = report?.cards ?? {};
+  return Object.entries(cards)
+    .filter(([, card]) => card.outcome === 'shipped')
+    .map(([cardId]) => cardId);
+}
+
+/** §4b/§4c: the thin edge read behind the closing postcondition. For every shipped card it reads
+ * `<home>/supervisor/verdicts/<cardId>.json` (the file `verify-shipped.sh --verdict-out` wrote),
+ * or `null` when absent. The pure `verifyClosing` parses each `raw` and decides — this function
+ * only reads (`pure-core.md`). */
+function readShippedVerdicts(
+  io: SupervisorLoopSeam, verdictsDir: string, report: CampaignReportFacts | null,
+): ShippedVerdict[] {
+  return shippedCardIds(report).map((cardId) => ({
+    cardId,
+    raw: entryExists(io, verdictsDir, `${cardId}.json`)
+      ? io.readFileOrEmpty(join(verdictsDir, `${cardId}.json`))
+      : null,
+  }));
+}
+
 /** §5.2/§5.3/§5.4: gathers the disk facts for a `spawn_session` action and renders the real
  * brief (`brief.ts#renderBrief`) — this is the session's initial prompt. `before` is
  * `answers.md`'s content as already read by the caller (the SAME read used for the
  * postcondition check's `before` snapshot — one read, two uses, never a second read that could
  * observe a different moment). Everything else is read fresh, right here, off the same `io`. */
-async function buildOneShotPrompt(
-  io: SupervisorLoopSeam, config: SupervisorLoopConfig, homeDir: string, paths: SupervisorPaths,
+// Exported as a test seam ONLY (card `supervisor-hardening`, RW1): the G5 reproduction
+// (`tests/test-supervisor-repro.sh`) calls this directly, with the REAL production io adapter, to
+// prove the closing brief carries the gate's real open ids — the defect (spec §6) was that this
+// function handed `readGapGateOpenIds` the BASE tribe home (`io.resolveTribeHome`), while the gate
+// writes under the campaign home this function already holds as `homeDir`. The closing branch below
+// now reads that campaign home directly.
+export async function buildOneShotPrompt(
+  io: SupervisorLoopSeam, homeDir: string, paths: SupervisorPaths,
   observation: SupervisorObservation, action: { session: SessionKind; cardId: string | null }, before: string,
 ): Promise<string> {
   if (action.session === 'ruling') {
@@ -601,13 +639,16 @@ async function buildOneShotPrompt(
     id: block.id,
     ratifiedAs: block.ratifiedAs ?? '',
   }));
-  const baseHome = await io.resolveTribeHome(config.repoRoot);
-  const openIdsByCard: ClosingOpenIdsFact[] = baseHome.ok
-    ? Object.keys(observation.report?.cards ?? {}).map((cardId) => ({
-      cardId,
-      openIds: readGapGateOpenIds(io, baseHome.home, cardId),
-    }))
-    : [];
+  // The gate writes under the campaign home (`homeDir`), so read there — one path, no fallback to
+  // the base tribe home (spec §6 fix). `resolveTribeHome` is deliberately NOT consulted here.
+  const openIdsByCard: ClosingOpenIdsFact[] = Object.keys(observation.report?.cards ?? {}).map((cardId) => ({
+    cardId,
+    openIds: readGapGateOpenIds(io, homeDir, cardId),
+  }));
+  const shippedVerdicts: ClosingVerdictFact[] = shippedCardIds(observation.report).map((cardId) => ({
+    cardId,
+    verdictPath: join(paths.verdictsDir, `${cardId}.json`),
+  }));
   const facts: ClosingBriefFacts = {
     kind: 'closing',
     template: io.readFileOrEmpty(CLOSING_TEMPLATE_PATH),
@@ -615,6 +656,7 @@ async function buildOneShotPrompt(
     rulings,
     openIdsByCard,
     finalReportPath: paths.finalReport,
+    shippedVerdicts,
   };
   return renderBrief('closing', facts);
 }
@@ -872,7 +914,7 @@ export async function runSupervisor(
             : {}),
         };
         const before = io.readFileOrEmpty(paths.answers);
-        const prompt = await buildOneShotPrompt(io, config, homeDir, paths, observation, action, before);
+        const prompt = await buildOneShotPrompt(io, homeDir, paths, observation, action, before);
         const startedAtIso = io.now();
         const result = await runOneShotSession(
           {
@@ -910,7 +952,10 @@ export async function runSupervisor(
           const finalReport = entryExists(io, paths.dir, 'final-report.md')
             ? io.readFileOrEmpty(paths.finalReport)
             : null;
-          const verdict = verifyClosing({ finalReport, answers: after });
+          // §4b: the verdict is the verify-shipped SCRIPT's own artifact, one file per shipped
+          // card — never the model's prose. The caller reads each file; `verifyClosing` decides.
+          const shippedVerdicts = readShippedVerdicts(io, paths.verdictsDir, observation.report);
+          const verdict = verifyClosing({ finalReport, answers: after, shippedVerdicts });
           outcome = verdict.outcome;
         }
 
@@ -953,13 +998,21 @@ export async function runSupervisor(
 
       case 'park': {
         const cardIdHint = currentLastSessionOutcome?.cardId ?? nextUnansweredCardId(observation.escalations);
+        // The park document shows the owner the parked card's OWN question, read from that card's
+        // escalation file (the loop already reads this shape each tick via `buildEscalationFacts`).
+        // `null` only when this park is not about one card's escalation — no card-scoped file to
+        // read. Fail-closed: a missing/empty/unparseable file yields `null`, never a throw.
+        const question = cardIdHint !== null
+          && entryExists(io, escalationsDirOf(homeDir), `${cardIdHint}.md`)
+          ? parseEscalationQuestion(io.readFileOrEmpty(escalationPathOf(homeDir, cardIdHint)))
+          : null;
         const content = renderNeedsOwner({
           campaignSlug: config.campaign,
           campaignHome: homeDir,
           reason: action.reason,
           atMs: io.nowMs(),
           cardId: cardIdHint,
-          question: null,
+          question,
           rulingRoundsUsed: Object.entries(supState.rulingRounds)
             .map(([cardId, used]) => ({ cardId, used, max: config.limits.maxRulingRounds })),
           spawnsUsed: { used: supState.spawns, max: config.limits.maxSpawns },
