@@ -2061,7 +2061,7 @@ reproduces rather than reinterprets.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing check** — extend `test-supervisor-docs.sh` with a flags-parity
+- [x] **Step 1: Write the failing check** — extend `test-supervisor-docs.sh` with a flags-parity
   wall in the style the watchdog's own docs test uses: every flag the README's table names must be
   accepted by the parser, and every flag the parser accepts must appear in the table.
 
@@ -2071,12 +2071,12 @@ for f in $(grep -oE '^\| `--[a-z-]+`' "$RUNNER_README" | tr -d '|` '); do
 done
 ```
 
-- [ ] **Step 2: Write both sections**, including the Known limitations entries: `autoAnswerRounds`
+- [x] **Step 2: Write both sections**, including the Known limitations entries: `autoAnswerRounds`
   is never incremented by the runner (FU-CS-1); a supervisor session gets no viewer badge chip, only
   its own project directory (FU-CS-2); and a crash of the supervisor itself is recovered by
   re-running it, exactly as the watchdog's own limitation reads.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 bash plugins/tribe/scripts/tests/test-supervisor-docs.sh
@@ -2086,7 +2086,7 @@ bash plugins/tribe/scripts/tests/test-fresh-machine.sh
 Expected: the docs test green including flags parity, and `test-fresh-machine.sh` unmoved (the
 supervisor adds no installable and no resolver).
 
-- [ ] **Step 4: Commit** — `docs(runner): supervisor sections in the runner and tribe READMEs (task 23/24)`.
+- [x] **Step 4: Commit** — `docs(runner): supervisor sections in the runner and tribe READMEs (task 23/24)`.
 
 ---
 
