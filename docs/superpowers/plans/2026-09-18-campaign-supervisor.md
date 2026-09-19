@@ -2111,7 +2111,7 @@ under `docs/superpowers/**`), and any drift the four earlier change-units left. 
 
 **Steps**
 
-- [ ] **Step 1: Reconcile and verify.**
+- [x] **Step 1: Reconcile and verify.**
 
 ```sh
 cd /Users/hip/repo/tribe-wt/campaign-supervisor
@@ -2126,7 +2126,7 @@ git status --short .c3
 Expected: `check` prints `total: 54` with `ok: true` both before and after, and `git status` shows
 only the change-unit and document files this plan authored (`.c3/c3.db` is git-ignored).
 
-- [ ] **Step 2: Commit** — `docs(c3): final governance reconciliation for the campaign supervisor (task 24/24)`.
+- [x] **Step 2: Commit** — `docs(c3): final governance reconciliation for the campaign supervisor (task 24/24)`.
 
 ---
 
