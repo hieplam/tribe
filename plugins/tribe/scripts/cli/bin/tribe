@@ -1,0 +1,4 @@
+#!/usr/bin/env bun
+// The `tribe` command. ./install.sh links this file onto PATH; bun resolves the link, so the
+// import below always finds main.ts inside this checkout.
+await import('../main.ts');

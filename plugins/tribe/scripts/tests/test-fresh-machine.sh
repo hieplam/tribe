@@ -28,7 +28,7 @@ contains() { # contains NAME HAYSTACK NEEDLE
 # into its $HOME/.claude by ./install.sh, mirroring a real second machine's layout.
 fresh_home() { # fresh_home HOME_DIR
   mkdir -p "$1/.claude"
-  CLAUDE_DIR="$1/.claude" bash "$REPO_ROOT/install.sh" tribe
+  CLAUDE_DIR="$1/.claude" TRIBE_BIN_DIR="$1/.local/bin" bash "$REPO_ROOT/install.sh" tribe
 }
 
 # doctor_fixture — a throwaway scripts/ tree for doctor.sh: $1 is the dir, $2 is

@@ -44,6 +44,11 @@ Behaviour: `agents/*.md` link into `~/.claude/agents/`, `skills/<name>/` into
 file is backed up to `<name>.bak.<epoch>` first, and a plugin's own `install.sh` runs as a
 post-install hook. `CLAUDE_DIR` overrides the target root (used by the tests).
 
+The `tribe` plugin's hook also puts the **`tribe` command** on your PATH — a symlink at
+`~/.local/bin/tribe` (`TRIBE_BIN_DIR` overrides the directory; the hook warns if it is not on
+PATH). Type `tribe` anywhere to start the session viewer and open it in the browser; `tribe
+--help` lists the options. See [`plugins/tribe/scripts/cli/`](plugins/tribe/scripts/cli/README.md).
+
 **Which one do I want?** Marketplace to *use* the plugins anywhere; symlink install to *develop*
 them.
 
@@ -95,6 +100,9 @@ semantics, the escalation workflow, and its known limitations.
 ```bash
 # runner tests
 cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit
+
+# `tribe` command tests (needs the viewer built: cd plugins/tribe/scripts/viewer && bun run build)
+cd plugins/tribe/scripts/cli && bun install && bun test && bunx tsc --noEmit
 
 # shell script tests (per plugin)
 plugins/tribe/scripts/tests/test-validate-plan.sh
