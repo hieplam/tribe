@@ -86,7 +86,13 @@ describe('reviseCeiling against the COMMITTED ratchet fixture (R7)', () => {
   test('one of the fixture\'s 0 ceilings accepts an initial measurement; an already-measured ceiling then refuses a further raise with no raisedBy', () => {
     const path = join(import.meta.dir, '../../../../../../docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json');
     const ratchet = JSON.parse(readFileSync(path, 'utf8')) as { ceilings: Record<string, number> };
-    const recorded = ratchet.ceilings['ruling'];
+    // `doorbell` (kind: 'owner', spec §12.2 — an owner-ruling transcription) is NOT a
+    // SessionKind and is never a spawned session, so no ledger entry ever carries kind
+    // `doorbell`; Task 20's Step 3 (`for k,v in peak.items()`, peak keyed off ledger kinds)
+    // never touches it. `ceilings.doorbell` therefore stays genuinely 0 forever — unlike
+    // `ruling`/`ratify`/`closing`, which Task 20's real run measures and moves off 0 — so this
+    // fixture read keeps proving the 0-is-unmeasured path even after that run lands.
+    const recorded = ratchet.ceilings['doorbell'];
     expect(recorded).toBe(0); // the fixture is genuinely unmeasured, as the brief asserts
 
     const initial = reviseCeiling(recorded, 258795, null);
