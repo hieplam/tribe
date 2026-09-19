@@ -30,15 +30,13 @@ export function CampaignBadge({ badge, history }: CampaignBadgeProps) {
   };
 
   return (
-    <button
-      type="button"
-      className="campaign-badge"
-      onClick={onClick}
-      style={{ background: 'var(--badge-bg)', color: 'var(--badge-ink)', borderRadius: 'var(--badge-radius)' }}
-    >
+    <button type="button" className="campaign-badge" onClick={onClick}>
       <span className="campaign-badge__slug">{badge.slug}</span>
+      <span className="campaign-badge__sep" aria-hidden="true">·</span>
       <span className="campaign-badge__card">{badge.cardId}</span>
+      <span className="campaign-badge__sep" aria-hidden="true">·</span>
       <span className="campaign-badge__status">{badge.cardStatus}</span>
+      <span className="campaign-badge__sep" aria-hidden="true">·</span>
       <span
         className="campaign-badge__runner"
         style={badge.runnerAlive ? undefined : { color: 'var(--warn)' }}

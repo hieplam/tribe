@@ -12,10 +12,8 @@ export interface ShowOlderProjectsProps {
 export function ShowOlderProjects({ olderCount }: ShowOlderProjectsProps) {
   if (olderCount <= 0) return null;
   return (
-    <p className="show-older-projects" style={{ color: 'var(--ink-soft)' }}>
-      <a href="?all=1" style={{ color: 'var(--accent)' }}>
-        show {olderCount} older projects
-      </a>
+    <p className="show-older-projects">
+      <a href="?all=1">show {olderCount} older projects</a>
     </p>
   );
 }

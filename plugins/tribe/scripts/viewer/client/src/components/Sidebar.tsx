@@ -11,6 +11,9 @@ export interface SidebarProps {
   olderCount: number;
   campaignFilter: string;
   onCampaignFilterChange: (value: string) => void;
+  /** The `dir` of the project currently being viewed (route `/p/<dir>`), threaded to `ProjectList`
+   * so its row shows the active stroke. Omitted on the aggregate `/` list. */
+  activeProjectDir?: string | null;
   /** A failed sidebar projects fetch (spec §8.1). Surfaced HERE, inside the sidebar itself, so it
    * is visible on EVERY route the shell renders — including a session route, whose `<main>` never
    * shares the list route's error branch (Item D, phase-3 audit fix). `null`/omitted renders
@@ -18,15 +21,16 @@ export interface SidebarProps {
   projectsError?: string | null;
 }
 
-export function Sidebar({ projects, olderCount, campaignFilter, onCampaignFilterChange, projectsError }: SidebarProps) {
+export function Sidebar({ projects, olderCount, campaignFilter, onCampaignFilterChange, activeProjectDir, projectsError }: SidebarProps) {
   return (
-    <aside className="sidebar" style={{ background: 'var(--surface)', borderColor: 'var(--rule)' }}>
+    <aside className="sidebar">
+      <h2 className="sidebar__heading">Projects</h2>
       {projectsError != null && (
-        <p className="sidebar-error" data-testid="sidebar-projects-error" style={{ color: 'var(--warn)' }}>
+        <p className="sidebar-error" data-testid="sidebar-projects-error">
           {projectsError}
         </p>
       )}
-      <ProjectList projects={projects} />
+      <ProjectList projects={projects} activeProjectDir={activeProjectDir} />
       <CampaignFilter value={campaignFilter} onChange={onCampaignFilterChange} />
       <ShowOlderProjects olderCount={olderCount} />
     </aside>

@@ -4,8 +4,10 @@
 import { expect, test } from 'bun:test';
 import { collectSources, findUnstyledClasses } from './unstyled-classes.ts';
 
-// Today's measured baseline, from `bun tools/unstyled-classes.ts`: unstyled 70 of 74 (2026-09-19).
-const UNSTYLED_CEILING = 70;
+// Measured with `bun tools/unstyled-classes.ts`. Task 1 baseline: unstyled 70 of 74 (2026-09-19).
+// Task 3 (session-list screen) styled the shell, sidebar, project/session rows, badge and dots,
+// lowering it to: unstyled 49 of 86 (2026-09-19). The ratchet only ever moves DOWN.
+const UNSTYLED_CEILING = 49;
 
 test('the real client stays at or below the committed unstyled-class ceiling', () => {
   const { tsxSources, cssSources } = collectSources();

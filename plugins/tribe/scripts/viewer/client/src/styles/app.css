@@ -30,22 +30,31 @@ body {
   padding: var(--space-16);
 }
 
-/* The two-column shell fills the remaining height; its children may shrink so the bounded `.rows`
- * container can own the overflow rather than the page. */
+/* The two-column shell IS preview §C/§D's `.screen` frame: a lifted panel with a hairline border,
+ * a gentle radius and the one barely-there shadow. Its children (sidebar, main) sit flush to the
+ * frame — the sidebar's own right rule is the column divider — so it carries no inner padding, and
+ * `overflow: hidden` keeps the rounded corners clean while each column owns its own scroll. */
 .app-shell {
   display: flex;
   flex-direction: row;
   min-height: 0;
   flex: 1;
+  background: var(--surface-raised);
+  border: var(--card-stroke) var(--rule-style) var(--rule);
+  border-radius: var(--radius-8);
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
 
 /* Main and the session view are height-filling flex columns, so the row list beneath them can be
- * the bounded scroll container. */
+ * the bounded scroll container. `min-width: 0` lets the main column shrink instead of forcing the
+ * frame wider than the viewport. */
 .app-main,
 .session-view {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   flex: 1;
 }
 
@@ -54,13 +63,6 @@ body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-}
-
-.app-shell {
-  background: var(--surface);
-  border: var(--card-stroke) var(--rule-style) var(--rule);
-  border-radius: var(--radius-8);
-  padding: var(--space-16);
 }
 
 .app-shell__title {

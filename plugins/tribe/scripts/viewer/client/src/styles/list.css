@@ -1,0 +1,249 @@
+/* client/src/styles/list.css — the SESSION-LIST screen (plan Task 3), styled to preview.html §C.
+ * Imported by ./index.css AFTER the tokens @import, so every value below is a `var(--token)` read
+ * from design/sea-salt/tokens.css. No colour, font, radius, or spacing literal is invented here;
+ * the three preview pixel values with no matching token (a 248-wide sidebar, a 9-wide dot, badge
+ * padding of 3) are translated to the nearest token or a relative unit, each noted on its line. */
+
+/* ---- sidebar (preview §C `.sidebar`): a salt panel with a hairline right rule ---- */
+.sidebar {
+  flex: 0 0 15.5rem; /* preview sidebar is 248 wide; 248/16 = 15.5rem so it tracks the root scale */
+  padding: var(--space-16);
+  background: var(--surface);
+  border-right: var(--rule-weight) var(--rule-style) var(--rule);
+  overflow-y: auto;
+}
+
+.sidebar__heading {
+  margin: 0 0 var(--space-12) 0;
+  font-size: var(--size-12);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
+}
+
+.sidebar-error {
+  margin: 0 0 var(--space-12) 0;
+  font-size: var(--size-12);
+  color: var(--warn);
+}
+
+/* ---- project rows (preview §C `.proj`) ---- */
+.project-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-8);
+  border-radius: var(--radius-4);
+  font-size: var(--size-13);
+  color: var(--ink-soft);
+}
+
+/* The project whose page is showing — preview §C `.proj.on`: the accent carried as an inset stroke,
+ * never a fill. */
+.project-row--active {
+  background: var(--surface-raised);
+  color: var(--ink);
+  box-shadow: inset var(--card-stroke) 0 0 var(--accent);
+}
+
+.project-row__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-row__count {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+}
+
+/* ---- filter box (preview §C `.filter .box`) ---- */
+.campaign-filter {
+  width: 100%;
+  margin-top: var(--space-16);
+  padding: var(--space-8);
+  background: var(--surface-raised);
+  color: var(--ink);
+  border: var(--rule-weight) var(--rule-style) var(--rule);
+  border-radius: var(--radius-4);
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+}
+
+/* ---- "show N older projects" affordance (D10) ---- */
+.show-older-projects {
+  margin: var(--space-12) 0 0 0;
+  font-size: var(--size-12);
+  color: var(--ink-soft);
+}
+
+.show-older-projects a {
+  color: var(--accent);
+}
+
+/* ---- the main column's header strip (preview §C `.screen-head`) ---- */
+.session-list-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.list-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-12);
+  padding: var(--space-12) var(--space-16);
+  background: var(--surface);
+  border-bottom: var(--rule-weight) var(--rule-style) var(--rule);
+  font-size: var(--size-13);
+}
+
+.list-head__title {
+  font-weight: 600;
+  font-size: var(--size-14);
+  color: var(--ink);
+}
+
+.list-head__meta {
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+  color: var(--ink-soft);
+}
+
+/* ---- session rows (preview §C `.item`) ---- */
+.session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.session-list__empty {
+  margin: 0;
+  padding: var(--space-16);
+  font-size: var(--size-14);
+  color: var(--ink-soft);
+}
+
+.session-row {
+  padding: var(--space-12) var(--space-16);
+  border-bottom: var(--rule-weight) var(--rule-style) var(--rule);
+  color: var(--ink);
+}
+
+/* preview §C `.item .top`: dot · title · age, title taking the slack so age sits at the right. */
+.session-row__top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+}
+
+.session-row__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--size-16);
+  font-weight: 500;
+}
+
+.session-row__age {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* preview §C `.item .sub`: the mono metadata line, its parts middot-separated. */
+.session-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--size-13);
+  color: var(--ink-soft);
+}
+
+.session-row__id,
+.session-row__size,
+.session-row__subagents,
+.session-row__projects {
+  font-family: var(--font-mono);
+}
+
+.session-row__sep {
+  color: var(--ink-soft);
+}
+
+/* preview §C `.item .badgeline`. */
+.session-row__badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}
+
+/* ---- campaign badge (preview §C/§E `.badge`) ---- */
+.campaign-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8); /* preview vertical padding is 3 → --space-4 */
+  font-family: var(--font-mono);
+  font-size: var(--size-12);
+  line-height: 1.4;
+  color: var(--badge-ink);
+  background: var(--badge-bg);
+  border: var(--rule-weight) var(--rule-style) var(--rule);
+  border-radius: var(--badge-radius);
+  cursor: pointer;
+}
+
+.campaign-badge__sep {
+  color: var(--badge-ink);
+}
+
+/* ---- status dots (preview §C `.dot`): a 9-wide circle, filled when live, hollow when idle ---- */
+.live-dot,
+.idle-dot {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: var(--space-8); /* preview dot is 9 wide → nearest token --space-8 */
+  height: var(--space-8);
+  border-radius: 50%; /* preview radius 999 → a circle */
+}
+
+.live-dot {
+  background: var(--live);
+  box-shadow: 0 0 0 var(--space-4) var(--accent-soft); /* preview halo is 3 → --space-4 */
+}
+
+.idle-dot {
+  background: transparent;
+  border: var(--rule-weight) var(--rule-style) var(--rule);
+}
+
+/* ---- the main-column error/degraded notes styled in the same soft-warn vocabulary ---- */
+.app-error,
+.app-degraded {
+  margin: 0;
+  padding: var(--space-16);
+  font-size: var(--size-14);
+  color: var(--warn);
+}

@@ -10,6 +10,9 @@ export interface SessionListProps {
   /** The raw `<repoKey>/<slug>` pair from `CampaignFilter` (empty string = no filter). Matches
    * spec §9's own contract: match on the PAIR, never the slug alone. */
   campaignFilter?: string;
+  /** The main column's header title — the project path on `/p/<dir>`, a general label on `/`
+   * (preview §C `.screen-head .ttl`). Omitted renders the meta line alone. */
+  heading?: string;
 }
 
 /** Pure: `sessions` narrowed to those carrying a badge for the exact `(repoKey, slug)` pair
@@ -27,22 +30,29 @@ export function filterSessionsByCampaign(sessions: SessionSummary[], campaignFil
   return sessions.filter((s) => s.badges.some((b) => b.repoKey === repoKey && b.slug === slug));
 }
 
-export function SessionList({ sessions, campaignFilter = '' }: SessionListProps) {
+export function SessionList({ sessions, campaignFilter = '', heading }: SessionListProps) {
   const filtered = filterSessionsByCampaign(sessions, campaignFilter);
-  if (filtered.length === 0) {
-    return (
-      <p className="session-list__empty" style={{ color: 'var(--ink-soft)' }}>
-        No sessions match this filter.
-      </p>
-    );
-  }
   return (
-    <ul className="session-list">
-      {filtered.map((session) => (
-        <li key={session.id}>
-          <SessionRow session={session} />
-        </li>
-      ))}
-    </ul>
+    <section className="session-list-view">
+      {/* preview §C `.screen-head`: the project path, then "N sessions · newest first". The count
+          is the rendered (post-filter) set, so it never disagrees with the rows below it. */}
+      <header className="list-head">
+        {heading != null && <span className="list-head__title">{heading}</span>}
+        <span className="list-head__meta">
+          {filtered.length} session{filtered.length === 1 ? '' : 's'} · newest first
+        </span>
+      </header>
+      {filtered.length === 0 ? (
+        <p className="session-list__empty">No sessions match this filter.</p>
+      ) : (
+        <ul className="session-list">
+          {filtered.map((session) => (
+            <li key={session.id}>
+              <SessionRow session={session} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

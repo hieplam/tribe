@@ -55,31 +55,40 @@ export interface SessionRowProps {
 export function SessionRow({ session, now }: SessionRowProps) {
   const nowMs = now ?? Date.now();
   return (
-    <div className="session-row" style={{ color: 'var(--ink)', borderColor: 'var(--rule)' }}>
-      <LiveDot live={session.live} />
-      <span className="session-row__title">{session.title}</span>
-      {/* spec §4/§5.2: `projects.length === 1` is the ordinary case and renders nothing; at 2+ the
-          real count is shown, never a guess ("multiple") and never a hard-coded "2". */}
-      {session.projects.length >= 2 && (
-        <span className="session-row__projects" style={{ color: 'var(--ink-soft)' }}>
-          found in {session.projects.length} projects
+    <div className="session-row">
+      {/* preview §C `.item .top`: the status dot, the title (taking the slack), the age at the
+          right. The dot is filled when live (LiveDot) and a hollow ring when idle — LiveDot renders
+          nothing when idle by design, so the ring is its own element here. */}
+      <div className="session-row__top">
+        {session.live ? <LiveDot live={true} /> : <span className="idle-dot" aria-hidden="true" />}
+        <span className="session-row__title">{session.title}</span>
+        <span className="session-row__age">{formatRelativeAge(session.mtimeIso, nowMs)}</span>
+      </div>
+      {/* preview §C `.item .sub`: the mono metadata line, its parts separated by a middot. */}
+      <div className="session-row__meta">
+        <span className="session-row__id">{shortSessionId(session.id)}</span>
+        <span className="session-row__sep" aria-hidden="true">·</span>
+        <span className="session-row__size">{formatSize(session.sizeBytes)}</span>
+        <span className="session-row__sep" aria-hidden="true">·</span>
+        <span className="session-row__subagents">
+          {session.subagentCount} subagent{session.subagentCount === 1 ? '' : 's'}
         </span>
+        {/* spec §4/§5.2: `projects.length === 1` is the ordinary case and renders nothing; at 2+
+            the real count is shown, never a guess ("multiple") and never a hard-coded "2". */}
+        {session.projects.length >= 2 && (
+          <>
+            <span className="session-row__sep" aria-hidden="true">·</span>
+            <span className="session-row__projects">found in {session.projects.length} projects</span>
+          </>
+        )}
+      </div>
+      {session.badges.length > 0 && (
+        <div className="session-row__badges">
+          {session.badges.map((badge) => (
+            <CampaignBadge key={`${badge.repoKey}/${badge.slug}`} badge={badge} />
+          ))}
+        </div>
       )}
-      <span className="session-row__id" style={{ color: 'var(--ink-soft)' }}>
-        {shortSessionId(session.id)}
-      </span>
-      <span className="session-row__size" style={{ color: 'var(--ink-soft)' }}>
-        {formatSize(session.sizeBytes)}
-      </span>
-      <span className="session-row__age" style={{ color: 'var(--ink-soft)' }}>
-        {formatRelativeAge(session.mtimeIso, nowMs)}
-      </span>
-      <span className="session-row__subagents" style={{ color: 'var(--ink-soft)' }}>
-        {session.subagentCount} subagent{session.subagentCount === 1 ? '' : 's'}
-      </span>
-      {session.badges.map((badge) => (
-        <CampaignBadge key={`${badge.repoKey}/${badge.slug}`} badge={badge} />
-      ))}
     </div>
   );
 }
