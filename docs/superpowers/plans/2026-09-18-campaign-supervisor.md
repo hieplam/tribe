@@ -1443,7 +1443,7 @@ park reason.
 
 **Steps**
 
-- [ ] **Step 1: Write the failing test** with a fully scripted fake `SupervisorIO` (no real fs, no
+- [x] **Step 1: Write the failing test** with a fully scripted fake `SupervisorIO` (no real fs, no
   real spawn). Assert, at minimum: the happy path `run_watchdog → escalations_pending → ruling
   spawn → verified → archive → run_watchdog → runner_done → closing → exit 0`; that `events.jsonl`
   records the intent line **before** the effect for every action; that the ruling round increments
@@ -1452,9 +1452,9 @@ park reason.
   retries exactly once and then parks; that the write surface touched by the whole run is exactly
   S-P5's three locations.
 
-- [ ] **Step 2: Write `core/supervisor/loop.ts`.**
+- [x] **Step 2: Write `core/supervisor/loop.ts`.**
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 
 ```sh
 cd plugins/tribe/scripts/runner && bun test core/supervisor/loop.test.ts && bunx tsc --noEmit
@@ -1462,7 +1462,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/loop.test.ts && bunx
 
 Expected: about 20 tests pass; `tsc` silent.
 
-- [ ] **Step 4: Commit** — `feat(supervisor): the observe-decide-perform-persist loop (task 14/24)`.
+- [x] **Step 4: Commit** — `feat(supervisor): the observe-decide-perform-persist loop (task 14/24)`.
 
 ---
 
