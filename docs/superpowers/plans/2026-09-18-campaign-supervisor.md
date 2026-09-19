@@ -2229,7 +2229,9 @@ subset of:
 `plugins/tribe/scripts/runner/{core/metrics/**,core/supervisor/**,ports/ports.ts,adapters/supervisor-io.adapter.ts,adapters/supervisor-io.adapter.test.ts,adapters/transcript-io.adapter.ts,adapters/transcript-io.adapter.test.ts,adapters/cut.ts,adapters/cut.test.ts,adapters/session-double.adapter.ts,cli/main.ts,cli/main.test.ts,fixtures/supervisor/**,README.md}`,
 `plugins/tribe/scripts/tests/{test-supervisor-e2e.sh,test-supervisor-kill.sh,test-supervisor-real-e2e.sh,test-supervisor-docs.sh,test-supervisor-permission-real.sh}`,
 `plugins/tribe/skills/orchestrate-campaign/SKILL.md`, `plugins/tribe/README.md`,
-`docs/superpowers/{specs,plans,evidence}/**`, `.c3/**`.
+`docs/superpowers/{specs,plans,evidence}/**`, `.c3/**`, and the mandated gap-gate registry
+`.tribe/harness-gaps.jsonl` (the harness-gaps reconciliation every card's PR commits with the
+`Tribe-Milestone: gap-gate` trailer — a governance artifact, not card scope creep).
 Note what is NOT there: `core/types.ts`, `core/state.ts`, `core/watchdog/**`, and the entire
 `plugins/tribe/scripts/viewer/` tree. Anything else in the diff is a fence breach — stop and report,
 do not tidy it.
