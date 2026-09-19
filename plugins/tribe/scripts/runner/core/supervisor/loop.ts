@@ -22,19 +22,27 @@
  * with `adapters/session.adapter.ts`'s exports and a `realpath` primitive, the same way any
  * composition root merges capability ports. See the report to the Warchief for this concern.
  *
- * --- V7/V8 (spec §3.4): `decide.ts`'s own post-session block deliberately does NOT implement
- * the `ratified`/`closed` outcomes ("not this task's scope (dispatch ruling 2026-09-19)" —
- * `decide.test.ts`'s own comment proves it: an outcome outside V1-V6 "falls through to the
- * ordinary rows", which would use the WATCHDOG's now-stale terminal reason and wrongly re-spawn
- * another ratify/closing session forever). V7/V8 are therefore this loop's own responsibility,
- * not a re-derivation of anything `decide()` owns: a session-authored SUCCESS the loop performs
- * unconditionally, never a `ParkReason`.
+ * --- V7/V8 (spec §3.4): `decide.ts` implements BOTH rows (task 7 fix) — this loop never
+ * re-derives the `ratified`/`closed` action itself. It still performs one piece of bookkeeping
+ * `decide()` cannot: durably recording `closingVerified: true` in `state.json` the moment a
+ * `closed` verdict is carried out, BEFORE the process exits (§4.3's crash-recovery row for
+ * `spawn_session(closing)`). That is a state-persistence side effect of CARRYING OUT the exit
+ * decide() already made — the same class of bookkeeping this loop already performs for every
+ * other action kind (incrementing `spawns`/`rulingRounds`/`ratifyRounds`/`watchdogRuns`) — never
+ * a re-decision of what to do.
  *
- * --- The one-shot session's PROMPT: `core/supervisor/brief.ts#renderBrief` needs facts
- * (escalation body text already read, spec/plan paths, gap-gate reports) that
- * `SupervisorObservation` (spec §3.2) does not carry, and this task's brief does not list
- * `brief.ts` among the modules "the loop composes". Wiring the real brief is left to a later
- * task; `placeholderPrompt` below documents the seam rather than pretending to close it.
+ * --- The one-shot session's PROMPT: rendered by `core/supervisor/brief.ts#renderBrief` from
+ * facts this loop gathers off disk at the moment of a `spawn_session` action (spec §5.2/§5.3/
+ * §5.4) — the escalation file's content, the card's spec/plan paths (`campaign-state.json`'s
+ * per-card `spec`/`plan` fields, read the same repo-relative way `core/brief.ts`'s executor
+ * brief already reads them — never `core/types.ts`'s `Card`, which this module does not import),
+ * the unratified rulings' own verbatim blocks (`extractRulingBlockVerbatim` below — `../
+ * rulings.ts#parseRulings` classifies a block's `ratified-as:` but deliberately never carries
+ * its bytes), and the closing session's campaign-report/gap-gate facts (`SupervisorIO`'s
+ * `resolveTribeHome` — the BASE tribe home, never the campaign-nested `homeDir` — is what the
+ * gate's own JSON lives under, per `orchestrate-campaign/SKILL.md` Stage D step 2, verbatim:
+ * "`<base-home>/reports/<card>-gap-gate.json` (... the BASE tribe home the gate writes to, NOT
+ * the campaign-nested `--home`)").
  */
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -57,7 +65,12 @@ import {
   buildOneShotOptions as _buildOneShotOptions, runOneShotSession,
   type OneShotSessionConfig, type OneShotSessionSeam,
 } from './session.ts';
-import { unratifiedRulingIds } from '../rulings.ts';
+import {
+  CLOSING_TEMPLATE_PATH, RATIFY_TEMPLATE_PATH, RULING_TEMPLATE_PATH, renderBrief,
+  type ClosingBriefFacts, type ClosingOpenIdsFact, type ClosingRulingFact,
+  type RatifyBlockFact, type RatifyBriefFacts, type RulingBriefFacts,
+} from './brief.ts';
+import { parseRulings, unratifiedRulingIds } from '../rulings.ts';
 import { answersPathOf, campaignStatePathOf, escalationPathOf, escalationsDirOf } from '../paths.ts';
 import { REPORT_JSON_FILENAME } from '../report.ts';
 import { watchdogPathsOf } from '../watchdog/select.ts';
@@ -430,13 +443,138 @@ function observe(
   };
 }
 
-/** Task 14's oracle governs the seven-step tick and the spawn/verify/persist mechanics, not the
- * one-shot session's prompt CONTENT — see the module doc comment. A clearly-labelled placeholder
- * so a real session, if ever pointed at this loop before brief.ts is wired in, fails obviously
- * rather than silently. */
-function placeholderPrompt(session: SessionKind, cardId: string | null): string {
-  return `[supervisor placeholder prompt — core/supervisor/brief.ts wiring is a later task] `
-    + `kind=${session} cardId=${cardId ?? '(none)'}`;
+/** §5.3's ratify brief needs each named ruling's OWN block, byte-verbatim (the `## ` heading
+ * line through the line before the next `## ` heading, or EOF) — `../rulings.ts#parseRulings`
+ * classifies a block's `ratified-as:` value but deliberately never carries the block's own
+ * bytes (it is a classifier, not an extractor; see that module's own doc comment). Fail-closed
+ * (`fail-closed-edges.md`): an id with no matching heading, or empty content, returns `null`
+ * rather than guessing at a block boundary — never a throw. Exported for its own unit test. */
+export function extractRulingBlockVerbatim(answersContent: string, id: string): string | null {
+  const lines = answersContent.split('\n');
+  let startLine = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const heading = /^##\s+(.+?)\s*$/.exec(lines[i] as string);
+    if (heading !== null && (heading[1] as string).trim() === id) {
+      startLine = i;
+      break;
+    }
+  }
+  if (startLine === -1) return null;
+  let endLine = lines.length;
+  for (let i = startLine + 1; i < lines.length; i++) {
+    if (/^##\s+/.test(lines[i] as string)) {
+      endLine = i;
+      break;
+    }
+  }
+  return lines.slice(startLine, endLine).join('\n');
+}
+
+/** §5.2's brief needs the card's spec/plan paths, repo-relative — the same convention
+ * `core/brief.ts`'s executor brief already uses (`card.spec ?? '(missing)'`, joined with
+ * `repoRoot` only by whoever displays it, never here). Read directly off `campaign-state.json`'s
+ * raw JSON — never `core/types.ts`'s `CampaignState`/`Card` (this module imports neither; the
+ * scope fence keeps `core/types.ts` untouched). Fail-closed: any shape mismatch reads as
+ * `null`, never a throw. */
+function readCardSpecPlan(
+  io: SupervisorLoopSeam, homeDir: string, cardId: string,
+): { specPath: string | null; planPath: string | null } {
+  const missing = { specPath: null, planPath: null };
+  const raw = io.readFileOrEmpty(campaignStatePathOf(homeDir));
+  if (raw === '') return missing;
+  try {
+    const cards = (JSON.parse(raw) as Record<string, unknown>)['cards'];
+    if (cards === null || typeof cards !== 'object') return missing;
+    const card = (cards as Record<string, unknown>)[cardId];
+    if (card === null || typeof card !== 'object') return missing;
+    const c = card as Record<string, unknown>;
+    return {
+      specPath: typeof c['spec'] === 'string' ? c['spec'] : null,
+      planPath: typeof c['plan'] === 'string' ? c['plan'] : null,
+    };
+  } catch {
+    return missing;
+  }
+}
+
+/** §5.4's closing brief needs each card's still-open gap ids, from **the gate's own JSON** —
+ * `<base-home>/reports/<card>-gap-gate.json`'s `open_ids` (`orchestrate-campaign/SKILL.md`
+ * Stage D step 2, quoted in the module doc comment). `baseHome` is `io.resolveTribeHome`'s
+ * result, never `homeDir` (which is the campaign-NESTED home). Fail-closed: a missing or
+ * unparseable report reads as zero open ids, never a throw — a card that never shipped (so the
+ * gate never ran for it) is exactly this case, and is not an error. */
+function readGapGateOpenIds(io: SupervisorLoopSeam, baseHome: string, cardId: string): string[] {
+  const raw = io.readFileOrEmpty(join(baseHome, 'reports', `${cardId}-gap-gate.json`));
+  if (raw === '') return [];
+  try {
+    const openIds = (JSON.parse(raw) as Record<string, unknown>)['open_ids'];
+    return Array.isArray(openIds) ? openIds.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** §5.2/§5.3/§5.4: gathers the disk facts for a `spawn_session` action and renders the real
+ * brief (`brief.ts#renderBrief`) — this is the session's initial prompt. `before` is
+ * `answers.md`'s content as already read by the caller (the SAME read used for the
+ * postcondition check's `before` snapshot — one read, two uses, never a second read that could
+ * observe a different moment). Everything else is read fresh, right here, off the same `io`. */
+async function buildOneShotPrompt(
+  io: SupervisorLoopSeam, config: SupervisorLoopConfig, homeDir: string, paths: SupervisorPaths,
+  observation: SupervisorObservation, action: { session: SessionKind; cardId: string | null }, before: string,
+): Promise<string> {
+  if (action.session === 'ruling') {
+    const cardId = action.cardId as string; // row 12 always names a card for `ruling`
+    const { specPath, planPath } = readCardSpecPlan(io, homeDir, cardId);
+    const facts: RulingBriefFacts = {
+      kind: 'ruling',
+      template: io.readFileOrEmpty(RULING_TEMPLATE_PATH),
+      cardId,
+      escalationContent: io.readFileOrEmpty(escalationPathOf(homeDir, cardId)),
+      ownerOnlyEscalations: observation.ownerOnlyEscalations,
+      existingRulingIds: parseRulings(before).map((block) => block.id),
+      specPath,
+      planPath,
+    };
+    return renderBrief('ruling', facts);
+  }
+
+  if (action.session === 'ratify') {
+    const rulingBlocks: RatifyBlockFact[] = observation.unratifiedRulings.map((id) => ({
+      id,
+      content: extractRulingBlockVerbatim(before, id)
+        ?? `(no matching "## ${id}" block found in answers.md — read this as a contract violation)`,
+    }));
+    const facts: RatifyBriefFacts = {
+      kind: 'ratify',
+      template: io.readFileOrEmpty(RATIFY_TEMPLATE_PATH),
+      unratifiedRulingIds: observation.unratifiedRulings,
+      rulingBlocks,
+    };
+    return renderBrief('ratify', facts);
+  }
+
+  // action.session === 'closing'
+  const rulings: ClosingRulingFact[] = parseRulings(before).map((block) => ({
+    id: block.id,
+    ratifiedAs: block.ratifiedAs ?? '',
+  }));
+  const baseHome = await io.resolveTribeHome(config.repoRoot);
+  const openIdsByCard: ClosingOpenIdsFact[] = baseHome.ok
+    ? Object.keys(observation.report?.cards ?? {}).map((cardId) => ({
+      cardId,
+      openIds: readGapGateOpenIds(io, baseHome.home, cardId),
+    }))
+    : [];
+  const facts: ClosingBriefFacts = {
+    kind: 'closing',
+    template: io.readFileOrEmpty(CLOSING_TEMPLATE_PATH),
+    campaignReportContent: io.readFileOrEmpty(paths.campaignReport),
+    rulings,
+    openIdsByCard,
+    finalReportPath: paths.finalReport,
+  };
+  return renderBrief('closing', facts);
 }
 
 function incrementRetrigger(state: SupervisorState, key: string): SupervisorState {
@@ -587,16 +725,9 @@ export async function runSupervisor(
 
     const observation = observe(config, homeDir, io, paths, loopState, supState, currentLastSessionOutcome);
 
-    // V7/V8 — see the module doc comment: `decide.ts` deliberately excludes these two outcomes.
-    let action: SupervisorAction;
-    if (currentLastSessionOutcome !== null && currentLastSessionOutcome.outcome === 'ratified') {
-      action = { kind: 'run_watchdog', cards: null, includeEscalated: false };
-    } else if (currentLastSessionOutcome !== null && currentLastSessionOutcome.outcome === 'closed') {
-      supState = { ...supState, closingVerified: true };
-      action = { kind: 'exit', status: 'done', reason: 'campaign_closed' };
-    } else {
-      action = decide(observation);
-    }
+    // The loop carries out decisions; it makes none (Task 14 oracle) — `decide()` alone owns
+    // V7/V8, same as every other row (task 7 fix).
+    const action: SupervisorAction = decide(observation);
 
     // Oracle step 4 — BEFORE step 5 (perform).
     recordIntent(io, paths.events, io.now(), action);
@@ -683,11 +814,12 @@ export async function runSupervisor(
             : {}),
         };
         const before = io.readFileOrEmpty(paths.answers);
+        const prompt = await buildOneShotPrompt(io, config, homeDir, paths, observation, action, before);
         const startedAtIso = io.now();
         const result = await runOneShotSession(
           {
             kind: action.session,
-            prompt: placeholderPrompt(action.session, action.cardId),
+            prompt,
             config: oneShotConfig,
             sessionTimeoutMs: config.sessionTimeoutSeconds * 1000,
           },
@@ -799,6 +931,15 @@ export async function runSupervisor(
       }
 
       case 'exit': {
+        // §4.3's crash-recovery row for `spawn_session(closing)`: a verified `closed` outcome
+        // must be DURABLE in `state.json` before this process actually exits, so a restart's
+        // row 1 (`o.state.closingVerified`) can exit `done` without re-spawning a closing
+        // session that already succeeded. This is bookkeeping that CARRIES OUT the `exit`
+        // action decide() already returned (keyed off the same typed session-outcome fact
+        // decide() itself read) — never a re-derivation of the action itself.
+        if (currentLastSessionOutcome !== null && currentLastSessionOutcome.outcome === 'closed') {
+          supState = { ...supState, closingVerified: true };
+        }
         persist();
         publish('terminal', `exit:${action.reason}`, {
           status: 'done', reason: action.reason, exitCode: exitCodeOf('done'),
