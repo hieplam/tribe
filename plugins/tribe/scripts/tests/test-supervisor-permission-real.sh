@@ -234,6 +234,9 @@ git -C "$CLOSING_REPO_ROOT" add seed.txt
 git -C "$CLOSING_REPO_ROOT" commit -q -m 'initial commit'
 
 CLOSING_WRITTEN_FILE="$CLOSING_REPO_ROOT/closing-probe-note.txt"
+# R12: the Bash step must leave an OBSERVABLE effect — proof Bash actually ran, not just that
+# nothing was denied (a session that silently skips the Bash step passes the old assertions too).
+CLOSING_BASH_PROBE="$CLOSING_REPO_ROOT/bash-probe.txt"
 
 # R11 item 4: resolved from THIS SCRIPT'S OWN LOCATION (`$HERE`), never cwd — mirrors
 # `cli/main.ts`'s `import.meta.dir`-relative resolution of the same directory. `plugins/` is
@@ -263,7 +266,7 @@ const prompt = [
   'order, never stopping to ask for confirmation and never substituting a different path or',
   'command for either of them:',
   '(i) Write the text "closing probe" to the file ' + repoRoot + '/closing-probe-note.txt',
-  '(ii) Run the shell command: git -C ' + repoRoot + ' status',
+  '(ii) Run the shell command: git -C ' + repoRoot + ' rev-parse HEAD > ' + repoRoot + '/bash-probe.txt',
   'After doing both (regardless of outcome), reply with exactly: DONE',
 ].join('\\n');
 
@@ -335,6 +338,21 @@ if [[ -e "$CLOSING_WRITTEN_FILE" ]]; then
   ok "closing: the Write inside repoRoot landed on disk ($CLOSING_WRITTEN_FILE)"
 else
   bad "closing: the Write inside repoRoot landed on disk ($CLOSING_WRITTEN_FILE missing)"
+fi
+
+# --- R12: prove the Bash step actually EXECUTED — an outcome==success + empty-denials run that
+# silently skipped Bash would pass every assertion above too. bash-probe.txt must exist and hold
+# exactly the throwaway closing-repo's HEAD sha.
+EXPECTED_HEAD="$(git -C "$CLOSING_REPO_ROOT" rev-parse HEAD)"
+if [[ -e "$CLOSING_BASH_PROBE" ]]; then
+  GOT_HEAD="$(tr -d '[:space:]' < "$CLOSING_BASH_PROBE")"
+  if [[ "$GOT_HEAD" == "$EXPECTED_HEAD" ]]; then
+    ok "closing: the Bash step actually ran — bash-probe.txt holds the throwaway repo HEAD sha"
+  else
+    bad "closing: the Bash step actually ran — bash-probe.txt holds the throwaway repo HEAD sha (got=$GOT_HEAD expected=$EXPECTED_HEAD)"
+  fi
+else
+  bad "closing: the Bash step actually ran — bash-probe.txt holds the throwaway repo HEAD sha (file missing)"
 fi
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
