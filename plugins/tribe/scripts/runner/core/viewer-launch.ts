@@ -77,8 +77,10 @@ function isCurrentViewer(body: Record<string, unknown>): boolean {
  *   200, or a body that failed to parse as JSON at all (`unparseable`) -> `stale`. The port is
  *   occupied by something that is not this viewer: spawning would die to `EADDRINUSE`
  *   invisibly (the failure mode the old code could not see), and reusing would hand out a URL
- *   that 404s. Neither is safe, so neither happens. */
-function classifyProbe(probe: ProbeSignal): 'reuse' | 'spawn' | 'stale' {
+ *   that 404s. Neither is safe, so neither happens.
+ * Exported because the `tribe` CLI (`scripts/cli/`) reads the same `/healthz` shape and must
+ * not parse it a second way (rule-one-parser-per-edge-shape). */
+export function classifyProbe(probe: ProbeSignal): 'reuse' | 'spawn' | 'stale' {
   if (probe.kind === 'no-response') return 'spawn';
   if (probe.kind === 'unparseable') return 'stale';
   return isCurrentViewer(probe.body) ? 'reuse' : 'stale';

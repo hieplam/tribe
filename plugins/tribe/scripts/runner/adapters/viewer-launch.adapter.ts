@@ -30,10 +30,10 @@ const PROBE_TIMEOUT_MS = 500;
  * anything else that actually answered is `responded` with its parsed body, unclassified. */
 export function buildViewerPort(): ViewerPort {
   return {
-    async probeViewer(port): Promise<ProbeSignal> {
+    async probeViewer(port, host = '127.0.0.1'): Promise<ProbeSignal> {
       let res: Response;
       try {
-        res = await fetch(`http://127.0.0.1:${port}/healthz`, {
+        res = await fetch(`http://${host}:${port}/healthz`, {
           signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
         });
       } catch {

@@ -17,7 +17,8 @@ separate `/live` runner-log tail) was retired.
 ## Read-only, by construction
 
 Nothing in this package ever writes, renames, deletes, locks, or executes anything, anywhere; it
-never calls `git`, `gh`, or any network endpoint; it binds `127.0.0.1` only. Every filesystem
+never calls `git`, `gh`, or any network endpoint; it binds `127.0.0.1` unless the owner passes
+`--host` (the `tribe --remote` flag) to open it to the local network. Every filesystem
 access goes through one of two adapters — `adapters/fs.adapter.ts` (every transcript read: stat,
 readdir, ranged read, realpath) or `adapters/campaign.adapter.ts` (the *only* two `~/.tribe` reads
 — `campaign-state.json` and `run.json` — plus the pid liveness probe). `adapters/poller.adapter.ts`
@@ -27,13 +28,17 @@ touches the filesystem, the clock, the network, or `process.env`/`process.argv` 
 
 ## Run it
 
+The everyday way is the `tribe` command ([`../cli/README.md`](../cli/README.md)): it picks a free
+port, starts this server in the foreground, and opens the browser. Directly:
+
 ```sh
 bun serve.ts --port 4321
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--port` | `4321` | HTTP port, bound to `127.0.0.1` only. `1-65535`; `--port abc`, `--port 0`, `--port 70000`, or an unknown flag each refuse with one stderr line and exit `2` (never a stack trace, never a random port). A port already in use refuses with one stderr line and exit `1`. |
+| `--port` | `4321` | HTTP port. `1-65535`; `--port abc`, `--port 0`, `--port 70000`, or an unknown flag each refuse with one stderr line and exit `2` (never a stack trace, never a random port). A port already in use refuses with one stderr line and exit `1`. |
+| `--host` | `127.0.0.1` | Address to listen on. `0.0.0.0` (what `tribe --remote` passes) makes the viewer reachable from any device on the local network, with **no password** — kanna's `--remote` behaviour, chosen by the owner. The startup prints each `http://<LAN-IP>:<port>` URL and a no-password warning. A host that is not `0.0.0.0`, `localhost`/`127.0.0.1`, or one of this machine's own IPv4 addresses (IPv6 included) refuses with one stderr line and exit `2` before binding (Bun would otherwise misreport it as `EADDRINUSE`, i.e. "port in use"). A missing value refuses with exit `2`. |
 
 `--tribe-root` is gone. Both roots the server needs are resolved from the environment alone, once
 at boot, and printed on the startup line:
@@ -92,8 +97,11 @@ filesystem to decide a status code.
 Every `sessionId`/`agentId`/`project` value is validated and contained **before any path is
 joined** — both lexically and, after `realpath`, against the resolved projects root (a symlinked
 `subagents` directory, sidecar, or spill that escapes the root, or a symlink loop, is refused, not
-read). Every request is also gated on `Host`/`Origin` — `127.0.0.1[:port]` or `localhost[:port]`
-only, `403` otherwise (DNS-rebinding defense). Every response carries
+read). Every request is also gated on `Host`/`Origin`, `403` otherwise (DNS-rebinding defense,
+`core/net.ts#hostHeaderAllowed`): on the default loopback bind only `127.0.0.1[:port]` or
+`localhost[:port]`; on a network bind (`--host`) also any IPv4 literal and any `*.local` name —
+how another device addresses this machine — while a request under any other DNS name is still
+refused, because that is the shape a rebinding attack needs. Every response carries
 `X-Content-Type-Options: nosniff`; the HTML document responses (the SPA shell) additionally carry a
 Content-Security-Policy.
 
@@ -215,6 +223,7 @@ core/                    PURE — no fs, no clock, no env, no network
   badge.ts               badge derivation + campaign selection/cap (pure over already-read JSON)
   routes.ts              URL -> Route
   sse.ts                 frame encode/decode, sequence ids, 1 MiB frame batching
+  net.ts                 --host validation, the Host/Origin allow rule, LAN address list
 adapters/                the only impure edges — thin, fail-closed
   fs.adapter.ts          every transcript read (stat, readdir, ranged read, realpath)
   campaign.adapter.ts    the ONLY two ~/.tribe reads + the pid liveness probe

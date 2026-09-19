@@ -74,10 +74,11 @@ export type ProbeSignal =
  * feature); `core/viewer-launch.ts`'s `decideViewerLaunch` only ever sees the `ProbeSignal`
  * this port produces — it never touches the network or a process itself. */
 export interface ViewerPort {
-  /** Read-only reuse probe against `http://127.0.0.1:<port>/healthz` (card D6). Never
+  /** Read-only reuse probe against `http://<host>:<port>/healthz` (card D6; `host` defaults
+   * to 127.0.0.1 — the `tribe` CLI passes a LAN address when it opens the viewer to the network). Never
    * throws (fail-closed-edges.md): every fetch/parse failure degrades to a typed `ProbeSignal`
    * member instead. */
-  probeViewer(port: number): Promise<ProbeSignal>;
+  probeViewer(port: number, host?: string): Promise<ProbeSignal>;
   /** Detached, `stdio: 'ignore'`, `unref()`ed — cannot hold the runner open, cannot pollute
    * its stdout, cannot fail it (D12: "observability exhaust never kills a run"). */
   spawnDetached(argv: string[]): void;

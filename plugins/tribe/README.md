@@ -326,13 +326,19 @@ it binds `127.0.0.1` only. The campaign runner starts it automatically alongside
 prints its URL and a per-card session URL — see
 [`scripts/runner/README.md`](scripts/runner/README.md#live-viewer).
 
-Start the server by hand with:
+Start it with the `tribe` command (linked onto PATH by `./install.sh`, see
+[`scripts/cli/README.md`](scripts/cli/README.md)):
 
 ```sh
-bun plugins/tribe/scripts/viewer/serve.ts [--port <n>]
+tribe                    # start on 4321 (or the next free port) and open the browser
+tribe --port 5000 --no-open
 ```
 
-`--port` defaults to `4321`. Both roots the server needs (the transcripts root and `~/.tribe`)
+`tribe` reuses a viewer already running on the port instead of starting a second one. `tribe
+--remote` opens it to other devices on your network (kanna's flag; **no password** — see the CLI
+README). The
+underlying server can still be run directly with `bun plugins/tribe/scripts/viewer/serve.ts
+[--port <n>]`; `--port` defaults to `4321`. Both roots the server needs (the transcripts root and `~/.tribe`)
 resolve from the environment alone (`CLAUDE_CONFIG_DIR`/`HOME`) — there is no `--tribe-root` flag.
 Then open `http://127.0.0.1:<port>` (or `curl` it). See
 [`scripts/viewer/README.md`](scripts/viewer/README.md) for the full route contract.

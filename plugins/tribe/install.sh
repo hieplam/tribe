@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — tribe plugin post-install hook. Three jobs:
+# install.sh — tribe plugin post-install hook. Five jobs:
 #
 # 1. Symlinks each machine-global rule file in rules/ into $CLAUDE_DIR/rules/,
 #    where reviewers (tracker, skinner) read every *.md fresh on each run.
@@ -17,6 +17,12 @@
 #    the presence marker — if that exact line exists in CLAUDE.md, the snippet is
 #    skipped.
 #
+# 4. Links the `tribe` command (scripts/cli/bin/tribe) into $TRIBE_BIN_DIR (default
+#    ~/.local/bin) so a bare `tribe` starts the session viewer from any directory.
+#    Same link/backup behavior as rules/; warns when that directory is not on PATH.
+#
+# 5. Builds the viewer client (scripts/viewer/dist) — see the block at the end.
+#
 # The first line alone is not a sufficient guard. When a snippet grows a NEW
 # top-level heading above an existing section, the marker misses against a
 # CLAUDE.md that already carries that section under the old shape — the snippet
@@ -26,7 +32,8 @@
 # append: the hook reports the overlap and leaves reconciliation to the owner,
 # whose copy may hold local edits this script must never silently bury.
 #
-# CLAUDE_DIR overrides the target root (default: ~/.claude) — used by tests.
+# CLAUDE_DIR overrides the target root (default: ~/.claude) and TRIBE_BIN_DIR the command
+# directory (default: ~/.local/bin) — both used by tests.
 
 set -euo pipefail
 
@@ -72,6 +79,31 @@ if [ -d "$PLUGIN_DIR/canvases" ]; then
     ln -s "$canvas" "$dst"
     printf '  linked  canvases/%s -> %s\n' "$(basename "$canvas")" "$dst"
   done
+fi
+
+# --- scripts/cli/bin/tribe -> $TRIBE_BIN_DIR/tribe (the `tribe` command on PATH) ---
+# Placed before the claude-md/ block, whose `exit 0` ends the hook when claude-md/ is absent.
+TRIBE_CMD_SRC="$PLUGIN_DIR/scripts/cli/bin/tribe"
+TRIBE_BIN_DIR="${TRIBE_BIN_DIR:-$HOME/.local/bin}"
+if [ -f "$TRIBE_CMD_SRC" ]; then
+  mkdir -p "$TRIBE_BIN_DIR"
+  dst="$TRIBE_BIN_DIR/tribe"
+  if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$TRIBE_CMD_SRC" ]; then
+    printf '  ok      command tribe (already linked)\n'
+  else
+    if [ -e "$dst" ] || [ -L "$dst" ]; then
+      bak="$dst.bak.$(date +%s)"
+      mv "$dst" "$bak"
+      printf 'WARN: command tribe: existing %s backed up to %s\n' "$dst" "$bak" >&2
+    fi
+    ln -s "$TRIBE_CMD_SRC" "$dst"
+    printf '  linked  command tribe -> %s\n' "$dst"
+  fi
+  case ":$PATH:" in
+    *":$TRIBE_BIN_DIR:"*) ;;
+    *) printf 'WARN: %s is not on PATH — add `export PATH="%s:$PATH"` to your shell profile to run `tribe`\n' \
+         "$TRIBE_BIN_DIR" "$TRIBE_BIN_DIR" >&2 ;;
+  esac
 fi
 
 # --- claude-md/ -> appended to $CLAUDE_DIR/CLAUDE.md -------------------------
