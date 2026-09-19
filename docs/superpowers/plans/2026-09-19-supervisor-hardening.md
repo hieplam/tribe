@@ -630,7 +630,7 @@ frozen component is judgment.
 
 **Files:** `.c3/` entities, through the wrapper CLI only.
 
-- [ ] **Step 1: Author the patches against `c3-215`.**
+- [x] **Step 1: Author the patches against `c3-215`.**
   Now that Phase 2's code exists, author the change-unit patches the ADR from Task 5 describes.
 
   ```bash
@@ -643,7 +643,7 @@ frozen component is judgment.
   not repair the three older 2026-09-19 units' pre-existing drift — spec §11 records that as a
   follow-up, and it is not this card's damage.
 
-- [ ] **Step 2: Accept, apply, validate.**
+- [x] **Step 2: Accept, apply, validate.**
 
   ```bash
   C3X_MODE=agent bash "$C3/bin/c3x.sh" change accept adr-supervisor-hardening
@@ -654,7 +654,7 @@ frozen component is judgment.
   Expected: `ok: true`. If `apply` reports drift on this card's own patches, rebase them through the
   CLI and re-apply.
 
-- [ ] **Step 3: Commit** — `docs(c3): reconcile c3-215 with the supervisor-hardening fixes`.
+- [x] **Step 3: Commit** — `docs(c3): reconcile c3-215 with the supervisor-hardening fixes`.
 
 ---
 

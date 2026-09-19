@@ -1,0 +1,6 @@
+---
+target: c3-215
+scope: insert
+base: c3-215#n1795@v1:sha256:28f22344eac8aeafc892845dc7461500e7c0576a71d68a4c929cc1b17ecad8af
+---
+| The closing brief omits the gap-gate's open ids because the reader looks in the wrong home | Editing core/supervisor/loop.ts#readGapGateOpenIds or buildOneShotPrompt's closing branch | The gap-gate writer writes `<home>/reports/<card>-gap-gate.json` under the CAMPAIGN home (forced by where its Tracker-report inputs live), while the reader used to read under the BASE tribe home (io.resolveTribeHome), so the closing brief never listed the gate's open ids (G5). readGapGateOpenIds now reads `join(homeDir, 'reports', ...)` — the campaign home the function already holds — with NO fallback to a second directory (a silent fallback is exactly how a reader drifts from a writer again); an absent file reads as zero open ids, never a throw. The two documentation lines the fix falsifies (orchestrate-campaign/SKILL.md Stage D, agents/warchief.md's gap-gate invocation) name the campaign home | cd plugins/tribe/scripts/runner && bun test core/supervisor/loop.test.ts && bunx tsc --noEmit — a report under the campaign home is found and one under the base home is not consulted; plus plugins/tribe/scripts/tests/test-supervisor-repro.sh drives the real production io adapter to prove the closing brief carries the gate's real open ids |

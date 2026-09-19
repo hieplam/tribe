@@ -1,6 +1,6 @@
 ---
 id: adr-20260920-supervisor-hardening
-c3-seal: 4cca28a9c8b753cc1258f62e3a6a8397415c8d0280d013e8d02647bc7913cca9
+c3-seal: e69ad9c920b4f7b45845ef19aaa7910672ce5ec92758a29d48782c65b0d71512
 title: supervisor-hardening
 type: adr
 goal: |-
@@ -15,7 +15,7 @@ goal: |-
     make its model true again are deferred to the Phase 2 reconciliation task, because the code they
     describe does not exist yet and a patch against absent code is exactly the drift this repo already
     carries.
-status: proposed
+status: accepted
 date: "2026-09-20"
 ---
 
