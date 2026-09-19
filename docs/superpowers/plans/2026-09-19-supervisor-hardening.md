@@ -243,7 +243,7 @@ their expected exit codes are fully specified.
 
 **Files:** edit `plugins/tribe/scripts/tests/test-supervisor-repro.sh`.
 
-- [ ] **Step 1: Add the failing reproduction.**
+- [x] **Step 1: Add the failing reproduction.**
   In a throwaway `mktemp` git repo built from nothing, commit a ratchet file with
   `"ruling": 27534`, then commit a second version raising it to `999999` with no `raisedBy`, and
   assert the gate that must exist refuses it:
@@ -256,7 +256,7 @@ their expected exit codes are fully specified.
   Add the two companion cases in the same run: the same raise **with** `raisedBy.ruling` set must
   exit `0`, and a lowering must exit `0`.
 
-- [ ] **Step 2: Observe it fail — the red.**
+- [x] **Step 2: Observe it fail — the red.**
 
   ```bash
   TRIBE_REPRO=1 bash plugins/tribe/scripts/tests/test-supervisor-repro.sh
@@ -265,7 +265,7 @@ their expected exit codes are fully specified.
   Expected: all three G2 assertions fail because `plugins/tribe/scripts/ratchet-check.ts` does not
   exist yet, so `bun` exits with a module-resolution error rather than `1`, `0`, `0`.
 
-- [ ] **Step 3: Commit** — `test(supervisor): reproduce the ratchet accepting an unjustified raise`.
+- [x] **Step 3: Commit** — `test(supervisor): reproduce the ratchet accepting an unjustified raise`.
 
 ## Task 5: Phase 1 governance reconciliation
 

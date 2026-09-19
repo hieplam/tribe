@@ -281,5 +281,88 @@ if [[ "$brief_rc" != "0" ]]; then
 fi
 contains "G5: the closing brief lists the gate's own open ids" "$brief_out" "$g5_open_id"
 
+# --- G2: the ratchet does not ratchet (spec §3) --------------------------------------------
+# `reviseCeiling` (core/metrics/ceiling.ts) is a correct, already-unit-tested pure predicate with
+# NO CALLER outside its own test — there is no edge anywhere that compares a proposed ratchet
+# file against its prior (merge-base) version, so "raising" is not a concept any gate can
+# observe today. `plugins/tribe/scripts/ratchet-check.ts` (the thin edge Task 7 builds) does not
+# exist yet; this reproduces "the gate is absent" by invoking it directly — never
+# re-implementing `checkRatchetRevision`/`reviseCeiling` in this script, which would only prove
+# the pure function works (already covered) and miss the actual defect (no caller).
+G2_FIX="$TMP/g2-ratchet-repo"
+mkdir -p "$G2_FIX"
+git init -q -b master "$G2_FIX"
+# Mirrors the real committed file's shape verbatim
+# (docs/superpowers/evidence/2026-09-18-supervisor-ratchet.json).
+cat > "$G2_FIX/ratchet.json" <<'JSON'
+{
+  "v": 1,
+  "ceilings": { "ruling": 27534, "ratify": 0, "closing": 93443, "doorbell": 0 }
+}
+JSON
+git -C "$G2_FIX" -c user.email=t@t.test -c user.name=t add ratchet.json
+git -C "$G2_FIX" -c user.email=t@t.test -c user.name=t commit -q -m "base: ruling ceiling 27534"
+G2_BASE_SHA="$(git -C "$G2_FIX" rev-parse HEAD)"
+RATCHET_CHECK="$REPO_ROOT/plugins/tribe/scripts/ratchet-check.ts"
+
+# Case 1: an unjustified raise (999999, no raisedBy anywhere) — committed, mirroring the plan's
+# literal wording ("commit a second version raising it…"), even though the edge only reads the
+# WORKING TREE for the head version (spec §3's thin-edge description: "reading the working-tree
+# version") — a real PR branch would carry this as a commit, so committing it here is the
+# faithful shape.
+cat > "$G2_FIX/ratchet.json" <<'JSON'
+{
+  "v": 1,
+  "ceilings": { "ruling": 999999, "ratify": 0, "closing": 93443, "doorbell": 0 }
+}
+JSON
+git -C "$G2_FIX" -c user.email=t@t.test -c user.name=t commit -q -am "raise ruling ceiling to 999999, no raisedBy"
+
+set +e
+g2_case1_out="$(bun "$RATCHET_CHECK" --repo "$G2_FIX" --base "$G2_BASE_SHA" --path ratchet.json 2>&1)"
+g2_case1_rc=$?
+set -e
+# Verified by direct measurement before writing this assertion: `bun` itself exits 1 with
+# "error: Module not found …" when `ratchet-check.ts` is absent (today's real state) — the SAME
+# code case 1 expects from a genuine refusal. A bare `check ... "1"` would spuriously PASS today
+# for the wrong reason (the script is missing, not "the raise was refused") — exactly the
+# collision Task 2's resolver check hit. Exclude it explicitly so this assertion fails for the
+# real reason until Task 7 lands the gate.
+if [[ "$g2_case1_rc" == "1" && "$g2_case1_out" != *"Module not found"* ]]; then
+  ok "G2: an unjustified raise is refused"
+else
+  bad "G2: an unjustified raise is refused (rc: $g2_case1_rc, out: $g2_case1_out)"
+fi
+
+# Case 2: the SAME raise, but with raisedBy.ruling set — no collision risk (module-not-found is
+# rc 1, this case wants rc 0), so a plain `check` is the correct, sufficient oracle. The edge
+# reads the WORKING TREE for the head version, so overwriting the file (no new commit) is the
+# real shape it compares.
+cat > "$G2_FIX/ratchet.json" <<'JSON'
+{
+  "v": 1,
+  "ceilings": { "ruling": 999999, "ratify": 0, "closing": 93443, "doorbell": 0 },
+  "raisedBy": { "ruling": "R7-2026-09-20-context-headroom" }
+}
+JSON
+set +e
+g2_case2_out="$(bun "$RATCHET_CHECK" --repo "$G2_FIX" --base "$G2_BASE_SHA" --path ratchet.json 2>&1)"
+g2_case2_rc=$?
+set -e
+check "G2: the same raise WITH raisedBy.ruling set is allowed" "$g2_case2_rc" "0"
+
+# Case 3: a lowering — also no collision risk.
+cat > "$G2_FIX/ratchet.json" <<'JSON'
+{
+  "v": 1,
+  "ceilings": { "ruling": 20000, "ratify": 0, "closing": 93443, "doorbell": 0 }
+}
+JSON
+set +e
+g2_case3_out="$(bun "$RATCHET_CHECK" --repo "$G2_FIX" --base "$G2_BASE_SHA" --path ratchet.json 2>&1)"
+g2_case3_rc=$?
+set -e
+check "G2: a lowering is allowed" "$g2_case3_rc" "0"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]
