@@ -37,16 +37,23 @@ BASE_BRANCH="master"
 REPO_ARG=""
 CARD_ARG=""
 VERDICT_OUT_ARG=""
-VERDICT_OUT_SEEN=0
 
+# A flag's value is "missing" when there is no next token, the next token is empty, OR the next
+# token is itself an option (`--…`): silently consuming an option token as a value is the
+# fail-closed-edges obligation-1 bug (campaign gap-gate-2026-09-10: `--card --base <sha>` read
+# `--base` as the card name). The two flags whose value is free-form text (`--card`,
+# `--verdict-out`) guard against it explicitly, exactly as the sibling `ratchet-check.ts` does.
+# `--verdict-out` left unset (VERDICT_OUT_ARG stays "") means "no file requested" — skip the write.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --pr)          PR_ARG="$2"; shift 2 ;;
     --worktree)    WORKTREE_ARG="$2"; shift 2 ;;
     --base)        BASE_BRANCH="$2"; shift 2 ;;
     --repo)        REPO_ARG="$2"; shift 2 ;;
-    --card)        CARD_ARG="${2:-}"; shift $(( $# >= 2 ? 2 : 1 )) ;;
-    --verdict-out) VERDICT_OUT_SEEN=1; VERDICT_OUT_ARG="${2:-}"; shift $(( $# >= 2 ? 2 : 1 )) ;;
+    --card)        [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || DIE "--card <slug> requires a value"
+                   CARD_ARG="$2"; shift 2 ;;
+    --verdict-out) [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || DIE "--verdict-out <path> requires a value"
+                   VERDICT_OUT_ARG="$2"; shift 2 ;;
     -h|--help)     sed -n '2,26p' "$0"; exit 0 ;;
     *)             DIE "unknown arg: $1" ;;
   esac
@@ -55,12 +62,6 @@ done
 [[ -n "$PR_ARG" ]]       || DIE "--pr <number|url> is required"
 [[ -n "$WORKTREE_ARG" ]] || DIE "--worktree <path> is required (all four checks must run)"
 [[ -n "$CARD_ARG" ]] || DIE "--card <slug> is required (all four checks must run)"
-# VERDICT_OUT_SEEN distinguishes "flag not given" (skip the file write, VERDICT_OUT_ARG stays
-# "") from "flag given with no following value" (refuse — never silently fall through with an
-# empty path, and never consume the next flag's own token as this flag's value).
-if [[ "$VERDICT_OUT_SEEN" == "1" && -z "$VERDICT_OUT_ARG" ]]; then
-  DIE "--verdict-out <path> requires a value"
-fi
 
 command -v gh >/dev/null 2>&1      || DIE "gh (GitHub CLI) not found — required for PR checks"
 command -v git >/dev/null 2>&1     || DIE "git not found"

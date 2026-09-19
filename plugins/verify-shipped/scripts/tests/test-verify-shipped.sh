@@ -128,6 +128,18 @@ code9=$?
 set -e
 check "valueless --verdict-out (no following value) -> setup error, exit 2 (not an unbound-variable crash)" "$code9" "2"
 
+# The next token is itself an OPTION: `--verdict-out --help` must refuse cleanly (exit 2), never
+# swallow `--help` as the path and then crash on `dirname "--help"` (fail-closed-edges obligation 1;
+# campaign gap-gate-2026-09-10). Same guard on `--card`.
+set +e
+( cd "$repo9" && PATH="$bin9:$PATH" bash "$SCRIPT" --pr 42 --worktree "$TMP/gone-worktree" --card C1 --verdict-out --help >/dev/null 2>&1 )
+code9b=$?
+( cd "$repo9" && PATH="$bin9:$PATH" bash "$SCRIPT" --pr 42 --worktree "$TMP/gone-worktree" --card --verdict-out "$TMP/v9c.json" >/dev/null 2>&1 )
+code9c=$?
+set -e
+check "--verdict-out followed by an option refuses (exit 2, no argv-swallow crash)" "$code9b" "2"
+check "--card followed by an option refuses (exit 2, no argv-swallow)" "$code9c" "2"
+
 # --- resolve-verify-shipped.sh: the skill resolves its own script path (FU-CS-4) ---
 
 if [[ -x "$RESOLVER" ]]; then
