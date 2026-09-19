@@ -3,7 +3,7 @@
 // against the real viewer. The unit tests in core/ cover the decisions; this covers the wiring.
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const TRIBE_BIN = join(import.meta.dir, 'bin', 'tribe');
@@ -34,6 +34,14 @@ function freePort(): number {
 
 function runTribe(args: string[]) {
   return Bun.spawn(['tribe', ...args], { cwd: join(root, 'somewhere'), env, stdout: 'pipe', stderr: 'pipe' });
+}
+
+/** Stops `tribe` the way a user does (Ctrl-C), so it takes its viewer child down with it. A
+ * SIGKILL cannot be forwarded and would orphan the viewer; it is only the fallback. */
+async function stopTribe(child: ReturnType<typeof runTribe>): Promise<void> {
+  child.kill('SIGINT');
+  const exited = await Promise.race([child.exited.then(() => true), Bun.sleep(5000).then(() => false)]);
+  if (!exited) child.kill('SIGKILL');
 }
 
 /** Reads the child's stdout until `needle` appears; fails the test after 15 s. */
@@ -94,5 +102,40 @@ test('`tribe --strict-port` refuses a taken port with exit 1', async () => {
     expect(await new Response(child.stderr).text()).toContain(`port ${blocker.port} is in use`);
   } finally {
     blocker.stop(true);
+  }
+}, 30_000);
+
+const lanAddress = Object.values(networkInterfaces())
+  .flatMap((list) => list ?? [])
+  .find((a) => a.family === 'IPv4' && !a.internal)?.address;
+
+test('`tribe --remote` is reachable from the network, and a localhost-only viewer on the port is not mistaken for it', async () => {
+  if (lanAddress === undefined) {
+    console.error('SKIP (loudly): this machine has no non-loopback IPv4 interface to test against');
+    return;
+  }
+  const port = freePort();
+  const localOnly = runTribe(['--no-open', '--port', String(port)]);
+  let remote: ReturnType<typeof runTribe> | undefined;
+  try {
+    await waitForOutput(localOnly.stdout, `http://127.0.0.1:${port}`);
+    // Other devices cannot reach the localhost-only viewer...
+    await expect(fetch(`http://${lanAddress}:${port}/healthz`)).rejects.toThrow();
+
+    // ...so `tribe --remote` must start a network-reachable one rather than "reuse" it.
+    remote = runTribe(['--no-open', '--remote', '--port', String(port)]);
+    const out = await waitForOutput(remote.stdout, 'no password');
+    expect(out).toContain(`on your network at http://${lanAddress}:`);
+    const url = /on your network at (http:\/\/[^\s]+)/.exec(out)![1]!;
+    const health = await fetch(`${url}/healthz`);
+    expect(await health.json()).toEqual({ ok: true, viewer: 'tribe-viewer', v: 2 });
+
+    // A second `tribe --remote` on the same port reuses the network viewer.
+    const again = runTribe(['--no-open', '--remote', '--port', String(new URL(url).port)]);
+    expect(await again.exited).toBe(0);
+    expect(await new Response(again.stdout).text()).toContain('already running');
+  } finally {
+    await stopTribe(localOnly);
+    if (remote !== undefined) await stopTribe(remote);
   }
 }, 30_000);

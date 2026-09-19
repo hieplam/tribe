@@ -2,8 +2,10 @@
 // probe (reused from the runner, one reader of that shape), the foreground viewer child, the
 // browser, and the clock that bounds the wait for the viewer to answer.
 import { spawn } from 'node:child_process';
+import { networkInterfaces } from 'node:os';
 import { buildViewerPort, VIEWER_ENTRY_PATH } from '../../runner/adapters/viewer-launch.adapter.ts';
 import { classifyProbe } from '../../runner/core/viewer-launch.ts';
+import { lanIPv4Addresses } from '../../viewer/core/net.ts';
 import type { StartResult, ViewerIo } from '../core/viewer.ts';
 
 const READY_POLL_MS = 100;
@@ -25,11 +27,14 @@ function browserOpener(url: string): [string, string[]] {
 export function buildViewerIo(): ViewerIo {
   const viewerPort = buildViewerPort();
   return {
-    probe: (port) => viewerPort.probeViewer(port),
+    probe: (port, host) => viewerPort.probeViewer(port, host),
 
-    start(port) {
+    lanAddresses: () => lanIPv4Addresses(Object.values(networkInterfaces()).flatMap((list) => list ?? [])),
+
+    start(port, bindHost, probeHost) {
       // The viewer shares this terminal: its startup line and any refusal print directly.
-      const child = spawn(process.execPath, [VIEWER_ENTRY_PATH, '--port', String(port)], { stdio: 'inherit' });
+      const argv = [VIEWER_ENTRY_PATH, '--port', String(port), '--host', bindHost];
+      const child = spawn(process.execPath, argv, { stdio: 'inherit' });
       const forward = (signal: NodeJS.Signals) => child.kill(signal);
       for (const signal of FORWARDED_SIGNALS) process.on(signal, forward);
       const stopForwarding = () => {
@@ -58,7 +63,7 @@ export function buildViewerIo(): ViewerIo {
         const deadline = Date.now() + READY_TIMEOUT_MS;
         while (Date.now() < deadline) {
           if (childExit !== null) return { kind: 'exited', code: childExit };
-          if (classifyProbe(await viewerPort.probeViewer(port)) === 'reuse') return { kind: 'ready' };
+          if (classifyProbe(await viewerPort.probeViewer(port, probeHost)) === 'reuse') return { kind: 'ready' };
           await Bun.sleep(READY_POLL_MS);
         }
         return { kind: 'timeout' };

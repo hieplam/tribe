@@ -7,12 +7,28 @@ const otherService: ProbeSignal = { kind: 'responded', body: { hello: 'world' } 
 const nothing: ProbeSignal = { kind: 'no-response' };
 
 /** A scripted world: `probes` answers each port, `starts` answers each spawn in order. */
-function fakeIo(probes: Record<number, ProbeSignal>, starts: Array<{ started: StartResult; exitCode: number }> = []) {
-  const calls = { spawned: [] as number[], opened: [] as string[], logs: [] as string[], warns: [] as string[] };
+function fakeIo(
+  probes: Record<number, ProbeSignal>,
+  starts: Array<{ started: StartResult; exitCode: number }> = [],
+  lan: string[] = ['192.168.1.20'],
+) {
+  const calls = {
+    spawned: [] as number[],
+    spawnHosts: [] as string[],
+    probeHosts: [] as string[],
+    opened: [] as string[],
+    logs: [] as string[],
+    warns: [] as string[],
+  };
   const io: ViewerIo = {
-    probe: async (port) => probes[port] ?? nothing,
-    start: (port) => {
+    probe: async (port, host) => {
+      calls.probeHosts.push(host);
+      return probes[port] ?? nothing;
+    },
+    lanAddresses: () => lan,
+    start: (port, bindHost, probeHost) => {
       calls.spawned.push(port);
+      calls.spawnHosts.push(`${bindHost}>${probeHost}`);
       const next = starts.shift();
       if (!next) throw new Error(`unexpected spawn on ${port}`);
       return { started: Promise.resolve(next.started), exited: Promise.resolve(next.exitCode) };
@@ -24,7 +40,7 @@ function fakeIo(probes: Record<number, ProbeSignal>, starts: Array<{ started: St
   return { io, calls };
 }
 
-const opts = { port: 4321, open: true, strictPort: false };
+const opts = { port: 4321, open: true, strictPort: false, host: '127.0.0.1' };
 
 test('a free port spawns the viewer, opens the browser once it answers, and returns its exit code', async () => {
   const { io, calls } = fakeIo({}, [{ started: { kind: 'ready' }, exitCode: 0 }]);
@@ -98,4 +114,33 @@ test('a viewer that never answers in time is left running, with no browser and a
   expect(await runViewer(opts, io)).toBe(0);
   expect(calls.opened).toEqual([]);
   expect(calls.warns.join('\n')).toContain('did not answer');
+});
+
+test('--remote binds 0.0.0.0, checks the port through the LAN address, and opens the local URL', async () => {
+  const { io, calls } = fakeIo({}, [{ started: { kind: 'ready' }, exitCode: 0 }]);
+  await runViewer({ ...opts, host: '0.0.0.0' }, io);
+  // Through the LAN address: a localhost-only viewer on the port must NOT count as reusable,
+  // because the other devices could not reach it.
+  expect(calls.probeHosts).toEqual(['192.168.1.20']);
+  expect(calls.spawnHosts).toEqual(['0.0.0.0>192.168.1.20']);
+  expect(calls.opened).toEqual(['http://127.0.0.1:4321/']);
+});
+
+test('--remote on a machine with no LAN address still starts, checking through loopback', async () => {
+  const { io, calls } = fakeIo({}, [{ started: { kind: 'ready' }, exitCode: 0 }], []);
+  await runViewer({ ...opts, host: '0.0.0.0' }, io);
+  expect(calls.probeHosts).toEqual(['127.0.0.1']);
+});
+
+test('--host <LAN address> probes and opens that address (it does not answer on 127.0.0.1)', async () => {
+  const { io, calls } = fakeIo({}, [{ started: { kind: 'ready' }, exitCode: 0 }]);
+  await runViewer({ ...opts, host: '192.168.1.20' }, io);
+  expect(calls.probeHosts).toEqual(['192.168.1.20']);
+  expect(calls.opened).toEqual(['http://192.168.1.20:4321/']);
+});
+
+test('--host localhost is probed as 127.0.0.1', async () => {
+  const { io, calls } = fakeIo({ 4321: viewerBody });
+  await runViewer({ ...opts, host: 'localhost' }, io);
+  expect(calls.probeHosts).toEqual(['127.0.0.1']);
 });

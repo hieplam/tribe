@@ -334,7 +334,9 @@ tribe                    # start on 4321 (or the next free port) and open the br
 tribe --port 5000 --no-open
 ```
 
-`tribe` reuses a viewer already running on the port instead of starting a second one. The
+`tribe` reuses a viewer already running on the port instead of starting a second one. `tribe
+--remote` opens it to other devices on your network (kanna's flag; **no password** — see the CLI
+README). The
 underlying server can still be run directly with `bun plugins/tribe/scripts/viewer/serve.ts
 [--port <n>]`; `--port` defaults to `4321`. Both roots the server needs (the transcripts root and `~/.tribe`)
 resolve from the environment alone (`CLAUDE_CONFIG_DIR`/`HOME`) — there is no `--tribe-root` flag.
