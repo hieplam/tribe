@@ -1538,7 +1538,7 @@ row for the `run.ts supervise` surface, a Business Flow amendment for the judgme
 
 **Steps**
 
-- [ ] **Step 1: File-context gate and author the ADR.**
+- [x] **Step 1: File-context gate and author the ADR.**
 
 ```sh
 cd /Users/hip/repo/tribe-wt/campaign-supervisor
@@ -1556,7 +1556,7 @@ containment hook, the repo-untouched probe, and the `closing` exception), the co
 becomes mechanical; `autoAnswerRounds` is documented as vestigial, FU-CS-1), and the alternatives
 rejected in spec §17.
 
-- [ ] **Step 2: Cite, scaffold, patch, apply.**
+- [x] **Step 2: Cite, scaffold, patch, apply.**
 
 ```sh
 C3X_MODE=agent bash "$C3X_BIN" read c3-215 --section Contract --cite
@@ -1582,7 +1582,7 @@ Expected: three pending patches with no drift; `apply` lands them atomically; `c
 re-author — **never hand-edit the sealed doc**; if a seal is already broken, run
 `C3X_MODE=agent bash "$C3X_BIN" repair` and re-apply.
 
-- [ ] **Step 3: Commit** — `docs(c3): ADR and c3-215 sync including the least-privilege model (task 16/24)`.
+- [x] **Step 3: Commit** — `docs(c3): ADR and c3-215 sync including the least-privilege model (task 16/24)`.
 
 ---
 
