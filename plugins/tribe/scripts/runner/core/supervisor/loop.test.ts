@@ -10,7 +10,7 @@ import {
   type SupervisorLoopConfig, type SupervisorLoopSeam, type SupervisorTerminal,
 } from './loop.ts';
 import { CLOSING_TEMPLATE_PATH, RATIFY_TEMPLATE_PATH, RULING_TEMPLATE_PATH } from './brief.ts';
-import type { OneShotSpawnParams } from './session.ts';
+import type { OneShotSessionOptions, OneShotSpawnParams } from './session.ts';
 import type { SessionMessage } from '../session.ts';
 import type { WatchdogHandle } from '../../ports/ports.ts';
 import type { SupervisorLimits } from './model.ts';
@@ -40,6 +40,7 @@ function baseConfig(overrides: Partial<SupervisorLoopConfig> = {}): SupervisorLo
     campaign: 'c',
     limits: LIMITS,
     sessionTimeoutSeconds: 1800,
+    sessionMaxTurns: 60,
     pollSeconds: 30,
     watchdogCommand: ['bun', '/abs/run.ts'],
     rerunCommand: 'bun run.ts supervise --repo /repo --campaign c --model claude-fixture',
@@ -87,6 +88,7 @@ function fakeSeam(opts: {
   const watchdogQueue = [...(opts.watchdogRuns ?? [])];
   const sessionQueue = [...(opts.sessions ?? [])];
   const spawnedPrompts: string[] = []; // one entry per spawnSession call, in order — the RENDERED brief
+  const spawnedOptions: OneShotSessionOptions[] = []; // one entry per spawnSession call, in order
   let spawnWatchdogCalls = 0; // total spawnWatchdog invocations this seam has served
   let sessionCounter = 0;
   const watchdogStatusPath = join(HOME, 'watchdog', 'status.json');
@@ -165,6 +167,7 @@ function fakeSeam(opts: {
     realpath: (p) => p,
     spawnSession: (params: OneShotSpawnParams): AsyncIterable<SessionMessage> => {
       spawnedPrompts.push(params.prompt);
+      spawnedOptions.push(params.options);
       callLog.push('effect');
       async function* gen(): AsyncGenerator<SessionMessage> {
         const sessionId = `sess-${++sessionCounter}`;
@@ -191,7 +194,7 @@ function fakeSeam(opts: {
   };
 
   return {
-    io, files, writes, callLog, statusHistory, spawnedPrompts,
+    io, files, writes, callLog, statusHistory, spawnedPrompts, spawnedOptions,
     get spawnWatchdogCalls(): number { return spawnWatchdogCalls; },
   };
 }
@@ -470,6 +473,32 @@ describe('runSupervisor — Fix 1 (Blocker, skinner audit): the busy-spawn guard
     const events = (seam.files.get(join(HOME, 'supervisor', 'events.jsonl')) ?? '').trim().split('\n');
     const kinds = events.map((l) => (JSON.parse(l) as { action: string }).action);
     expect(kinds).toEqual(['run_watchdog', 'await_watchdog', 'exit']);
+  });
+});
+
+describe('runSupervisor — Fix 2 (skinner audit): sessionMaxTurns reaches buildOneShotOptions', () => {
+  test('the configured --session-max-turns value flows into every one-shot session actually spawned', async () => {
+    const seam = fakeSeam({
+      initialFiles: {
+        [join(HOME, 'escalations', 'c1.md')]: escalationFile('planning_needed'),
+        [join(HOME, 'campaign-state.json')]: JSON.stringify({ ownerOnlyEscalations: [] }),
+      },
+      watchdogRuns: [
+        { reason: 'escalations_pending', exitCode: 12, report: reportEscalated() },
+        { reason: 'runner_done', exitCode: 0, report: reportShipped() },
+      ],
+      sessions: [
+        { effect: () => { seam.files.set(join(HOME, 'answers.md'), RULING_CONTENT); } },
+        { effect: () => { seam.files.set(join(HOME, 'supervisor', 'final-report.md'), '# Final Report\n\nShipped c1.\n'); } },
+      ],
+    });
+    const result = await runSupervisor(baseConfig({ sessionMaxTurns: 17 }), HOME, seam.io);
+
+    expect(result.kind).toBe('done');
+    expect(seam.spawnedOptions.length).toBe(2); // ruling, then closing
+    for (const options of seam.spawnedOptions) {
+      expect(options.maxTurns).toBe(17);
+    }
   });
 });
 

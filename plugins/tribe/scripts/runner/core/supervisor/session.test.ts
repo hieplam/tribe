@@ -17,6 +17,7 @@ function fixtureConfig(overrides: Partial<OneShotSessionConfig> = {}): OneShotSe
   return {
     homeDir: '/abs/home/.tribe/key/campaigns/slug',
     model: 'claude-haiku-fixture',
+    maxTurns: 60,
     repoRoot: '/abs/repo',
     realpath: (p: string) => p,
     ...overrides,
@@ -135,6 +136,16 @@ describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () =>
     const abortController = new AbortController();
     const options = buildOneShotOptions('ruling', fixtureConfig(), abortController);
     expect(options.abortController).toBe(abortController);
+  });
+
+  // Fix 2 (skinner audit): `--session-max-turns` was parsed and bounds-checked in args.ts but
+  // wired to nothing — `OneShotSessionOptions` carried no `maxTurns` at all, so the SDK's
+  // `query()` never received a turn cap. This is the regression guard.
+  test('maxTurns carries the configured OneShotSessionConfig.maxTurns value, for every kind', () => {
+    for (const kind of ['ruling', 'ratify', 'closing'] as SessionKind[]) {
+      const options = buildOneShotOptions(kind, fixtureConfig({ maxTurns: 17 }), new AbortController());
+      expect(options.maxTurns).toBe(17);
+    }
   });
 });
 

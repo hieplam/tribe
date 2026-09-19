@@ -787,6 +787,10 @@ export async function main(): Promise<void> {
       campaign: parsed.config.campaignSlug ?? basename(home.homeDir),
       limits: parsed.config.limits,
       sessionTimeoutSeconds: parsed.config.sessionTimeoutSeconds,
+      // Fix 2 (skinner audit): `--session-max-turns` was parsed by args.ts but wired to
+      // nothing — threaded into `SupervisorLoopConfig` here, then into every one-shot
+      // session's `OneShotSessionConfig.maxTurns` (`loop.ts`).
+      sessionMaxTurns: parsed.config.sessionMaxTurns,
       pollSeconds: parsed.config.pollSeconds,
       // Mirrors `ports.ts`'s `RunnerSpawnPort.runnerCommand()` / `watchdog-io.adapter.ts`'s own
       // `RUNNER_ENTRYPOINT` — resolved from THIS file's own location, never from cwd.

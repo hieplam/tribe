@@ -42,6 +42,10 @@ export interface OneShotSessionOptions {
   additionalDirectories?: string[];
   abortController: AbortController;
   hooks?: { PreToolUse: Array<{ hooks: Array<(input: unknown) => Promise<HookDecision>> }> };
+  /** Fix 2 (skinner audit): spec §5.1's bounded-TURN guard, distinct from the wall-clock
+   * `sessionTimeoutMs` — "exceeding it is a failed attempt, not a hang." Forwarded verbatim
+   * into the SDK's own `query()` options (`adapters/session.adapter.ts`'s pass-through). */
+  maxTurns: number;
 }
 
 /** `buildOneShotOptions`'s input. `repoRoot` is read access for `ruling` (spec §5.2's
@@ -55,6 +59,9 @@ export interface OneShotSessionConfig {
    * with no viewer change at all). */
   homeDir: string;
   model: string;
+  /** Fix 2 (skinner audit): the caller's configured `--session-max-turns` — always supplied
+   * (never defaulted here; `args.ts` owns the default), for every one of the three kinds. */
+  maxTurns: number;
   repoRoot?: string;
   realpath: (path: string) => string;
 }
@@ -76,6 +83,7 @@ export function buildOneShotOptions(
     settingSources: kind === 'closing' ? ['project'] : [],
     permissionMode: 'default',
     abortController,
+    maxTurns: config.maxTurns,
   };
 
   if (kind === 'closing') {

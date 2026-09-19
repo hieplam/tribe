@@ -109,6 +109,11 @@ export interface SupervisorLoopConfig {
   campaign: string;
   limits: SupervisorLimits;
   sessionTimeoutSeconds: number;
+  /** Fix 2 (skinner audit): `args.ts`'s `--session-max-turns` (default 60, bounded 1-500) —
+   * a bounded-TURN guard distinct from `sessionTimeoutSeconds`'s wall-clock one (spec §5.1:
+   * "exceeding it is a failed attempt, not a hang"). Threaded into every one-shot session's
+   * `OneShotSessionConfig.maxTurns` below. */
+  sessionMaxTurns: number;
   pollSeconds: number;
   /** e.g. `['bun', '/abs/path/run.ts']` — see the module doc comment's IO-seam note. */
   watchdogCommand: string[];
@@ -823,6 +828,7 @@ export async function runSupervisor(
         const oneShotConfig: OneShotSessionConfig = {
           homeDir,
           model: config.model,
+          maxTurns: config.sessionMaxTurns,
           realpath: (p: string) => io.realpath(p),
           ...(action.session === 'ruling' || action.session === 'closing'
             ? { repoRoot: config.repoRoot }
