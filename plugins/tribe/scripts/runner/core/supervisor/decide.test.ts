@@ -348,12 +348,35 @@ test('V5/V6: a failed attempt parks once its retry budget is exhausted, keyed pe
   expect(closing).toEqual({ kind: 'park', reason: 'closing_failed', detail: expect.any(String) });
 });
 
-test('an outcome outside V1-V5 (ratified/closed) falls through to the ordinary rows, not swallowed', () => {
+test('V7: the unratified list reached empty re-triggers the watchdog on the same scope — proven '
+  + 'against a stale watchdog fact that would decide DIFFERENTLY if this fell through', () => {
   const a = decide(base({
     lastSessionOutcome: { kind: 'ratify', cardId: null, outcome: 'ratified' },
+    // A stale `rulings_unratified` terminal reason: if V7 did not own this outcome and it fell
+    // through to the ordinary rows, row 15 would spawn ANOTHER ratify session forever. Getting
+    // `run_watchdog` here instead is proof V7 fired, not proof of a fallthrough coincidence.
+    lastWatchdog: terminal('rulings_unratified'),
+  }));
+  // The exact literal decide.ts already uses for rows 16/24 — "same scope" resolves to the base
+  // scope, never a card-scoped re-run.
+  expect(a).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false });
+});
+
+test('V8: the final report exists and nothing is unratified — the campaign closes', () => {
+  const a = decide(base({
+    lastSessionOutcome: { kind: 'closing', cardId: null, outcome: 'closed' },
+  }));
+  expect(a).toEqual({ kind: 'exit', status: 'done', reason: 'campaign_closed' });
+});
+
+test('a malformed outcome (a "ruled" verdict missing its rulingId) is a contract violation by '
+  + 'the layer below and falls through to the ordinary rows, never swallowed', () => {
+  const a = decide(base({
+    lastSessionOutcome: { kind: 'ruling', cardId: 'c1', outcome: 'ruled', rulingId: null },
   }));
   // With no watchdog fact at all, the ordinary rows land on row 27 — proof the post-session
-  // block did not silently produce a wrong action for an outcome it does not own.
+  // block did not silently produce a wrong action for an outcome it does not own. This is now
+  // the ONLY class of outcome that reaches this fallthrough: V7/V8 own 'ratified'/'closed'.
   expect(a).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false });
 });
 

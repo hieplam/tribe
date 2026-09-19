@@ -35,11 +35,12 @@ const ONCE_ONLY_REASONS = new Set([
 ]);
 
 export function decide(o: SupervisorObservation): SupervisorAction {
-  // --- Post-session rows V1-V5 (§3.4): "the loop records the verdict into the observation as
+  // --- Post-session rows V1-V8 (§3.4): "the loop records the verdict into the observation as
   // `lastSessionOutcome` and re-enters `decide()`" — these run BEFORE any other row, whenever a
-  // session just returned. `outcome === 'ratified'` and `outcome === 'closed'` (V7/V8) are not
-  // this task's scope (dispatch ruling 2026-09-19); an outcome this block does not recognise
-  // falls through to the ordinary pre-loop/main rows below rather than being silently swallowed.
+  // session just returned. V7/V8 are handled explicitly here, same as V1-V6; only a MALFORMED
+  // outcome (a 'ruled'/'parked' verdict missing its required id/kind — a contract violation by
+  // the layer below) falls through to the ordinary pre-loop/main rows, rather than being
+  // silently swallowed.
   if (o.lastSessionOutcome !== null) {
     const outcome = o.lastSessionOutcome;
 
@@ -91,9 +92,19 @@ export function decide(o: SupervisorObservation): SupervisorAction {
           + `and the retry budget (${o.limits.sessionRetries}) is exhausted`,
       );
     }
-    // outcome.outcome is 'ratified' or 'closed', or a 'ruled'/'parked' outcome missing its
-    // required id/kind (a contract violation by the layer below) — neither is a row this block
-    // owns; fall through and let the ordinary rows below decide from the rest of the observation.
+    // V7: the unratified list reached empty. "Same scope" resolves to the base scope
+    // (`{cards: null, includeEscalated: false}`) — the SAME literal used for rows 16/24 above:
+    // a fresh watchdog run over the whole campaign, not a card-scoped re-run.
+    if (outcome.outcome === 'ratified') {
+      return { kind: 'run_watchdog', cards: null, includeEscalated: false };
+    }
+    // V8: the final report exists and nothing is unratified — the campaign closes.
+    if (outcome.outcome === 'closed') {
+      return { kind: 'exit', status: 'done', reason: 'campaign_closed' };
+    }
+    // outcome.outcome is a 'ruled'/'parked' outcome missing its required id/kind (a contract
+    // violation by the layer below) — not a row this block owns; fall through and let the
+    // ordinary rows below decide from the rest of the observation.
   }
 
   // --- Pre-loop rows P1-P4 (§3.4): evaluated before any watchdog is run.
