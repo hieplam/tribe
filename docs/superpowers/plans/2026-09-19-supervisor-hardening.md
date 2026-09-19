@@ -154,7 +154,7 @@ below and the suite already exists.
 
 **Files:** edit `plugins/tribe/scripts/tests/test-supervisor-repro.sh`.
 
-- [ ] **Step 1: Add three failing assertions.**
+- [x] **Step 1: Add three failing assertions.**
   Drive a campaign to a closing session with the session double (`DOUBLE_PLAN="rule:R1 close"`),
   then assert the behaviour the fix must produce:
 
@@ -173,7 +173,7 @@ below and the suite already exists.
     if (v.outcome === "closed") { console.error("G3: a BLOCKED report still closes"); process.exit(1); }'
   ```
 
-- [ ] **Step 2: Observe it fail — the red.**
+- [x] **Step 2: Observe it fail — the red.**
 
   ```bash
   TRIBE_REPRO=1 bash plugins/tribe/scripts/tests/test-supervisor-repro.sh
@@ -183,7 +183,7 @@ below and the suite already exists.
   exits `0` instead of `20`, no verdict file exists, `resolve-verify-shipped.sh` does not exist, and
   `verifyClosing` rejects the unknown `shippedVerdicts` argument or returns `closed`.
 
-- [ ] **Step 3: Commit** — `test(supervisor): reproduce the closing verdict nobody checks`.
+- [x] **Step 3: Commit** — `test(supervisor): reproduce the closing verdict nobody checks`.
 
 ## Task 3: G5's reproduction — writer and reader name different directories
 

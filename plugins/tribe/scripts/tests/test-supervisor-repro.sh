@@ -28,6 +28,9 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER="$HERE/../runner"
 DOUBLE="$RUNNER/fixtures/supervisor/session-double.sh"
+# test-supervisor-real-e2e.sh's own precedent for deriving the repo root from this same HERE.
+REPO_ROOT="$(cd "$HERE/../../../.." && pwd)"
+SKILL_DIR="$REPO_ROOT/plugins/verify-shipped/skills/verify-shipped"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 # W-P10 (test-supervisor-e2e.sh's own precedent): resolve TMP's own symlinks NOW — macOS's
 # `mktemp -d` hands back a path under `/var/folders/...` that is itself a symlink to
@@ -41,6 +44,7 @@ ok()  { PASS=$((PASS+1)); printf 'ok - %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf 'not ok - %s\n' "$1"; }
 check()    { if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (got: $2, want: $3)"; fi }
 contains() { if [[ "$2" == *"$3"* ]]; then ok "$1"; else bad "$1 (got: $2, want substring: $3)"; fi }
+ok_if_file() { if [[ -f "$2" ]]; then ok "$1"; else bad "$1 (missing: $2)"; fi }
 
 # A throwaway machine: its own HOME, so the supervisor's `--home`/`--campaign` containment root
 # is this temp tree and nothing here can ever touch the real `~/.tribe`.
@@ -137,6 +141,55 @@ rc_g1=$?
 set -e
 check "G1: an owner-only escalation parks" "$rc_g1" "20"
 contains "G1: NEEDS_OWNER.md carries the escalation's own Context text" "$(cat "$G1_HOME/NEEDS_OWNER.md" 2>/dev/null)" "$MARKER"
+
+# --- G3: the closing verdict is the model's prose, and nothing checks the script ran (spec §4) -
+# A campaign driven to a closing session with the double: attempt 1 lands ruling R1, attempt 2
+# writes `supervisor/final-report.md` and NOTHING else (the double's own `close` spec — see this
+# file's doc comment / session-double.sh). Today `verifyClosing` accepts any non-empty report, so
+# the campaign closes (`supervise` exits 0) with no verdict file ever written, no check that
+# `verify-shipped.sh` ran, and no check its own path even resolves under a plugin load — three
+# independent unchecked links, per spec §4's root-cause section.
+G3_HOME="$(new_campaign g3-closing generic-ruling-needed 0)"
+export DOUBLE_PLAN="rule:R1 close"
+export DOUBLE_STATE="$TMP/double-state-g3"
+set +e
+out_g3="$(bun "$RUNNER/run.ts" supervise --repo "$REPO" --model repro-model --home "$G3_HOME" "${SUPERVISE_ARGS[@]}" 2>&1)"
+rc_g3=$?
+set -e
+check "G3: a closing session that wrote no verdict file does not close the campaign" "$rc_g3" "20"
+ok_if_file "G3: verify-shipped.sh writes a verdict file per shipped card" "$G3_HOME/supervisor/verdicts/c1.json"
+
+# FU-CS-4, same reproduction (spec §4d): the resolver `verify-shipped.sh`'s own `SKILL.md`
+# documents does not exist yet, so resolving it must fail today. A bare substring match on
+# "verify-shipped.sh" is not a safe oracle here — bash's own "No such file or directory" error
+# for the MISSING resolver script `resolve-verify-shipped.sh` itself contains that exact
+# substring (it is the resolver's own filename's suffix), which would make this assertion pass
+# today for the wrong reason. Gate the substring check on the resolver actually having
+# succeeded (rc 0), so a missing resolver — the real defect — is what fails this assertion.
+set +e
+resolve_out="$(bash "$SKILL_DIR/resolve-verify-shipped.sh" 2>&1)"
+resolve_rc=$?
+set -e
+if [[ "$resolve_rc" == "0" && "$resolve_out" == *"verify-shipped.sh"* ]]; then
+  ok "G3: the SKILL.md command resolves under a plugin load"
+else
+  bad "G3: the SKILL.md command resolves under a plugin load (rc: $resolve_rc, out: $resolve_out)"
+fi
+
+# The pure postcondition itself, called directly against the real module (spec §4's own
+# reproduction line, and this task's brief) — proving `verifyClosing` is blind to a BLOCKED
+# report with no shipped verdicts today. `shippedVerdicts` is not yet a known input, so it is
+# silently ignored by the current implementation; this call exits 1 (spec-defined failure) when
+# the postcondition wrongly returns `closed`, and will exit 0 once Task 10 widens it.
+set +e
+g3_verifyclosing_out="$(cd "$RUNNER" && bun -e 'import { verifyClosing } from "./core/supervisor/verify.ts";
+  const v = verifyClosing({ finalReport: "Status: BLOCKED\n", answers: "", shippedVerdicts: [] });
+  if (v.outcome === "closed") { console.error("G3: a BLOCKED report still closes"); process.exit(1); }' 2>&1)"
+g3_verifyclosing_rc=$?
+set -e
+check "G3: verifyClosing does not close a campaign whose report says BLOCKED with no shipped verdicts" \
+  "$g3_verifyclosing_rc" "0"
+[[ -n "$g3_verifyclosing_out" ]] && echo "$g3_verifyclosing_out"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]
