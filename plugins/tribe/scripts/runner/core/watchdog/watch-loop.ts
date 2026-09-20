@@ -51,16 +51,20 @@ interface LoopState {
   /** FIX F-C1/F-C2: the deadline of the most recently ORDERED `wait_until`, cleared the moment
    * any new attempt is spawned — see `model.ts`'s `WatchdogObservation.pendingWait`. */
   pendingWait: { cause: 'quota' | 'overload'; untilMs: number } | null;
-  /** FIX F-C5 (audit round 2): THIS invocation's own clock for "how long has the currently-alive
-   * run gone with no log line at all" — the `nowMs` this invocation FIRST observed the given
-   * `runId` alive with `newestLogMtimeMs === null`. Deliberately never the record's own
-   * `startedAt`: that value is untrusted external content the runner wrote (mirroring FIX S3's
-   * `MAX_QUOTA_WAIT_MS` clamp on `resetsAtEpochS` for the same reason), and several pre-existing
-   * fixtures set it to an unrealistic placeholder that was never meant to be read as a real
-   * elapsed-time signal — reading it here would misreport those otherwise-legitimate scenarios
-   * as instantly stale. Reset to `null` the moment the run stops being "alive with no log" (a
-   * log appears, the run ends, or a different run becomes the observed one). */
-  noLogSince: { runId: string | null; sinceMs: number } | null;
+  /** FIX F-C5, re-keyed for D2: THIS invocation's own clock for "how long has the currently-alive
+   * run gone with no log line at all". The key is the SUPERVISION identity, not the run id:
+   * while we own a live child that identity is its attempt, because the child's run id is
+   * legitimately unknown for the first tick or two and then becomes known — and re-keying on
+   * that transition would RESTART the silence clock, pushing a genuine stall a whole poll
+   * interval past the bound the card allows ("--stall-minutes + one poll interval"). With no
+   * owned child (an adopted run) the run id is the identity, exactly as before. Deliberately
+   * never the record's own `startedAt`: that value is untrusted external content the runner
+   * wrote (mirroring FIX S3's `MAX_QUOTA_WAIT_MS` clamp on `resetsAtEpochS` for the same
+   * reason), and several pre-existing fixtures set it to an unrealistic placeholder that was
+   * never meant to be read as a real elapsed-time signal — reading it here would misreport
+   * those otherwise-legitimate scenarios as instantly stale. Reset to `null` the moment the run
+   * stops being "alive with no log" (a log appears, the run ends, or the identity changes). */
+  noLogSince: { key: string | null; sinceMs: number } | null;
 }
 
 /** The tick's raw signal read, carried alongside the pure `WatchdogObservation` purely so the
@@ -187,9 +191,10 @@ function observe(config: WatchdogConfig, homeDir: string, io: WatchdogIO, state:
   // both doors led to the SAME unbounded `attach` loop (a reviewer reproduced it running until
   // `RangeError: Out of memory`). See `LoopState.noLogSince`'s own comment for why this tracks
   // THIS invocation's own clock rather than the record's `startedAt`.
+  const silenceKey = ownsLiveChild ? `attempt-${state.attempt}` : runId;
   if (alive && newest === null) {
-    if (state.noLogSince === null || state.noLogSince.runId !== runId) {
-      state.noLogSince = { runId, sinceMs: nowMs };
+    if (state.noLogSince === null || state.noLogSince.key !== silenceKey) {
+      state.noLogSince = { key: silenceKey, sinceMs: nowMs };
     }
   } else {
     state.noLogSince = null;
@@ -362,6 +367,9 @@ export async function runWatchdog(
     // honest value is `null` — publishing the PREVIOUS run's id here is what made status.json
     // corroborate the false stall. It becomes the real id on the first tick that sees it.
     state.runId = null;
+    // Task 2: each new attempt starts a clean silence clock — the PREVIOUS attempt's
+    // `noLogSince` (keyed on its own attempt id or run id) must never be read as this attempt's.
+    state.noLogSince = null;
     state.child = io.spawnRunner(argv, { cwd: config.repoRoot, stdoutPath });
     state.ownedExitCode = null;
     state.nextWakeAtMs = null;

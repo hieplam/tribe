@@ -487,7 +487,7 @@ git -c user.email=lamhiep16@gmail.com -c user.name=hieplam commit -m 'fix(watchd
 
 **Expected result:** one commit carrying both trailers.
 
-- [ ] Task 2 complete
+- [x] Task 2 complete
 
 ---
 

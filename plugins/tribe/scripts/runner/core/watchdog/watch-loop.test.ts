@@ -100,7 +100,22 @@ function fakeIo(passes: Scripted[]) {
       // Visible starting from the SECOND `listEntries(runsDir)` call since this spawn — never
       // the first (the tick immediately after spawn, with no yield, must see nothing yet).
       pendingReveals.push({ pass, attemptIndex: index, callsRemaining: 2 });
-      return { pid: 9000 + index, waitFor: async () => pass.exitCode };
+      return {
+        pid: 9000 + index,
+        // Mirrors the real adapter's bounded contract (`adapters/watchdog-io.adapter.ts`:
+        // `Promise<number | null>`, `null` meaning "still running after this slice"), which the
+        // old always-resolve-immediately fake never modelled at all. `pass.endedAt === null`
+        // (explicitly, never the default `undefined`) is a runner that never exits within this
+        // test — every pre-existing scripted pass leaves `endedAt` unset and keeps the original
+        // immediate-exit behaviour verbatim.
+        waitFor: async (waitMs) => {
+          if (pass.endedAt === null) {
+            nowMs += waitMs;
+            return null;
+          }
+          return pass.exitCode;
+        },
+      };
     },
     userHome: () => '/h',
     cwd: () => '/cwd',
@@ -724,5 +739,44 @@ describe('runWatchdog — D2: a relaunched runner is never judged on the PREVIOU
     const afterRelaunch = seen.slice(seen.lastIndexOf('r1') + 1);
     expect(afterRelaunch).not.toContain('r1');
     expect(seen).toContain('r2');
+  });
+});
+
+describe('runWatchdog — D4(a): a relaunched runner that never writes still stalls, on time', () => {
+  test('the stall fires within --stall-minutes + ONE poll interval of the relaunch', async () => {
+    // r2 is alive and never writes a log line at all. CONFIG: stallMinutes 30, pollSeconds 30.
+    const resetAt = 1_800_000_000 + 107 * 60;
+    const { io, files } = fakeIo([
+      { exitCode: 3, runId: 'r1', logTail: quotaTail(resetAt) },
+      { exitCode: 0, runId: 'r2', endedAt: null },
+    ]);
+    io.isProcessAlive; // the record stays unfinalized, so r2 reads as alive throughout
+    const outcome = await runWatchdog(CONFIG, HOME, io);
+
+    const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
+      .trim().split('\n').map((l) => JSON.parse(l) as { at: string; action: string });
+    const relaunchAt = Date.parse(events.find((e) => e.action === 'relaunch')?.at as string);
+    const stallAt = Date.parse(events.find((e) => e.action === 'stall')?.at as string);
+    expect([outcome.exitCode, outcome.reason]).toEqual([10, 'stalled']);
+    // Not early: the relaunched run gets its full --stall-minutes of its OWN silence.
+    expect(stallAt - relaunchAt).toBeGreaterThan(30 * 60_000);
+    // Not late: at most one further poll interval to notice it.
+    expect(stallAt - relaunchAt).toBeLessThanOrEqual(30 * 60_000 + 30_000);
+  });
+
+  test('a relaunched runner is still attaching one minute before its own deadline', async () => {
+    const resetAt = 1_800_000_000 + 107 * 60;
+    const { io, files } = fakeIo([
+      { exitCode: 3, runId: 'r1', logTail: quotaTail(resetAt) },
+      { exitCode: 0, runId: 'r2', endedAt: null },
+    ]);
+    await runWatchdog(CONFIG, HOME, io);
+    const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
+      .trim().split('\n').map((l) => JSON.parse(l) as { at: string; action: string });
+    const relaunchAt = Date.parse(events.find((e) => e.action === 'relaunch')?.at as string);
+    const deadline = relaunchAt + 29 * 60_000; // stall-minutes - 1
+    const before = events.filter((e) => Date.parse(e.at) <= deadline).map((e) => e.action);
+    expect(before).not.toContain('stall');
+    expect(before).toContain('attach');
   });
 });
