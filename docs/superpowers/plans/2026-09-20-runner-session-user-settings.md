@@ -283,10 +283,10 @@ The evidence doc must carry this note verbatim:
 > — G2 and G4 state it that way ("baseline 4 in campaign `supervisor-hardening` → 0 in the next
 > campaign's logs"). The global total is context, not the target.
 
-- [ ] **Step 4: Commit** — stage this task's files and commit, with the trailers from
+- [x] **Step 4: Commit** — stage this task's files and commit, with the trailers from
   Global Constraints (`Tribe-Card: runner-session-user-settings`, `Tribe-Task: 2/7`) in the
   commit's ONE final paragraph, ticking this task's boxes in that SAME commit.
-- [ ] Task 2 complete
+- [x] Task 2 complete
 
 ---
 
