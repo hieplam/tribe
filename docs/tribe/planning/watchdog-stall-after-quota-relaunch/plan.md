@@ -361,7 +361,7 @@ git -c user.email=lamhiep16@gmail.com -c user.name=hieplam commit -m 'fix(watchd
 
 **Expected result:** one commit; `git log -1 --format='%(trailers)'` prints both trailer lines.
 
-- [ ] Task 1 complete
+- [x] Task 1 complete
 
 ---
 

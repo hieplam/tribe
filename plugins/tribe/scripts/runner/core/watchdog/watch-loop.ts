@@ -11,7 +11,7 @@ import type { WatchdogAction, WatchdogConfig, WatchdogCounters, WatchdogObservat
 import type { RunnerHandle, WatchdogIO } from '../../ports/ports.ts';
 import { decide } from './decide.ts';
 import { parseSessionSignals } from './signals.ts';
-import { isStale, newestLog, newestRunId, watchdogPathsOf } from './select.ts';
+import { isOwnRunVisible, isStale, newestLog, newestRunId, watchdogPathsOf } from './select.ts';
 import { actionLine, buildStatus, exitCodeOf, serializeEvent, serializeStatus } from './status.ts';
 
 /** Carried-forward audit requirement 2 (Task 8 dispatch): `readTail` returns `''` when the
@@ -42,6 +42,12 @@ interface LoopState {
   /** FIX S1: the runId THIS invocation has actually observed running (owned or adopted while
    * alive) — see `observe()`'s comment. */
   trackedRunId: string | null;
+  /** D2: the newest run id present on disk immediately BEFORE the most recent spawn. Anything
+   * at or below it predates this invocation's current child and can therefore never be that
+   * child's run — see `select.ts`'s `isOwnRunVisible`. `null` until this invocation has spawned
+   * anything (and a plain `null` is also the honest answer for an adopted run we never spawned:
+   * the suppression only ever applies while we own a live child). */
+  priorNewestRunId: string | null;
   /** FIX F-C1/F-C2: the deadline of the most recently ORDERED `wait_until`, cleared the moment
    * any new attempt is spawned — see `model.ts`'s `WatchdogObservation.pendingWait`. */
   pendingWait: { cause: 'quota' | 'overload'; untilMs: number } | null;
@@ -69,7 +75,17 @@ interface ObserveResult {
 function observe(config: WatchdogConfig, homeDir: string, io: WatchdogIO, state: LoopState): ObserveResult {
   const nowMs = io.nowMs();
   const runsDir = join(homeDir, 'runs');
-  const runId = newestRunId(io.listEntries(runsDir).filter((e) => e.isDir).map((e) => e.name));
+  const newestOnDisk = newestRunId(io.listEntries(runsDir).filter((e) => e.isDir).map((e) => e.name));
+  // D2: liveness comes from `state.child` (this invocation's own truth) while the observed run
+  // came from whatever directory happened to be newest on disk — and for the 63-170 ms it takes
+  // a real forked runner to create its own directory those two name DIFFERENT runs. Whenever we
+  // own a live child, a directory that predates its spawn is not it: report the run as
+  // not-yet-visible (`runId === null`, the same state the C1 fix below already handles for an
+  // empty runs/ directory) rather than attributing the previous run's silence to this one.
+  const ownsLiveChild = state.child !== null && state.ownedExitCode === null;
+  const runId = (!ownsLiveChild || isOwnRunVisible(newestOnDisk, state.priorNewestRunId))
+    ? newestOnDisk
+    : null;
 
   let record: Record<string, unknown> | null = null;
   if (runId !== null) {
@@ -143,7 +159,7 @@ function observe(config: WatchdogConfig, homeDir: string, io: WatchdogIO, state:
   const thisInvocationsFinalizedRecord = recordEndedAt !== null
     && (recordExitCodeSelfCorrects || recordProvenanceMatches);
 
-  const childAlive = state.child !== null && state.ownedExitCode === null;
+  const childAlive = ownsLiveChild;
   const recordAlive = recordNotFinalized;
   const alive = childAlive || recordAlive;
   const runnerPid = childAlive ? (state.child as RunnerHandle).pid : recordPid;
@@ -254,7 +270,7 @@ export async function runWatchdog(
   const state: LoopState = {
     child: null, ownedExitCode: null, attempt: 0, model: config.model, runId: null,
     nextWakeAtMs: null, stall: null, runnerCommand: null, trackedRunId: null, pendingWait: null,
-    noLogSince: null,
+    noLogSince: null, priorNewestRunId: null,
     counters: {
       quotaWaits: 0, overloadBackoffs: 0, crashRelaunches: 0, lockRelaunches: 0,
       fallbackUsed: false,
@@ -335,6 +351,17 @@ export async function runWatchdog(
       ...config.passthrough,
     ];
     state.runnerCommand = argv;
+    // D2: the newest run directory present at the instant BEFORE this child exists. Read here,
+    // and nowhere earlier, because this is the only instant at which the answer is exactly
+    // right: anything already on disk cannot belong to a process that does not exist yet.
+    state.priorNewestRunId = newestRunId(
+      io.listEntries(join(homeDir, 'runs')).filter((e) => e.isDir).map((e) => e.name),
+    );
+    // D2's second sentence: `status.json.runId` and the stall event's log path must name the
+    // same run. The id of a run whose directory does not exist yet is not knowable, so the
+    // honest value is `null` — publishing the PREVIOUS run's id here is what made status.json
+    // corroborate the false stall. It becomes the real id on the first tick that sees it.
+    state.runId = null;
     state.child = io.spawnRunner(argv, { cwd: config.repoRoot, stdoutPath });
     state.ownedExitCode = null;
     state.nextWakeAtMs = null;

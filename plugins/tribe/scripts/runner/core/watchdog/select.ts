@@ -10,6 +10,29 @@ export function newestRunId(runIds: string[]): string | null {
   return newest;
 }
 
+/**
+ * D2 (card watchdog-stall-after-quota-relaunch): the stall verdict only ever concerns the run
+ * the watchdog is supervising RIGHT NOW. While this invocation owns a live child, a run
+ * directory that already existed at the instant that child was spawned belongs to an EARLIER
+ * run — the child's own directory does not exist yet, because a real forked process needs real
+ * wall-clock time to create it (63-170 ms in the three recorded field sequences). Judging the
+ * new runner against that earlier run's hours-old log is the whole defect: 11 of 11 recorded
+ * `stall` events were false, each fired 1-20 ms after a launch/relaunch.
+ *
+ * `newestRunId`'s own contract already establishes that run ids compare chronologically as
+ * strings, so "newer than everything that was present at spawn time" is exactly `>`.
+ * `priorNewestRunId === null` means nothing at all preceded this child, so the first directory
+ * to appear is necessarily its own.
+ */
+export function isOwnRunVisible(
+  newestRunId: string | null,
+  priorNewestRunId: string | null,
+): boolean {
+  if (newestRunId === null) return false;
+  if (priorNewestRunId === null) return true;
+  return newestRunId > priorNewestRunId;
+}
+
 export interface LogEntry { name: string; mtimeMs: number }
 
 /** Greatest mtime; ties broken by name so the choice is deterministic under a coarse clock. */

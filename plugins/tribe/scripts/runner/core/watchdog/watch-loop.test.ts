@@ -685,3 +685,44 @@ describe('runWatchdog — FIX F-C5: an adopted run that dies before writing its 
     expect(sleepCalls).toBeLessThanOrEqual(SAFETY_VALVE);
   });
 });
+
+describe('runWatchdog — D2: a relaunched runner is never judged on the PREVIOUS run\'s log', () => {
+  test('a quota wait longer than --stall-minutes does not turn the relaunch into a stall', async () => {
+    // The gap-gate-2026-09-10 shape, in simulated time: the first pass hits a 429 whose reset is
+    // ~107 min out (the recorded wait), so by the time the watchdog relaunches, r1's log is far
+    // older than --stall-minutes 30. r2's own directory is not visible on the tick right after
+    // its spawn, exactly like a real just-forked process.
+    const resetAt = 1_800_000_000 + 107 * 60;
+    const { io, files } = fakeIo([
+      { exitCode: 3, runId: 'r1', logTail: quotaTail(resetAt) },
+      { exitCode: 0, runId: 'r2' },
+    ]);
+    const outcome = await runWatchdog(CONFIG, HOME, io);
+
+    const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
+      .trim().split('\n').map((l) => JSON.parse(l) as { action: string });
+    expect(events.map((e) => e.action)).not.toContain('stall');
+    expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
+  });
+
+  test('status.json never names the previous run while the new one is being supervised', async () => {
+    const resetAt = 1_800_000_000 + 107 * 60;
+    const { io, files } = fakeIo([
+      { exitCode: 3, runId: 'r1', logTail: quotaTail(resetAt) },
+      { exitCode: 0, runId: 'r2' },
+    ]);
+    const seen: Array<string | null> = [];
+    const spy: WatchdogIO = {
+      ...io,
+      writeFileAtomic: (p, c) => {
+        io.writeFileAtomic(p, c);
+        if (p.endsWith('status.json')) seen.push((JSON.parse(c) as { runId: string | null }).runId);
+      },
+    };
+    await runWatchdog(CONFIG, HOME, spy);
+    // Once the relaunch has happened, 'r1' may never be published again as the current run.
+    const afterRelaunch = seen.slice(seen.lastIndexOf('r1') + 1);
+    expect(afterRelaunch).not.toContain('r1');
+    expect(seen).toContain('r2');
+  });
+});
