@@ -540,7 +540,7 @@ the supervisor now reads, and document the schema guard's range as the card bran
 (`<mergeSha>^1...<mergeSha>^2`), including the fail-closed behaviour on a non-two-parent merge. Do not
 weaken the existing P11/R3 "never hand-edit `baseSha`" wording.
 
-- [ ] **Step 1: GREEN**
+- [x] **Step 1: GREEN**
 
 ```bash
 bash plugins/tribe/scripts/tests/test-supervisor-docs.sh 2>&1 | tail -12
@@ -548,7 +548,7 @@ bash plugins/tribe/scripts/tests/test-supervisor-docs.sh 2>&1 | tail -12
 
 Expected: the docs suite passes; exit 0.
 
-- [ ] **Step 2: Commit** `docs(supervisor): document park supersession and the guard real range`
+- [x] **Step 2: Commit** `docs(supervisor): document park supersession and the guard real range`
 
 ### Task 10: reconcile the architecture model
 
