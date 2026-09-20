@@ -192,6 +192,7 @@ Expected: test 1 fails with the guard reporting that the `locked/` schema-lock p
 ### Task 2: make the guard diff the branch's own commits
 
 - Modify: `plugins/tribe/scripts/runner/core/verify.ts`
+- Modify: `plugins/tribe/scripts/runner/core/verify.test.ts`
 
 Add the pure range decision next to `readAllowsSchemaChange`:
 
@@ -247,7 +248,7 @@ same pattern `checkGapGateStamped` already uses one line below:
 const schema = await checkSchemaGuard(card, config, io, merged.mergeSha);
 ```
 
-- [ ] **Step 1: GREEN** both Task 1 tests pass, and no existing verify test regresses.
+- [x] **Step 1: GREEN** both Task 1 tests pass, and no existing verify test regresses.
 
 ```bash
 cd plugins/tribe/scripts/runner && bun test core/verify.test.ts 2>&1 | tail -15 && bunx tsc --noEmit
@@ -255,7 +256,7 @@ cd plugins/tribe/scripts/runner && bun test core/verify.test.ts 2>&1 | tail -15 
 
 Expected: every test in `core/verify.test.ts` passes, `0 fail`; `tsc --noEmit` prints nothing.
 
-- [ ] **Step 2: Commit** `fix(verify): diff the card branch own commits in the schema guard`
+- [x] **Step 2: Commit** `fix(verify): diff the card branch own commits in the schema guard`
 
 ---
 

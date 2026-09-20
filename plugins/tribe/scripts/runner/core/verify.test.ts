@@ -51,6 +51,9 @@ interface MockOptions {
   worktreeStillExists?: boolean;
   remoteStillExists?: boolean;
   schemaDiffStdout?: string;
+  /** The merge commit's two parents, as `git rev-list --parents -n 1 <mergeSha>` would report
+   * them (schema guard's new oracle, spec §2.1) — a realistic two-parent line by default. */
+  mergeParents?: [string, string];
   planContent?: string;
   /** When false, the card's plan path is reported absent (`fileExists` → false) and any
    * `readFile` of it throws ENOENT — the shape a card leaves behind when its own merge
@@ -73,6 +76,7 @@ function buildIo(opts: MockOptions = {}): VerifyIO {
   const worktreeStillExists = opts.worktreeStillExists ?? false;
   const remoteStillExists = opts.remoteStillExists ?? false;
   const schemaDiffStdout = opts.schemaDiffStdout ?? '';
+  const mergeParents = opts.mergeParents ?? ['parent0001', 'parent0002'];
   const planContent = opts.planContent ?? '# plan\n\nno front matter here.\n';
   const planExists = opts.planExists ?? true;
   const prBody =
@@ -115,6 +119,11 @@ function buildIo(opts: MockOptions = {}): VerifyIO {
       }
       if (bin === 'git' && rest[0] === 'ls-remote') {
         return ok(remoteStillExists ? `abc123\trefs/heads/${rest[rest.length - 1]}\n` : '');
+      }
+      if (bin === 'git' && rest[0] === 'rev-list') {
+        // Schema guard's oracle (spec §2.1): `git rev-list --parents -n 1 <mergeSha>` reports
+        // `<mergeSha> <parent1> <parent2>` on one line for a regular two-parent merge.
+        return ok(`${mergeSha} ${mergeParents[0]} ${mergeParents[1]}\n`);
       }
       if (bin === 'git' && rest[0] === 'diff' && rest.includes('--name-only')) {
         return ok(docsOnlyDiffFiles.map((f) => `${f}\n`).join(''));
@@ -422,13 +431,19 @@ describe('verifyShipped — remote/baseBranch are threaded, never hardcoded', ()
     expect(diffCall).toContain('base0001..upstream/main');
   });
 
-  test('checkSchemaGuard diffs against <remote>/<baseBranch>', async () => {
-    const { io, calls } = buildIoRecordingCalls();
+  // Superseded (Task 2, schema guard's real oracle, spec §2.1): the guard used to diff
+  // `baseSha..<remote>/<baseBranch>`, which is exactly the false-positive range the card
+  // eliminates. The oracle is now the card branch's OWN commits — the three-dot range between
+  // the merge commit's two parents — and <remote>/<baseBranch> plays no part in it at all.
+  test('checkSchemaGuard diffs the merge commit two parents (mergeSha rev-list), never <remote>/<baseBranch>', async () => {
+    const { io, calls } = buildIoRecordingCalls({ mergeParents: ['parent0001', 'parent0002'] });
     await verifyShipped(fixtureCard(), fixtureConfig({ remote: 'upstream', baseBranch: 'main' }), io, 'C1');
     const diffCall = calls.find(
-      (c) => c[0] === 'git' && c[1] === 'diff' && c[2] === 'base0001..upstream/main',
+      (c) => c[0] === 'git' && c[1] === 'diff' && c[2] === 'parent0001...parent0002',
     );
     expect(diffCall).toBeDefined();
+    expect(diffCall).not.toContain('base0001..upstream/main');
+    expect(diffCall?.join(' ')).not.toContain('upstream/main');
   });
 
   test('checkWorktreeAndBranchGone passing-case detail reflects the resolved remote, not a hardcoded "origin"', async () => {
@@ -440,17 +455,24 @@ describe('verifyShipped — remote/baseBranch are threaded, never hardcoded', ()
     expect(point?.detail).not.toContain('origin/');
   });
 
-  test('checkSchemaGuard failing-case (missing baseSha) detail reflects the resolved remote/baseBranch, not hardcoded "origin/master"', async () => {
-    const io = buildIo();
+  // Superseded (Task 2): this used to pin the failing detail naming the OLD
+  // `baseSha..<remote>/<baseBranch>` range. The guard's failing detail now names the range it
+  // actually diffed — the merge commit's two parents — and never <remote>/<baseBranch> at all.
+  test('checkSchemaGuard failing-case detail names the range actually diffed (mergeSha rev-list parents), never <remote>/<baseBranch>', async () => {
+    const io = buildIo({
+      schemaDiffStdout: 'diff --git a/packages/app/src/domain/sample-types.ts ...\n',
+      mergeParents: ['parent0001', 'parent0002'],
+    });
     const result = await verifyShipped(
-      fixtureCard({ baseSha: null }),
+      fixtureCard(),
       fixtureConfig({ remote: 'upstream', baseBranch: 'main' }),
       io,
       'C1',
     );
     const point = result.points.find((p) => p.id === 'schemaGuard');
     expect(point?.passed).toBe(false);
-    expect(point?.detail).toContain('baseSha..upstream/main');
+    expect(point?.detail).toContain('parent0001...parent0002');
+    expect(point?.detail).not.toContain('upstream/main');
     expect(point?.detail).not.toContain('origin/master');
   });
 });

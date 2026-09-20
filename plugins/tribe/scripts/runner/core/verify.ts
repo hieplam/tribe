@@ -320,7 +320,35 @@ export function readAllowsSchemaChange(planContent: string): boolean {
   return keyMatch[1] === 'true';
 }
 
-async function checkSchemaGuard(card: Card, config: VerifyConfig, io: VerifyIO): Promise<VerifyPointResult> {
+/** The schema guard's oracle (spec §2.1): the card branch's OWN commits. After a regular merge
+ * that set is exactly the three-dot diff between the merge commit's two parents — `merge-base(p1,
+ * p2)` is the last base-branch commit the branch absorbed, so every base-side change is excluded
+ * by construction while all branch-authored work (including a sub-branch the card merged in) is
+ * included. PURE: the caller reads the parents, this decides (`pure-core.md`). */
+export type SchemaGuardRange =
+  | { kind: 'range'; from: string; to: string }
+  | { kind: 'refuse'; detail: string };
+
+export function schemaGuardRange(input: { mergeSha: string | null; parents: string[] }): SchemaGuardRange {
+  if (input.mergeSha === null) {
+    return { kind: 'refuse', detail: 'the merge commit sha is unknown, so the card branch own commits cannot be identified' };
+  }
+  if (input.parents.length !== 2) {
+    return {
+      kind: 'refuse',
+      detail: `the merge commit ${input.mergeSha} has ${input.parents.length} parent(s), not 2; `
+        + 'only a regular merge leaves the two-parent anchor this guard needs (never squash, never rebase-merge)',
+    };
+  }
+  return { kind: 'range', from: input.parents[0] as string, to: input.parents[1] as string };
+}
+
+async function checkSchemaGuard(
+  card: Card,
+  config: VerifyConfig,
+  io: VerifyIO,
+  mergeSha: string | null,
+): Promise<VerifyPointResult> {
   if (config.schemaLockPaths.length === 0) {
     return { id: 'schemaGuard', passed: true, detail: 'no schema-lock paths configured; guard is a no-op' };
   }
@@ -329,7 +357,7 @@ async function checkSchemaGuard(card: Card, config: VerifyConfig, io: VerifyIO):
     return {
       id: 'schemaGuard',
       passed: false,
-      detail: `card.baseSha is not set; cannot diff baseSha..${config.remote}/${config.baseBranch} for the schema guard`,
+      detail: 'card.baseSha is not set; cannot evaluate the schema guard',
     };
   }
 
@@ -350,24 +378,33 @@ async function checkSchemaGuard(card: Card, config: VerifyConfig, io: VerifyIO):
     }
   }
 
+  const parentsResult = await run(io, config.repoRoot, ['git', 'rev-list', '--parents', '-n', '1', String(mergeSha)]);
+  const parents = parentsResult.exitCode === 0
+    ? parentsResult.stdout.trim().split(/\s+/).slice(1)
+    : [];
+  const range = schemaGuardRange({ mergeSha, parents });
+  if (range.kind === 'refuse') {
+    return { id: 'schemaGuard', passed: false, detail: `cannot evaluate the schema guard: ${range.detail}` };
+  }
+
   const result = await run(io, config.repoRoot, [
     'git',
     'diff',
-    `${card.baseSha}..${config.remote}/${config.baseBranch}`,
+    `${range.from}...${range.to}`,
     '--',
     ...config.schemaLockPaths,
   ]);
   const diffIsEmpty = result.stdout.trim().length === 0;
 
   if (diffIsEmpty) {
-    return { id: 'schemaGuard', passed: true, detail: `no diff on schema-lock paths since ${card.baseSha}` };
+    return { id: 'schemaGuard', passed: true, detail: `no diff on schema-lock paths in ${range.from}...${range.to}` };
   }
 
   if (allowsSchemaChange) {
     return {
       id: 'schemaGuard',
       passed: true,
-      detail: `schema-lock paths changed since ${card.baseSha}, but the plan's front-matter declares allowsSchemaChange: true`,
+      detail: `schema-lock paths changed in ${range.from}...${range.to}, but the plan's front-matter declares allowsSchemaChange: true`,
     };
   }
 
@@ -377,7 +414,7 @@ async function checkSchemaGuard(card: Card, config: VerifyConfig, io: VerifyIO):
   return {
     id: 'schemaGuard',
     passed: false,
-    detail: `schema-lock paths (${config.schemaLockPaths.join(', ')}) changed since ${card.baseSha} and allowsSchemaChange is not true${planNote}`,
+    detail: `schema-lock paths (${config.schemaLockPaths.join(', ')}) changed in ${range.from}...${range.to} and allowsSchemaChange is not true${planNote}`,
   };
 }
 
@@ -540,7 +577,7 @@ export async function verifyShipped(
   const ancestor = await checkAncestor(merged.mergeSha, config, io);
   const checks = await checkChecksGreen(card, config, io);
   const worktree = await checkWorktreeAndBranchGone(card, config, io);
-  const schema = await checkSchemaGuard(card, config, io);
+  const schema = await checkSchemaGuard(card, config, io, merged.mergeSha);
   const gapGate = await checkGapGateStamped(cardId, card, config, io, merged.mergeSha);
   const ledger = await checkLedgerCommitted(gapGate.stamp, config, io);
   const points: VerifyPointResult[] = [
