@@ -429,7 +429,7 @@ Add tests both ways: a stale park yields `supersede_park`; a park that still hol
 `resume_blocked` with the unchanged message. Assert explicitly that rows P1, P3 and P4 still win
 where they used to — a live foreign supervisor must still beat a stale park.
 
-- [ ] **Step 1: GREEN**
+- [x] **Step 1: GREEN**
 
 ```bash
 cd plugins/tribe/scripts/runner && bun test core/supervisor/decide.test.ts 2>&1 | tail -12
@@ -437,7 +437,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/decide.test.ts 2>&1 
 
 Expected: `0 fail`, including every pre-existing decide row test.
 
-- [ ] **Step 2: Commit** `fix(supervisor): supersede a park the disk has already falsified`
+- [x] **Step 2: Commit** `fix(supervisor): supersede a park the disk has already falsified`
 
 ### Task 7: never park on a terminal the disk contradicts (G2, G5)
 

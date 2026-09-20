@@ -774,6 +774,11 @@ function stateLabelFor(action: SupervisorAction): SupervisorStatus['state'] {
         : action.session === 'ratify' ? 'session_ratify' : 'session_closing';
     case 'archive_escalation': return 'observing';
     case 'park': return 'terminal';
+    // Task 6 (card `supervisor-park-truth`) added this action kind so `decide.ts` compiles and
+    // its own tests can run; performing the supersede at the edge (Task 8) is what gives this
+    // case its real, considered label. Placeholder only, to keep this exhaustive switch
+    // compiling — no behaviour for `supersede_park` is implemented in this task.
+    case 'supersede_park': return 'observing';
     case 'exit': return 'terminal';
   }
 }

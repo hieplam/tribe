@@ -11,6 +11,7 @@
  * order spec §3.4 lists it, with the row number(s) it implements named in a comment.
  */
 import type { EscalationFact, ParkReason, SupervisorAction, SupervisorObservation } from './model.ts';
+import { parkStillHolds } from './truth.ts';
 
 function park(reason: ParkReason, detail: string): SupervisorAction {
   return { kind: 'park', reason, detail };
@@ -115,8 +116,17 @@ export function decide(o: SupervisorObservation): SupervisorAction {
       `a live supervisor (pid ${o.supervisorLock.pid}) already holds this campaign's lock`,
     );
   }
-  // P2: an unresolved park is never silently resumed.
+  // P2: an unresolved park is never silently resumed — but a park whose stated condition the disk
+  // has already falsified is SUPERSEDED, not obeyed (G3). `parkStillHolds` is the pure predicate;
+  // a park that still holds refuses exactly as before.
   if (o.needsOwnerPresent) {
+    if (!parkStillHolds(o)) {
+      return {
+        kind: 'supersede_park',
+        priorReason: o.parkedTerminal?.reason ?? 'unknown',
+        detail: 'the park condition no longer holds on disk; re-observing and continuing',
+      };
+    }
     return park('resume_blocked', 'NEEDS_OWNER.md is present; resume is blocked until the owner deletes it');
   }
   // P3: a STOP file honoured immediately, every tick.

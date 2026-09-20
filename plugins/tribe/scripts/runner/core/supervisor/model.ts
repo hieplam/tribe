@@ -214,6 +214,10 @@ export type SupervisorAction =
   | { kind: 'spawn_session'; session: SessionKind; cardId: string | null }
   | { kind: 'archive_escalation'; cardId: string; rulingId: string }
   | { kind: 'park'; reason: ParkReason; detail: string }
+  /** G3 (spec §2.2, card `supervisor-park-truth`): a park whose stated condition the disk has
+   * already falsified — superseding is an ACTION, never a `ParkReason` (`ParkReason` gains
+   * nothing here). `priorReason` names the park being superseded. */
+  | { kind: 'supersede_park'; priorReason: string; detail: string }
   | { kind: 'exit'; status: 'done'; reason: string };
 
 /** §11: one ledger.jsonl line per spawn (G5) — a session spawn, or an owner ruling transcribed

@@ -45,6 +45,82 @@ test('P2: an existing NEEDS_OWNER.md blocks resume', () => {
   expect(decide(base({ needsOwnerPresent: true })).kind).toBe('park');
 });
 
+// Task 6 (spec §2.2/§3.4 row P2, card `supervisor-park-truth`, G3): a park whose stated
+// condition the disk has already falsified is SUPERSEDED, not obeyed; a park that still holds
+// refuses byte-for-byte as before.
+
+test('P2: a park whose condition the disk has already falsified is SUPERSEDED, not obeyed', () => {
+  const stale = base({
+    needsOwnerPresent: true,
+    parkedTerminal: { reason: 'stalled', atMs: 1_000 },
+    lastWatchdog: terminal('stalled'),
+    watchdogRunId: 'run-0001',
+    // A newer run than the one the terminal is about is alive: parkStillHolds(o) === false.
+    runs: [{ runId: 'run-0002', pid: 99, alive: true, endedAt: null, exitCode: null, reason: null }],
+  });
+  expect(decide(stale)).toEqual({
+    kind: 'supersede_park',
+    priorReason: 'stalled',
+    detail: 'the park condition no longer holds on disk; re-observing and continuing',
+  });
+});
+
+test('P2: a park that STILL holds refuses exactly as before, message unchanged', () => {
+  const stillTrue = base({
+    needsOwnerPresent: true,
+    parkedTerminal: { reason: 'stalled', atMs: 1_000 },
+    lastWatchdog: terminal('stalled'),
+    watchdogRunId: 'run-0001',
+    // No disk evidence contradicts the terminal: parkStillHolds(o) === true.
+    runs: [],
+  });
+  expect(decide(stillTrue)).toEqual({
+    kind: 'park',
+    reason: 'resume_blocked',
+    detail: 'NEEDS_OWNER.md is present; resume is blocked until the owner deletes it',
+  });
+});
+
+test('P1 still beats P2 even when the park is stale: a live foreign supervisor wins', () => {
+  const staleButForeignLockHeld = base({
+    supervisorLock: { pid: 42, alive: true },
+    needsOwnerPresent: true,
+    parkedTerminal: { reason: 'stalled', atMs: 1_000 },
+    lastWatchdog: terminal('stalled'),
+    watchdogRunId: 'run-0001',
+    runs: [{ runId: 'run-0002', pid: 99, alive: true, endedAt: null, exitCode: null, reason: null }],
+  });
+  expect(decide(staleButForeignLockHeld)).toEqual({
+    kind: 'park',
+    reason: 'resume_blocked',
+    detail: 'a live supervisor (pid 42) already holds this campaign\'s lock',
+  });
+});
+
+test('P3 is unaffected: a STOP file is still honoured immediately when NEEDS_OWNER.md is absent, '
+  + 'even though the disk carries a stale-park-shaped set of facts', () => {
+  const staleParkFactsButNoParkFile = base({
+    stopFilePresent: true,
+    parkedTerminal: { reason: 'stalled', atMs: 1_000 },
+    lastWatchdog: terminal('stalled'),
+    watchdogRunId: 'run-0001',
+    runs: [{ runId: 'run-0002', pid: 99, alive: true, endedAt: null, exitCode: null, reason: null }],
+  });
+  expect(decide(staleParkFactsButNoParkFile)).toEqual({ kind: 'exit', status: 'done', reason: 'stop_requested' });
+});
+
+test('P4 is unaffected: a live watchdog is still adopted when NEEDS_OWNER.md is absent, '
+  + 'even though the disk carries a stale-park-shaped set of facts', () => {
+  const staleParkFactsButNoParkFile = base({
+    watchdogLive: { pid: 7, alive: true },
+    parkedTerminal: { reason: 'stalled', atMs: 1_000 },
+    lastWatchdog: terminal('stalled'),
+    watchdogRunId: 'run-0001',
+    runs: [{ runId: 'run-0002', pid: 99, alive: true, endedAt: null, exitCode: null, reason: null }],
+  });
+  expect(decide(staleParkFactsButNoParkFile)).toEqual({ kind: 'await_watchdog', pid: 7 });
+});
+
 test('P3: a STOP file is honoured immediately, before any watchdog fact is even consulted', () => {
   expect(decide(base({ stopFilePresent: true, lastWatchdog: terminal('escalations_pending') })))
     .toEqual({ kind: 'exit', status: 'done', reason: 'stop_requested' });
