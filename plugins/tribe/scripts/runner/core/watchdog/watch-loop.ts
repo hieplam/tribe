@@ -69,14 +69,16 @@ interface LoopState {
    * those otherwise-legitimate scenarios as instantly stale. Reset to `null` the moment the run
    * stops being "alive with no log" (a log appears, the run ends, or the identity changes).
    *
-   * M1 (fix round 1): the symmetric, much narrower transition — `ownsLiveChild` flipping from
-   * `true` to `false` on a tick where the on-disk record is still unfinalized and its pid still
-   * reads alive (an adoption of our own just-relinquished run) — DOES flip `silenceKey` from the
-   * attempt key to the run id on that same tick, unlike the null-to-known transition above. This
-   * is bounded, not a permanent misjudgment of a live run: the clock merely restarts once, so the
-   * worst case is noticing an ALREADY-DEAD run's stall one poll interval late — it can never
-   * un-notice a genuinely live one, because `alive` (recomputed fresh every tick from `state.child`
-   * or a fresh `io.isProcessAlive` probe) still gates whether the clock runs at all. */
+   * GX1 (fix round 3, corrects a false claim M1 (fix round 1) made here): `ownsLiveChild`
+   * flipping from `true` to `false` on a tick where the on-disk record is still unfinalized and
+   * its pid still reads alive (our own child hard-crashing without ever writing `endedAt`, then
+   * being re-observed as "adopted" because `io.isProcessAlive` still reports the pid alive — pid
+   * reuse, or a lingering zombie) is the SAME run this invocation spawned, not a different one,
+   * and must NOT flip `silenceKey` either — see `observe()`'s `ourOwnRun` for why. M1 claimed
+   * this transition was "bounded to one poll interval late"; it is not: a crash at 25.5 minutes
+   * of already-accumulated silence pushed the eventual stall verdict to 56 minutes against a
+   * 30-minute `--stall-minutes`, because restarting the clock discards however much silence had
+   * already been observed, however large — see `watch-loop.test.ts`'s GX1 test. */
   noLogSince: { key: string | null; sinceMs: number } | null;
 }
 
@@ -213,7 +215,20 @@ function observe(config: WatchdogConfig, homeDir: string, io: WatchdogIO, state:
   // both doors led to the SAME unbounded `attach` loop (a reviewer reproduced it running until
   // `RangeError: Out of memory`). See `LoopState.noLogSince`'s own comment for why this tracks
   // THIS invocation's own clock rather than the record's `startedAt`.
-  const silenceKey = ownsLiveChild ? `attempt-${state.attempt}` : runId;
+  // GX1 (fix round 3): a scalar `ownsLiveChild ? attempt : runId` key restarts the clock on
+  // EITHER of two transitions this run can pass through mid-supervision — `runId` going
+  // null -> known (the directory finally appearing) and `ownsLiveChild` going true -> false (our
+  // own child's exit is captured while its record stays unfinalized and its pid still reads
+  // alive) — but only the first was ever meant to be absorbed; a reset on the second discards
+  // however much silence had already accumulated (see `LoopState.noLogSince`'s GX1 comment). The
+  // supervision identity that must survive BOTH transitions is "is this a run THIS invocation
+  // spawned", which `state.priorRunIds` (populated once, at spawn time, in `spawnRunnerNow`)
+  // answers without depending on `ownsLiveChild` at all: a run we spawned is one whose id is
+  // either not yet knowable (`runId === null`) or was not already on disk before we spawned it.
+  // `state.attempt > 0` excludes the adopted-on-start case (attempt 0, never spawned by us),
+  // which must keep keying on the run id exactly as the pre-card code did.
+  const ourOwnRun = state.attempt > 0 && (runId === null || !state.priorRunIds.has(runId));
+  const silenceKey = ourOwnRun ? `attempt-${state.attempt}` : runId;
   if (alive && newest === null) {
     if (state.noLogSince === null || state.noLogSince.key !== silenceKey) {
       state.noLogSince = { key: silenceKey, sinceMs: nowMs };

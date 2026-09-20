@@ -328,25 +328,34 @@ describe('D1/D2 — no launch path is judged on a run directory that predates it
     expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
   }, 60_000);
 
-  // FC2 (fixer round 2, spec §5.2 R4 / §10 goal 2): R1-R3 above prove the fix suppresses
-  // nothing FALSE; R4 is the card's own "keep" clause — the OPPOSITE proof, that a genuinely
-  // silent RELAUNCHED runner still stalls, on time, bound by the REAL wall clock (no fake
-  // timers anywhere in this file or this test — `bun:test` never patches `Date.now`/timers, and
-  // nothing here scripts `io.nowMs`/`io.sleep`, unlike `watch-loop.test.ts`'s `fakeIo`).
-  test('R4 a genuinely silent relaunched runner still stalls, bound by the real clock', async () => {
+  // FC2 (fixer round 2, spec §5.2 R4 / §10 goal 2), reworked per GC1 (audit round 3): R1-R3
+  // above prove the fix suppresses nothing FALSE; R4 is the card's own "keep" clause — the
+  // OPPOSITE proof, that a genuinely silent RELAUNCHED runner still stalls, on the REAL wall
+  // clock (no fake timers anywhere in this file or this test — `bun:test` never patches
+  // `Date.now`/timers, and nothing here scripts `io.nowMs`/`io.sleep`, unlike
+  // `watch-loop.test.ts`'s `fakeIo`).
+  //
+  // Spec §5.2 (quoted): this real-process test proves ONLY the "not early" half — "no later"
+  // than `stallMinutes` — because "the *upper* half of the bound... asks a real-clock test to
+  // discriminate a one-second margin inside a sixty-second wait, on a loaded developer machine."
+  // A reviewer reverted the fix and ran the tight-upper-bound version of this exact test twice:
+  // it "failed once and passed once" — a flaky negative control proves nothing. The exact
+  // `stallMinutes` + one poll interval CEILING is asserted instead on the simulated clock, where
+  // the tick schedule is deterministic: `core/watchdog/watch-loop.test.ts`, describe block
+  // "runWatchdog — D4(a): a relaunched runner that never writes still stalls, on time", test
+  // "the stall fires within --stall-minutes + ONE poll interval of the relaunch".
+  test('R4 a genuinely silent relaunched runner still stalls, and not before its own --stall-minutes', async () => {
     // Attempt 1: exit 3 with a quota fixture whose reset is already in the PAST (R2's shape) —
     // takes the plain crash-relaunch path immediately, with no quota/overload wait to sit
     // through, so the real clock spent here is negligible next to the stall bound below.
     const pastReset = Math.floor(Date.now() / 1000) - 3600;
     // Attempt 2: the `none` fixture — writes NO session log at all — sleeping long enough (90s)
-    // to still be alive well past the stall bound (61s) computed below, so the watchdog's own
-    // `noLogSince` clock, never a mocked one, is what fires the stall. `DOUBLE_RUNDIR_DELAY_S`
-    // (5s, same knob R1/R2/R3 use) widens the gap between the relaunch and the new attempt's own
-    // `runs/<id>/` directory appearing — the fixed code's D2 exclusion (`newestRunIdExcluding`)
-    // starts the silence clock the INSTANT the child is spawned regardless of this delay, so a
-    // correct fix's measured interval is unaffected by it; the sanity check below (temporarily
-    // reverting to base commit 0ca94dc) shows the PRE-fix code instead waits out this whole delay
-    // before it even recognises "alive with no log", failing the "not late" bound below.
+    // to still be alive well past --stall-minutes (60s), so the watchdog's own `noLogSince`
+    // clock, never a mocked one, is what fires the stall. `DOUBLE_RUNDIR_DELAY_S` (5s, same knob
+    // R1/R2/R3 use) widens the gap between the relaunch and the new attempt's own `runs/<id>/`
+    // directory appearing — the fixed code's D2 exclusion (`newestRunIdExcluding`) starts the
+    // silence clock the INSTANT the child is spawned regardless of this delay, so a correct
+    // fix's measured "not early" interval is unaffected by it.
     const h = harness('3:quota 0:none:90', {
       DOUBLE_RESET_S: String(pastReset), DOUBLE_RUNDIR_DELAY_S: '5',
     });
@@ -367,13 +376,10 @@ describe('D1/D2 — no launch path is judged on a run directory that predates it
     // Not early: the relaunched run gets its own full `--stall-minutes` (60_000 ms) of silence
     // before it may be declared stalled — this is the wall the D4(a) "keep" clause exists to
     // guard: suppressing stalls wholesale after a relaunch would fail this assertion by firing
-    // at (or near) 0 ms instead.
+    // at (or near) 0 ms instead. Wall-clock time cannot run backwards, so this half is robust
+    // under load (GC1) — unlike the tight upper-bound half, which is proven instead on the
+    // simulated clock (see the comment above this test for exactly where).
     expect(measuredMs).toBeGreaterThan(60_000);
-    // Not late: at most one further poll interval (1_000 ms, `pollSeconds: 1`) to notice it,
-    // plus a stated real-clock scheduling allowance (5_000 ms) for subprocess-spawn and event-
-    // loop jitter that a REAL clock (unlike a mocked one) genuinely incurs — measured, never
-    // assumed: this run's actual `measuredMs` is asserted below the loop.
-    expect(measuredMs).toBeLessThanOrEqual(60_000 + 1_000 + 5_000);
     // Sanity: this test really did run in real wall-clock time, not a mocked instant.
     expect(finished - started).toBeGreaterThan(60_000);
   }, 180_000);

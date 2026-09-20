@@ -43,7 +43,12 @@ sleep_seconds="${sleep_seconds:-0}"
 # luck. Computing run_id AFTER the wait also keeps ids chronologically ordered.
 [[ -z "${DOUBLE_RUNDIR_DELAY_S:-}" ]] || sleep "$DOUBLE_RUNDIR_DELAY_S"
 
-run_id="$(date -u +%Y-%m-%dT%H-%M-%S-000Z)-d$next"
+# GM1 (audit round 3): zero-padded to 3 digits so the id's tail stays lexicographically ordered
+# past attempt 9 (unpadded, "d10" < "d2") — this module's own convention is that run ids sort
+# lexicographically (`select.ts`'s `newestRunId`/`newestRunIdExcluding`), so this fixture double
+# must honour it too, past a single digit of attempts.
+next_padded="$(printf '%03d' "$next")"
+run_id="$(date -u +%Y-%m-%dT%H-%M-%S-000Z)-d$next_padded"
 run_dir="$home/runs/$run_id"
 mkdir -p "$run_dir/logs"
 

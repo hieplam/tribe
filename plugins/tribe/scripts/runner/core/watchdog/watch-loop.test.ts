@@ -853,6 +853,76 @@ describe('runWatchdog — D4(a): a relaunched runner that never writes still sta
   });
 });
 
+// GX1 (fixer round 3): the `ownsLiveChild` boolean re-keying `silenceKey` restarts the silence
+// clock the instant an OWNED child that has just hard-crashed (never wrote run.json's `endedAt`)
+// is re-observed as "adopted" because `io.isProcessAlive(recordPid)` still reports its pid alive
+// (pid reuse, or a lingering zombie). This is the SAME run this invocation spawned — its silence
+// clock must never restart on this transition, exactly as it must not restart on the symmetric
+// `runId: null -> known` transition the D4(a) tests above already guard.
+describe('runWatchdog — GX1: an owned child\'s captured crash must not reset already-accumulated silence', () => {
+  test('a crash captured mid-silence, with the record left unfinalized and the pid still reading alive, does not restart the noLogSince clock', async () => {
+    const { io, files, entries, setProcessAlive, setNow } = fakeIo([]); // spawnRunner overridden below
+    const runsDir = join(HOME, 'runs');
+    const RUN_ID = 'r1';
+    const runDir = join(runsDir, RUN_ID);
+    const PID = 12345;
+    const T0 = io.nowMs();
+    const POLL_MS = CONFIG.pollSeconds * 1000; // 30_000
+    // How much silence has ALREADY accumulated on THIS run at the instant of the simulated
+    // crash — chosen to be well past the halfway point of --stall-minutes (30), so a clock
+    // restart (the regression) pushes the eventual stall verdict roughly 25 minutes later than
+    // the --stall-minutes + one-poll-interval bound the fix must honour.
+    const PRE_CRASH_SILENCE_MS = 25.5 * 60_000;
+
+    let crashed = false;
+    const wrapped: WatchdogIO = {
+      ...io,
+      spawnRunner: () => {
+        // The run's own directory and unfinalized record are visible from the very first tick —
+        // this isolates the GX1 transition from the separate C1/F1 startup-timing races, exactly
+        // like the F1 test above does.
+        entries.set(runsDir, [{ name: RUN_ID, mtimeMs: io.nowMs(), isDir: true }]);
+        files.set(join(runDir, 'run.json'), JSON.stringify({
+          v: 1, runId: RUN_ID, pid: PID, startedAt: io.now(), endedAt: null,
+          exitCode: null, reason: null,
+        }));
+        entries.set(join(runDir, 'logs'), []); // never writes a single log line, ever
+        // The pid keeps reading alive even AFTER the crash below — e.g. the OS has already
+        // reused it, or it is a lingering zombie — which is exactly what lets the crashed run
+        // keep reading `alive` (via the unfinalized record) once `ownsLiveChild` flips false.
+        setProcessAlive(PID, true);
+        return {
+          pid: PID,
+          waitFor: async (waitMs) => {
+            const elapsedBefore = io.nowMs() - T0;
+            if (!crashed && elapsedBefore >= PRE_CRASH_SILENCE_MS) {
+              // The crash: THIS invocation captures a real (non-null) exit code — `ownsLiveChild`
+              // goes false on the NEXT observation — but the on-disk record is NEVER finalized
+              // (as if the process were killed before it could write `endedAt`), matching GX1.
+              crashed = true;
+              return 1;
+            }
+            setNow(io.nowMs() + waitMs);
+            return null;
+          },
+        };
+      },
+    };
+
+    const outcome = await runWatchdog(CONFIG, HOME, wrapped);
+
+    const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
+      .trim().split('\n').map((l) => JSON.parse(l) as { at: string; action: string });
+    const launchAt = Date.parse(events.find((e) => e.action === 'launch')?.at as string);
+    const stallAt = Date.parse(events.find((e) => e.action === 'stall')?.at as string);
+    expect([outcome.exitCode, outcome.reason]).toEqual([10, 'stalled']);
+    // The bound the card promises (spec §10 goal 2 / D4(a)): no later than --stall-minutes (30)
+    // plus one poll interval (30s), measured from the run's OWN original silence — never from
+    // whatever instant the (buggy) re-keying happened to restart the clock at.
+    expect(stallAt - launchAt).toBeLessThanOrEqual(30 * 60_000 + 30_000);
+  });
+});
+
 describe('runWatchdog — goal 3: the three recorded sequences replay with zero false stalls', () => {
   // Numbers copied from the recorded events.jsonl files (offsets and log ages only — no paths,
   // no card names, no owner content):
