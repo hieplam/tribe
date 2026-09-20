@@ -324,6 +324,7 @@ of the default `bun test` gate, with the exact invocation recorded in the eviden
 | Agent drift: `~/.claude/agents/*.md` shadows the plugin for the bare name | **Note only** (card adjudication rule). Byte-identical today, 6/6 verified. `install.sh` keeps them synced; `tribe:hunter` is the explicit address. |
 | The scan guard over-refuses a legitimate scan | **By design** — the oracle says over-refusing is acceptable, under-refusing is a bug. The deny message names the alternative, so a session is redirected, never merely blocked. |
 | `local` tier is untracked and machine-specific | No defect found (§4.6); absent on fresh clones. |
+| **An MCP server now connects at startup in every spawned session** (playwright) | **Must be proven to fail OPEN** (Shaman ruling R-c, `fail-closed-edges.md`): an unavailable server must leave the session running with the tools absent — never a hang, never a startup abort. Proven in Task 6; a non-fail-open result is an escalation, not a fix. |
 
 **Rollback:** the behaviour change is one literal in two files. Reverting the commit restores
 `['project']` exactly; the ratchet, the guard and the E2E are additive and independently
@@ -346,15 +347,22 @@ behaviour appearing where nothing applied before*. Answered as such in §4.2; it
 skills"*. The card's step 2 describes the pre-`b6b5330` text. The **false `c3 lookup` executable
 claim on line 5 still stands**, so G3 remains real — it is just narrower than the card describes.
 
-**D3 — G4's `verify-shipped` baseline is partly out of fence.** `core/supervisor/session.ts:113`
+**D3 — G4's `verify-shipped` baseline is partly out of fence. (Shaman ruling R-d: G4's oracle is
+SCOPED to executor-kind sessions.** G4 is met when the count originating in **executor** sessions
+reaches zero; `core/supervisor/session.ts:113`'s separate envelope is outside this card's fence and
+its residual occurrences are **not this card's regression**. Follow-up candidate
+**FU-supervisor-settings**. *Do not report a global zero that was not achieved.*) `core/supervisor/session.ts:113`
 builds a separate envelope for supervisor sessions. 6 of the 43 `Unknown skill: verify-shipped`
 occurrences are in `campaign-supervisor`'s logs, i.e. potentially from supervisor-kind sessions,
 which this card does not touch. Executor sessions are fixed and `verify-shipped` does resolve in
 them (§4.4); a residual count originating in supervisor sessions would not be regressed by this
 card, and is flagged as a follow-up rather than silently absorbed.
 
-**D4 — the global baselines differ from the card's.** The card records 91 / 32; the same corpus
-now counts **124 / 43** occurrences. The corpus is append-only and still growing (sessions ran
+**D4 — the global baselines differ from the card's. (Shaman ruling R-e: the baseline of record is
+the committed script's output at the merge base, not the card's 91 / 32.)** The card records
+91 / 32; the same corpus now counts **124 / 43** occurrences. *The card's missing counting method is
+itself the defect, and the committed counter is the fix;* the evidence document records the method
+(which pattern, over which roots), the **merge-base** output, and the post-change output. The corpus is append-only and still growing (sessions ran
 between the card's measurement and this one), and the card does not record its counting method.
 **The per-campaign `supervisor-hardening` scan baseline of 4 reproduces exactly**, which is the
 one the card names for G2 and the one the ratchet targets.
@@ -367,6 +375,11 @@ one the card names for G2 and the one the ratchet targets.
 
 ## 10. Open questions for the Shaman
 
-None blocking. R-a and R-b are ruled; D1–D5 are grounding corrections the plan already absorbs.
+**Follow-up candidate FU-supervisor-settings** (out of fence, per R-d): supervisor and closing
+sessions build a separate envelope at `core/supervisor/session.ts:113` and keep
+`settingSources: ['project']` / `[]`. Whether they should load the user tier too is a real question
+this card deliberately does not answer.
+
+None blocking. R-a and R-b (owner) and R-c, R-d, R-e (Shaman) are ruled; D1–D5 are grounding corrections the plan already absorbs.
 D3 is offered as a **follow-up candidate** (supervisor-kind sessions and `/c3`), explicitly out of
 this card's fence.

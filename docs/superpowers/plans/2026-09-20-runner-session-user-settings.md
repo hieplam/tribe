@@ -500,6 +500,30 @@ is the one the owner explicitly called out.
 4. **Opt-in**, behind `RUN_SESSION_E2E=1`, skipped otherwise (it costs tokens and needs auth), so
    `bun test` stays hermetic. Use `test.skipIf(process.env.RUN_SESSION_E2E !== '1')`.
 
+### R-c — the MCP server must fail OPEN (Shaman ruling, load-bearing)
+
+Loading the user tier connects one MCP server (`plugin:playwright:playwright`) at session startup
+in **every** spawned session. That is an outside-world dependency on the startup path, and
+`~/.claude/rules/fail-closed-edges.md` governs it:
+
+> "An **impure edge** ... must fail *closed*: refuse with a clear message, never crash, never
+> hang, never reach outside its root."
+
+**Prove by running** that a spawned session still starts and completes a trivial action when that
+MCP server is **unavailable** — browser binary missing, server command absent, or otherwise made
+to fail. Force the failure (e.g. point the plugin's server command at a nonexistent binary, or
+run with a `PATH`/env that cannot resolve it); do not simulate it with a stub.
+
+**Required outcome:** the session **starts anyway**, with the playwright tools simply absent from
+its tool list, and the trivial action completes. Never a hang, never a startup abort.
+
+**If it does NOT fail open — if the session hangs or refuses to start — STOP and report
+`NEEDS_CONTEXT` immediately.** Do not work around it. A campaign that dies because a browser is
+missing is strictly worse than the bug this card fixes, and that outcome needs a ruling, not a fix.
+
+Record the transcript (or the init message showing the server absent and the session live) in the
+task report; Task 7 carries it into the evidence doc.
+
 **The empty-implementation check, and it is mandatory:** on `settingSources: ['project']` this test
 **must fail**, and fail with `Unknown skill: c3` — not with a setup or auth error. Prove it:
 temporarily revert Task 4's literal, run the test, capture the failure, restore. **Paste both
@@ -522,6 +546,9 @@ Note `runSession` parses the final result for `SHIPPED`/`NEEDS_DIRECTION` and wi
 cd plugins/tribe/scripts/runner && RUN_SESSION_E2E=1 bun test core/session.e2e.test.ts
 cd plugins/tribe/scripts/runner && bun test   # E2E skipped, suite still hermetic and green
 ```
+Expected: the E2E passes with the tier list in place, the default suite stays green with it
+skipped, and the R-c probe shows a live session whose tool list simply lacks the playwright tools.
+
 
 - [ ] **Step 4: Commit** — stage this task's files and commit, with the trailers from
   Global Constraints (`Tribe-Card: runner-session-user-settings`, `Tribe-Task: 6/7`) in the
