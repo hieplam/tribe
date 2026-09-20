@@ -472,10 +472,10 @@ command grep -n "c3 lookup" AGENTS.md || echo "false claim gone"
 ```
 Expected: test passes; `false claim gone`.
 
-- [ ] **Step 4: Commit** — stage this task's files and commit, with the trailers from
+- [x] **Step 4: Commit** — stage this task's files and commit, with the trailers from
   Global Constraints (`Tribe-Card: runner-session-user-settings`, `Tribe-Task: 5/7`) in the
   commit's ONE final paragraph, ticking this task's boxes in that SAME commit.
-- [ ] Task 5 complete
+- [x] Task 5 complete
 
 ---
 
