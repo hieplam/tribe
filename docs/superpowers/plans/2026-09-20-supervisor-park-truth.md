@@ -562,7 +562,7 @@ gains the `supersede_park` action and the contradiction check; a new pure module
 ADR entry for the guard's range change and for park supersession. Leave no fact describing the old
 `baseSha..<remote>/<baseBranch>` range or the unconditional P2 refusal.
 
-- [ ] **Step 1: GREEN**
+- [x] **Step 1: GREEN**
 
 ```bash
 cd /Users/hip/repo/tribe-wt/park-truth && c3x check 2>&1 | tail -20
@@ -570,4 +570,4 @@ cd /Users/hip/repo/tribe-wt/park-truth && c3x check 2>&1 | tail -20
 
 Expected: `c3x check` reports ok with no drift against the reconciled facts.
 
-- [ ] **Step 2: Commit** `docs(c3): reconcile supervisor and schema-guard facts for park truth`
+- [x] **Step 2: Commit** `docs(c3): reconcile supervisor and schema-guard facts for park truth`

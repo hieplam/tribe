@@ -1031,7 +1031,9 @@ written by the supervisor):
   spec §11) — the owner-facing park artifact: park reason, what happened, the escalated card's
   question (verbatim), what was already tried, what unblocks it, and the run's ledger lines.
   **Deleting it is the owner's explicit "I have handled it" signal** — row P2 refuses to resume
-  while it exists.
+  while it exists *and the park it records still holds*. A runner-liveness park the disk has
+  since falsified is superseded by the supervisor itself rather than obeyed, leaving
+  `NEEDS_OWNER.md.superseded-<ts>` behind as the trail (see the decision table below).
 - **an escalation file renamed** `<home>/escalations/<card>.md` → `.resolved-R<n>` — performed
   by the supervisor only after a ruling is verified against `answers.md` (§5.5), never by a
   session.
@@ -1042,7 +1044,7 @@ comments; first match wins)
 | Observation | Action |
 | --- | --- |
 | A live foreign supervisor holds `.supervisor.lock` (P1) | `park(resume_blocked)` — never a second supervisor. |
-| `NEEDS_OWNER.md` is present (P2) | `park(resume_blocked)` — resume stays blocked until the owner deletes it. |
+| `NEEDS_OWNER.md` is present (P2) | The supervisor re-observes before it refuses: a park whose stated condition the disk has already falsified yields `supersede_park` (`park_superseded` in `events.jsonl`, the file renamed to `NEEDS_OWNER.md.superseded-<ts>`, `counters.staleTerminals` incremented, the campaign continuing); a park that still holds yields `park(resume_blocked)` — resume stays blocked until the owner deletes it. |
 | `STOP` file present (P3) | `exit(done:stop_requested)`. |
 | A watchdog is already live (P4) | `await_watchdog` — adopted, never relaunched. |
 | No watchdog has run yet this invocation (row 27) | `run_watchdog` over the whole campaign. |
