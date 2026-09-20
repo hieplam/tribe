@@ -4,8 +4,10 @@
  * tests; this proves the WIRING — the class of defect the runner README calls out ("Mocked
  * tests validate logic, not invocations").
  */
-import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import {
+  existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runWatchdog } from './core/watchdog/watch-loop.ts';
@@ -17,8 +19,17 @@ const DOUBLE = join(import.meta.dir, 'fixtures', 'watchdog', 'runner-double.sh')
 
 interface Harness { home: string; statePath: string; io: WatchdogIO; lines: string[] }
 
+// FT1 (rules reviewer, fix round 2, `rule-temp-dir-cleanup`): every `mktemp` root this helper
+// creates is collected here and removed once, after the whole file's tests have run — every
+// call site (including R1/R2/R3/R4 below) benefits without touching its own call.
+const harnessRoots: string[] = [];
+afterAll(() => {
+  for (const root of harnessRoots) rmSync(root, { recursive: true, force: true });
+});
+
 function harness(plan: string, extraEnv: Record<string, string> = {}): Harness {
   const root = mkdtempSync(join(tmpdir(), 'wd-int-'));
+  harnessRoots.push(root);
   const home = join(root, '.tribe', 'k', 'campaigns', 'c');
   mkdirSync(home, { recursive: true });
   // A VALID minimal state (runner README "State file schema" — every required top-level key
@@ -257,4 +268,119 @@ describe('W-P9 — the watchdog writes nothing outside home/watchdog', () => {
     expect(JSON.parse(readFileSync(join(h.home, 'campaign-state.json'), 'utf8')).sequence)
       .toEqual([]);
   }, 60_000);
+});
+
+/** A finished previous run whose session log is `ageSeconds` old — the stale sibling directory
+ * every recorded false stall was judged against. Written directly, never by the double, because
+ * in the field it was left behind by an earlier watchdog invocation (or an earlier day). */
+function seedStaleRun(home: string, runId: string, ageSeconds: number): void {
+  const runDir = join(home, 'runs', runId);
+  mkdirSync(join(runDir, 'logs'), { recursive: true });
+  writeFileSync(join(runDir, 'run.json'), JSON.stringify({
+    v: 1, runId, pid: 999_999, startedAt: '2026-09-19T05:00:30.073Z',
+    repo: '/repo', statePath: '', answersPath: '', escalationsDir: '', logsDir: '', argv: [],
+    endedAt: '2026-09-19T05:05:50.000Z', exitCode: 0, reason: 'done',
+  }));
+  const logPath = join(runDir, 'logs', 'prev-card-prev-session.log');
+  writeFileSync(logPath, '{"type":"assistant"}\n');
+  const when = new Date(Date.now() - ageSeconds * 1000);
+  utimesSync(logPath, when, when);
+}
+
+const actionsOf = (home: string) =>
+  events(home).map((e) => e.action).filter((a) => a !== 'wait_slice');
+
+describe('D1/D2 — no launch path is judged on a run directory that predates its spawn', () => {
+  test('R3 initial launch over a stale previous run directory', async () => {
+    const h = harness('0:none', { DOUBLE_RUNDIR_DELAY_S: '2' });
+    seedStaleRun(h.home, '2026-09-19T05-00-30-073Z-8df1', 7200);
+    const outcome = await runWatchdog(config(), h.home, h.io);
+    expect(actionsOf(h.home)).not.toContain('stall');
+    expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
+  }, 60_000);
+
+  test('R1 quota relaunch over a stale previous run directory', async () => {
+    const resetAt = Math.floor(Date.now() / 1000) + 3;
+    const h = harness('3:quota 0:none', {
+      DOUBLE_RESET_S: String(resetAt), DOUBLE_STALE_S: '7200', DOUBLE_RUNDIR_DELAY_S: '2',
+    });
+    const outcome = await runWatchdog(config(), h.home, h.io);
+    const actions = actionsOf(h.home);
+    expect(actions).not.toContain('stall');
+    expect(actions).toContain('relaunch');
+    expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
+  }, 60_000);
+
+  test('R2 a NON-quota relaunch over a stale previous run directory', async () => {
+    // A 429 whose reset is already in the PAST is not a quota signal (decide.ts, W-P2) and 429
+    // is deliberately not an overload status (signals.ts:37-38), so this exit-3 pass takes the
+    // plain crash-relaunch path — the same defect on a non-quota cause (recorded twice as
+    // `relaunch:crash`), with no extra fixture needed.
+    const pastReset = Math.floor(Date.now() / 1000) - 3600;
+    const h = harness('3:quota 0:none', {
+      DOUBLE_RESET_S: String(pastReset), DOUBLE_STALE_S: '7200', DOUBLE_RUNDIR_DELAY_S: '2',
+    });
+    const outcome = await runWatchdog(config(), h.home, h.io);
+    const actions = actionsOf(h.home);
+    expect(actions).not.toContain('stall');
+    const relaunch = events(h.home).find((e) => e.action === 'relaunch');
+    expect(relaunch?.detail.cause).toBe('crash');
+    expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
+  }, 60_000);
+
+  // FC2 (fixer round 2, spec §5.2 R4 / §10 goal 2), reworked per GC1 (audit round 3): R1-R3
+  // above prove the fix suppresses nothing FALSE; R4 is the card's own "keep" clause — the
+  // OPPOSITE proof, that a genuinely silent RELAUNCHED runner still stalls, on the REAL wall
+  // clock (no fake timers anywhere in this file or this test — `bun:test` never patches
+  // `Date.now`/timers, and nothing here scripts `io.nowMs`/`io.sleep`, unlike
+  // `watch-loop.test.ts`'s `fakeIo`).
+  //
+  // Spec §5.2 (quoted): this real-process test proves ONLY the "not early" half — "no later"
+  // than `stallMinutes` — because "the *upper* half of the bound... asks a real-clock test to
+  // discriminate a one-second margin inside a sixty-second wait, on a loaded developer machine."
+  // A reviewer reverted the fix and ran the tight-upper-bound version of this exact test twice:
+  // it "failed once and passed once" — a flaky negative control proves nothing. The exact
+  // `stallMinutes` + one poll interval CEILING is asserted instead on the simulated clock, where
+  // the tick schedule is deterministic: `core/watchdog/watch-loop.test.ts`, describe block
+  // "runWatchdog — D4(a): a relaunched runner that never writes still stalls, on time", test
+  // "the stall fires within --stall-minutes + ONE poll interval of the relaunch".
+  test('R4 a genuinely silent relaunched runner still stalls, and not before its own --stall-minutes', async () => {
+    // Attempt 1: exit 3 with a quota fixture whose reset is already in the PAST (R2's shape) —
+    // takes the plain crash-relaunch path immediately, with no quota/overload wait to sit
+    // through, so the real clock spent here is negligible next to the stall bound below.
+    const pastReset = Math.floor(Date.now() / 1000) - 3600;
+    // Attempt 2: the `none` fixture — writes NO session log at all — sleeping long enough (90s)
+    // to still be alive well past --stall-minutes (60s), so the watchdog's own `noLogSince`
+    // clock, never a mocked one, is what fires the stall. `DOUBLE_RUNDIR_DELAY_S` (5s, same knob
+    // R1/R2/R3 use) widens the gap between the relaunch and the new attempt's own `runs/<id>/`
+    // directory appearing — the fixed code's D2 exclusion (`newestRunIdExcluding`) starts the
+    // silence clock the INSTANT the child is spawned regardless of this delay, so a correct
+    // fix's measured "not early" interval is unaffected by it.
+    const h = harness('3:quota 0:none:90', {
+      DOUBLE_RESET_S: String(pastReset), DOUBLE_RUNDIR_DELAY_S: '5',
+    });
+    const started = Date.now();
+    const outcome = await runWatchdog(config({ stallMinutes: 1, pollSeconds: 1 }), h.home, h.io);
+    const finished = Date.now();
+
+    expect([outcome.exitCode, outcome.reason]).toEqual([10, 'stalled']);
+
+    const evts = events(h.home);
+    const relaunch = evts.find((e) => e.action === 'relaunch');
+    const stall = evts.find((e) => e.action === 'stall');
+    expect(relaunch?.detail.cause).toBe('crash');
+    expect(stall).toBeDefined();
+    const relaunchAt = Date.parse((relaunch as unknown as { at: string }).at);
+    const stallAt = Date.parse((stall as unknown as { at: string }).at);
+    const measuredMs = stallAt - relaunchAt;
+    // Not early: the relaunched run gets its own full `--stall-minutes` (60_000 ms) of silence
+    // before it may be declared stalled — this is the wall the D4(a) "keep" clause exists to
+    // guard: suppressing stalls wholesale after a relaunch would fail this assertion by firing
+    // at (or near) 0 ms instead. Wall-clock time cannot run backwards, so this half is robust
+    // under load (GC1) — unlike the tight upper-bound half, which is proven instead on the
+    // simulated clock (see the comment above this test for exactly where).
+    expect(measuredMs).toBeGreaterThan(60_000);
+    // Sanity: this test really did run in real wall-clock time, not a mocked instant.
+    expect(finished - started).toBeGreaterThan(60_000);
+  }, 180_000);
 });

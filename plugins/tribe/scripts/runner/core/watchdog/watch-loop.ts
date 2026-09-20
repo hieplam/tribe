@@ -11,7 +11,7 @@ import type { WatchdogAction, WatchdogConfig, WatchdogCounters, WatchdogObservat
 import type { RunnerHandle, WatchdogIO } from '../../ports/ports.ts';
 import { decide } from './decide.ts';
 import { parseSessionSignals } from './signals.ts';
-import { isStale, newestLog, newestRunId, watchdogPathsOf } from './select.ts';
+import { isStale, newestLog, newestRunId, newestRunIdExcluding, watchdogPathsOf } from './select.ts';
 import { actionLine, buildStatus, exitCodeOf, serializeEvent, serializeStatus } from './status.ts';
 
 /** Carried-forward audit requirement 2 (Task 8 dispatch): `readTail` returns `''` when the
@@ -42,19 +42,44 @@ interface LoopState {
   /** FIX S1: the runId THIS invocation has actually observed running (owned or adopted while
    * alive) — see `observe()`'s comment. */
   trackedRunId: string | null;
+  /** D2, FIX F1 (fix round 1): the SET of run ids present on disk immediately BEFORE the most
+   * recent spawn. Every one of them predates this invocation's current child and can therefore
+   * never be that child's run — see `select.ts`'s `newestRunIdExcluding`. Empty until this
+   * invocation has spawned anything (and empty is also the honest answer for an adopted run we
+   * never spawned: the exclusion only ever applies while we own a live child). Was a single
+   * `priorNewestRunId: string | null` compared by ORDERING — replaced because an unrelated
+   * directory already on disk that sorts lexicographically ABOVE the new child's own id pinned
+   * that ordering comparison false FOREVER (finding F1); a SET, checked by membership, is
+   * immune to how any id happens to sort. */
+  priorRunIds: ReadonlySet<string>;
   /** FIX F-C1/F-C2: the deadline of the most recently ORDERED `wait_until`, cleared the moment
    * any new attempt is spawned — see `model.ts`'s `WatchdogObservation.pendingWait`. */
   pendingWait: { cause: 'quota' | 'overload'; untilMs: number } | null;
-  /** FIX F-C5 (audit round 2): THIS invocation's own clock for "how long has the currently-alive
-   * run gone with no log line at all" — the `nowMs` this invocation FIRST observed the given
-   * `runId` alive with `newestLogMtimeMs === null`. Deliberately never the record's own
-   * `startedAt`: that value is untrusted external content the runner wrote (mirroring FIX S3's
-   * `MAX_QUOTA_WAIT_MS` clamp on `resetsAtEpochS` for the same reason), and several pre-existing
-   * fixtures set it to an unrealistic placeholder that was never meant to be read as a real
-   * elapsed-time signal — reading it here would misreport those otherwise-legitimate scenarios
-   * as instantly stale. Reset to `null` the moment the run stops being "alive with no log" (a
-   * log appears, the run ends, or a different run becomes the observed one). */
-  noLogSince: { runId: string | null; sinceMs: number } | null;
+  /** FIX F-C5, re-keyed for D2: THIS invocation's own clock for "how long has the currently-alive
+   * run gone with no log line at all". The key is the SUPERVISION identity, not the run id:
+   * while we own a live child that identity is its attempt, because the child's run id is
+   * legitimately unknown for the first tick or two and then becomes known — and re-keying on
+   * that transition would RESTART the silence clock, pushing a genuine stall a whole poll
+   * interval past the bound the card allows ("--stall-minutes + one poll interval"). With no
+   * owned child (an adopted run) the run id is the identity, exactly as before. Deliberately
+   * never the record's own `startedAt`: that value is untrusted external content the runner
+   * wrote (mirroring FIX S3's `MAX_QUOTA_WAIT_MS` clamp on `resetsAtEpochS` for the same
+   * reason), and several pre-existing fixtures set it to an unrealistic placeholder that was
+   * never meant to be read as a real elapsed-time signal — reading it here would misreport
+   * those otherwise-legitimate scenarios as instantly stale. Reset to `null` the moment the run
+   * stops being "alive with no log" (a log appears, the run ends, or the identity changes).
+   *
+   * GX1 (fix round 3, corrects a false claim M1 (fix round 1) made here): `ownsLiveChild`
+   * flipping from `true` to `false` on a tick where the on-disk record is still unfinalized and
+   * its pid still reads alive (our own child hard-crashing without ever writing `endedAt`, then
+   * being re-observed as "adopted" because `io.isProcessAlive` still reports the pid alive — pid
+   * reuse, or a lingering zombie) is the SAME run this invocation spawned, not a different one,
+   * and must NOT flip `silenceKey` either — see `observe()`'s `ourOwnRun` for why. M1 claimed
+   * this transition was "bounded to one poll interval late"; it is not: a crash at 25.5 minutes
+   * of already-accumulated silence pushed the eventual stall verdict to 56 minutes against a
+   * 30-minute `--stall-minutes`, because restarting the clock discards however much silence had
+   * already been observed, however large — see `watch-loop.test.ts`'s GX1 test. */
+  noLogSince: { key: string | null; sinceMs: number } | null;
 }
 
 /** The tick's raw signal read, carried alongside the pure `WatchdogObservation` purely so the
@@ -69,7 +94,26 @@ interface ObserveResult {
 function observe(config: WatchdogConfig, homeDir: string, io: WatchdogIO, state: LoopState): ObserveResult {
   const nowMs = io.nowMs();
   const runsDir = join(homeDir, 'runs');
-  const runId = newestRunId(io.listEntries(runsDir).filter((e) => e.isDir).map((e) => e.name));
+  const allRunIds = io.listEntries(runsDir).filter((e) => e.isDir).map((e) => e.name);
+  const newestOnDisk = newestRunId(allRunIds);
+  // D2: liveness comes from `state.child` (this invocation's own truth) while the observed run
+  // came from whatever directory happened to be newest on disk — and for the 63-170 ms it takes
+  // a real forked runner to create its own directory those two name DIFFERENT runs. Whenever we
+  // own a live child, a directory that predates its spawn is not it: report the run as
+  // not-yet-visible (`runId === null`, the same state the C1 fix below already handles for an
+  // empty runs/ directory) rather than attributing the previous run's silence to this one.
+  //
+  // FIX F1 (fix round 1): while we own a live child, "not it" is now decided by IDENTITY
+  // (`newestRunIdExcluding` against every id present at spawn time), never by ordering the
+  // single newest id on disk against the single id that predated the spawn — the ordering
+  // comparison stayed pinned false forever whenever some OTHER, unrelated directory already on
+  // disk sorted lexicographically above the new child's own id (see `select.ts`'s doc comment
+  // on `newestRunIdExcluding`). The non-owned path is UNCHANGED: `newestOnDisk` exactly as
+  // before.
+  const ownsLiveChild = state.child !== null && state.ownedExitCode === null;
+  const runId = ownsLiveChild
+    ? newestRunIdExcluding(allRunIds, state.priorRunIds)
+    : newestOnDisk;
 
   let record: Record<string, unknown> | null = null;
   if (runId !== null) {
@@ -143,7 +187,7 @@ function observe(config: WatchdogConfig, homeDir: string, io: WatchdogIO, state:
   const thisInvocationsFinalizedRecord = recordEndedAt !== null
     && (recordExitCodeSelfCorrects || recordProvenanceMatches);
 
-  const childAlive = state.child !== null && state.ownedExitCode === null;
+  const childAlive = ownsLiveChild;
   const recordAlive = recordNotFinalized;
   const alive = childAlive || recordAlive;
   const runnerPid = childAlive ? (state.child as RunnerHandle).pid : recordPid;
@@ -171,9 +215,23 @@ function observe(config: WatchdogConfig, homeDir: string, io: WatchdogIO, state:
   // both doors led to the SAME unbounded `attach` loop (a reviewer reproduced it running until
   // `RangeError: Out of memory`). See `LoopState.noLogSince`'s own comment for why this tracks
   // THIS invocation's own clock rather than the record's `startedAt`.
+  // GX1 (fix round 3): a scalar `ownsLiveChild ? attempt : runId` key restarts the clock on
+  // EITHER of two transitions this run can pass through mid-supervision — `runId` going
+  // null -> known (the directory finally appearing) and `ownsLiveChild` going true -> false (our
+  // own child's exit is captured while its record stays unfinalized and its pid still reads
+  // alive) — but only the first was ever meant to be absorbed; a reset on the second discards
+  // however much silence had already accumulated (see `LoopState.noLogSince`'s GX1 comment). The
+  // supervision identity that must survive BOTH transitions is "is this a run THIS invocation
+  // spawned", which `state.priorRunIds` (populated once, at spawn time, in `spawnRunnerNow`)
+  // answers without depending on `ownsLiveChild` at all: a run we spawned is one whose id is
+  // either not yet knowable (`runId === null`) or was not already on disk before we spawned it.
+  // `state.attempt > 0` excludes the adopted-on-start case (attempt 0, never spawned by us),
+  // which must keep keying on the run id exactly as the pre-card code did.
+  const ourOwnRun = state.attempt > 0 && (runId === null || !state.priorRunIds.has(runId));
+  const silenceKey = ourOwnRun ? `attempt-${state.attempt}` : runId;
   if (alive && newest === null) {
-    if (state.noLogSince === null || state.noLogSince.runId !== runId) {
-      state.noLogSince = { runId, sinceMs: nowMs };
+    if (state.noLogSince === null || state.noLogSince.key !== silenceKey) {
+      state.noLogSince = { key: silenceKey, sinceMs: nowMs };
     }
   } else {
     state.noLogSince = null;
@@ -254,7 +312,7 @@ export async function runWatchdog(
   const state: LoopState = {
     child: null, ownedExitCode: null, attempt: 0, model: config.model, runId: null,
     nextWakeAtMs: null, stall: null, runnerCommand: null, trackedRunId: null, pendingWait: null,
-    noLogSince: null,
+    noLogSince: null, priorRunIds: new Set(),
     counters: {
       quotaWaits: 0, overloadBackoffs: 0, crashRelaunches: 0, lockRelaunches: 0,
       fallbackUsed: false,
@@ -335,6 +393,22 @@ export async function runWatchdog(
       ...config.passthrough,
     ];
     state.runnerCommand = argv;
+    // D2, FIX F1: every run directory present at the instant BEFORE this child exists. Read
+    // here, and nowhere earlier, because this is the only instant at which the answer is
+    // exactly right: anything already on disk cannot belong to a process that does not exist
+    // yet. A SET of every id (not just the single newest one) so `newestRunIdExcluding` can
+    // answer "did MY directory appear" by membership, immune to how any of these ids sorts.
+    state.priorRunIds = new Set(
+      io.listEntries(join(homeDir, 'runs')).filter((e) => e.isDir).map((e) => e.name),
+    );
+    // D2's second sentence: `status.json.runId` and the stall event's log path must name the
+    // same run. The id of a run whose directory does not exist yet is not knowable, so the
+    // honest value is `null` — publishing the PREVIOUS run's id here is what made status.json
+    // corroborate the false stall. It becomes the real id on the first tick that sees it.
+    state.runId = null;
+    // Task 2: each new attempt starts a clean silence clock — the PREVIOUS attempt's
+    // `noLogSince` (keyed on its own attempt id or run id) must never be read as this attempt's.
+    state.noLogSince = null;
     state.child = io.spawnRunner(argv, { cwd: config.repoRoot, stdoutPath });
     state.ownedExitCode = null;
     state.nextWakeAtMs = null;

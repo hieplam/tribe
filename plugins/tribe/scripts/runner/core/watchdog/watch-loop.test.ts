@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { runWatchdog } from './watch-loop.ts';
 import { parseSessionSignals } from './signals.ts';
+import { countFalseStalls } from './replay.ts';
 import type { WatchdogConfig } from './model.ts';
 import type { RunnerHandle, WatchdogIO } from '../../ports/ports.ts';
 
@@ -100,7 +101,22 @@ function fakeIo(passes: Scripted[]) {
       // Visible starting from the SECOND `listEntries(runsDir)` call since this spawn — never
       // the first (the tick immediately after spawn, with no yield, must see nothing yet).
       pendingReveals.push({ pass, attemptIndex: index, callsRemaining: 2 });
-      return { pid: 9000 + index, waitFor: async () => pass.exitCode };
+      return {
+        pid: 9000 + index,
+        // Mirrors the real adapter's bounded contract (`adapters/watchdog-io.adapter.ts`:
+        // `Promise<number | null>`, `null` meaning "still running after this slice"), which the
+        // old always-resolve-immediately fake never modelled at all. `pass.endedAt === null`
+        // (explicitly, never the default `undefined`) is a runner that never exits within this
+        // test — every pre-existing scripted pass leaves `endedAt` unset and keeps the original
+        // immediate-exit behaviour verbatim.
+        waitFor: async (waitMs) => {
+          if (pass.endedAt === null) {
+            nowMs += waitMs;
+            return null;
+          }
+          return pass.exitCode;
+        },
+      };
     },
     userHome: () => '/h',
     cwd: () => '/cwd',
@@ -684,4 +700,252 @@ describe('runWatchdog — FIX F-C5: an adopted run that dies before writing its 
     expect([outcome.exitCode, outcome.reason]).toEqual([10, 'stalled']);
     expect(sleepCalls).toBeLessThanOrEqual(SAFETY_VALVE);
   });
+});
+
+describe('runWatchdog — D2: a relaunched runner is never judged on the PREVIOUS run\'s log', () => {
+  test('a quota wait longer than --stall-minutes does not turn the relaunch into a stall', async () => {
+    // The gap-gate-2026-09-10 shape, in simulated time: the first pass hits a 429 whose reset is
+    // ~107 min out (the recorded wait), so by the time the watchdog relaunches, r1's log is far
+    // older than --stall-minutes 30. r2's own directory is not visible on the tick right after
+    // its spawn, exactly like a real just-forked process.
+    const resetAt = 1_800_000_000 + 107 * 60;
+    const { io, files } = fakeIo([
+      { exitCode: 3, runId: 'r1', logTail: quotaTail(resetAt) },
+      { exitCode: 0, runId: 'r2' },
+    ]);
+    const outcome = await runWatchdog(CONFIG, HOME, io);
+
+    const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
+      .trim().split('\n').map((l) => JSON.parse(l) as { action: string });
+    expect(events.map((e) => e.action)).not.toContain('stall');
+    expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
+  });
+
+  test('status.json never names the previous run while the new one is being supervised', async () => {
+    const resetAt = 1_800_000_000 + 107 * 60;
+    const { io, files } = fakeIo([
+      { exitCode: 3, runId: 'r1', logTail: quotaTail(resetAt) },
+      { exitCode: 0, runId: 'r2' },
+    ]);
+    const seen: Array<string | null> = [];
+    const spy: WatchdogIO = {
+      ...io,
+      writeFileAtomic: (p, c) => {
+        io.writeFileAtomic(p, c);
+        if (p.endsWith('status.json')) seen.push((JSON.parse(c) as { runId: string | null }).runId);
+      },
+    };
+    await runWatchdog(CONFIG, HOME, spy);
+    // Once the relaunch has happened, 'r1' may never be published again as the current run.
+    const afterRelaunch = seen.slice(seen.lastIndexOf('r1') + 1);
+    expect(afterRelaunch).not.toContain('r1');
+    expect(seen).toContain('r2');
+  });
+});
+
+// FIX F1 (fix round 1): the D2 block above only ever seeds ONE prior run whose id sorts
+// BELOW the new spawn's id ('r1' < 'r2') — every case there is satisfied by pure ORDERING
+// ("is the newest thing on disk newer than the one id that predated the spawn"), so it can
+// never catch a defect that only manifests when a stale sibling sorts ABOVE the new run's own
+// id. This block seeds exactly that shape: a finished, unrelated run directory whose id sorts
+// LEXICOGRAPHICALLY ABOVE the freshly-spawned run's own id.
+describe('runWatchdog — F1: a stale sibling sorting ABOVE the new run must not hide it forever', () => {
+  test('a healthy runner that writes a fresh log line on every tick is never falsely stalled, even though an old finished run sorts lexicographically above its own id', async () => {
+    const { io, files, entries, setNow } = fakeIo([]); // no scripted passes: spawnRunner is overridden below
+    const runsDir = join(HOME, 'runs');
+
+    // An old, unrelated, FINISHED run — e.g. left behind by an earlier watchdog invocation and
+    // never deleted — whose id sorts ABOVE any id the fresh spawn below will use ('z' > 'a').
+    const STALE_ID = 'z-stale-sibling';
+    entries.set(runsDir, [{ name: STALE_ID, mtimeMs: 1, isDir: true }]);
+    files.set(join(runsDir, STALE_ID, 'run.json'), JSON.stringify({
+      v: 1, runId: STALE_ID, pid: 1, startedAt: new Date(0).toISOString(),
+      endedAt: new Date(1000).toISOString(), exitCode: 0, reason: 'x',
+    }));
+
+    const NEW_ID = 'a-new-run';
+    const newRunDir = join(runsDir, NEW_ID);
+    const logPath = join(newRunDir, 'logs', 'card-sid.log');
+    // Just past --stall-minutes (30 in CONFIG): long enough that the OLD, ordering-based
+    // predicate has every opportunity to declare a stall before this pass ever finishes.
+    const TOTAL_ALIVE_MS = 31 * 60_000;
+
+    const wrapped: WatchdogIO = {
+      ...io,
+      spawnRunner: () => {
+        // The new run's own directory is on disk from the very first tick — this test isolates
+        // the ORDERING-vs-IDENTITY defect (F1) from the startup-timing race the C1 fix already
+        // covers, by removing the timing race entirely.
+        entries.set(runsDir, [
+          ...(entries.get(runsDir) ?? []),
+          { name: NEW_ID, mtimeMs: io.nowMs(), isDir: true },
+        ]);
+        files.set(join(newRunDir, 'run.json'), JSON.stringify({
+          v: 1, runId: NEW_ID, pid: 9001, startedAt: io.now(), endedAt: null,
+          exitCode: null, reason: null,
+        }));
+        entries.set(join(newRunDir, 'logs'), [{ name: 'card-sid.log', mtimeMs: io.nowMs(), isDir: false }]);
+        files.set(logPath, 'line 0\n');
+        const startedAtMs = io.nowMs();
+        let tick = 0;
+        return {
+          pid: 9001,
+          waitFor: async (waitMs) => {
+            tick += 1;
+            const newNow = io.nowMs() + waitMs;
+            setNow(newNow);
+            // A genuinely healthy runner: a fresh log line lands on EVERY tick.
+            files.set(logPath, `line ${tick}\n`);
+            entries.set(join(newRunDir, 'logs'), [{ name: 'card-sid.log', mtimeMs: newNow, isDir: false }]);
+            if (newNow - startedAtMs > TOTAL_ALIVE_MS) return 0; // finishes, having logged throughout
+            return null;
+          },
+        };
+      },
+    };
+
+    const outcome = await runWatchdog(CONFIG, HOME, wrapped);
+
+    const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
+      .trim().split('\n').map((l) => JSON.parse(l) as { action: string });
+    expect(events.map((e) => e.action)).not.toContain('stall');
+    expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
+  });
+});
+
+describe('runWatchdog — D4(a): a relaunched runner that never writes still stalls, on time', () => {
+  test('the stall fires within --stall-minutes + ONE poll interval of the relaunch', async () => {
+    // r2 is alive and never writes a log line at all. CONFIG: stallMinutes 30, pollSeconds 30.
+    const resetAt = 1_800_000_000 + 107 * 60;
+    const { io, files } = fakeIo([
+      { exitCode: 3, runId: 'r1', logTail: quotaTail(resetAt) },
+      { exitCode: 0, runId: 'r2', endedAt: null },
+    ]);
+    // r2's `endedAt: null` keeps its record unfinalized, so it reads as alive throughout —
+    // no `setProcessAlive` scripting is needed for this scenario (T1, fix round 1).
+    const outcome = await runWatchdog(CONFIG, HOME, io);
+
+    const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
+      .trim().split('\n').map((l) => JSON.parse(l) as { at: string; action: string });
+    const relaunchAt = Date.parse(events.find((e) => e.action === 'relaunch')?.at as string);
+    const stallAt = Date.parse(events.find((e) => e.action === 'stall')?.at as string);
+    expect([outcome.exitCode, outcome.reason]).toEqual([10, 'stalled']);
+    // Not early: the relaunched run gets its full --stall-minutes of its OWN silence.
+    expect(stallAt - relaunchAt).toBeGreaterThan(30 * 60_000);
+    // Not late: at most one further poll interval to notice it.
+    expect(stallAt - relaunchAt).toBeLessThanOrEqual(30 * 60_000 + 30_000);
+  });
+
+  test('a relaunched runner is still attaching one minute before its own deadline', async () => {
+    const resetAt = 1_800_000_000 + 107 * 60;
+    const { io, files } = fakeIo([
+      { exitCode: 3, runId: 'r1', logTail: quotaTail(resetAt) },
+      { exitCode: 0, runId: 'r2', endedAt: null },
+    ]);
+    await runWatchdog(CONFIG, HOME, io);
+    const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
+      .trim().split('\n').map((l) => JSON.parse(l) as { at: string; action: string });
+    const relaunchAt = Date.parse(events.find((e) => e.action === 'relaunch')?.at as string);
+    const deadline = relaunchAt + 29 * 60_000; // stall-minutes - 1
+    const before = events.filter((e) => Date.parse(e.at) <= deadline).map((e) => e.action);
+    expect(before).not.toContain('stall');
+    expect(before).toContain('attach');
+  });
+});
+
+// GX1 (fixer round 3): the `ownsLiveChild` boolean re-keying `silenceKey` restarts the silence
+// clock the instant an OWNED child that has just hard-crashed (never wrote run.json's `endedAt`)
+// is re-observed as "adopted" because `io.isProcessAlive(recordPid)` still reports its pid alive
+// (pid reuse, or a lingering zombie). This is the SAME run this invocation spawned — its silence
+// clock must never restart on this transition, exactly as it must not restart on the symmetric
+// `runId: null -> known` transition the D4(a) tests above already guard.
+describe('runWatchdog — GX1: an owned child\'s captured crash must not reset already-accumulated silence', () => {
+  test('a crash captured mid-silence, with the record left unfinalized and the pid still reading alive, does not restart the noLogSince clock', async () => {
+    const { io, files, entries, setProcessAlive, setNow } = fakeIo([]); // spawnRunner overridden below
+    const runsDir = join(HOME, 'runs');
+    const RUN_ID = 'r1';
+    const runDir = join(runsDir, RUN_ID);
+    const PID = 12345;
+    const T0 = io.nowMs();
+    const POLL_MS = CONFIG.pollSeconds * 1000; // 30_000
+    // How much silence has ALREADY accumulated on THIS run at the instant of the simulated
+    // crash — chosen to be well past the halfway point of --stall-minutes (30), so a clock
+    // restart (the regression) pushes the eventual stall verdict roughly 25 minutes later than
+    // the --stall-minutes + one-poll-interval bound the fix must honour.
+    const PRE_CRASH_SILENCE_MS = 25.5 * 60_000;
+
+    let crashed = false;
+    const wrapped: WatchdogIO = {
+      ...io,
+      spawnRunner: () => {
+        // The run's own directory and unfinalized record are visible from the very first tick —
+        // this isolates the GX1 transition from the separate C1/F1 startup-timing races, exactly
+        // like the F1 test above does.
+        entries.set(runsDir, [{ name: RUN_ID, mtimeMs: io.nowMs(), isDir: true }]);
+        files.set(join(runDir, 'run.json'), JSON.stringify({
+          v: 1, runId: RUN_ID, pid: PID, startedAt: io.now(), endedAt: null,
+          exitCode: null, reason: null,
+        }));
+        entries.set(join(runDir, 'logs'), []); // never writes a single log line, ever
+        // The pid keeps reading alive even AFTER the crash below — e.g. the OS has already
+        // reused it, or it is a lingering zombie — which is exactly what lets the crashed run
+        // keep reading `alive` (via the unfinalized record) once `ownsLiveChild` flips false.
+        setProcessAlive(PID, true);
+        return {
+          pid: PID,
+          waitFor: async (waitMs) => {
+            const elapsedBefore = io.nowMs() - T0;
+            if (!crashed && elapsedBefore >= PRE_CRASH_SILENCE_MS) {
+              // The crash: THIS invocation captures a real (non-null) exit code — `ownsLiveChild`
+              // goes false on the NEXT observation — but the on-disk record is NEVER finalized
+              // (as if the process were killed before it could write `endedAt`), matching GX1.
+              crashed = true;
+              return 1;
+            }
+            setNow(io.nowMs() + waitMs);
+            return null;
+          },
+        };
+      },
+    };
+
+    const outcome = await runWatchdog(CONFIG, HOME, wrapped);
+
+    const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
+      .trim().split('\n').map((l) => JSON.parse(l) as { at: string; action: string });
+    const launchAt = Date.parse(events.find((e) => e.action === 'launch')?.at as string);
+    const stallAt = Date.parse(events.find((e) => e.action === 'stall')?.at as string);
+    expect([outcome.exitCode, outcome.reason]).toEqual([10, 'stalled']);
+    // The bound the card promises (spec §10 goal 2 / D4(a)): no later than --stall-minutes (30)
+    // plus one poll interval (30s), measured from the run's OWN original silence — never from
+    // whatever instant the (buggy) re-keying happened to restart the clock at.
+    expect(stallAt - launchAt).toBeLessThanOrEqual(30 * 60_000 + 30_000);
+  });
+});
+
+describe('runWatchdog — goal 3: the three recorded sequences replay with zero false stalls', () => {
+  // Numbers copied from the recorded events.jsonl files (offsets and log ages only — no paths,
+  // no card names, no owner content):
+  //   gap-gate-2026-09-10       relaunch:quota  after a 107 min wait, prior log 107.3 min old
+  //   viewer-consolidation      relaunch:crash  prior log 169.9 min old
+  //   supervisor-hardening      relaunch:quota  after a 41 min wait, prior log 41.3 min old
+  const recorded: Array<[name: string, waitMinutes: number]> = [
+    ['gap-gate-2026-09-10 (relaunch:quota, 107 min)', 107],
+    ['viewer-consolidation (relaunch, 170 min)', 170],
+    ['supervisor-hardening (relaunch:quota, 41 min)', 41],
+  ];
+  for (const [name, waitMinutes] of recorded) {
+    test(`${name}: zero stall events within 30 min of the relaunch`, async () => {
+      const resetAt = 1_800_000_000 + waitMinutes * 60;
+      const { io, files } = fakeIo([
+        { exitCode: 3, runId: 'prev', logTail: quotaTail(resetAt) },
+        { exitCode: 0, runId: 'next' },
+      ]);
+      const outcome = await runWatchdog(CONFIG, HOME, io);
+      const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
+        .trim().split('\n').map((l) => JSON.parse(l) as { at: string; action: string });
+      expect(countFalseStalls(events)).toEqual([]);
+      expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
+    });
+  }
 });
