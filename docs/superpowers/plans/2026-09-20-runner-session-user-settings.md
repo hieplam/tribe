@@ -384,10 +384,10 @@ cd plugins/tribe/scripts/runner && bun test core/session.test.ts && bunx tsc --n
 ```
 Expected: all pass, including the three pre-existing hook-wiring tests at indices 0-2 **unchanged**.
 
-- [ ] **Step 4: Commit** — stage this task's files and commit, with the trailers from
+- [x] **Step 4: Commit** — stage this task's files and commit, with the trailers from
   Global Constraints (`Tribe-Card: runner-session-user-settings`, `Tribe-Task: 3/7`) in the
   commit's ONE final paragraph, ticking this task's boxes in that SAME commit.
-- [ ] Task 3 complete
+- [x] Task 3 complete
 
 ---
 

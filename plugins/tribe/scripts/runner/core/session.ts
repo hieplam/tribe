@@ -5,6 +5,7 @@
 // a session through the `SessionIO` seam below, never the SDK package directly.
 import { join } from 'node:path';
 import type { HookDecision, PinnedSessionOptions, SessionIO, SessionMessage, SpawnSessionParams } from '../ports/ports.ts';
+import { isFilesystemWideScan } from './metrics/session-hygiene.ts';
 import { buildMergeGateDecision, parseMergeCommand } from './merge-gate.ts';
 
 export type { HookDecision, PinnedSessionOptions, SessionIO, SessionMessage, SpawnSessionParams };
@@ -167,6 +168,35 @@ export function decideMergeGateHook(io: Pick<SessionIO, 'execInRepo'>) {
   };
 }
 
+/** The reason a denied filesystem-wide scan reports back. Phrased as an INSTRUCTION, not just a
+ * refusal (same contract as BACKGROUNDING_DENIED_REASON) — a session that is only blocked will
+ * try the next variant of the same hunt; a session that is redirected stops hunting. */
+export const SCAN_DENIED_REASON =
+  'Filesystem-wide scans are disabled for campaign sessions: scanning from / or $HOME walks ' +
+  'Desktop/Documents/Downloads and triggers an OS folder-consent prompt that nobody is present ' +
+  'to answer. You almost never need one. For architecture, components or file->component ' +
+  'lookup, invoke the `c3` skill (Skill tool, skill name "c3") — it resolves its own tooling. ' +
+  'For anything else, scan a specific directory you already know (e.g. the repo root or a ' +
+  'package directory), not / or $HOME.';
+
+/** PURE: denies one PreToolUse event that would run a `find` rooted at the filesystem or home
+ * root (owner ruling R-a). The predicate itself lives in `core/metrics/session-hygiene.ts` and is
+ * shared with the ratchet counter, so the guard and the measurement can never disagree about what
+ * a scan is. Bash-only; every other tool gets no opinion. */
+export function decideScanGuardHook(input: unknown): HookDecision {
+  const event = (input ?? {}) as { tool_name?: unknown; tool_input?: unknown };
+  if (event.tool_name !== 'Bash') return {};
+  const command = ((event.tool_input ?? {}) as { command?: unknown }).command;
+  if (typeof command !== 'string' || !isFilesystemWideScan(command)) return {};
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: SCAN_DENIED_REASON,
+    },
+  };
+}
+
 /** Builds the §D1 option block verbatim. */
 export function buildSessionOptions(
   input: RunSessionInput,
@@ -192,6 +222,8 @@ export function buildSessionOptions(
         { hooks: [(hookInput: unknown) => Promise.resolve(decideWaitToolHook(hookInput))] },
         // Pre-merge check gate (P2 fix-list card) — decideMergeGateHook.
         { hooks: [decideMergeGateHook(io)] },
+        // Filesystem-wide scan wall (owner ruling R-a) — decideScanGuardHook.
+        { hooks: [(hookInput: unknown) => Promise.resolve(decideScanGuardHook(hookInput))] },
       ],
     },
   };
