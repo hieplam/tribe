@@ -14,6 +14,7 @@ import {
   WAIT_TOOL_DENIED_REASON,
   decideBackgroundingHook,
   decideMergeGateHook,
+  decideScanGuardHook,
   decideWaitToolHook,
   runSession,
   type HookDecision,
@@ -85,7 +86,7 @@ describe('runSession — §D1 option set (regression guard against SDK drift)', 
     expect(options.cwd).toBe('/fixture/repo');
     expect(options.model).toBe('fixture-model');
     expect(options.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code' });
-    expect(options.settingSources).toEqual(['project']);
+    expect(options.settingSources).toEqual(['user', 'project', 'local']);
     expect(options.plugins).toEqual([{ type: 'local', path: TRIBE_PLUGIN_DIR }]);
     expect(options.permissionMode).toBe('bypassPermissions');
     expect(options.allowDangerouslySkipPermissions).toBe(true);
@@ -527,5 +528,38 @@ describe('decideMergeGateHook — the pre-merge check gate, enforced (P2 fix-lis
 
     expect(decision.hookSpecificOutput?.permissionDecision).toBe('deny');
     expect(decision.hookSpecificOutput?.permissionDecisionReason).toBe(MERGE_GATE_DENIED_CHECKS_ERROR_REASON);
+  });
+});
+
+describe('decideScanGuardHook (R-a)', () => {
+  test('denies a filesystem-wide find and names the alternative', async () => {
+    const d = decideScanGuardHook({ tool_name: 'Bash', tool_input: { command: 'find / -maxdepth 4 -iname "*c3x*"' } });
+    expect(d.hookSpecificOutput?.permissionDecision).toBe('deny');
+    expect(d.hookSpecificOutput?.permissionDecisionReason).toContain('c3');
+  });
+
+  test('allows a scoped find', () => {
+    expect(decideScanGuardHook({ tool_name: 'Bash', tool_input: { command: 'find /Users/hip/repo/tribe -iname "x"' } })).toEqual({});
+  });
+
+  test('has no opinion on non-Bash tools', () => {
+    expect(decideScanGuardHook({ tool_name: 'Read', tool_input: { command: 'find / -name x' } })).toEqual({});
+  });
+
+  test('is wired as the FOURTH PreToolUse entry and actually denies', async () => {
+    let captured: PinnedSessionOptions | undefined;
+    const io = recordingIo();
+    io.spawnSession = (params) => {
+      captured = params.options;
+      return messages([INIT_MESSAGE, { type: 'result', subtype: 'success', result: 'SHIPPED 42 abc1234', session_id: 'sess-123' }]);
+    };
+    await runSession({ brief: 'x' }, fixtureConfig(), io);
+    const wired = (captured as PinnedSessionOptions).hooks.PreToolUse[3]?.hooks[0];
+    expect(wired).toBeDefined();
+    const d = await (wired as (i: unknown) => Promise<HookDecision>)({
+      tool_name: 'Bash',
+      tool_input: { command: 'find $HOME -name "*.log"' },
+    });
+    expect(d.hookSpecificOutput?.permissionDecision).toBe('deny');
   });
 });

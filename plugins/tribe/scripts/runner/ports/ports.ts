@@ -193,16 +193,18 @@ export interface PinnedSessionOptions {
   cwd: string;
   model: string;
   systemPrompt: { type: 'preset'; preset: 'claude_code' };
-  settingSources: ['project'];
+  settingSources: ['user', 'project', 'local'];
   plugins: Array<{ type: 'local'; path: string }>;
   permissionMode: 'bypassPermissions';
   allowDangerouslySkipPermissions: true;
   abortController: AbortController;
   executable: 'bun';
   resume?: string;
-  /** PreToolUse deny-hook enforcing the anti-livelock wall (a backgrounded job dies with the
-   * one-shot session that started it). Prose in the brief alone failed six workers in the
-   * 2026-07-17 incident, so the rule is enforced at the permission layer too. */
+  /** Four PreToolUse deny-hooks, in this fixed order (session.ts's `buildSessionOptions`):
+   * anti-livelock (a backgrounded job dies with the one-shot session that started it, prose
+   * alone failed six workers in the 2026-07-17 incident), wait-tool, pre-merge check gate, and
+   * the filesystem-wide scan wall (owner ruling R-a) — each enforced at the permission layer,
+   * not left to prose. */
   hooks: { PreToolUse: Array<{ hooks: Array<(input: unknown) => Promise<HookDecision>> }> };
 }
 
