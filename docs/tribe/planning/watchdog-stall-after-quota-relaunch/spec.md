@@ -165,8 +165,8 @@ never read and never judged.
 
 ### 3.3 Purity (`~/.claude/rules/pure-core.md`)
 
-- **Pure core, added:** `select.ts#isOwnRunVisible(newestRunId, priorNewestRunId)` — a total
-  function over two `string | null`s, no clock, no fs, no throw. It answers the identity
+- **Pure core, added:** `select.ts#newestRunIdExcluding(runIds, excluded)` — a total function
+  over a list of ids and a set of ids, no clock, no fs, no throw. It answers the identity
   question, and is table-testable.
 - **Pure core, unchanged:** `decide.ts` and its 48-row table; `isStale`.
 - **Impure edge, changed:** `watch-loop.ts`'s `observe()` and `spawnRunnerNow()` — the loop reads
@@ -179,18 +179,30 @@ never read and never judged.
 
 ### 3.4 The mechanism, concretely
 
-1. `LoopState` gains `priorNewestRunId: string | null` — the newest run id present **immediately
+1. `LoopState` gains `priorRunIds: ReadonlySet<string>` — **every** run id present **immediately
    before** the most recent spawn. `spawnRunnerNow()` reads it from `io.listEntries` *before*
    calling `io.spawnRunner`, which is the only instant at which the answer is exactly right: any
    directory existing before our child exists cannot be our child's.
+
+   **Identity, never ordering (audit round 1, finding F1).** The first implementation kept only
+   the single *newest* prior id and asked "is the newest directory on disk newer than that?".
+   That is an ordering test, and it silently assumes run ids are globally monotonic — which
+   `generateRunId` cannot promise, because it is built from the wall clock with no monotonic
+   clamp. A backward NTP correction, a VM whose clock has not finished syncing, or two hosts
+   sharing one campaign home all produce a new run id that sorts *below* a directory already
+   present; the ordering test then answers "not visible" for the run's **entire lifetime**, and
+   the `noLogSince` clock falsely stalls a healthy, continuously-logging runner after
+   `--stall-minutes` — the exact defect class this card exists to remove, re-entering through a
+   different door. Asking instead "which directory is NOT one of the ones that were already
+   there?" is an identity question, and it is correct whatever the clock does.
 2. `spawnRunnerNow()` also clears `state.runId` and `state.noLogSince`. Clearing `state.runId` is
    what makes D2's second sentence literally true: `status.json.runId` never names the previous
    run while the current child is being supervised. It becomes `null` for at most one poll
    interval, then the real new id. (`WatchdogStatus.runId` is already declared `string | null` —
    `model.ts:151` — so this is a value change, never a shape change.)
-3. `observe()` computes `newestOnDisk` as today, then:
-   `ownRunVisible = !ownsLiveChild || isOwnRunVisible(newestOnDisk, state.priorNewestRunId)`,
-   and uses `runId = ownRunVisible ? newestOnDisk : null`. Everything downstream already flows
+3. `observe()` lists the run ids as today, then derives
+   `runId = ownsLiveChild ? newestRunIdExcluding(allRunIds, state.priorRunIds) : newestRunId(allRunIds)`
+   — `null` meaning "my own directory has not appeared yet". Everything downstream already flows
    from `runId` (the record read at `:76`, the log listing at `:163`, the signal parse at `:189`),
    so nothing else needs rewiring.
 4. The silence clock is keyed on the **supervision identity** rather than the run id, so it does
@@ -373,7 +385,7 @@ Per `brief-contracts.md` obligation 4, these are settled before any auditor read
 | The suppression window hides a *genuine* stall of the new run | It cannot: the window ends the moment the child's directory appears, and while it is open the `noLogSince` clock is already running from the spawn instant. R4 measures the bound. |
 | A runner that never creates a run directory attaches forever | Bounded by the same clock → `stalled` after `--stall-minutes` (D4(a), R4). This is the F-C5 runaway a previous audit round found; the design keeps that guard, keyed so it cannot be reset by the directory appearing. |
 | Two watchdogs racing on one home | Out of scope and already prevented by the single-instance lock; unchanged. |
-| Lexicographic id comparison wrong for some id shape | `generateRunId` is the only producer and `select.ts:5-6` already depends on this property for `newestRunId`. No new assumption. |
+| Lexicographic id comparison wrong for some id shape | Removed as a dependency in audit round 1: the supervised run is identified by **set difference** over the ids present at spawn, never by ordering, so a non-monotonic clock cannot mislead it (§3.4 item 1). `newestRunId`'s own ordering use on the non-owned path is unchanged and pre-existing. |
 | Regression in the 48-row action table | `decide.ts` is not modified; the table test is a floor. |
 
 **Rollback:** one revert of the merge commit. The change is confined to the watchdog's own
