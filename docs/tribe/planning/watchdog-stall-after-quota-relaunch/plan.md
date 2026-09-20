@@ -857,7 +857,7 @@ git -c user.email=lamhiep16@gmail.com -c user.name=hieplam commit -m 'test(watch
 
 **Expected result:** one commit carrying both trailers.
 
-- [ ] Task 4 complete
+- [x] Task 4 complete
 
 ---
 

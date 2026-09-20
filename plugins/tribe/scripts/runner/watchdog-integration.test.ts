@@ -5,7 +5,7 @@
  * tests validate logic, not invocations").
  */
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runWatchdog } from './core/watchdog/watch-loop.ts';
@@ -256,5 +256,64 @@ describe('W-P9 — the watchdog writes nothing outside home/watchdog', () => {
     expect(readFileSync(join(h.home, 'answers.md'), 'utf8')).toBe('');
     expect(JSON.parse(readFileSync(join(h.home, 'campaign-state.json'), 'utf8')).sequence)
       .toEqual([]);
+  }, 60_000);
+});
+
+/** A finished previous run whose session log is `ageSeconds` old — the stale sibling directory
+ * every recorded false stall was judged against. Written directly, never by the double, because
+ * in the field it was left behind by an earlier watchdog invocation (or an earlier day). */
+function seedStaleRun(home: string, runId: string, ageSeconds: number): void {
+  const runDir = join(home, 'runs', runId);
+  mkdirSync(join(runDir, 'logs'), { recursive: true });
+  writeFileSync(join(runDir, 'run.json'), JSON.stringify({
+    v: 1, runId, pid: 999_999, startedAt: '2026-09-19T05:00:30.073Z',
+    repo: '/repo', statePath: '', answersPath: '', escalationsDir: '', logsDir: '', argv: [],
+    endedAt: '2026-09-19T05:05:50.000Z', exitCode: 0, reason: 'done',
+  }));
+  const logPath = join(runDir, 'logs', 'prev-card-prev-session.log');
+  writeFileSync(logPath, '{"type":"assistant"}\n');
+  const when = new Date(Date.now() - ageSeconds * 1000);
+  utimesSync(logPath, when, when);
+}
+
+const actionsOf = (home: string) =>
+  events(home).map((e) => e.action).filter((a) => a !== 'wait_slice');
+
+describe('D1/D2 — no launch path is judged on a run directory that predates its spawn', () => {
+  test('R3 initial launch over a stale previous run directory', async () => {
+    const h = harness('0:none', { DOUBLE_RUNDIR_DELAY_S: '2' });
+    seedStaleRun(h.home, '2026-09-19T05-00-30-073Z-8df1', 7200);
+    const outcome = await runWatchdog(config(), h.home, h.io);
+    expect(actionsOf(h.home)).not.toContain('stall');
+    expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
+  }, 60_000);
+
+  test('R1 quota relaunch over a stale previous run directory', async () => {
+    const resetAt = Math.floor(Date.now() / 1000) + 3;
+    const h = harness('3:quota 0:none', {
+      DOUBLE_RESET_S: String(resetAt), DOUBLE_STALE_S: '7200', DOUBLE_RUNDIR_DELAY_S: '2',
+    });
+    const outcome = await runWatchdog(config(), h.home, h.io);
+    const actions = actionsOf(h.home);
+    expect(actions).not.toContain('stall');
+    expect(actions).toContain('relaunch');
+    expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
+  }, 60_000);
+
+  test('R2 a NON-quota relaunch over a stale previous run directory', async () => {
+    // A 429 whose reset is already in the PAST is not a quota signal (decide.ts, W-P2) and 429
+    // is deliberately not an overload status (signals.ts:37-38), so this exit-3 pass takes the
+    // plain crash-relaunch path — the same defect on a non-quota cause (recorded twice as
+    // `relaunch:crash`), with no extra fixture needed.
+    const pastReset = Math.floor(Date.now() / 1000) - 3600;
+    const h = harness('3:quota 0:none', {
+      DOUBLE_RESET_S: String(pastReset), DOUBLE_STALE_S: '7200', DOUBLE_RUNDIR_DELAY_S: '2',
+    });
+    const outcome = await runWatchdog(config(), h.home, h.io);
+    const actions = actionsOf(h.home);
+    expect(actions).not.toContain('stall');
+    const relaunch = events(h.home).find((e) => e.action === 'relaunch');
+    expect(relaunch?.detail.cause).toBe('crash');
+    expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
   }, 60_000);
 });

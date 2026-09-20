@@ -15,6 +15,10 @@
 #   DOUBLE_RESET_S  epoch seconds to substitute for the quota fixture's resetsAt
 #   DOUBLE_STALE_S  when set with a sleeping pass, back-date the session log by this many
 #                   seconds (stall simulation)
+#   DOUBLE_RUNDIR_DELAY_S  seconds to wait BEFORE creating runs/<run-id>/ — models the real
+#                          wall-clock gap between fork and first write (63-170 ms in the three
+#                          recorded field sequences), widened so it is deterministic in a test.
+#                          Unset (the default) means no wait, exactly as before.
 set -euo pipefail
 
 home=""; args=("$@")
@@ -32,6 +36,12 @@ read -r -a plan <<<"${DOUBLE_PLAN:-0:none}"
 spec="${plan[$attempt]:-0:none}"
 IFS=: read -r exit_code fixture sleep_seconds <<<"$spec"
 sleep_seconds="${sleep_seconds:-0}"
+
+# A real runner does git and lock work before it writes its run record, so its runs/<id>/
+# directory does not exist for the first tens of milliseconds of its life. Reproducing that gap
+# is the whole point of the watchdog's D2 wall, so it is scriptable here rather than left to
+# luck. Computing run_id AFTER the wait also keeps ids chronologically ordered.
+[[ -z "${DOUBLE_RUNDIR_DELAY_S:-}" ]] || sleep "$DOUBLE_RUNDIR_DELAY_S"
 
 run_id="$(date -u +%Y-%m-%dT%H-%M-%S-000Z)-d$next"
 run_dir="$home/runs/$run_id"
