@@ -863,6 +863,23 @@ outranks an overload signal (a quota wall has a known reset instant; a 529 is tr
   checked by `doctor.sh`; the watchdog shares the runner's `node_modules`) — which is exactly
   why `plugins/tribe/scripts/doctor.sh` is **unchanged** by this card.
 
+### Which run a stall is about
+
+The watchdog supervises exactly one run at a time, and a stall verdict only ever concerns *that*
+run. This matters because a freshly-spawned runner needs real wall-clock time — tens to hundreds
+of milliseconds — to create its own `runs/<run-id>/` directory, and during that gap the newest
+directory on disk still belongs to the *previous* run. So the watchdog records every run id
+present at the instant before it spawns a child, and while it owns that live child it treats only
+a directory that is **not** one of those as its own run — a question of identity, not of ordering,
+so a non-monotonic clock cannot mislead it. A run directory that already existed at the instant
+the current runner was spawned is therefore never the supervised run: its log is not read and
+never judged for staleness, and `status.json.runId` reports `null` rather than naming the previous
+run, until the current run's own directory appears.
+
+Nothing is suppressed by this. A runner that goes quiet still reports
+`needs_human:stalled` after `--stall-minutes` — measured from its own last log line, or, when it
+has never written one, from its own launch.
+
 ### Known limitations (watchdog)
 
 - **A crash of the watchdog itself is not resumed automatically.** `status.json` is left with

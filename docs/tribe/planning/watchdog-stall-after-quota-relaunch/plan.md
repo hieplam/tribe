@@ -951,4 +951,4 @@ git -c user.email=lamhiep16@gmail.com -c user.name=hieplam commit -m 'docs(watch
 
 **Expected result:** one commit carrying both trailers; `git status --short` empty.
 
-- [ ] Task 5 complete
+- [x] Task 5 complete
