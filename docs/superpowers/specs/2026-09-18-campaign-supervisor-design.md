@@ -298,7 +298,7 @@ Step 4 before step 5 is what makes a crash diagnosable: `events.jsonl` always sh
 | `spawn_session(ruling)` — session wrote the ruling, supervisor died | `answers.md` has `R<n>`, escalation file still present | Restart observes the ruling (row 5) and **archives** rather than re-ruling. The ruling itself is the guard. |
 | `spawn_session(ruling)` — session died mid-write | `answers.md` has a partial/unratified block | `core/rulings.ts` classifies it unratified → row 15 spawns a **ratify** session, which repairs it. Never a second ruling on the same question. |
 | `archive_escalation` | rename is atomic | A rename of an already-renamed file is detected as "already archived" and skipped. |
-| `park` | `NEEDS_OWNER.md` written, then death | Restart hits row P2 and refuses to resume — the owner's decision is not bypassed by a restart. |
+| `park` | `NEEDS_OWNER.md` written, then death | Restart hits row P2 and refuses to resume — the owner's decision is not bypassed by a restart. *(Superseded 2026-09-20 by card `supervisor-park-truth`: row P2 now re-observes on restart and may supersede a park the disk has already falsified, refusing only while the park still holds — see `2026-09-20-supervisor-park-truth-design.md` §2.2.)* |
 | `spawn_session(closing)` | report written, supervisor died | Restart sees the closing postcondition satisfied in `state.json` **or**, if that write was lost, re-verifies from disk (`final-report.md` exists, `unratifiedRulings` empty) and exits `done` without re-spawning. |
 
 **The one thing that is NOT idempotent is a model spawn**, and that is precisely why the guard is
@@ -813,6 +813,11 @@ verbatim.** It is a transcriber, not a judge. The procedure, in order:
 4. **Archive** `escalations/<cardId>.md` to `.resolved-R<n>`.
 5. **Delete `<home>/NEEDS_OWNER.md`** — that file is a latch, and deleting it is the owner's "I have
    handled it" signal (§11); the supervisor refuses to resume while it exists (row P2).
+
+   *(Superseded 2026-09-20 by card `supervisor-park-truth`: row P2 now re-observes on restart and
+   may supersede — not just refuse against — a park the disk has already falsified; it still
+   refuses exactly as described here while the park holds. See
+   `docs/superpowers/specs/2026-09-20-supervisor-park-truth-design.md` §2.2.)*
 6. **Restart the supervisor**, detached, with the same command the park document printed.
 
 **`ratified-as: pending` is a legitimate outcome here.** If the owner rules the substance but not
