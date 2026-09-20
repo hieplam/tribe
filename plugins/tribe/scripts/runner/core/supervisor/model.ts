@@ -272,6 +272,12 @@ export interface SupervisorStatus {
     rulingRounds: Record<string, number>;
     ratifyRounds: number;
     failures: number;
+    /** G2/G3 (spec §2.2, card `supervisor-park-truth`): how many times THIS invocation found a
+     * park or terminal the disk had already falsified and superseded it. `supervisor/status.json`
+     * is the supervisor's OWN artifact, so counting here changes nothing about
+     * `campaign-state.json` or `campaign-report.json` (owner-only, untouched). Per-invocation,
+     * exactly like `failures` — it is a publication counter, not persisted state. */
+    staleTerminals: number;
   };
   terminal: { status: 'done' | 'needs_owner'; reason: string; exitCode: number } | null;
 }

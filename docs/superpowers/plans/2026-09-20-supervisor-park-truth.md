@@ -506,7 +506,7 @@ Handle the new action in the tick loop's action switch, using only existing seam
 Add loop tests over the fake seam proving the rename happened, the event was appended, the counter
 incremented, and the loop continued to a following tick.
 
-- [ ] **Step 1: GREEN** the whole runner suite and the Task 3 E2E suite.
+- [x] **Step 1: GREEN** the whole runner suite and the Task 3 E2E suite.
 
 ```bash
 cd plugins/tribe/scripts/runner && bun test 2>&1 | tail -6 && bunx tsc --noEmit
@@ -518,7 +518,7 @@ bash plugins/tribe/scripts/tests/test-watchdog-e2e.sh 2>&1 | tail -8
 Expected: `bun test` reports `0 fail` with a pass count at or above the 1137 floor; `tsc` silent; the
 park-truth suite now all `ok` and exit 0; the supervisor and watchdog E2E suites unchanged and green.
 
-- [ ] **Step 2: Commit** `feat(supervisor): supersede a stale park and continue the campaign`
+- [x] **Step 2: Commit** `feat(supervisor): supersede a stale park and continue the campaign`
 
 ---
 

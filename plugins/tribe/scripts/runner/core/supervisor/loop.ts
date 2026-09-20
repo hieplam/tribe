@@ -63,6 +63,7 @@ import {
 import {
   buildStatus, exitCodeOf, renderNeedsOwner, serializeStatus, type SupervisorTerminalKind,
 } from './status.ts';
+import { terminalContradiction } from './truth.ts';
 import { parseParkMarker, verifyClosing, verifyRatify, verifyRuling, type ShippedVerdict } from './verify.ts';
 import {
   buildOneShotOptions as _buildOneShotOptions, runOneShotSession,
@@ -309,6 +310,19 @@ interface SupervisorStatusFacts {
   terminal: { reason: string } | null;
 }
 
+/** The park a PREVIOUS invocation recorded in `<home>/supervisor/status.json`'s `terminal`, as
+ * the typed fact `SupervisorObservation.parkedTerminal` carries (spec §2.2) — never parsed out
+ * of `NEEDS_OWNER.md`'s prose. Fail-closed: an absent, malformed or terminal-less status reads
+ * as `null`, never a throw. Exported as a test seam (the loop reads it once at startup — see
+ * `LoopState.priorParkedTerminal`). */
+export function readParkedTerminal(
+  io: SupervisorLoopSeam, statusPath: string,
+): { reason: string; atMs: number } | null {
+  const facts = parseSupervisorStatusFacts(io.readFileOrEmpty(statusPath));
+  if (facts === null || facts.terminal === null || facts.updatedAtMs === null) return null;
+  return { reason: facts.terminal.reason, atMs: facts.updatedAtMs };
+}
+
 /** Narrow, fail-closed reader for `<home>/supervisor/status.json` — only the two fields
  * `parkedTerminal` needs (spec §2.2). Malformed/missing content degrades to `null`. */
 function parseSupervisorStatusFacts(raw: string): SupervisorStatusFacts | null {
@@ -490,6 +504,15 @@ interface LoopState {
    * tick immediately after a one-shot session returns." */
   lastSessionOutcome: SessionOutcome | null;
   landedThisRun: string[];
+  /** G3 (Task 8, spec §2.2): the park a PREVIOUS invocation recorded in
+   * `supervisor/status.json`'s `terminal`, captured ONCE at startup — before this invocation's
+   * own first `publish()` overwrites that field with `terminal: null` (this run has not parked).
+   * Without the snapshot, `observe()` could only ever read back the `null` this process had just
+   * written, so `parkedTerminal` was always `null` in production and G3 could never fire however
+   * correct `decide()` was. A park under examination is BY CONSTRUCTION an earlier run's — a
+   * park decided in THIS run returns from the loop immediately — so one read at startup is the
+   * whole truth, and it is order-independent: no later publish can erase it. */
+  priorParkedTerminal: { reason: string; atMs: number } | null;
 }
 
 // Exported for its own unit test (Task 4, spec §2.2) — the same "exported so the fake seam can
@@ -553,13 +576,9 @@ export function observe(
   // new from them).
   const runs = readRunFacts(io, homeDir);
   const watchdogRunId = watchdogStatus?.runId ?? null;
-  const supervisorStatusFacts = parseSupervisorStatusFacts(io.readFileOrEmpty(paths.status));
-  const parkedTerminal = needsOwnerPresent
-    && supervisorStatusFacts !== null
-    && supervisorStatusFacts.terminal !== null
-    && supervisorStatusFacts.updatedAtMs !== null
-    ? { reason: supervisorStatusFacts.terminal.reason, atMs: supervisorStatusFacts.updatedAtMs }
-    : null;
+  // The park's stated condition, as a typed fact: the startup snapshot (`LoopState`'s own
+  // contract above), never a re-read of a `status.json` this invocation has already republished.
+  const parkedTerminal = needsOwnerPresent ? loopState.priorParkedTerminal : null;
 
   return {
     nowMs,
@@ -774,10 +793,9 @@ function stateLabelFor(action: SupervisorAction): SupervisorStatus['state'] {
         : action.session === 'ratify' ? 'session_ratify' : 'session_closing';
     case 'archive_escalation': return 'observing';
     case 'park': return 'terminal';
-    // Task 6 (card `supervisor-park-truth`) added this action kind so `decide.ts` compiles and
-    // its own tests can run; performing the supersede at the edge (Task 8) is what gives this
-    // case its real, considered label. Placeholder only, to keep this exhaustive switch
-    // compiling — no behaviour for `supersede_park` is implemented in this task.
+    // Task 8 (card `supervisor-park-truth`): superseding a falsified park is not a terminal —
+    // the park document is archived and the loop goes straight back to watching the campaign,
+    // so `observing` is exactly what the next tick is doing.
     case 'supersede_park': return 'observing';
     case 'exit': return 'terminal';
   }
@@ -809,10 +827,17 @@ export async function runSupervisor(
     watchdogRunAttempt: 0,
     lastSessionOutcome: null,
     landedThisRun: [],
+    // Read HERE, before the `publish('observing', 'start', null)` below — see the field's own
+    // contract. This is the only moment `status.json` still carries a previous run's park.
+    priorParkedTerminal: readParkedTerminal(io, paths.status),
   };
 
   let watchdogLastPid: number | null = null;
   let watchdogLastTerminalReason: string | null = null;
+  // G2/G3 (spec §2.2): parks/terminals this invocation found the disk had already falsified.
+  // Per-invocation and published on `status.json`'s counters, exactly like `failures` —
+  // `supervisor/state.json`'s persisted schema is untouched by this card.
+  let staleTerminals = 0;
 
   const publish = (
     stateLabel: SupervisorStatus['state'], lastAction: string,
@@ -834,6 +859,7 @@ export async function runSupervisor(
         rulingRounds: supState.rulingRounds,
         ratifyRounds: supState.ratifyRounds,
         failures: 0,
+        staleTerminals,
       },
       terminal,
     })));
@@ -883,7 +909,9 @@ export async function runSupervisor(
       pid: currentPid, home: homeDir, campaign: config.campaign, startedAtMs, updatedAtMs: io.nowMs(),
       state: 'terminal', lastAction: 'park:state_unreadable',
       watchdog: { pid: null, lastTerminalReason: null }, currentSession: null,
-      counters: { watchdogRuns: 0, spawns: 0, rulingRounds: {}, ratifyRounds: 0, failures: 0 },
+      counters: {
+        watchdogRuns: 0, spawns: 0, rulingRounds: {}, ratifyRounds: 0, failures: 0, staleTerminals: 0,
+      },
       terminal: { status: 'needs_owner', reason, exitCode: exitCodeOf('needs_owner') },
     })));
     return { exitCode: exitCodeOf('needs_owner'), kind: 'needs_owner', reason, statusPath: paths.status };
@@ -931,6 +959,20 @@ export async function runSupervisor(
           } else if (observation.lastWatchdog.terminal === null) {
             supState = incrementRetrigger(supState, 'watchdog_no_terminal');
           }
+        }
+        // G2 (Task 8): the third, symmetric arm — decide()'s contradiction row re-runs the
+        // watchdog when a NEWER run is alive, bounded by `retriggers['stale_terminal'] < 1`.
+        // Nothing credited that key, so the bound's retry half was permanently true and the
+        // one-shot intent was unrealised. Read off the SAME pure predicate and the SAME two
+        // counters decide() itself consulted this tick (never a re-decision of whether to run
+        // the watchdog — that has already happened), and guarded by the row's own condition so
+        // a `run_watchdog` decided by some OTHER row can never spend this budget.
+        const contradiction = terminalContradiction(observation);
+        if (contradiction !== null
+          && contradiction.kind === 'newer_run_alive'
+          && supState.watchdogRuns < config.limits.maxWatchdogRuns
+          && (supState.retriggers['stale_terminal'] ?? 0) < 1) {
+          supState = incrementRetrigger(supState, 'stale_terminal');
         }
         supState = { ...supState, watchdogRuns: supState.watchdogRuns + 1 };
 
@@ -1086,6 +1128,37 @@ export async function runSupervisor(
         loopState.landedThisRun.push(action.rulingId);
         persist();
         publish(stateLabelFor(action), 'archive_escalation', null);
+        continue;
+      }
+
+      case 'supersede_park': {
+        // G3 (spec §2.2): `decide()` has established that the park's stated condition is false
+        // on disk. Carrying that out is four things and no decision of its own:
+        //   1. the supersession is RECORDED — the prior reason plus the disk fact that
+        //      falsified it, so an owner reading events.jsonl can see why the park stopped
+        //      applying without reconstructing it from three artifacts (spec §1.2);
+        //   2. `NEEDS_OWNER.md` is RENAMED, never deleted — the owner's own document survives
+        //      as `NEEDS_OWNER.md.superseded-<ts>`, which is the whole audit trail;
+        //   3. the supersession is counted on `status.json`'s own counters;
+        //   4. the loop CONTINUES — never exit 20. The next tick re-observes a home that no
+        //      longer carries a park and decides afresh from the truth.
+        const supersededAt = io.now();
+        io.appendFile(paths.events, `${JSON.stringify({
+          at: supersededAt,
+          action: 'park_superseded',
+          detail: {
+            priorReason: action.priorReason,
+            detail: action.detail,
+            // The superseding fact itself, from the SAME pure predicate decide() read.
+            supersededBy: terminalContradiction(observation),
+            parkedAtMs: observation.parkedTerminal?.atMs ?? null,
+            archivedAs: `${paths.needsOwner}.superseded-${supersededAt}`,
+          },
+        })}\n`);
+        io.renameIfPresent(paths.needsOwner, `${paths.needsOwner}.superseded-${supersededAt}`);
+        staleTerminals += 1;
+        persist();
+        publish(stateLabelFor(action), `park_superseded:${action.priorReason}`, null);
         continue;
       }
 

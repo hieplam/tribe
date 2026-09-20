@@ -144,8 +144,10 @@ SUPERVISE_ARGS=(--session-timeout-seconds 60 --session-max-turns 5 --poll-second
 
 # `run_supervise <home> [limit-seconds]` — runs the real composition root, bounded portably (see
 # this file's header). Sets `RC` to the exit code, or to the literal `TIMEOUT` when the bound was
-# spent; sets `OUT` to the combined output. `TIMEOUT` is asserted against explicitly by every
-# probe, so a run that is merely killed by the bound can never be mistaken for a passing probe.
+# spent; sets `OUT` to the combined output. Every probe below either asserts `RC` explicitly
+# (`not_timeout`, `check ... "$RC" "20"`) or asserts positive evidence the supervisor could only
+# have written by deciding and acting — so a run that is merely killed by the bound can never be
+# mistaken for a passing probe. See `not_timeout`'s own comment for which probe gets which.
 RC=""; OUT=""
 run_supervise() {
   local home="$1" limit="${2:-120}" out="$TMP/supervise.$$.$RANDOM.out" pid waited=0 rc
@@ -168,6 +170,18 @@ run_supervise() {
   OUT="$(cat "$out")"; RC="$rc"
 }
 
+# `not_timeout` exists so a HANG can never masquerade as a satisfied ABSENCE assertion ("no park
+# was written" is trivially true of a supervisor that never got anywhere). It therefore belongs on
+# every probe whose correct behaviour is to reach a terminal and exit on its own — and ONLY those.
+#
+# After the G2/G5 fixes, a probe whose correct behaviour is "keep supervising" (a newer run is
+# alive, so the supervisor re-triggers the watchdog and carries on) legitimately never exits inside
+# the suite's bound: asserting it did would pin the OPPOSITE of the fixed behaviour. Those probes
+# assert POSITIVE EVIDENCE instead — an event the supervisor can only have written by deciding and
+# acting (`run_watchdog`, `park_superseded`), the `staleTerminals` counter, the renamed park
+# document. Positive evidence is immune to the failure mode `not_timeout` guards by construction: a
+# hung supervisor does not write a `park_superseded` event. Every subprocess stays bounded exactly
+# as before, and the negative probe keeps every one of its `not_timeout` assertions.
 not_timeout() { if [[ "$RC" != "TIMEOUT" ]]; then ok "$1"; else bad "$1 (the suite's bound killed the run)"; fi }
 
 # The supervisor's own decision trail, minus the `await_watchdog` heartbeat noise.
@@ -184,6 +198,14 @@ print(json.dumps(json.load(open(sys.argv[1])).get("terminal"), separators=(",","
 superseded_count() {
   find "$1" -maxdepth 1 -name 'NEEDS_OWNER.md.superseded-*' | grep -c . | tr -d ' '
 }
+# `supervisor/status.json`'s own `counters.staleTerminals` — how many falsified parks/terminals
+# THIS campaign home's last supervisor invocation superseded. Prints `missing` when the field (or
+# the file) is not there, so an absent counter can never read as a zero that happens to match.
+stale_terminals_of() {
+  python3 -c 'import json,sys
+print(json.load(open(sys.argv[1])).get("counters",{}).get("staleTerminals","missing"))' \
+    "$1/supervisor/status.json" 2>/dev/null || printf 'missing'
+}
 
 # --- Probe G2: a terminal `stalled` about run A while a NEWER run B is ALIVE -----------------
 # The disk says the park is false, so parking is a bug (Oracle, direction 1).
@@ -194,7 +216,13 @@ run_supervise "$H_G2"
 printf 'exit: %s\n' "$RC"
 printf -- '--- supervisor/events.jsonl ---\n%s\n' "$(event_lines "$H_G2")"
 printf -- '--- supervisor/status.json terminal ---\n%s\n' "$(terminal_of "$H_G2")"
-not_timeout "G2: the supervise run finished on its own, inside the suite's bound"
+# POSITIVE EVIDENCE, in place of `not_timeout` (see that helper's own comment): the fixed
+# behaviour here is "keep supervising" — the supervisor re-triggers the watchdog because the run
+# it is supervising is alive — so this run is EXPECTED to still be supervising when the bound
+# expires. A `run_watchdog` decision recorded in events.jsonl can only have been written by a
+# supervisor that observed, decided and acted; a hung one writes nothing.
+has "G2: the supervisor re-triggered the watchdog instead of parking" \
+  "$(event_lines "$H_G2")" '"action":"run_watchdog"'
 absent "G2: the supervisor did not write NEEDS_OWNER.md" "$H_G2/NEEDS_OWNER.md"
 hasnt "G2: no park with reason stalled was recorded" "$(event_lines "$H_G2")" '"reason":"stalled"'
 hasnt "G2: the supervisor's own terminal is not a stalled park" "$(terminal_of "$H_G2")" '"reason":"stalled"'
@@ -204,6 +232,14 @@ hasnt "G2: the supervisor's own terminal is not a stalled park" "$(terminal_of "
 # terminal. Pinned here as "the supervisor does not park `stalled`" — which row the run's real
 # reason then routes into is the decision table's business, and asserting a specific downstream
 # row would couple this E2E to internals it cannot see.
+#
+# MEASURED, and deliberately NOT asserted here (it is a separate defect, in a file this probe
+# does not own): the two vocabularies do not fully overlap. `run.json`'s `reason` is the RUNNER's
+# (`core/report.ts#deriveExitReason`: done | escalations_pending | session_incomplete |
+# rulings_unratified | stop_requested | error), while the supervisor's rows are keyed on the
+# WATCHDOG's (`runner_done`, …). A run that finished cleanly therefore arrives as `done`, which
+# no row recognises. Reported to the Warchief with the bisect; do not read this probe's green as
+# "every finalised run routes correctly".
 section "G5 — run B finalised (exit 2 / escalations_pending) while nobody watched"
 new_campaign g5; H_G5="$CAMPAIGN_HOME"
 add_run_b "$H_G5" finalised
@@ -231,11 +267,19 @@ run_supervise "$H_G3"
 printf 'run 2 exit: %s\n' "$RC"
 printf -- '--- events appended by run 2 ---\n%s\n' "$(events_after "$H_G3" "$before_g3")"
 printf -- '--- superseded markers ---\n%s\n' "$(find "$H_G3" -maxdepth 1 -name 'NEEDS_OWNER.md.superseded-*' -print)"
-not_timeout "G3: run 2 finished on its own, inside the suite's bound"
+printf -- '--- counters.staleTerminals ---\n%s\n' "$(stale_terminals_of "$H_G3")"
+# POSITIVE EVIDENCE, in place of run 2's `not_timeout` (see that helper's own comment): once the
+# park is superseded the campaign CONTINUES — the supervisor re-observes, finds the run that
+# falsified the park still alive, and goes back to supervising it — so run 2 is expected to still
+# be running when the bound expires. Exiting on its own would mean it parked again. The four
+# assertions below are all things only a supervisor that actually decided and acted can produce.
+# (Run 1 keeps its `not_timeout`: parking IS its expected behaviour.)
 has "G3: run 2 appended a park_superseded event" "$(events_after "$H_G3" "$before_g3")" 'park_superseded'
 absent "G3: NEEDS_OWNER.md no longer blocks the campaign" "$H_G3/NEEDS_OWNER.md"
 check "G3: exactly one NEEDS_OWNER.md.superseded-* marker (renamed, never deleted)" \
   "$(superseded_count "$H_G3")" "1"
+check "G3: the supersession is counted in supervisor/status.json's counters" \
+  "$(stale_terminals_of "$H_G3")" "1"
 
 # --- Negative probe: a park that IS still true is still obeyed -------------------------------
 # Oracle, direction 2, BY DESIGN: refusing to resume while the park still holds is correct. No
@@ -258,6 +302,7 @@ check "negative: run 2 refuses to resume — exit 20" "$RC" "20"
 has "negative: run 2 recorded a resume_blocked park" "$(events_after "$H_NEG" "$before_neg")" '"reason":"resume_blocked"'
 present "negative: NEEDS_OWNER.md is left exactly where the owner must find it" "$H_NEG/NEEDS_OWNER.md"
 check "negative: nothing was superseded — the park still holds" "$(superseded_count "$H_NEG")" "0"
+check "negative: the stale-terminal counter stayed at zero" "$(stale_terminals_of "$H_NEG")" "0"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

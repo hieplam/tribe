@@ -50,7 +50,9 @@ function statusInput(over: Partial<Parameters<typeof buildStatus>[0]> = {}) {
     lastAction: 'run_watchdog',
     watchdog: { pid: null, lastTerminalReason: null },
     currentSession: null,
-    counters: { watchdogRuns: 0, spawns: 0, rulingRounds: {}, ratifyRounds: 0, failures: 0 },
+    counters: {
+      watchdogRuns: 0, spawns: 0, rulingRounds: {}, ratifyRounds: 0, failures: 0, staleTerminals: 0,
+    },
     terminal: null,
     ...over,
   };
@@ -70,7 +72,9 @@ describe('buildStatus — fills every field of spec §13', () => {
       lastAction: 'run_watchdog',
       watchdog: { pid: null, lastTerminalReason: null },
       currentSession: null,
-      counters: { watchdogRuns: 0, spawns: 0, rulingRounds: {}, ratifyRounds: 0, failures: 0 },
+      counters: {
+        watchdogRuns: 0, spawns: 0, rulingRounds: {}, ratifyRounds: 0, failures: 0, staleTerminals: 0,
+      },
       terminal: null,
     });
   });
@@ -81,7 +85,9 @@ describe('buildStatus — fills every field of spec §13', () => {
       lastAction: 'spawn_session:ruling',
       watchdog: { pid: 555, lastTerminalReason: 'escalations_pending' },
       currentSession: { kind: 'ruling', cardId: 'c1', sessionId: 'sess-1' },
-      counters: { watchdogRuns: 2, spawns: 1, rulingRounds: { c1: 1 }, ratifyRounds: 0, failures: 0 },
+      counters: {
+        watchdogRuns: 2, spawns: 1, rulingRounds: { c1: 1 }, ratifyRounds: 0, failures: 0, staleTerminals: 0,
+      },
     }));
     expect(status.watchdog).toEqual({ pid: 555, lastTerminalReason: 'escalations_pending' });
     expect(status.currentSession).toEqual({ kind: 'ruling', cardId: 'c1', sessionId: 'sess-1' });

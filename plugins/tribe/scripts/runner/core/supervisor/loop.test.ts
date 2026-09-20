@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   buildOneShotPrompt, extractRulingBlockVerbatim, observe, parseCampaignReportFacts,
-  readGapGateOpenIds, runSupervisor, supervisorPathsOf,
+  readGapGateOpenIds, readParkedTerminal, runSupervisor, supervisorPathsOf,
   type SupervisorLoopConfig, type SupervisorLoopSeam, type SupervisorTerminal,
 } from './loop.ts';
 import { CLOSING_TEMPLATE_PATH, RATIFY_TEMPLATE_PATH, RULING_TEMPLATE_PATH } from './brief.ts';
@@ -57,6 +57,12 @@ function baseConfig(overrides: Partial<SupervisorLoopConfig> = {}): SupervisorLo
 interface ScriptedWatchdogRun {
   reason: string;
   exitCode: number;
+  /** The run this terminal is ABOUT — `watchdog/status.json`'s own `runId` field, which a REAL
+   * watchdog always publishes alongside its terminal (`fixtures-mirror-reality.md`). Left
+   * `undefined` by every scenario that does not read it; set when a test needs the published
+   * terminal to stay attributable to a specific run in `runs/` (Task 8's stale-terminal
+   * retrigger). */
+  runId?: string;
   /** Overwrites `campaign-report.json` the moment this run's `waitFor()` resolves — simulating
    * the runner (the watchdog's own child) having produced a fresh report before exiting. */
   report?: Record<string, unknown>;
@@ -172,7 +178,9 @@ function fakeSeam(opts: {
           const run = watchdogQueue.shift();
           if (run === undefined) throw new Error('fakeSeam: no scripted watchdog run left');
           files.set(watchdogStatusPath, JSON.stringify({
-            pid, terminal: { status: 'terminal', reason: run.reason, exitCode: run.exitCode },
+            pid,
+            ...(run.runId === undefined ? {} : { runId: run.runId }),
+            terminal: { status: 'terminal', reason: run.reason, exitCode: run.exitCode },
           }));
           if (run.report !== undefined) {
             files.set(join(HOME, 'campaign-report.json'), JSON.stringify(run.report));
@@ -224,8 +232,15 @@ function assertWriteSurface(writes: string[]): void {
   for (const path of writes) {
     const inSupervisorDir = path.startsWith(join(HOME, 'supervisor') + '/') || path === join(HOME, 'supervisor');
     const isNeedsOwner = path === join(HOME, 'NEEDS_OWNER.md');
+    // Task 8 (spec §2.2): superseding a falsified park RENAMES the park document — never
+    // deletes it — so the audit trail survives. The marker is the same document under its
+    // archived name, so it is the same S-P5 surface entry, not a new one.
+    const isNeedsOwnerSuperseded = path.startsWith(join(HOME, 'NEEDS_OWNER.md') + '.superseded-');
     const isEscalationRename = path.startsWith(join(HOME, 'escalations') + '/') && path.includes('.resolved-');
-    expect({ path, allowed: inSupervisorDir || isNeedsOwner || isEscalationRename }).toEqual({ path, allowed: true });
+    expect({
+      path,
+      allowed: inSupervisorDir || isNeedsOwner || isNeedsOwnerSuperseded || isEscalationRename,
+    }).toEqual({ path, allowed: true });
   }
 }
 
@@ -892,10 +907,12 @@ describe('parseCampaignReportFacts — F2 (fail-closed-edges obligation 1): a ma
 });
 
 /** A never-touched-yet `LoopState` — no in-flight watchdog spawn, no pending session verdict. */
-function freshLoopState(): Parameters<typeof observe>[4] {
+function freshLoopState(
+  priorParkedTerminal: { reason: string; atMs: number } | null = null,
+): Parameters<typeof observe>[4] {
   return {
     watchdogHandle: null, watchdogOwnedExitCode: null, watchdogRunAttempt: 0,
-    lastSessionOutcome: null, landedThisRun: [],
+    lastSessionOutcome: null, landedThisRun: [], priorParkedTerminal,
   };
 }
 
@@ -910,8 +927,14 @@ describe('observe(): the runs directory as typed facts (Task 4, spec §2.2)', ()
 
   function runsObservation(files: Record<string, string>) {
     const seam = fakeSeam({ initialFiles: files });
+    const paths = supervisorPathsOf(HOME);
+    // Task 8: the prior park is read by the EDGE once at startup — BEFORE this invocation's own
+    // first `publish()` overwrites `status.json`'s `terminal` with `null` — and handed to
+    // `observe()` through the loop state. This helper composes the two exactly as
+    // `runSupervisor` does, so these Task 4 assertions still pin the same disk fact.
     return observe(
-      baseConfig(), HOME, seam.io, supervisorPathsOf(HOME), freshLoopState(), zeroState(), null,
+      baseConfig(), HOME, seam.io, paths,
+      freshLoopState(readParkedTerminal(seam.io, paths.status)), zeroState(), null,
     );
   }
 
@@ -981,5 +1004,174 @@ describe('observe(): the runs directory as typed facts (Task 4, spec §2.2)', ()
       }),
     });
     expect(o.parkedTerminal).toEqual({ reason: 'stalled', atMs: Date.parse('2026-02-02T00:00:00.000Z') });
+  });
+});
+
+// ---------------------------------------------------------------------------------------
+// Task 8 (spec §2.2, card `supervisor-park-truth`): performing the supersede AT THE EDGE.
+//
+// ORACLE (the card's, verbatim): "Parking when the disk says the park is false = bug. Refusing
+// to resume while a park is still TRUE = by design." Both directions are driven below through
+// the REAL `runSupervisor` over the fake seam, from the RECORDED 2026-09-19 shape (spec §1.2):
+// a watchdog terminal `stalled` about run A, while run B — newer — carried the campaign on.
+// ---------------------------------------------------------------------------------------
+
+const RUN_A = '2026-09-19T19-29-58-328Z-dcb2'; // the run the watchdog's stall is ABOUT
+const RUN_B = '2026-09-19T20-30-30-069Z-6185'; // the NEWER run that really carried the campaign
+const PARK_AT = '2026-09-19T20:30:30.010Z';    // when the PREVIOUS invocation parked
+
+/** The park document a previous invocation left behind, and the `supervisor/status.json` it
+ * published alongside it — the two artifacts a restart finds on disk. `runB` selects the
+ * ORACLE's direction: `'alive'` means the disk has falsified the park (superseding is
+ * mandatory), `null` means nothing contradicts it (refusing is BY DESIGN).
+ *
+ * A `STOP` file is seeded so the tick AFTER a supersede has an observable, terminating outcome:
+ * reaching `exit(stop_requested)` is how "the loop CONTINUED — never exit 20" is proven. P2 is
+ * evaluated before P3, so the STOP file can never pre-empt the park decision under test. */
+function parkedSeam(runB: 'alive' | null): ReturnType<typeof fakeSeam> {
+  const initialFiles: Record<string, string> = {
+    [join(HOME, 'STOP')]: '',
+    [join(HOME, 'NEEDS_OWNER.md')]: '# Campaign needs the owner: c\n\n**Park reason:** stalled\n',
+    [join(HOME, 'campaign-state.json')]: campaignStateFixture(),
+    // What the PREVIOUS invocation published when it parked (spec §13's own shape, verbatim).
+    [join(HOME, 'supervisor', 'status.json')]: JSON.stringify({
+      v: 1, pid: 21744, home: HOME, campaign: 'c', startedAt: PARK_AT, updatedAt: PARK_AT,
+      state: 'terminal', lastAction: 'park:stalled',
+      watchdog: { pid: 999997, lastTerminalReason: 'stalled' }, currentSession: null,
+      counters: { watchdogRuns: 1, spawns: 0, rulingRounds: {}, ratifyRounds: 0, failures: 0 },
+      terminal: { status: 'needs_owner', reason: 'stalled', exitCode: 20 },
+    }),
+    [join(HOME, 'watchdog', 'status.json')]: JSON.stringify({
+      v: 1, pid: 999997, runId: RUN_A,
+      terminal: { status: 'needs_human', reason: 'stalled', exitCode: 10 },
+    }),
+    [join(HOME, 'runs', RUN_A, 'run.json')]: JSON.stringify({
+      v: 1, runId: RUN_A, pid: 999999, startedAt: '2026-09-19T19:29:58.328Z',
+      endedAt: null, exitCode: null, reason: null,
+    }),
+  };
+  if (runB === 'alive') {
+    initialFiles[join(HOME, 'runs', RUN_B, 'run.json')] = JSON.stringify({
+      v: 1, runId: RUN_B, pid: 7777, startedAt: '2026-09-19T20:30:30.074Z',
+      endedAt: null, exitCode: null, reason: null,
+    });
+  }
+  // Run A's runner and the watchdog that reported on it are both long gone — the recorded shape.
+  // Only run B's pid is alive, and only when this fixture says so.
+  return fakeSeam({ initialFiles, initialDeadPids: [999997, 999999] });
+}
+
+function eventLines(seam: ReturnType<typeof fakeSeam>): Array<Record<string, unknown>> {
+  const raw = seam.files.get(join(HOME, 'supervisor', 'events.jsonl')) ?? '';
+  return raw.trim() === ''
+    ? []
+    : raw.trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
+}
+
+function lastStatus(seam: ReturnType<typeof fakeSeam>): Record<string, any> {
+  return JSON.parse(seam.statusHistory[seam.statusHistory.length - 1] as string) as Record<string, any>;
+}
+
+describe('runSupervisor — Task 8 (G3): a park the disk has already falsified is superseded, and '
+  + 'the campaign continues', () => {
+  let seam: ReturnType<typeof fakeSeam>;
+  let result: SupervisorTerminal;
+
+  beforeAll(async () => {
+    seam = parkedSeam('alive');
+    result = await runSupervisor(baseConfig(), HOME, seam.io);
+  });
+
+  test('the loop CONTINUES past the superseded park into a following tick — never exit 20', () => {
+    expect(result).toEqual({
+      exitCode: 0, kind: 'done', reason: 'stop_requested', statusPath: join(HOME, 'supervisor', 'status.json'),
+    });
+  });
+
+  test('decide() sees the park a PREVIOUS run recorded: this invocation\'s own start publish '
+    + 'must not erase status.json\'s `terminal` before the first observe() can read it', () => {
+    // The recorded INTENT is decide()'s own verdict, written before the action is performed.
+    // `park` here would mean `parkedTerminal` arrived as null — the defect this pins.
+    expect(eventLines(seam).map((e) => e['action'])).toEqual(['supersede_park', 'park_superseded', 'exit']);
+  });
+
+  test('NEEDS_OWNER.md is RENAMED, never deleted — exactly one .superseded-<ts> marker, carrying '
+    + 'the original document\'s bytes', () => {
+    expect(seam.files.has(join(HOME, 'NEEDS_OWNER.md'))).toBe(false);
+    const markers = [...seam.files.keys()].filter((k) => k.startsWith(`${join(HOME, 'NEEDS_OWNER.md')}.superseded-`));
+    expect(markers.length).toBe(1);
+    expect(seam.files.get(markers[0] as string)).toContain('**Park reason:** stalled');
+  });
+
+  test('a park_superseded event carries the prior park\'s reason and the superseding disk fact', () => {
+    const event = eventLines(seam).find((e) => e['action'] === 'park_superseded');
+    expect(event).toBeDefined();
+    const detail = (event as Record<string, unknown>)['detail'] as Record<string, unknown>;
+    expect(detail['priorReason']).toBe('stalled');
+    expect(detail['supersededBy']).toEqual({ kind: 'newer_run_alive', runId: RUN_B });
+  });
+
+  test('the supersession is counted in the supervisor\'s OWN artifact (status.json counters)', () => {
+    expect(lastStatus(seam)['counters']['staleTerminals']).toBe(1);
+  });
+
+  test('the write surface stays S-P5\'s — the marker is the park document itself, renamed', () => {
+    assertWriteSurface(seam.writes);
+  });
+});
+
+describe('runSupervisor — Task 8, the Oracle\'s OTHER direction: a park that is STILL TRUE is '
+  + 'obeyed', () => {
+  test('nothing on disk contradicts the terminal, so the supervisor refuses to resume (exit 20), '
+    + 'leaves NEEDS_OWNER.md exactly where the owner must find it, and supersedes nothing', async () => {
+    const seam = parkedSeam(null);
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+
+    expect(result.exitCode).toBe(20);
+    expect(result.kind).toBe('needs_owner');
+    expect(result.reason).toBe('resume_blocked');
+    expect(seam.files.has(join(HOME, 'NEEDS_OWNER.md'))).toBe(true);
+    expect([...seam.files.keys()].filter((k) => k.includes('.superseded-'))).toEqual([]);
+    expect(eventLines(seam).map((e) => e['action'])).toEqual(['park']);
+    expect(lastStatus(seam)['counters']['staleTerminals']).toBe(0);
+  });
+});
+
+describe('runSupervisor — Task 8 (G2): the stale-terminal retrigger is CREDITED, so the second '
+  + 'contradiction does not re-trigger', () => {
+  test('a contradicted terminal re-runs the watchdog exactly ONCE; when the same contradiction '
+    + 'is still there afterwards the one-shot bound is spent and the original park stands', async () => {
+    const seam = fakeSeam({
+      initialFiles: {
+        [join(HOME, 'campaign-state.json')]: campaignStateFixture(),
+        [join(HOME, 'watchdog', 'status.json')]: JSON.stringify({
+          v: 1, pid: 999997, runId: RUN_A,
+          terminal: { status: 'needs_human', reason: 'stalled', exitCode: 10 },
+        }),
+        [join(HOME, 'runs', RUN_A, 'run.json')]: JSON.stringify({
+          v: 1, runId: RUN_A, pid: 999999, endedAt: null, exitCode: null, reason: null,
+        }),
+        [join(HOME, 'runs', RUN_B, 'run.json')]: JSON.stringify({
+          v: 1, runId: RUN_B, pid: 7777, endedAt: null, exitCode: null, reason: null,
+        }),
+      },
+      initialDeadPids: [999997, 999999],
+      // The re-triggered child publishes the SAME stale terminal about the SAME run A — run B is
+      // still alive, so the contradiction is still there on the tick after it exits. Exactly ONE
+      // run is scripted: a second spawn is a test failure by construction (the seam refuses to
+      // serve a run it was never given), which is precisely the un-credited-retrigger defect.
+      watchdogRuns: [{ reason: 'stalled', exitCode: 10, runId: RUN_A }],
+    });
+
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+
+    expect(result.exitCode).toBe(20);
+    expect(result.reason).toBe('stalled');
+    expect(seam.spawnWatchdogCalls).toBe(1);
+    expect(eventLines(seam).map((e) => e['action'])).toEqual(['run_watchdog', 'await_watchdog', 'park']);
+    const state = JSON.parse(seam.files.get(join(HOME, 'supervisor', 'state.json')) as string) as {
+      retriggers: Record<string, number>;
+    };
+    expect(state.retriggers['stale_terminal']).toBe(1);
   });
 });
