@@ -4,8 +4,10 @@
  * tests; this proves the WIRING — the class of defect the runner README calls out ("Mocked
  * tests validate logic, not invocations").
  */
-import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import {
+  existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runWatchdog } from './core/watchdog/watch-loop.ts';
@@ -17,8 +19,17 @@ const DOUBLE = join(import.meta.dir, 'fixtures', 'watchdog', 'runner-double.sh')
 
 interface Harness { home: string; statePath: string; io: WatchdogIO; lines: string[] }
 
+// FT1 (rules reviewer, fix round 2, `rule-temp-dir-cleanup`): every `mktemp` root this helper
+// creates is collected here and removed once, after the whole file's tests have run — every
+// call site (including R1/R2/R3/R4 below) benefits without touching its own call.
+const harnessRoots: string[] = [];
+afterAll(() => {
+  for (const root of harnessRoots) rmSync(root, { recursive: true, force: true });
+});
+
 function harness(plan: string, extraEnv: Record<string, string> = {}): Harness {
   const root = mkdtempSync(join(tmpdir(), 'wd-int-'));
+  harnessRoots.push(root);
   const home = join(root, '.tribe', 'k', 'campaigns', 'c');
   mkdirSync(home, { recursive: true });
   // A VALID minimal state (runner README "State file schema" — every required top-level key
@@ -316,4 +327,54 @@ describe('D1/D2 — no launch path is judged on a run directory that predates it
     expect(relaunch?.detail.cause).toBe('crash');
     expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
   }, 60_000);
+
+  // FC2 (fixer round 2, spec §5.2 R4 / §10 goal 2): R1-R3 above prove the fix suppresses
+  // nothing FALSE; R4 is the card's own "keep" clause — the OPPOSITE proof, that a genuinely
+  // silent RELAUNCHED runner still stalls, on time, bound by the REAL wall clock (no fake
+  // timers anywhere in this file or this test — `bun:test` never patches `Date.now`/timers, and
+  // nothing here scripts `io.nowMs`/`io.sleep`, unlike `watch-loop.test.ts`'s `fakeIo`).
+  test('R4 a genuinely silent relaunched runner still stalls, bound by the real clock', async () => {
+    // Attempt 1: exit 3 with a quota fixture whose reset is already in the PAST (R2's shape) —
+    // takes the plain crash-relaunch path immediately, with no quota/overload wait to sit
+    // through, so the real clock spent here is negligible next to the stall bound below.
+    const pastReset = Math.floor(Date.now() / 1000) - 3600;
+    // Attempt 2: the `none` fixture — writes NO session log at all — sleeping long enough (90s)
+    // to still be alive well past the stall bound (61s) computed below, so the watchdog's own
+    // `noLogSince` clock, never a mocked one, is what fires the stall. `DOUBLE_RUNDIR_DELAY_S`
+    // (5s, same knob R1/R2/R3 use) widens the gap between the relaunch and the new attempt's own
+    // `runs/<id>/` directory appearing — the fixed code's D2 exclusion (`newestRunIdExcluding`)
+    // starts the silence clock the INSTANT the child is spawned regardless of this delay, so a
+    // correct fix's measured interval is unaffected by it; the sanity check below (temporarily
+    // reverting to base commit 0ca94dc) shows the PRE-fix code instead waits out this whole delay
+    // before it even recognises "alive with no log", failing the "not late" bound below.
+    const h = harness('3:quota 0:none:90', {
+      DOUBLE_RESET_S: String(pastReset), DOUBLE_RUNDIR_DELAY_S: '5',
+    });
+    const started = Date.now();
+    const outcome = await runWatchdog(config({ stallMinutes: 1, pollSeconds: 1 }), h.home, h.io);
+    const finished = Date.now();
+
+    expect([outcome.exitCode, outcome.reason]).toEqual([10, 'stalled']);
+
+    const evts = events(h.home);
+    const relaunch = evts.find((e) => e.action === 'relaunch');
+    const stall = evts.find((e) => e.action === 'stall');
+    expect(relaunch?.detail.cause).toBe('crash');
+    expect(stall).toBeDefined();
+    const relaunchAt = Date.parse((relaunch as unknown as { at: string }).at);
+    const stallAt = Date.parse((stall as unknown as { at: string }).at);
+    const measuredMs = stallAt - relaunchAt;
+    // Not early: the relaunched run gets its own full `--stall-minutes` (60_000 ms) of silence
+    // before it may be declared stalled — this is the wall the D4(a) "keep" clause exists to
+    // guard: suppressing stalls wholesale after a relaunch would fail this assertion by firing
+    // at (or near) 0 ms instead.
+    expect(measuredMs).toBeGreaterThan(60_000);
+    // Not late: at most one further poll interval (1_000 ms, `pollSeconds: 1`) to notice it,
+    // plus a stated real-clock scheduling allowance (5_000 ms) for subprocess-spawn and event-
+    // loop jitter that a REAL clock (unlike a mocked one) genuinely incurs — measured, never
+    // assumed: this run's actual `measuredMs` is asserted below the loop.
+    expect(measuredMs).toBeLessThanOrEqual(60_000 + 1_000 + 5_000);
+    // Sanity: this test really did run in real wall-clock time, not a mocked instant.
+    expect(finished - started).toBeGreaterThan(60_000);
+  }, 180_000);
 });
