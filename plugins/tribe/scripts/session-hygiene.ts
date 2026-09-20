@@ -80,13 +80,19 @@ function walkLogFiles(root: string): string[] {
   return out;
 }
 
+/** The pure counting core, as a seam (pure-core.md): production call sites rely on the default
+ * (the real `countSessionHygiene`) and never pass this explicitly. A test hands in its own
+ * function directly to exercise the core-failure boundary — no process-wide module mock, so this
+ * file's tests cannot leak into any other suite that imports the same core. */
+type CountFn = (text: string) => SessionHygieneCounts;
+
 /** Reads one log file and counts it, or `null` when the file cannot be READ — logging a warning
  * to stderr rather than throwing, so one bad file never costs the whole measurement
  * (fail-closed-edges.md obligation 1). The catch is scoped to `readFileSync` ONLY: a failure from
  * the pure core is a different kind of problem (a bug, not an unreadable file) and must propagate
  * as itself rather than be relabeled "skipping unreadable file" — `main()`'s boundary is what
  * turns it into a clean refusal. */
-export function countFileOrNull(path: string): SessionHygieneCounts | null {
+export function countFileOrNull(path: string, count: CountFn = countSessionHygiene): SessionHygieneCounts | null {
   let text: string;
   try {
     text = readFileSync(path, 'utf8');
@@ -95,17 +101,17 @@ export function countFileOrNull(path: string): SessionHygieneCounts | null {
     console.error(`session-hygiene: skipping unreadable file ${path}: ${message}`);
     return null;
   }
-  return countSessionHygiene(text);
+  return count(text);
 }
 
-function accumulate(root: string): SessionHygieneCounts {
+function accumulate(root: string, count: CountFn = countSessionHygiene): SessionHygieneCounts {
   const totals: SessionHygieneCounts = { unknownSkills: {}, filesystemWideScans: 0 };
   for (const path of walkLogFiles(root)) {
-    const counts = countFileOrNull(path);
+    const counts = countFileOrNull(path, count);
     if (counts === null) continue;
     totals.filesystemWideScans += counts.filesystemWideScans;
-    for (const [name, count] of Object.entries(counts.unknownSkills)) {
-      totals.unknownSkills[name] = (totals.unknownSkills[name] ?? 0) + count;
+    for (const [name, c] of Object.entries(counts.unknownSkills)) {
+      totals.unknownSkills[name] = (totals.unknownSkills[name] ?? 0) + c;
     }
   }
   return totals;
@@ -138,7 +144,7 @@ function parseArgsOrExit(argv: readonly string[]): Options {
   }
 }
 
-export function main(argv: readonly string[] = Bun.argv.slice(2)): void {
+export function main(argv: readonly string[] = Bun.argv.slice(2), count: CountFn = countSessionHygiene): void {
   const options = parseArgsOrExit(argv);
   // A boundary around the actual measurement: anything that escapes `accumulate` (a walk error
   // that isn't a filesystem errno, or — see countFileOrNull above — a pure-core bug) must become
@@ -146,7 +152,7 @@ export function main(argv: readonly string[] = Bun.argv.slice(2)): void {
   // never a raw stack trace reaching a user-facing CLI (fail-closed-edges.md).
   let counts: SessionHygieneCounts;
   try {
-    counts = accumulate(options.root);
+    counts = accumulate(options.root, count);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`session-hygiene: ${message}`);

@@ -5,16 +5,14 @@
 //   F3 proves `main()` turns any escaping error into a clean `session-hygiene: <message>` refusal
 //   with a non-zero exit, instead of letting a raw stack trace reach the user.
 //
-// The mocked tests below use `mock.module` on the shared core path
-// (`runner/core/metrics/session-hygiene.ts`) to force a synthetic, non-I/O failure — the real
-// pure core never throws for malformed text, so a module mock is the only way to exercise this
-// boundary. Bun's module mocks are PROCESS-WIDE and are NOT undone by `mock.restore()` (only spy
-// mocks are), so:
-//   - the mocked tests are declared LAST, after every test that needs the real core;
-//   - this file must be run in its own `bun test` invocation, never combined in one process with
-//     `runner/core/metrics/session-hygiene.test.ts` (which asserts the real core's regex
-//     behaviour) or any other suite that imports that same core module.
-import { expect, mock, spyOn, test } from 'bun:test';
+// The core-failure tests below hand a throwing fake DIRECTLY to `countFileOrNull`/`main` as their
+// injected `count` seam (pure-core.md: "a dependency may enter core logic only through an
+// abstraction the caller supplies") — the real pure core never throws for malformed text, so a
+// fake is the only way to exercise this boundary. This file mocks no module: Bun's module mocks
+// are process-wide and are not undone by `mock.restore()`, so mocking the shared core module here
+// would leak into every other suite in the process that imports it. An injected function leaks
+// nothing — it lives only in this test's own call.
+import { expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,6 +23,10 @@ function makeRealLogDir(): string {
   writeFileSync(join(dir, 'a.log'), 'hello');
   return dir;
 }
+
+const throwingCount = (): never => {
+  throw new TypeError('core exploded (not an I/O error)');
+};
 
 test('F2 — a real I/O failure is still reported and skipped, never thrown', () => {
   const missing = join(tmpdir(), 'session-hygiene-does-not-exist-' + Date.now(), 'nope.log');
@@ -51,21 +53,13 @@ test('F3 — a genuine measurement run still exits 0 (unaffected by the new erro
   }
 });
 
-// --- mocked pure-core failure: PROCESS-WIDE module mock, keep these tests LAST in this file ---
-
-test('F2 — a core failure surfaces as itself, not mislabeled "skipping unreadable file"', async () => {
-  await mock.module('./runner/core/metrics/session-hygiene.ts', () => ({
-    countSessionHygiene: () => {
-      throw new TypeError('core exploded (not an I/O error)');
-    },
-  }));
-  const { countFileOrNull: mockedCountFileOrNull } = await import('./session-hygiene.ts');
+test('F2 — a core failure surfaces as itself, not mislabeled "skipping unreadable file"', () => {
   const dir = makeRealLogDir();
   const errorSpy = spyOn(console, 'error').mockImplementation(() => {});
   try {
     let thrown: unknown;
     try {
-      mockedCountFileOrNull(join(dir, 'a.log'));
+      countFileOrNull(join(dir, 'a.log'), throwingCount);
     } catch (err) {
       thrown = err;
     }
@@ -81,9 +75,7 @@ test('F2 — a core failure surfaces as itself, not mislabeled "skipping unreada
   }
 });
 
-test('F3 — main() turns an escaping core failure into a clean refusal, never a raw stack trace', async () => {
-  // Reuses the core mock the previous test registered (module mocks are process-wide in Bun).
-  const { main: mockedMain } = await import('./session-hygiene.ts');
+test('F3 — main() turns an escaping core failure into a clean refusal, never a raw stack trace', () => {
   const dir = makeRealLogDir();
   const errorSpy = spyOn(console, 'error').mockImplementation(() => {});
   const exitSpy = spyOn(process, 'exit').mockImplementation(((code?: number) => {
@@ -92,7 +84,7 @@ test('F3 — main() turns an escaping core failure into a clean refusal, never a
   try {
     let escaped: unknown;
     try {
-      mockedMain(['--root', dir]);
+      main(['--root', dir], throwingCount);
     } catch (err) {
       escaped = err;
     }
