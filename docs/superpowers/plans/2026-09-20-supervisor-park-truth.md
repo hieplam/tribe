@@ -477,7 +477,7 @@ with `reason: 'escalations_pending'` routes into the escalation rows (rows 5-12)
 a terminal with no contradiction yields byte-identical behaviour to today for `stalled`, `quota_cap`,
 `overloaded`, `lock_conflict` and `error`.
 
-- [ ] **Step 1: GREEN**
+- [x] **Step 1: GREEN**
 
 ```bash
 cd plugins/tribe/scripts/runner && bun test core/supervisor/decide.test.ts 2>&1 | tail -12
@@ -485,7 +485,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/decide.test.ts 2>&1 
 
 Expected: `0 fail`; the pre-existing `stalled` park test still passes in its no-contradiction form.
 
-- [ ] **Step 2: Commit** `fix(supervisor): let the disk overrule a watchdog terminal it contradicts`
+- [x] **Step 2: Commit** `fix(supervisor): let the disk overrule a watchdog terminal it contradicts`
 
 ### Task 8: perform the supersede at the edge
 

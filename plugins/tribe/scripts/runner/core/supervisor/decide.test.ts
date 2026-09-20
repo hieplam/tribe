@@ -323,6 +323,105 @@ test('row 23: a --once-only reason is a contract violation and parks, never gues
 });
 
 // ---------------------------------------------------------------------------------------------
+// Task 7 (spec §2.2 edit 2, card `supervisor-park-truth`, G2/G5): the watchdog's terminal is an
+// INPUT, not a fact. When the runs directory contradicts it, the contradiction wins — but only
+// then. Oracle: "Parking when the disk says the park is false = bug. Refusing to resume while a
+// park is still TRUE = by design."
+//
+// The two run ids below are the ones actually recorded in the incident (spec §1.2): the watchdog
+// published `stalled` about run A at 20:30:30Z while run B — carrying the very pid the watchdog's
+// own status named as alive — had just started and went on to finish `escalations_pending`.
+// ---------------------------------------------------------------------------------------------
+
+const RUN_A = '2026-09-19T19-29-58-328Z-dcb2';
+const RUN_B = '2026-09-19T20-30-30-069Z-6185';
+
+/** The recorded shape: terminal `stalled` about run A, a strictly NEWER run B alive. */
+const staleStalledTerminal = (over: Partial<SupervisorObservation> = {}) => base({
+  lastWatchdog: terminal('stalled'),
+  watchdogRunId: RUN_A,
+  runs: [{ runId: RUN_B, pid: 21744, alive: true, endedAt: null, exitCode: null, reason: null }],
+  ...over,
+});
+
+test('G2: the recorded shape — terminal `stalled` while a NEWER run is alive — re-triggers the '
+  + 'watchdog instead of parking stalled', () => {
+  expect(decide(staleStalledTerminal()))
+    .toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false });
+});
+
+test('G2 is BOUNDED: with the one-shot stale_terminal retrigger already spent, the original '
+  + 'terminal\'s park stands', () => {
+  expect(decide(staleStalledTerminal({
+    state: { ...base().state, retriggers: { stale_terminal: 1 } },
+  }))).toEqual({ kind: 'park', reason: 'stalled', detail: 'the watchdog observed a stalled runner' });
+});
+
+test('G2 is BOUNDED: with the watchdog-run cap spent, the original terminal\'s park stands', () => {
+  expect(decide(staleStalledTerminal({
+    state: { ...base().state, watchdogRuns: 20 },
+  }))).toEqual({ kind: 'park', reason: 'stalled', detail: 'the watchdog observed a stalled runner' });
+});
+
+test('G5: a run that finalised `escalations_pending` while nobody watched routes into the '
+  + 'escalation rows (5-12), never into the stale terminal\'s park', () => {
+  const a = decide(staleStalledTerminal({
+    runs: [{
+      runId: RUN_B, pid: 21744, alive: false,
+      endedAt: '2026-09-19T22:48:45.898Z', exitCode: 2, reason: 'escalations_pending',
+    }],
+    escalations: [escalation({ cardId: 'c1', contentSha256: 'h1' })],
+  }));
+  // Row 12 — the effective reason became the RUN's own, so the ordinary escalation rows decided.
+  expect(a).toEqual({ kind: 'spawn_session', session: 'ruling', cardId: 'c1' });
+});
+
+test('G5: a finalised run carrying NO reason of its own leaves the terminal\'s reason in force', () => {
+  const a = decide(staleStalledTerminal({
+    runs: [{
+      runId: RUN_B, pid: 21744, alive: false,
+      endedAt: '2026-09-19T22:48:45.898Z', exitCode: 2, reason: null,
+    }],
+  }));
+  expect(a).toEqual({ kind: 'park', reason: 'stalled', detail: 'the watchdog observed a stalled runner' });
+});
+
+// REGRESSION (mandatory): with NO contradiction on the disk, every terminal-reason row decides
+// byte-identically to today — details asserted verbatim, not `expect.any(String)`. A supervisor
+// that simply stopped parking would be a worse bug than the one this card fixes.
+test('rows 18-22 are byte-identical when the disk does NOT contradict the terminal', () => {
+  const expected: Array<[ParkReason, string]> = [
+    ['quota_cap', 'the watchdog exhausted its quota-wait budget'],
+    ['overloaded', 'the watchdog exhausted its overload-backoff budget'],
+    ['stalled', 'the watchdog observed a stalled runner'],
+    ['lock_conflict', 'the watchdog could not resolve a lock conflict'],
+    ['error', 'the watchdog reported an unrecoverable error'],
+  ];
+  // Four shapes that each carry NO contradiction, for four different reasons.
+  const noContradiction: Array<[string, Partial<SupervisorObservation>]> = [
+    ['no runs observed at all', { watchdogRunId: RUN_A, runs: [] }],
+    ['the watchdog never said which run it was about', {
+      watchdogRunId: null,
+      runs: [{ runId: RUN_B, pid: 21744, alive: true, endedAt: null, exitCode: null, reason: null }],
+    }],
+    ['only an OLDER run exists', {
+      watchdogRunId: RUN_B,
+      runs: [{ runId: RUN_A, pid: 21744, alive: true, endedAt: null, exitCode: null, reason: null }],
+    }],
+    ['the newer run is neither alive nor finalised', {
+      watchdogRunId: RUN_A,
+      runs: [{ runId: RUN_B, pid: 21744, alive: false, endedAt: null, exitCode: null, reason: null }],
+    }],
+  ];
+  for (const [reason, detail] of expected) {
+    for (const [, facts] of noContradiction) {
+      expect(decide(base({ lastWatchdog: terminal(reason), ...facts })))
+        .toEqual({ kind: 'park', reason, detail });
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------------------------
 // Main rows 24-26: no terminal published, or a usage-error exit
 // ---------------------------------------------------------------------------------------------
 
