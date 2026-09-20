@@ -231,6 +231,16 @@ cd /Users/hip/repo/tribe-wt/watchdog-stall/plugins/tribe/scripts/runner && bun t
 **Expected RED:** both new tests fail — the first because the event list contains `stall` and the
 outcome is `[10, 'stalled']`, the second because `r1` is still published after the relaunch.
 
+> **SUPERSEDED (audit round 1, finding F1).** The `isOwnRunVisible` predicate sketched in Steps
+> 1.3 and 1.4 below is an **ordering** test, and it silently assumes run ids are globally monotonic.
+> They are not: `generateRunId` is built from the wall clock with no monotonic clamp, so a backward
+> NTP correction (or a shared campaign home across drifting hosts) yields a new run id that sorts
+> *below* a directory already present — and the ordering test then answers "not visible" for the
+> run's entire lifetime, falsely stalling a healthy runner after `--stall-minutes`. What actually
+> shipped is the **identity** test `newestRunIdExcluding(runIds, excluded)` over `LoopState.priorRunIds`
+> (commit `1fe3086`); see spec §3.4 item 1. The steps below are kept verbatim as the historical
+> recipe this task was built from — the spec, not this plan, is the contract.
+
 ### Step 1.3 — GREEN, the pure predicate
 
 Append to `core/watchdog/select.ts`, immediately after `newestRunId`:
