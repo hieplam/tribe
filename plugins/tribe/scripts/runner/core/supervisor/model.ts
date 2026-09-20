@@ -119,6 +119,18 @@ export interface SupervisorState {
   retriggers: Record<string, number>;
 }
 
+/** One run under `<home>/runs/<runId>/run.json`, narrowed to the fields a decision needs
+ * (spec §2.2, card `supervisor-park-truth`). `alive` is the edge's `isProcessAlive(pid)`
+ * answer, never re-derived by the core. */
+export interface RunFact {
+  runId: string;
+  pid: number | null;
+  alive: boolean;
+  endedAt: string | null;
+  exitCode: number | null;
+  reason: string | null;
+}
+
 /** §3.2, verbatim. Everything `decide()` needs, read once per tick by the edge and handed in as
  * data — no clock, no fs, no spawn reachable from here. */
 export interface SupervisorObservation {
@@ -148,6 +160,16 @@ export interface SupervisorObservation {
   unratifiedRulings: string[];
   /** `<home>/supervisor/park/*.json` written by a session. */
   parkMarkers: ParkMarker[];
+  /** Every run under `<home>/runs/`, ASCENDING by runId (spec §2.2, card
+   * `supervisor-park-truth`). Run ids are `<ISO-with-dashes>-<hex>`
+   * (core/run-record.ts#generateRunId), so lexicographic order IS chronological order. */
+  runs: RunFact[];
+  /** `watchdog/status.json`'s own `runId` — which run its terminal is ABOUT (spec §2.2). */
+  watchdogRunId: string | null;
+  /** When `NEEDS_OWNER.md` is present: the park the supervisor itself recorded in
+   * `supervisor/status.json`'s `terminal`. The park's stated condition, as a typed fact —
+   * never parsed out of NEEDS_OWNER.md's prose (spec §2.2). */
+  parkedTerminal: { reason: string; atMs: number } | null;
   /** The supervisor's own persisted counters. */
   state: SupervisorState;
   limits: SupervisorLimits;

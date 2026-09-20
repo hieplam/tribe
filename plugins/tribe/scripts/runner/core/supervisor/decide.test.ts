@@ -6,6 +6,10 @@ const base = (over: Partial<SupervisorObservation> = {}): SupervisorObservation 
   nowMs: 1_000_000, stopFilePresent: false, needsOwnerPresent: false,
   supervisorLock: null, watchdogLive: null, lastWatchdog: null, report: null,
   escalations: [], ownerOnlyEscalations: [], unratifiedRulings: [], parkMarkers: [],
+  // Task 4 (spec §2.2, card `supervisor-park-truth`): observation-only fields `decide()` does
+  // not read yet (Tasks 5-7 do) — defaulted here purely so this fixture keeps compiling against
+  // `SupervisorObservation`'s three new required fields; every existing row below is unaffected.
+  runs: [], watchdogRunId: null, parkedTerminal: null,
   state: { rulingRounds: {}, ratifyRounds: 0, spawns: 0, watchdogRuns: 0, seenEscalations: {},
            closingVerified: false, retriggers: {} },
   limits: { maxRulingRounds: 2, maxRatifyRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20,

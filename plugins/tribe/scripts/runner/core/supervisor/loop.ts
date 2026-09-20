@@ -52,7 +52,7 @@ import { CampaignStateSchema } from '../state.ts';
 import type { CampaignState } from '../types.ts';
 import type {
   CampaignReportCardFact, CampaignReportFacts, EscalationFact, LedgerEntry, LedgerVerdict,
-  ParkMarker, ParkReason, SessionKind, SessionOutcome, SupervisorAction, SupervisorLimits,
+  ParkMarker, ParkReason, RunFact, SessionKind, SessionOutcome, SupervisorAction, SupervisorLimits,
   SupervisorObservation, SupervisorState, SupervisorStatus,
 } from './model.ts';
 import { decide } from './decide.ts';
@@ -77,6 +77,7 @@ import { parseRulings, unratifiedRulingIds } from '../rulings.ts';
 import { extractReasonLine, parseEscalationQuestion } from '../escalation.ts';
 import { answersPathOf, campaignStatePathOf, escalationPathOf, escalationsDirOf } from '../paths.ts';
 import { REPORT_JSON_FILENAME } from '../report.ts';
+import { runRecordPathOf } from '../run-record.ts';
 import { watchdogPathsOf } from '../watchdog/select.ts';
 
 // `buildOneShotOptions` is imported only so its signature is read by this module's doc comment
@@ -162,7 +163,9 @@ interface SupervisorPaths {
   verdictsDir: string;
 }
 
-function supervisorPathsOf(homeDir: string): SupervisorPaths {
+// Exported for its own unit test (Task 4, spec §2.2) — `observe()` needs a real `SupervisorPaths`
+// to be driven directly against a fake seam, the same way `readGapGateOpenIds` is exported below.
+export function supervisorPathsOf(homeDir: string): SupervisorPaths {
   const dir = join(homeDir, 'supervisor');
   return {
     dir,
@@ -239,6 +242,9 @@ function tryAcquireLock(
 
 interface WatchdogStatusFacts {
   pid: number;
+  /** Task 4 (spec §2.2): which run the terminal is ABOUT — `null` on a malformed/absent field,
+   * never a throw. */
+  runId: string | null;
   terminal: { status: string; reason: string; exitCode: number } | null;
 }
 
@@ -253,6 +259,7 @@ function parseWatchdogStatusFacts(raw: string): WatchdogStatusFacts | null {
   const obj = parsed as Record<string, unknown>;
   const pid = obj['pid'];
   if (typeof pid !== 'number') return null;
+  const runId = typeof obj['runId'] === 'string' ? obj['runId'] : null;
   const terminalRaw = obj['terminal'];
   let terminal: WatchdogStatusFacts['terminal'] = null;
   if (terminalRaw !== null && typeof terminalRaw === 'object') {
@@ -261,7 +268,67 @@ function parseWatchdogStatusFacts(raw: string): WatchdogStatusFacts | null {
       terminal = { status: t['status'], reason: t['reason'], exitCode: t['exitCode'] };
     }
   }
-  return { pid, terminal };
+  return { pid, runId, terminal };
+}
+
+/** Narrow, fail-closed reader for `<home>/runs/<runId>/run.json` — degrades to `null` on a
+ * missing or malformed record, never throws into the tick loop (`fail-closed-edges.md`). */
+function parseRunFact(io: SupervisorLoopSeam, raw: string, runId: string): RunFact | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { return null; }
+  if (parsed === null || typeof parsed !== 'object') return null;
+  const r = parsed as Record<string, unknown>;
+  const pid = typeof r.pid === 'number' ? r.pid : null;
+  const endedAt = typeof r.endedAt === 'string' ? r.endedAt : null;
+  return {
+    runId,
+    pid,
+    alive: endedAt === null && pid !== null && io.isProcessAlive(pid),
+    endedAt,
+    exitCode: typeof r.exitCode === 'number' ? r.exitCode : null,
+    reason: typeof r.reason === 'string' ? r.reason : null,
+  };
+}
+
+/** `<home>/runs/<runId>/run.json`, every entry, ASCENDING by runId (model.ts's own contract: run ids are
+ * `<ISO-with-dashes>-<hex>`, so lexicographic order is chronological). Only `io.listEntries`,
+ * `io.readFileOrEmpty` and `io.isProcessAlive` are used — no new IO primitive (spec §2.2). */
+function readRunFacts(io: SupervisorLoopSeam, homeDir: string): RunFact[] {
+  const runIds = io.listEntries(join(homeDir, 'runs')).filter((e) => e.isDir).map((e) => e.name);
+  const facts: RunFact[] = [];
+  for (const runId of runIds) {
+    const fact = parseRunFact(io, io.readFileOrEmpty(runRecordPathOf(homeDir, runId)), runId);
+    if (fact !== null) facts.push(fact);
+  }
+  facts.sort((a, b) => (a.runId < b.runId ? -1 : a.runId > b.runId ? 1 : 0));
+  return facts;
+}
+
+interface SupervisorStatusFacts {
+  updatedAtMs: number | null;
+  terminal: { reason: string } | null;
+}
+
+/** Narrow, fail-closed reader for `<home>/supervisor/status.json` — only the two fields
+ * `parkedTerminal` needs (spec §2.2). Malformed/missing content degrades to `null`. */
+function parseSupervisorStatusFacts(raw: string): SupervisorStatusFacts | null {
+  if (raw === '') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const obj = parsed as Record<string, unknown>;
+  const updatedAtRaw = obj['updatedAt'];
+  const updatedAtMs = typeof updatedAtRaw === 'string' ? Date.parse(updatedAtRaw) : NaN;
+  const terminalRaw = obj['terminal'];
+  let terminal: SupervisorStatusFacts['terminal'] = null;
+  if (terminalRaw !== null && typeof terminalRaw === 'object') {
+    const t = terminalRaw as Record<string, unknown>;
+    if (typeof t['reason'] === 'string') terminal = { reason: t['reason'] };
+  }
+  return { updatedAtMs: Number.isFinite(updatedAtMs) ? updatedAtMs : null, terminal };
 }
 
 /** `campaign-report.json`'s typed fields only (spec §3.2's `CampaignReportFacts`) — deliberately
@@ -425,7 +492,9 @@ interface LoopState {
   landedThisRun: string[];
 }
 
-function observe(
+// Exported for its own unit test (Task 4, spec §2.2) — the same "exported so the fake seam can
+// drive it directly" pattern `readGapGateOpenIds` below already uses.
+export function observe(
   config: SupervisorLoopConfig, homeDir: string, io: SupervisorLoopSeam, paths: SupervisorPaths,
   loopState: LoopState, supState: SupervisorState, lastSessionOutcome: SessionOutcome | null,
 ): SupervisorObservation {
@@ -476,6 +545,22 @@ function observe(
 
   const parkMarkers = readParkMarkers(io, paths.parkDir);
 
+  // Task 4 (spec §2.2, card `supervisor-park-truth`): the one new primitive fact — what
+  // `<home>/runs/` says — plus which run the watchdog's terminal is ABOUT, and the park the
+  // supervisor itself already recorded (only meaningful while `NEEDS_OWNER.md` is present).
+  // Purely observational: `decide()` does not read any of these three fields yet, so this task
+  // changes no decision (`pure-core.md` — the edge gathers facts, the core still decides nothing
+  // new from them).
+  const runs = readRunFacts(io, homeDir);
+  const watchdogRunId = watchdogStatus?.runId ?? null;
+  const supervisorStatusFacts = parseSupervisorStatusFacts(io.readFileOrEmpty(paths.status));
+  const parkedTerminal = needsOwnerPresent
+    && supervisorStatusFacts !== null
+    && supervisorStatusFacts.terminal !== null
+    && supervisorStatusFacts.updatedAtMs !== null
+    ? { reason: supervisorStatusFacts.terminal.reason, atMs: supervisorStatusFacts.updatedAtMs }
+    : null;
+
   return {
     nowMs,
     stopFilePresent,
@@ -488,6 +573,9 @@ function observe(
     ownerOnlyEscalations,
     unratifiedRulings,
     parkMarkers,
+    runs,
+    watchdogRunId,
+    parkedTerminal,
     state: supState,
     limits: config.limits,
     lastSessionOutcome,

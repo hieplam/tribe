@@ -6,11 +6,12 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  buildOneShotPrompt, extractRulingBlockVerbatim, parseCampaignReportFacts, readGapGateOpenIds,
-  runSupervisor,
+  buildOneShotPrompt, extractRulingBlockVerbatim, observe, parseCampaignReportFacts,
+  readGapGateOpenIds, runSupervisor, supervisorPathsOf,
   type SupervisorLoopConfig, type SupervisorLoopSeam, type SupervisorTerminal,
 } from './loop.ts';
 import { CLOSING_TEMPLATE_PATH, RATIFY_TEMPLATE_PATH, RULING_TEMPLATE_PATH } from './brief.ts';
+import { zeroState } from './state.ts';
 import type { OneShotSessionOptions, OneShotSpawnParams } from './session.ts';
 import type { SessionMessage } from '../session.ts';
 import type { WatchdogHandle } from '../../ports/ports.ts';
@@ -887,5 +888,98 @@ describe('parseCampaignReportFacts — F2 (fail-closed-edges obligation 1): a ma
     const cards = (facts as { cards: Record<string, { outcome: string }> }).cards;
     expect(Object.keys(cards)).toEqual(['c2']);
     expect(cards['c2']?.outcome).toBe('shipped');
+  });
+});
+
+/** A never-touched-yet `LoopState` — no in-flight watchdog spawn, no pending session verdict. */
+function freshLoopState(): Parameters<typeof observe>[4] {
+  return {
+    watchdogHandle: null, watchdogOwnedExitCode: null, watchdogRunAttempt: 0,
+    lastSessionOutcome: null, landedThisRun: [],
+  };
+}
+
+/** Task 4 (spec §2.2, card `supervisor-park-truth`): `observe()` reads `<home>/runs/`,
+ * `watchdog/status.json`'s own `runId`, and `supervisor/status.json`'s `terminal` (only when
+ * `NEEDS_OWNER.md` is present) into three new typed fields. `decide()` is untouched by this
+ * task, so these tests exercise `observe()` directly. */
+describe('observe(): the runs directory as typed facts (Task 4, spec §2.2)', () => {
+  const RUN_OLD = '2026-01-01T00-00-00-000Z-aaaa';
+  const RUN_NEW = '2026-02-02T00-00-00-000Z-bbbb';
+  const RUN_MALFORMED = '2026-03-03T00-00-00-000Z-cccc';
+
+  function runsObservation(files: Record<string, string>) {
+    const seam = fakeSeam({ initialFiles: files });
+    return observe(
+      baseConfig(), HOME, seam.io, supervisorPathsOf(HOME), freshLoopState(), zeroState(), null,
+    );
+  }
+
+  test('a finished run (endedAt set) is dropped from `runs`, sorted ascending, and a malformed '
+    + 'run.json is dropped entirely rather than throwing', () => {
+    // Inserted UNSORTED (malformed first, then the newer run, then the older one) to prove
+    // `observe()` sorts — a fixture that happened to already be in order would prove nothing.
+    const o = runsObservation({
+      [join(HOME, 'runs', RUN_MALFORMED, 'run.json')]: '{not json',
+      [join(HOME, 'runs', RUN_NEW, 'run.json')]: JSON.stringify({
+        pid: 5001, endedAt: null, exitCode: null, reason: null,
+      }),
+      // pid 4242 is never added to `deadPids`, so `isProcessAlive` would report it ALIVE — this
+      // run must still read `alive: false` because `endedAt` is set (endedAt always wins).
+      [join(HOME, 'runs', RUN_OLD, 'run.json')]: JSON.stringify({
+        pid: 4242, endedAt: '2026-01-01T01:00:00.000Z', exitCode: 2, reason: 'escalations_pending',
+      }),
+    });
+
+    expect(o.runs.map((r) => r.runId)).toEqual([RUN_OLD, RUN_NEW]);
+    expect(o.runs[0]).toEqual({
+      runId: RUN_OLD, pid: 4242, alive: false,
+      endedAt: '2026-01-01T01:00:00.000Z', exitCode: 2, reason: 'escalations_pending',
+    });
+    expect(o.runs[1]).toEqual({
+      runId: RUN_NEW, pid: 5001, alive: true, endedAt: null, exitCode: null, reason: null,
+    });
+  });
+
+  test('an empty `runs/` directory reads as `[]`, never a throw', () => {
+    const o = runsObservation({});
+    expect(o.runs).toEqual([]);
+  });
+
+  test('`watchdogRunId` is read off `watchdog/status.json`\'s own `runId`', () => {
+    const o = runsObservation({
+      [join(HOME, 'watchdog', 'status.json')]: JSON.stringify({
+        pid: 999, runId: RUN_NEW, terminal: { status: 'terminal', reason: 'stalled', exitCode: 10 },
+      }),
+    });
+    expect(o.watchdogRunId).toBe(RUN_NEW);
+  });
+
+  test('`watchdogRunId` is `null` when `watchdog/status.json` is absent', () => {
+    const o = runsObservation({});
+    expect(o.watchdogRunId).toBeNull();
+  });
+
+  test('`parkedTerminal` is `null` when `NEEDS_OWNER.md` is absent, even with a terminal parked '
+    + 'on `supervisor/status.json`', () => {
+    const o = runsObservation({
+      [join(HOME, 'supervisor', 'status.json')]: JSON.stringify({
+        updatedAt: '2026-02-02T00:00:00.000Z',
+        terminal: { status: 'needs_owner', reason: 'stalled', exitCode: 20 },
+      }),
+    });
+    expect(o.parkedTerminal).toBeNull();
+  });
+
+  test('`parkedTerminal` reflects `supervisor/status.json`\'s terminal when `NEEDS_OWNER.md` is '
+    + 'present', () => {
+    const o = runsObservation({
+      [join(HOME, 'NEEDS_OWNER.md')]: '# needs owner\n',
+      [join(HOME, 'supervisor', 'status.json')]: JSON.stringify({
+        updatedAt: '2026-02-02T00:00:00.000Z',
+        terminal: { status: 'needs_owner', reason: 'stalled', exitCode: 20 },
+      }),
+    });
+    expect(o.parkedTerminal).toEqual({ reason: 'stalled', atMs: Date.parse('2026-02-02T00:00:00.000Z') });
   });
 });

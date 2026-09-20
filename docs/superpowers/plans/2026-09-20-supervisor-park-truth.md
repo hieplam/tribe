@@ -338,7 +338,7 @@ No decision changes in this task: `decide()` must behave identically. Add unit t
 `run.json` yielding no entry rather than a throw, and an unsorted directory listing coming back
 sorted).
 
-- [ ] **Step 1: GREEN**
+- [x] **Step 1: GREEN**
 
 ```bash
 cd plugins/tribe/scripts/runner && bun test core/supervisor/loop.test.ts 2>&1 | tail -12 && bunx tsc --noEmit
@@ -346,7 +346,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/loop.test.ts 2>&1 | 
 
 Expected: `0 fail`, the new observation tests pass, `tsc --noEmit` silent.
 
-- [ ] **Step 2: Commit** `feat(supervisor): observe the runs directory as typed facts`
+- [x] **Step 2: Commit** `feat(supervisor): observe the runs directory as typed facts`
 
 ### Task 5: the two pure truth predicates
 
