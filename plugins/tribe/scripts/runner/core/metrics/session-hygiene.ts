@@ -21,8 +21,21 @@ const SHELL_EXEC_WRAPPER = String.raw`(?:(?:sh|bash|zsh)\s+-c\s+|eval\s+)['"]?`;
 /** Leading `NAME=value` environment assignments before the command (`FOO=bar find / ...`). */
 const ENV_ASSIGNMENTS = String.raw`(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*`;
 
-/** `find`, optionally invoked by its absolute path (`/usr/bin/find`, `/bin/find`). */
-const FIND_BIN = String.raw`(?:\/usr\/bin\/|\/bin\/)?find`;
+/** `find`, optionally invoked by an absolute path — any directory prefix ending in `/find`
+ * (`/usr/bin/find`, `/bin/find`, `/usr/local/bin/find`, `/opt/homebrew/bin/find`, ...), rather than
+ * an enumerated list of two: this repo's own documented session `PATH`
+ * (`/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`) already carries a directory a two-entry
+ * enumeration would miss (G4). Under-detecting is a bug, so any absolute prefix is accepted. */
+const FIND_BIN = String.raw`(?:\/(?:[^\s\/'"]+\/)+)?find`;
+
+/** A non-shell interpreter invoked with an inline program (`python3 -c "..."`, `node -e "..."`,
+ * `perl -e '...'`) that itself runs `find` via a nested call (`os.system('find / ...')`,
+ * `execSync('find / ...')`, `system("find / ...")`) — a bypass class distinct from
+ * SHELL_EXEC_WRAPPER because arbitrary program text sits between the wrapper and the nested
+ * quote that actually precedes `find` (G3). Over-matching is by design (plan Oracle): this does
+ * not attempt to parse the interpreter's own syntax, it only asks whether an inline program
+ * mentions running `find` from a quoted root, which is enough to flag for a human to check. */
+const INLINE_INTERPRETER_WRAPPER = String.raw`(?:python3?|node|perl|ruby)\s+-[ce]\s+['"][\s\S]*?['"]`;
 
 // The command-position separator includes a backtick, for command substitution
 // (`` `find / -name x` ``). A literal backtick can't be written inside this file's OWN
@@ -44,6 +57,20 @@ const FS_WIDE_SCAN_RE = new RegExp(
     String.raw`(?=\s|$)`,
 );
 
+/** The INLINE_INTERPRETER_WRAPPER bypass (G3) as its own command, matched independently of
+ * FS_WIDE_SCAN_RE: the arbitrary program text `INLINE_INTERPRETER_WRAPPER` swallows between the
+ * interpreter and the nested quote makes it a different shape than "wrapper directly adjacent to
+ * find", not a stricter version of it. */
+const INLINE_INTERPRETER_FIND_RE = new RegExp(
+  COMMAND_SEPARATOR +
+    INLINE_INTERPRETER_WRAPPER +
+    ENV_ASSIGNMENTS +
+    FIND_BIN +
+    String.raw`\s+(?:-[A-Za-z]+\s+)*` +
+    SCAN_ROOT +
+    String.raw`(?=\s|$)`,
+);
+
 /** PURE. True when this shell command runs a `find` rooted at the filesystem or home root.
  * Over-matching is by design; under-matching is a bug (plan Oracle).
  *
@@ -53,7 +80,7 @@ const FS_WIDE_SCAN_RE = new RegExp(
  * would be wrong here anyway: it would also destroy a *real* quoted root argument
  * (`find "$HOME" -name x`), which must still match. */
 export function isFilesystemWideScan(command: string): boolean {
-  return FS_WIDE_SCAN_RE.test(command);
+  return FS_WIDE_SCAN_RE.test(command) || INLINE_INTERPRETER_FIND_RE.test(command);
 }
 
 const UNKNOWN_SKILL_RE = /Unknown skill: ([A-Za-z0-9_-]+)/g;

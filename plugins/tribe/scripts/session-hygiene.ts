@@ -6,12 +6,16 @@
 //
 //   bun session-hygiene.ts --root <dir> [--json]
 //
-// This is a MEASUREMENT, not a gate: it always exits 0. A single unreadable file never costs the
-// whole run — it is skipped with a warning to stderr and the walk continues
+// This is a MEASUREMENT, not a gate: a genuine measurement run always exits 0, and the counts it
+// finds never change that. A single unreadable file, or an unreadable SUBdirectory mid-walk,
+// never costs the whole run — it is skipped with a warning to stderr and the walk continues
 // (fail-closed-edges.md obligation 1: catch narrowly, never bare, never let a traceback escape).
+// The root itself being unreadable is different: that is a usage error (a typo'd --root must not
+// read as a clean, empty scan), so it refuses with a non-zero exit and prints no report.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { countSessionHygiene, type SessionHygieneCounts } from './runner/core/metrics/session-hygiene.ts';
+import { errorCode } from './runner/core/errno.ts';
 
 const LOG_EXTENSIONS = ['.log', '.jsonl'];
 
@@ -44,29 +48,34 @@ function parseArgs(argv: readonly string[]): Options {
   return { root, json: argv.includes('--json') };
 }
 
-function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
-  return err instanceof Error && 'code' in err;
-}
-
 /** Every `*.log`/`*.jsonl` file under `root`, recursively. A directory this process cannot read
  * (permission denied, or removed mid-walk) is skipped with a warning rather than aborting the
  * whole walk — the same fail-closed discipline as the per-file read below. Symlinked directories
  * are not descended into (`dirent.isDirectory()` is false for a symlink), which also avoids
- * symlink cycles. */
+ * symlink cycles.
+ *
+ * The root itself failing is a DIFFERENT case from a subdirectory failing mid-walk (see the catch
+ * below): a subdirectory failure is a legitimate partial failure (skip and continue), but the root
+ * not existing/being readable at all is a usage error that must refuse the whole run, before any
+ * report is printed — a typo'd --root must never look like a clean, empty scan. */
 function walkLogFiles(root: string): string[] {
   const out: string[] = [];
   const stack: string[] = [root];
   while (stack.length > 0) {
     const dir = stack.pop() as string;
+    const isRoot = dir === root;
     let entries: ReturnType<typeof readdirSync>;
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch (err) {
-      if (isErrnoException(err)) {
-        console.error(`session-hygiene: skipping unreadable directory ${dir}: ${err.message}`);
-        continue;
-      }
-      throw err;
+      if (errorCode(err) === null) throw err;
+      const message = err instanceof Error ? err.message : String(err);
+      // The root itself is a usage error (a typo'd --root must not read as a clean, empty scan —
+      // see G2): refuse up front instead of silently reporting 0. A SUBdirectory failing mid-walk
+      // (permission denied, removed mid-run) is a legitimate partial failure: warn and continue.
+      if (isRoot) throw new SessionHygieneError(`root ${root} is not readable: ${message}`);
+      console.error(`session-hygiene: skipping unreadable directory ${dir}: ${message}`);
+      continue;
     }
     for (const entry of entries) {
       const full = join(dir, entry.name);

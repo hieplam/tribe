@@ -75,6 +75,44 @@ test('F2 — a core failure surfaces as itself, not mislabeled "skipping unreada
   }
 });
 
+test('G2 — a nonexistent --root refuses with a non-zero exit and prints no report (text mode)', () => {
+  const missingRoot = join(tmpdir(), 'session-hygiene-nonexistent-root-' + Date.now());
+  const errorSpy = spyOn(console, 'error').mockImplementation(() => {});
+  const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+  const exitSpy = spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    throw new Error(`__process_exit_${code}__`);
+  }) as never);
+  try {
+    expect(() => main(['--root', missingRoot])).toThrow(/^__process_exit_(?!0__)/);
+    // A typo'd root must not look like a clean, empty scan (G2): no report body at all.
+    expect(logSpy.mock.calls.length).toBe(0);
+    const messages = errorSpy.mock.calls.map(([m]) => String(m));
+    expect(messages.some((m) => m.startsWith('session-hygiene: ') && !m.includes('\n'))).toBe(true);
+  } finally {
+    errorSpy.mockRestore();
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  }
+});
+
+test('G2 — a nonexistent --root refuses with a non-zero exit and prints no report (--json mode)', () => {
+  const missingRoot = join(tmpdir(), 'session-hygiene-nonexistent-root-json-' + Date.now());
+  const errorSpy = spyOn(console, 'error').mockImplementation(() => {});
+  const logSpy = spyOn(console, 'log').mockImplementation(() => {});
+  const exitSpy = spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    throw new Error(`__process_exit_${code}__`);
+  }) as never);
+  try {
+    expect(() => main(['--root', missingRoot, '--json'])).toThrow(/^__process_exit_(?!0__)/);
+    // Even in --json mode, a bad root must not print a JSON payload that reads as "0 -> 0, clean".
+    expect(logSpy.mock.calls.length).toBe(0);
+  } finally {
+    errorSpy.mockRestore();
+    logSpy.mockRestore();
+    exitSpy.mockRestore();
+  }
+});
+
 test('F3 — main() turns an escaping core failure into a clean refusal, never a raw stack trace', () => {
   const dir = makeRealLogDir();
   const errorSpy = spyOn(console, 'error').mockImplementation(() => {});

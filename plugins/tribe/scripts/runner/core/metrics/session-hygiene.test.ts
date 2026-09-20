@@ -26,6 +26,14 @@ describe('isFilesystemWideScan — the oracle', () => {
     'eval "find / -name x"',
     '`find / -name x`',
     '/usr/bin/find / -name x',
+    // G3 reproduced bypasses: non-shell interpreters running find via an inline program string.
+    `python3 -c "import os; os.system('find / -name x')"`,
+    `node -e "require('child_process').execSync('find / -name x')"`,
+    `perl -e 'system("find / -name x")'`,
+    // G4: find invoked via an absolute path outside /usr/bin and /bin (this repo's own documented
+    // session PATH: /opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin).
+    '/usr/local/bin/find / -name x',
+    '/opt/homebrew/bin/find / -name x',
   ])('refuses %p', (cmd) => {
     expect(isFilesystemWideScan(cmd)).toBe(true);
   });

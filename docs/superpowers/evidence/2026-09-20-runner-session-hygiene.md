@@ -1,7 +1,9 @@
 # Evidence — session-hygiene ratchet (card `runner-session-user-settings`)
 
 Committed tool: `plugins/tribe/scripts/session-hygiene.ts` (Task 2). Pure counting core:
-`plugins/tribe/scripts/runner/core/metrics/session-hygiene.ts` (Task 1, 23 tests green).
+`plugins/tribe/scripts/runner/core/metrics/session-hygiene.ts` (Task 1, 40 tests green — 35 after
+the oracle widening, plus 5 more from the fix round that closed the non-shell-interpreter bypass
+G3/G4; `bun test core/metrics/session-hygiene.test.ts` from `plugins/tribe/scripts/runner`).
 
 ## Counting method
 
