@@ -11,6 +11,9 @@
  * order spec §3.4 lists it, with the row number(s) it implements named in a comment.
  */
 import type { EscalationFact, ParkReason, SupervisorAction, SupervisorObservation } from './model.ts';
+import {
+  parkStillHolds, staleTerminalRetriggerAvailable, terminalContradiction, terminalReasonForRunReason,
+} from './truth.ts';
 
 function park(reason: ParkReason, detail: string): SupervisorAction {
   return { kind: 'park', reason, detail };
@@ -96,7 +99,7 @@ export function decide(o: SupervisorObservation): SupervisorAction {
     // (`{cards: null, includeEscalated: false}`) — the SAME literal used for rows 16/24 above:
     // a fresh watchdog run over the whole campaign, not a card-scoped re-run.
     if (outcome.outcome === 'ratified') {
-      return { kind: 'run_watchdog', cards: null, includeEscalated: false };
+      return { kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: null };
     }
     // V8: the final report exists and nothing is unratified — the campaign closes.
     if (outcome.outcome === 'closed') {
@@ -115,8 +118,17 @@ export function decide(o: SupervisorObservation): SupervisorAction {
       `a live supervisor (pid ${o.supervisorLock.pid}) already holds this campaign's lock`,
     );
   }
-  // P2: an unresolved park is never silently resumed.
+  // P2: an unresolved park is never silently resumed — but a park whose stated condition the disk
+  // has already falsified is SUPERSEDED, not obeyed (G3). `parkStillHolds` is the pure predicate;
+  // a park that still holds refuses exactly as before.
   if (o.needsOwnerPresent) {
+    if (!parkStillHolds(o)) {
+      return {
+        kind: 'supersede_park',
+        priorReason: o.parkedTerminal?.reason ?? 'unknown',
+        detail: 'the park condition no longer holds on disk; re-observing and continuing',
+      };
+    }
     return park('resume_blocked', 'NEEDS_OWNER.md is present; resume is blocked until the owner deletes it');
   }
   // P3: a STOP file honoured immediately, every tick.
@@ -135,10 +147,33 @@ export function decide(o: SupervisorObservation): SupervisorAction {
   // behaviourally identical to the table's own row order: every row below implicitly requires
   // `lastWatchdog !== null`, so none of them can match while this one does.)
   if (w === null) {
-    return { kind: 'run_watchdog', cards: null, includeEscalated: false };
+    return { kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: null };
   }
 
-  const reason = w.terminal?.reason ?? null;
+  // G2/G5: the watchdog's terminal is an input, not a fact. When the disk contradicts it, the
+  // contradiction wins — the supervisor reads the runs directory it can read itself.
+  const contradiction = terminalContradiction(o);
+  let reason = w.terminal?.reason ?? null;
+  if (contradiction !== null) {
+    if (contradiction.kind === 'run_finalised') {
+      // G5: the run really finished while nobody was watching. Continue from the RUN's own
+      // reason, so every row below decides on the truth instead of the stale terminal — but
+      // TRANSLATED first: `run.json` speaks `core/report.ts#ExitReason` (success = `done`) while
+      // the rows below are keyed on the watchdog's terminal vocabulary (success = `runner_done`).
+      // `null` means "no substitution": an unrecognised run reason leaves the watchdog's own
+      // terminal in force rather than falling past every row into the residual backstop.
+      reason = terminalReasonForRunReason(contradiction.reason) ?? reason;
+    } else {
+      // G2: a newer run is alive. Re-run/attach the watchdog rather than park — bounded by the
+      // same run cap and one-shot retrigger rows 16/24 already use, spelled ONCE in
+      // `staleTerminalRetriggerAvailable` so `parkStillHolds` can ask the identical question
+      // (B-F3: a park is superseded only while this remedy is still available). `retrigger`
+      // names this row as the one the credit belongs to, so the edge never re-derives it (B-F5).
+      if (staleTerminalRetriggerAvailable(o)) {
+        return { kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: 'stale_terminal' };
+      }
+    }
+  }
 
   // Rows 1-3: runner_done.
   if (reason === 'runner_done') {
@@ -174,7 +209,7 @@ export function decide(o: SupervisorObservation): SupervisorAction {
         : Object.entries(o.report.cards)
           .filter(([, c]) => c.outcome === 'not_reached')
           .map(([cardId]) => cardId);
-      return { kind: 'run_watchdog', cards: [...answered, ...notReached], includeEscalated: false };
+      return { kind: 'run_watchdog', cards: [...answered, ...notReached], includeEscalated: false, retrigger: null };
     }
     // Row 5: crash-recovery guard (§4.3) — a ruling already landed in answers.md for this card
     // but the escalation file was never archived; archive it rather than re-ruling. This is
@@ -223,7 +258,7 @@ export function decide(o: SupervisorObservation): SupervisorAction {
   if (reason === 'session_incomplete') {
     const retries = o.state.retriggers['session_incomplete'] ?? 0;
     if (o.state.watchdogRuns < o.limits.maxWatchdogRuns && retries < 1) {
-      return { kind: 'run_watchdog', cards: null, includeEscalated: false };
+      return { kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: null };
     }
     return park('session_incomplete', 'the watchdog reported an incomplete session and the one-shot retrigger is spent');
   }
@@ -244,7 +279,7 @@ export function decide(o: SupervisorObservation): SupervisorAction {
   if (w.terminal === null) {
     const retries = o.state.retriggers['watchdog_no_terminal'] ?? 0;
     if (o.state.watchdogRuns < o.limits.maxWatchdogRuns && retries < 1) {
-      return { kind: 'run_watchdog', cards: null, includeEscalated: false };
+      return { kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: null };
     }
     return park('watchdog_no_terminal', 'the watchdog child exited without ever publishing a terminal reason');
   }

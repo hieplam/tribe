@@ -286,7 +286,7 @@ Read that file and follow its structure; it already encodes every environment fa
 Use the same `ok`/`bad`/`check` helpers and the same `PASS`/`FAIL` counting as
 `test-supervisor-e2e.sh`, exit non-zero when `FAIL > 0`, and `chmod +x` the file.
 
-- [ ] **Step 1: RED** run it on the untouched tree and paste the output.
+- [x] **Step 1: RED** run it on the untouched tree and paste the output.
 
 ```bash
 bash plugins/tribe/scripts/tests/test-supervisor-park-truth.sh 2>&1 | tail -30
@@ -295,7 +295,7 @@ bash plugins/tribe/scripts/tests/test-supervisor-park-truth.sh 2>&1 | tail -30
 Expected: the G2, G5 and G3 probes report `not ok`; the negative probe reports `ok`; the script exits
 non-zero.
 
-- [ ] **Step 2: Commit** `test(supervisor): reproduce the stale-park and stale-terminal defects E2E`
+- [x] **Step 2: Commit** `test(supervisor): reproduce the stale-park and stale-terminal defects E2E`
 
 ### Task 4: observe what `runs/` says
 
@@ -339,7 +339,7 @@ No decision changes in this task: `decide()` must behave identically. Add unit t
 `run.json` yielding no entry rather than a throw, and an unsorted directory listing coming back
 sorted).
 
-- [ ] **Step 1: GREEN**
+- [x] **Step 1: GREEN**
 
 ```bash
 cd plugins/tribe/scripts/runner && bun test core/supervisor/loop.test.ts 2>&1 | tail -12 && bunx tsc --noEmit
@@ -347,7 +347,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/loop.test.ts 2>&1 | 
 
 Expected: `0 fail`, the new observation tests pass, `tsc --noEmit` silent.
 
-- [ ] **Step 2: Commit** `feat(supervisor): observe the runs directory as typed facts`
+- [x] **Step 2: Commit** `feat(supervisor): observe the runs directory as typed facts`
 
 ### Task 5: the two pure truth predicates
 
@@ -386,7 +386,7 @@ alive; newer run finalised; newer run neither alive nor finalised; `parkedTermin
 `parkedTerminal` with a non-liveness reason (must hold); `parkedTerminal` stalled with no
 contradiction (must hold).
 
-- [ ] **Step 1: GREEN**
+- [x] **Step 1: GREEN**
 
 ```bash
 cd plugins/tribe/scripts/runner && bun test core/supervisor/truth.test.ts 2>&1 | tail -12
@@ -394,7 +394,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/truth.test.ts 2>&1 |
 
 Expected: every case passes, `0 fail`.
 
-- [ ] **Step 2: Commit** `feat(supervisor): pure predicates for park truth and terminal contradiction`
+- [x] **Step 2: Commit** `feat(supervisor): pure predicates for park truth and terminal contradiction`
 
 ### Task 6: a superseded park no longer blocks the restart (G3)
 
@@ -430,7 +430,7 @@ Add tests both ways: a stale park yields `supersede_park`; a park that still hol
 `resume_blocked` with the unchanged message. Assert explicitly that rows P1, P3 and P4 still win
 where they used to — a live foreign supervisor must still beat a stale park.
 
-- [ ] **Step 1: GREEN**
+- [x] **Step 1: GREEN**
 
 ```bash
 cd plugins/tribe/scripts/runner && bun test core/supervisor/decide.test.ts 2>&1 | tail -12
@@ -438,7 +438,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/decide.test.ts 2>&1 
 
 Expected: `0 fail`, including every pre-existing decide row test.
 
-- [ ] **Step 2: Commit** `fix(supervisor): supersede a park the disk has already falsified`
+- [x] **Step 2: Commit** `fix(supervisor): supersede a park the disk has already falsified`
 
 ### Task 7: never park on a terminal the disk contradicts (G2, G5)
 
@@ -478,7 +478,7 @@ with `reason: 'escalations_pending'` routes into the escalation rows (rows 5-12)
 a terminal with no contradiction yields byte-identical behaviour to today for `stalled`, `quota_cap`,
 `overloaded`, `lock_conflict` and `error`.
 
-- [ ] **Step 1: GREEN**
+- [x] **Step 1: GREEN**
 
 ```bash
 cd plugins/tribe/scripts/runner && bun test core/supervisor/decide.test.ts 2>&1 | tail -12
@@ -486,7 +486,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/decide.test.ts 2>&1 
 
 Expected: `0 fail`; the pre-existing `stalled` park test still passes in its no-contradiction form.
 
-- [ ] **Step 2: Commit** `fix(supervisor): let the disk overrule a watchdog terminal it contradicts`
+- [x] **Step 2: Commit** `fix(supervisor): let the disk overrule a watchdog terminal it contradicts`
 
 ### Task 8: perform the supersede at the edge
 
@@ -507,7 +507,7 @@ Handle the new action in the tick loop's action switch, using only existing seam
 Add loop tests over the fake seam proving the rename happened, the event was appended, the counter
 incremented, and the loop continued to a following tick.
 
-- [ ] **Step 1: GREEN** the whole runner suite and the Task 3 E2E suite.
+- [x] **Step 1: GREEN** the whole runner suite and the Task 3 E2E suite.
 
 ```bash
 cd plugins/tribe/scripts/runner && bun test 2>&1 | tail -6 && bunx tsc --noEmit
@@ -519,7 +519,7 @@ bash plugins/tribe/scripts/tests/test-watchdog-e2e.sh 2>&1 | tail -8
 Expected: `bun test` reports `0 fail` with a pass count at or above the 1137 floor; `tsc` silent; the
 park-truth suite now all `ok` and exit 0; the supervisor and watchdog E2E suites unchanged and green.
 
-- [ ] **Step 2: Commit** `feat(supervisor): supersede a stale park and continue the campaign`
+- [x] **Step 2: Commit** `feat(supervisor): supersede a stale park and continue the campaign`
 
 ---
 

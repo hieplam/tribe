@@ -119,6 +119,18 @@ export interface SupervisorState {
   retriggers: Record<string, number>;
 }
 
+/** One run under `<home>/runs/<runId>/run.json`, narrowed to the fields a decision needs
+ * (spec §2.2, card `supervisor-park-truth`). `alive` is the edge's `isProcessAlive(pid)`
+ * answer, never re-derived by the core. */
+export interface RunFact {
+  runId: string;
+  pid: number | null;
+  alive: boolean;
+  endedAt: string | null;
+  exitCode: number | null;
+  reason: string | null;
+}
+
 /** §3.2, verbatim. Everything `decide()` needs, read once per tick by the edge and handed in as
  * data — no clock, no fs, no spawn reachable from here. */
 export interface SupervisorObservation {
@@ -148,6 +160,16 @@ export interface SupervisorObservation {
   unratifiedRulings: string[];
   /** `<home>/supervisor/park/*.json` written by a session. */
   parkMarkers: ParkMarker[];
+  /** Every run under `<home>/runs/`, ASCENDING by runId (spec §2.2, card
+   * `supervisor-park-truth`). Run ids are `<ISO-with-dashes>-<hex>`
+   * (core/run-record.ts#generateRunId), so lexicographic order IS chronological order. */
+  runs: RunFact[];
+  /** `watchdog/status.json`'s own `runId` — which run its terminal is ABOUT (spec §2.2). */
+  watchdogRunId: string | null;
+  /** When `NEEDS_OWNER.md` is present: the park the supervisor itself recorded in
+   * `supervisor/status.json`'s `terminal`. The park's stated condition, as a typed fact —
+   * never parsed out of NEEDS_OWNER.md's prose (spec §2.2). */
+  parkedTerminal: { reason: string; atMs: number } | null;
   /** The supervisor's own persisted counters. */
   state: SupervisorState;
   limits: SupervisorLimits;
@@ -187,11 +209,32 @@ export interface SessionOutcome {
 
 /** §3.3: exactly one action per tick. */
 export type SupervisorAction =
-  | { kind: 'run_watchdog'; cards: string[] | null; includeEscalated: boolean }
+  | {
+    kind: 'run_watchdog';
+    cards: string[] | null;
+    includeEscalated: boolean;
+    /** G2 (card `supervisor-park-truth`): `'stale_terminal'` when — and only when — this
+     * `run_watchdog` IS the bounded re-observation the contradiction row asked for, `null` for
+     * every other row that returns this action (row 27's first run, row 6's re-scan, rows
+     * 16/24's own retriggers, V7's post-ratify re-run).
+     *
+     * The pure core already knows WHY it returned `run_watchdog`, so it says so rather than
+     * leaving the edge to re-derive it. The edge's re-derivation was wrong on the V7
+     * (`ratified`) early return, which also emits `run_watchdog` and can coincide with an
+     * independently-true contradiction, and so consumed the campaign's one-shot
+     * `retriggers['stale_terminal']` budget for an unrelated action (`pure-core.md`: "an adapter
+     * accumulating business decisions"). Additive: `ParkReason` gains nothing, and no persisted
+     * artifact's shape changes. */
+    retrigger: 'stale_terminal' | null;
+  }
   | { kind: 'await_watchdog'; pid: number }
   | { kind: 'spawn_session'; session: SessionKind; cardId: string | null }
   | { kind: 'archive_escalation'; cardId: string; rulingId: string }
   | { kind: 'park'; reason: ParkReason; detail: string }
+  /** G3 (spec §2.2, card `supervisor-park-truth`): a park whose stated condition the disk has
+   * already falsified — superseding is an ACTION, never a `ParkReason` (`ParkReason` gains
+   * nothing here). `priorReason` names the park being superseded. */
+  | { kind: 'supersede_park'; priorReason: string; detail: string }
   | { kind: 'exit'; status: 'done'; reason: string };
 
 /** §11: one ledger.jsonl line per spawn (G5) — a session spawn, or an owner ruling transcribed
@@ -246,6 +289,14 @@ export interface SupervisorStatus {
     rulingRounds: Record<string, number>;
     ratifyRounds: number;
     failures: number;
+    /** G2/G3 (spec §2.2, card `supervisor-park-truth`): how many times THIS invocation found a
+     * park or terminal the disk had already falsified and acted on that — G3's superseded park
+     * AND G2's re-observation of a stale terminal, which the card requires to be "counted in
+     * `counters`" too. `supervisor/status.json` is the supervisor's OWN artifact, so counting
+     * here changes nothing about
+     * `campaign-state.json` or `campaign-report.json` (owner-only, untouched). Per-invocation,
+     * exactly like `failures` — it is a publication counter, not persisted state. */
+    staleTerminals: number;
   };
   terminal: { status: 'done' | 'needs_owner'; reason: string; exitCode: number } | null;
 }
