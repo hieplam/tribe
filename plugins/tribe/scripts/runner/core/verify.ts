@@ -329,9 +329,23 @@ export type SchemaGuardRange =
   | { kind: 'range'; from: string; to: string }
   | { kind: 'refuse'; detail: string };
 
-export function schemaGuardRange(input: { mergeSha: string | null; parents: string[] }): SchemaGuardRange {
+export function schemaGuardRange(input: {
+  mergeSha: string | null;
+  /** The merge commit's parents as the edge observed them, or `null` when the edge could not
+   * observe them at all (the `git rev-list` lookup itself failed). That distinction is load-
+   * bearing: an unreadable parent list reported as an empty one refuses with "has 0 parent(s)",
+   * which is a false statement about the commit and hides a broken repository behind a message
+   * about merge policy. */
+  parents: string[] | null;
+}): SchemaGuardRange {
   if (input.mergeSha === null) {
     return { kind: 'refuse', detail: 'the merge commit sha is unknown, so the card branch own commits cannot be identified' };
+  }
+  if (input.parents === null) {
+    return {
+      kind: 'refuse',
+      detail: `the parents of merge commit ${input.mergeSha} could not be read, so the card branch own commits cannot be identified`,
+    };
   }
   if (input.parents.length !== 2) {
     return {
@@ -378,10 +392,16 @@ async function checkSchemaGuard(
     }
   }
 
-  const parentsResult = await run(io, config.repoRoot, ['git', 'rev-list', '--parents', '-n', '1', String(mergeSha)]);
-  const parents = parentsResult.exitCode === 0
-    ? parentsResult.stdout.trim().split(/\s+/).slice(1)
-    : [];
+  // With no merge sha there is nothing to look up: `git rev-list --parents -n 1 null` would
+  // spend a subprocess on the literal string "null" and log a nonsense command. A failed
+  // lookup yields `null` parents, never `[]` — see `schemaGuardRange`.
+  let parents: string[] | null = null;
+  if (mergeSha !== null) {
+    const parentsResult = await run(io, config.repoRoot, ['git', 'rev-list', '--parents', '-n', '1', mergeSha]);
+    if (parentsResult.exitCode === 0) {
+      parents = parentsResult.stdout.trim().split(/\s+/).slice(1);
+    }
+  }
   const range = schemaGuardRange({ mergeSha, parents });
   if (range.kind === 'refuse') {
     return { id: 'schemaGuard', passed: false, detail: `cannot evaluate the schema guard: ${range.detail}` };
@@ -394,6 +414,23 @@ async function checkSchemaGuard(
     '--',
     ...config.schemaLockPaths,
   ]);
+  // A failed diff leaves stdout EMPTY and writes to stderr, so an unchecked exit code reads
+  // "the diff ran and found nothing" — the guard would pass a check that never ran. The
+  // three-dot form makes this reachable: it requires a merge base and git refuses outright
+  // when the two parents share none (`fatal: <A>...<B>: no merge base`, exit 128). Under-
+  // checking is a BUG and failing closed on an undecidable range is BY DESIGN (spec §2.1),
+  // so this refuses. `run()` also folds a thrown `io.exec` into `exitCode: 1`, so one check
+  // covers a non-zero git exit and a spawn failure alike.
+  if (result.exitCode !== 0) {
+    return {
+      id: 'schemaGuard',
+      passed: false,
+      detail:
+        `cannot evaluate the schema guard: git diff ${range.from}...${range.to} failed with exit code ` +
+        `${result.exitCode}: ${result.stderr.trim() || '(no stderr)'}`,
+    };
+  }
+
   const diffIsEmpty = result.stdout.trim().length === 0;
 
   if (diffIsEmpty) {

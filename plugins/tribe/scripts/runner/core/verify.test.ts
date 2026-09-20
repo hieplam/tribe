@@ -9,10 +9,10 @@
 // right range from a wrong one — only real git commit topology can. `gh` stays mocked there.
 import { describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseGapGateStamp, readAllowsSchemaChange, verifyShipped } from './verify.ts';
+import { parseGapGateStamp, readAllowsSchemaChange, schemaGuardRange, verifyShipped } from './verify.ts';
 import type { ExecResult, VerifyConfig, VerifyIO, VerifyPointResult } from './verify.ts';
 import type { Card } from './types.ts';
 
@@ -265,6 +265,162 @@ describe('verifyShipped — point 5: schema guard', () => {
     const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     const point = result.points.find((p) => p.id === 'schemaGuard');
     expect(point?.passed).toBe(true);
+  });
+
+  // A card with no recorded base sha cannot be reasoned about at all; the guard refuses
+  // rather than reporting a verdict it has not earned.
+  test('a card with no baseSha fails the guard closed and says so', async () => {
+    const result = await verifyShipped(fixtureCard({ baseSha: null }), fixtureConfig(), buildIo(), 'C1');
+    expect(result.failedPoints).toContain('schemaGuard');
+    const point = result.points.find((p) => p.id === 'schemaGuard');
+    expect(point?.passed).toBe(false);
+    expect(point?.detail).toContain('baseSha');
+  });
+});
+
+// The guard's own failure modes. Every one of these ends in `passed: false`: the Oracle
+// (spec §2.1) makes under-checking a BUG and failing closed on an undecidable range BY
+// DESIGN, so "the check could not run" must never be reported as "nothing changed".
+describe('verifyShipped — point 5: the schema guard fails CLOSED, never open', () => {
+  /** Replaces one git subcommand's result, leaving every other mocked call intact. */
+  function withGitFailure(
+    opts: MockOptions,
+    match: (cmd: string[]) => boolean,
+    failure: ExecResult,
+  ): { io: VerifyIO; calls: string[][] } {
+    const { io: base, calls } = buildIoRecordingCalls(opts);
+    return {
+      calls,
+      io: {
+        ...base,
+        async exec(cmd: string[], options?: { cwd?: string }): Promise<ExecResult> {
+          if (match(cmd)) {
+            calls.push(cmd);
+            return failure;
+          }
+          return base.exec(cmd, options);
+        },
+      },
+    };
+  }
+
+  const isSchemaDiff = (cmd: string[]): boolean =>
+    cmd[0] === 'git' && cmd[1] === 'diff' && !cmd.includes('--name-only');
+
+  // The three-dot form REQUIRES a merge base; real git refuses outright when there is none
+  // (`git diff <A>...<B> -- .` -> exit 128, EMPTY stdout, "fatal: <A>...<B>: no merge base").
+  // Reading that empty stdout as "no locked-path change" would pass the guard on a diff that
+  // never ran — the exact under-check the Oracle forbids.
+  test('a non-zero exit from the schema-lock diff fails the guard and names the exit code and stderr', async () => {
+    const { io } = withGitFailure({}, isSchemaDiff, {
+      stdout: '',
+      stderr: 'fatal: parent0001...parent0002: no merge base',
+      exitCode: 128,
+    });
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
+    const point = result.points.find((p) => p.id === 'schemaGuard');
+    expect(point?.passed).toBe(false);
+    expect(result.failedPoints).toContain('schemaGuard');
+    expect(point?.detail).toContain('128');
+    expect(point?.detail).toContain('no merge base');
+    // And it is not mistakable for the genuine-empty-diff verdict.
+    expect(point?.detail).not.toContain('no diff on schema-lock paths');
+  });
+
+  // `run()` folds a THROWN io.exec into `{ exitCode: 1 }`, so the same exit-code check covers
+  // an adapter that throws as well as a git that exits non-zero.
+  test('an exec that throws on the schema-lock diff also fails the guard closed', async () => {
+    const base = buildIo();
+    const io: VerifyIO = {
+      ...base,
+      async exec(cmd: string[], options?: { cwd?: string }): Promise<ExecResult> {
+        if (isSchemaDiff(cmd)) throw new Error('spawn git ENOENT');
+        return base.exec(cmd, options);
+      },
+    };
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
+    const point = result.points.find((p) => p.id === 'schemaGuard');
+    expect(point?.passed).toBe(false);
+    expect(point?.detail).toContain('spawn git ENOENT');
+  });
+
+  // A failed parent lookup leaves NO parents. Reporting that as "has 0 parent(s), not 2" is a
+  // lie about the commit: it is indistinguishable from a real parentless commit, and A-F1
+  // shows what a mis-described failure costs.
+  test('a failed parent lookup refuses as a LOOKUP failure, not as a 0-parent commit', async () => {
+    const { io } = withGitFailure({}, (cmd) => cmd[0] === 'git' && cmd[1] === 'rev-list', {
+      stdout: '',
+      stderr: 'fatal: bad object mergesha1',
+      exitCode: 128,
+    });
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
+    const point = result.points.find((p) => p.id === 'schemaGuard');
+    expect(point?.passed).toBe(false);
+    expect(point?.detail).not.toContain('0 parent(s)');
+    expect(point?.detail).toContain('could not be read');
+  });
+
+  // With no merge sha there is nothing to look the parents of UP: issuing
+  // `git rev-list --parents -n 1 null` spends a subprocess on the literal string "null" and
+  // puts a nonsense command in the trace the next debugger reads.
+  test('no merge sha means no parent-lookup subprocess is spawned at all', async () => {
+    const { io, calls } = buildIoRecordingCalls({ mergeSha: null });
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
+    const revListCalls = calls.filter((c) => c[0] === 'git' && c[1] === 'rev-list');
+    expect(revListCalls).toEqual([]);
+    const point = result.points.find((p) => p.id === 'schemaGuard');
+    expect(point?.passed).toBe(false);
+  });
+});
+
+// Spec §4 item 1, verbatim: "`schemaGuardRange` both directions and every refusal".
+describe('schemaGuardRange (pure)', () => {
+  test('a regular two-parent merge yields first-parent...second-parent', () => {
+    expect(schemaGuardRange({ mergeSha: 'merge01', parents: ['p1', 'p2'] })).toEqual({
+      kind: 'range',
+      from: 'p1',
+      to: 'p2',
+    });
+  });
+
+  test('refuses when the merge sha is unknown', () => {
+    const range = schemaGuardRange({ mergeSha: null, parents: [] });
+    expect(range.kind).toBe('refuse');
+    if (range.kind !== 'refuse') throw new Error('unreachable');
+    expect(range.detail).toContain('merge commit sha is unknown');
+  });
+
+  // A squash merge, a rebase merge and a fast-forward all land as ONE parent — no two-parent
+  // anchor, so the branch's own commits cannot be identified. Failing closed here is BY
+  // DESIGN, and the campaign's mergePolicy means it cannot fire on a compliant card.
+  test('refuses a one-parent commit (squash / rebase-merge / fast-forward) and names the count', () => {
+    const range = schemaGuardRange({ mergeSha: 'merge01', parents: ['p1'] });
+    expect(range.kind).toBe('refuse');
+    if (range.kind !== 'refuse') throw new Error('unreachable');
+    expect(range.detail).toContain('merge01');
+    expect(range.detail).toContain('1 parent(s), not 2');
+  });
+
+  test('refuses an octopus merge, naming the real parent count', () => {
+    const range = schemaGuardRange({ mergeSha: 'merge01', parents: ['p1', 'p2', 'p3'] });
+    expect(range.kind).toBe('refuse');
+    if (range.kind !== 'refuse') throw new Error('unreachable');
+    expect(range.detail).toContain('3 parent(s), not 2');
+  });
+
+  // `null` parents means the EDGE could not read them. That is a different fact from a
+  // commit that genuinely has none, and the refusal must not conflate the two.
+  test('refuses an unreadable parent list distinctly from a real parent count', () => {
+    const range = schemaGuardRange({ mergeSha: 'merge01', parents: null });
+    expect(range.kind).toBe('refuse');
+    if (range.kind !== 'refuse') throw new Error('unreachable');
+    expect(range.detail).toContain('could not be read');
+    expect(range.detail).not.toContain('0 parent(s)');
+  });
+
+  test('is pure: the same input gives the same answer every time', () => {
+    const input = { mergeSha: 'merge01', parents: ['p1', 'p2'] };
+    expect(schemaGuardRange(input)).toEqual(schemaGuardRange(input));
   });
 });
 
@@ -701,14 +857,37 @@ function commitFile(repo: string, rel: string, body: string, msg: string): void 
   git(repo, 'commit', '-q', '-m', msg);
 }
 
+interface RepoFixture {
+  repo: string;
+  baseSha: string;
+  mergeSha: string;
+}
+
+/** Owns the temp directory's WHOLE lifecycle. The path is captured before any fallible work
+ * and released in a `finally` that runs whether `build` or `body` throws — `git()` uses
+ * `execFileSync`, which throws on any non-zero git exit, so a directory that is created
+ * first and handed back last leaks on every construction failure. `build` is injected so
+ * that property is itself testable. */
+async function withRepo(
+  build: (repo: string) => { baseSha: string; mergeSha: string },
+  body: (fixture: RepoFixture) => Promise<void>,
+): Promise<void> {
+  const repo = mkdtempSync(join(tmpdir(), 'guard-'));
+  try {
+    await body({ repo, ...build(repo) });
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}
+
 /** `branchTouchesLockedPath` selects the DIRECTION under test. Both directions contain a
  * MASTER-side locked-path commit that the card branch absorbed by merging master in — that
  * is the recorded shape of the false positive (spec §1.1), and it is what makes the two
  * directions distinguishable only by which commits the guard diffs.
  *
- * Returns the repo root, the card's `baseSha`, and the merge commit sha. */
-function makeRepo(branchTouchesLockedPath: boolean): { repo: string; baseSha: string; mergeSha: string } {
-  const repo = mkdtempSync(join(tmpdir(), 'guard-'));
+ * Builds inside an ALREADY-CREATED `repo` (see `withRepo`) and returns the card's `baseSha`
+ * and the merge commit sha. */
+function buildRepo(repo: string, branchTouchesLockedPath: boolean): { baseSha: string; mergeSha: string } {
   git(repo, 'init', '-q', '-b', 'master');
   commitFile(repo, 'README.md', 'base\n', 'init');
   const baseSha = git(repo, 'rev-parse', 'HEAD').trim();
@@ -737,7 +916,7 @@ function makeRepo(branchTouchesLockedPath: boolean): { repo: string; baseSha: st
   // remote-tracking ref, pointing at master with the card's merge already in it. Created as
   // a bare ref with NO remote URL, so nothing in this test can reach the network.
   git(repo, 'update-ref', 'refs/remotes/origin/master', 'master');
-  return { repo, baseSha, mergeSha };
+  return { baseSha, mergeSha };
 }
 
 /** Drives the real `checkSchemaGuard` — which is module-private — through `verifyShipped`'s
@@ -787,25 +966,68 @@ async function runGuard(opts: {
 
 describe('checkSchemaGuard: the oracle is the card branch OWN commits', () => {
   test('PASSES when only MASTER touched a locked path while the card was in flight', async () => {
-    const { repo, baseSha, mergeSha } = makeRepo(false);
-    try {
-      const result = await runGuard({ repo, baseSha, mergeSha, lockedPaths: ['locked/'] });
-      expect(result.passed).toBe(true);
-    } finally {
-      rmSync(repo, { recursive: true, force: true });
-    }
+    await withRepo(
+      (repo) => buildRepo(repo, false),
+      async ({ repo, baseSha, mergeSha }) => {
+        const result = await runGuard({ repo, baseSha, mergeSha, lockedPaths: ['locked/'] });
+        expect(result.passed).toBe(true);
+      },
+    );
   });
 
   test('FAILS when the card branch OWN commit touched a locked path', async () => {
-    const { repo, baseSha, mergeSha } = makeRepo(true);
-    try {
-      const result = await runGuard({ repo, baseSha, mergeSha, lockedPaths: ['locked/'] });
-      expect(result.passed).toBe(false);
-      // Fails for the RIGHT reason: the verdict names the locked prefix, not some unrelated
-      // breakage (a missing ref, an unresolvable range) that also yields `passed: false`.
-      expect(result.detail).toContain('locked/');
-    } finally {
-      rmSync(repo, { recursive: true, force: true });
-    }
+    await withRepo(
+      (repo) => buildRepo(repo, true),
+      async ({ repo, baseSha, mergeSha }) => {
+        const result = await runGuard({ repo, baseSha, mergeSha, lockedPaths: ['locked/'] });
+        expect(result.passed).toBe(false);
+        // Fails for the RIGHT reason: the verdict names the locked prefix, not some unrelated
+        // breakage (a missing ref, an unresolvable range) that also yields `passed: false`.
+        expect(result.detail).toContain('locked/');
+      },
+    );
+  });
+
+  // The fixture's own contract. `git()` throws on any non-zero exit, so the construction of
+  // these repositories is fallible; a temp directory created before that work and released
+  // only by the caller survives every failure, and a test run that fails leaves litter in
+  // the system temp dir forever.
+  test('the temp repository is released even when its construction throws', async () => {
+    const before = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('guard-')));
+    let bodyRan = false;
+    await expect(
+      withRepo(
+        (repo) => {
+          git(repo, 'init', '-q', '-b', 'master');
+          return { baseSha: git(repo, 'rev-parse', 'HEAD').trim(), mergeSha: '' }; // throws: no commits yet
+        },
+        async () => {
+          bodyRan = true;
+        },
+      ),
+    ).rejects.toThrow();
+    expect(bodyRan).toBe(false);
+    const leaked = readdirSync(tmpdir())
+      .filter((n) => n.startsWith('guard-') && !before.has(n))
+      .map((n) => join(tmpdir(), n))
+      .filter((p) => existsSync(p));
+    expect(leaked).toEqual([]);
+  });
+
+  test('the temp repository is released even when the test body throws', async () => {
+    const before = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('guard-')));
+    await expect(
+      withRepo(
+        (repo) => buildRepo(repo, false),
+        async () => {
+          throw new Error('body failed');
+        },
+      ),
+    ).rejects.toThrow('body failed');
+    const leaked = readdirSync(tmpdir())
+      .filter((n) => n.startsWith('guard-') && !before.has(n))
+      .map((n) => join(tmpdir(), n))
+      .filter((p) => existsSync(p));
+    expect(leaked).toEqual([]);
   });
 });
