@@ -385,7 +385,7 @@ alive; newer run finalised; newer run neither alive nor finalised; `parkedTermin
 `parkedTerminal` with a non-liveness reason (must hold); `parkedTerminal` stalled with no
 contradiction (must hold).
 
-- [ ] **Step 1: GREEN**
+- [x] **Step 1: GREEN**
 
 ```bash
 cd plugins/tribe/scripts/runner && bun test core/supervisor/truth.test.ts 2>&1 | tail -12
@@ -393,7 +393,7 @@ cd plugins/tribe/scripts/runner && bun test core/supervisor/truth.test.ts 2>&1 |
 
 Expected: every case passes, `0 fail`.
 
-- [ ] **Step 2: Commit** `feat(supervisor): pure predicates for park truth and terminal contradiction`
+- [x] **Step 2: Commit** `feat(supervisor): pure predicates for park truth and terminal contradiction`
 
 ### Task 6: a superseded park no longer blocks the restart (G3)
 
