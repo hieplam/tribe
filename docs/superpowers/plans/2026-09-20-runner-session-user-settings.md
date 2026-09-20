@@ -586,10 +586,10 @@ cd /Users/hip/repo/tribe-wt/runner-session-user-settings && bun test plugins/tri
 ```
 Expected: the runner suite green, and a non-zero count proving the README documents the new tier list.
 
-- [ ] **Step 4: Commit** — stage this task's files and commit, with the trailers from
+- [x] **Step 4: Commit** — stage this task's files and commit, with the trailers from
   Global Constraints (`Tribe-Card: runner-session-user-settings`, `Tribe-Task: 7/7`) in the
   commit's ONE final paragraph, ticking this task's boxes in that SAME commit.
-- [ ] Task 7 complete
+- [x] Task 7 complete
 
 ---
 
