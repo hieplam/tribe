@@ -13,6 +13,19 @@ describe('isFilesystemWideScan — the oracle', () => {
     'find $HOME/ -name x',
     'find -L / -name x',
     'echo hi | find / -name x',
+    // F1 reproduced bypasses: quoted/braced roots and executing wrapper forms.
+    "find '/' -name x",
+    'find "/" -name x',
+    "find '~' -name x",
+    'find "~" -name x',
+    "find '~/' -name x",
+    'find "~/" -name x',
+    'find ${HOME} -name x',
+    'sh -c "find / -name x"',
+    'bash -c "find / -name x"',
+    'eval "find / -name x"',
+    '`find / -name x`',
+    '/usr/bin/find / -name x',
   ])('refuses %p', (cmd) => {
     expect(isFilesystemWideScan(cmd)).toBe(true);
   });

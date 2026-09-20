@@ -4,15 +4,44 @@
 // One definition of "filesystem-wide scan" lives here and is used TWICE: by the ratchet counter
 // below and by `core/session.ts`'s decideScanGuardHook. Two definitions would drift.
 
-/** A `find` root that means "the whole filesystem" or "the whole home directory". Ordered
- * longest-first so `$HOME/` is preferred over `$HOME`. */
-const SCAN_ROOT = String.raw`(?:"\$HOME"|'\$HOME'|\$HOME\/?|~\/?|\/)`;
+/** A `find` root that means "the whole filesystem" or "the whole home directory" — unquoted, or
+ * wrapped in a matching pair of single or double quotes (a real caller can spell either: `find /`,
+ * `find '/'`, `find "$HOME"`). Each alternative starts with a distinct literal ('"', "'", '$',
+ * '~', '/'), so match order is not load-bearing here. */
+const ROOT_INNER = String.raw`(?:\$HOME\/?|\$\{HOME\}\/?|~\/?|\/)`;
+const SCAN_ROOT = String.raw`(?:"${ROOT_INNER}"|'${ROOT_INNER}'|${ROOT_INNER})`;
 
-/** `find` must sit at a command position — start of string, or after a separator — so that
- * `grep -rn "find /"` (which merely mentions it) does not match. Leading option tokens
+/** A shell that EXECUTES the string it is handed, rather than merely mentioning `find` in text —
+ * with an optional quote between the wrapper and the command (`sh -c "find / ..."`,
+ * `eval 'find / ...'`). This is what distinguishes `sh -c "find / -name x"` (must match: it runs
+ * find) from `echo "find / -name x"` (must not: it only echoes text) — both have a `"` right
+ * before `find`, so the wrapper keyword before that quote is the only thing telling them apart. */
+const SHELL_EXEC_WRAPPER = String.raw`(?:(?:sh|bash|zsh)\s+-c\s+|eval\s+)['"]?`;
+
+/** Leading `NAME=value` environment assignments before the command (`FOO=bar find / ...`). */
+const ENV_ASSIGNMENTS = String.raw`(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*`;
+
+/** `find`, optionally invoked by its absolute path (`/usr/bin/find`, `/bin/find`). */
+const FIND_BIN = String.raw`(?:\/usr\/bin\/|\/bin\/)?find`;
+
+// The command-position separator includes a backtick, for command substitution
+// (`` `find / -name x` ``). A literal backtick can't be written inside this file's OWN
+// backtick-delimited `String.raw` templates without ending them, so this one piece is a plain
+// string instead.
+const COMMAND_SEPARATOR = '(?:^|[;&|(`]|\\s)';
+
+/** `find` (optionally via a shell-executing wrapper and/or leading env assignments) must sit at a
+ * command position — start of string, after a separator, or after a wrapper like `sh -c "` — so
+ * that `grep -rn "find /"` (which merely mentions it) does not match. Leading option tokens
  * (`find -L / ...`) are skipped, because under-detecting is a bug. */
 const FS_WIDE_SCAN_RE = new RegExp(
-  String.raw`(?:^|[;&|(]|\s)find\s+(?:-[A-Za-z]+\s+)*` + SCAN_ROOT + String.raw`(?=\s|$)`,
+  COMMAND_SEPARATOR +
+    String.raw`(?:${SHELL_EXEC_WRAPPER})?` +
+    ENV_ASSIGNMENTS +
+    FIND_BIN +
+    String.raw`\s+(?:-[A-Za-z]+\s+)*` +
+    SCAN_ROOT +
+    String.raw`(?=\s|$)`,
 );
 
 /** PURE. True when this shell command runs a `find` rooted at the filesystem or home root.

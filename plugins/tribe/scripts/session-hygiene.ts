@@ -80,18 +80,22 @@ function walkLogFiles(root: string): string[] {
   return out;
 }
 
-/** Reads one log file and counts it, or `null` when the file cannot be read — logging a warning
+/** Reads one log file and counts it, or `null` when the file cannot be READ — logging a warning
  * to stderr rather than throwing, so one bad file never costs the whole measurement
- * (fail-closed-edges.md obligation 1). */
-function countFileOrNull(path: string): SessionHygieneCounts | null {
+ * (fail-closed-edges.md obligation 1). The catch is scoped to `readFileSync` ONLY: a failure from
+ * the pure core is a different kind of problem (a bug, not an unreadable file) and must propagate
+ * as itself rather than be relabeled "skipping unreadable file" — `main()`'s boundary is what
+ * turns it into a clean refusal. */
+export function countFileOrNull(path: string): SessionHygieneCounts | null {
+  let text: string;
   try {
-    const text = readFileSync(path, 'utf8');
-    return countSessionHygiene(text);
+    text = readFileSync(path, 'utf8');
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`session-hygiene: skipping unreadable file ${path}: ${message}`);
     return null;
   }
+  return countSessionHygiene(text);
 }
 
 function accumulate(root: string): SessionHygieneCounts {
@@ -134,9 +138,20 @@ function parseArgsOrExit(argv: readonly string[]): Options {
   }
 }
 
-function main(argv: readonly string[] = Bun.argv.slice(2)): void {
+export function main(argv: readonly string[] = Bun.argv.slice(2)): void {
   const options = parseArgsOrExit(argv);
-  const counts = accumulate(options.root);
+  // A boundary around the actual measurement: anything that escapes `accumulate` (a walk error
+  // that isn't a filesystem errno, or — see countFileOrNull above — a pure-core bug) must become
+  // the same clean `session-hygiene: <message>` refusal the rest of this file already produces,
+  // never a raw stack trace reaching a user-facing CLI (fail-closed-edges.md).
+  let counts: SessionHygieneCounts;
+  try {
+    counts = accumulate(options.root);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`session-hygiene: ${message}`);
+    process.exit(1);
+  }
   printReport(options.root, counts, options.json);
   process.exit(0); // measurement, not a gate — the counts found never change the exit code
 }
