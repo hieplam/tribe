@@ -51,6 +51,49 @@ export function terminalContradiction(o: SupervisorObservation): TerminalContrad
   return null;
 }
 
+/**
+ * The two reason vocabularies are NOT the same vocabulary, so a run's own reason is TRANSLATED
+ * before any `decide()` row is keyed on it — never substituted raw.
+ *
+ * - `runs/<runId>/run.json`'s `reason` is `core/report.ts#ExitReason`, whose success value is
+ *   `'done'`.
+ * - `decide()`'s rows are keyed on the WATCHDOG's terminal-reason vocabulary
+ *   (`core/watchdog/decide.ts`), whose success value is `'runner_done'`.
+ *
+ * Substituting raw made a campaign that had just SUCCEEDED fall past every row into the residual
+ * `park('error')` backstop — the card's oracle calls that a bug ("parking when the disk says the
+ * park is false"). The map below is the whole of `ExitReason`, read off the type itself: `done`
+ * is the one value that is spelled differently; the other five are spelled identically in both
+ * vocabularies and map to themselves.
+ *
+ * PURE and TOTAL: no fs, no clock, no throw.
+ */
+const RUN_REASON_TO_TERMINAL_REASON: ReadonlyMap<string, string> = new Map([
+  // The one genuine translation.
+  ['done', 'runner_done'],
+  // Spelled identically in both vocabularies — listed explicitly so the map stays exhaustive
+  // over `ExitReason` and an added exit reason is a one-line change, never a silent fall-through.
+  ['stop_requested', 'stop_requested'],
+  ['escalations_pending', 'escalations_pending'],
+  ['session_incomplete', 'session_incomplete'],
+  ['rulings_unratified', 'rulings_unratified'],
+  ['error', 'error'],
+]);
+
+/**
+ * "What does this finished run's own reason mean in the vocabulary `decide()`'s rows speak?"
+ * `null` means **make no substitution** — the caller must then leave the watchdog's own terminal
+ * reason in force.
+ *
+ * FAILS CLOSED on anything unrecognised: an unknown run reason is never passed through, because a
+ * silent pass-through is precisely the defect this function exists to prevent. A value the
+ * supervisor cannot interpret must never be allowed to decide anything.
+ */
+export function terminalReasonForRunReason(runReason: string | null): string | null {
+  if (runReason === null) return null;
+  return RUN_REASON_TO_TERMINAL_REASON.get(runReason) ?? null;
+}
+
 /** "Is this park still true?" `true` for every park reason that is not a runner-liveness claim —
  * refusing to resume while a park is still TRUE is BY DESIGN (the card's oracle). */
 export function parkStillHolds(o: SupervisorObservation): boolean {

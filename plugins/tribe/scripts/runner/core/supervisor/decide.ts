@@ -11,7 +11,7 @@
  * order spec §3.4 lists it, with the row number(s) it implements named in a comment.
  */
 import type { EscalationFact, ParkReason, SupervisorAction, SupervisorObservation } from './model.ts';
-import { parkStillHolds, terminalContradiction } from './truth.ts';
+import { parkStillHolds, terminalContradiction, terminalReasonForRunReason } from './truth.ts';
 
 function park(reason: ParkReason, detail: string): SupervisorAction {
   return { kind: 'park', reason, detail };
@@ -155,8 +155,12 @@ export function decide(o: SupervisorObservation): SupervisorAction {
   if (contradiction !== null) {
     if (contradiction.kind === 'run_finalised') {
       // G5: the run really finished while nobody was watching. Continue from the RUN's own
-      // reason, so every row below decides on the truth instead of the stale terminal.
-      reason = contradiction.reason ?? reason;
+      // reason, so every row below decides on the truth instead of the stale terminal — but
+      // TRANSLATED first: `run.json` speaks `core/report.ts#ExitReason` (success = `done`) while
+      // the rows below are keyed on the watchdog's terminal vocabulary (success = `runner_done`).
+      // `null` means "no substitution": an unrecognised run reason leaves the watchdog's own
+      // terminal in force rather than falling past every row into the residual backstop.
+      reason = terminalReasonForRunReason(contradiction.reason) ?? reason;
     } else {
       // G2: a newer run is alive. Re-run/attach the watchdog rather than park — bounded by the
       // same run cap and one-shot retrigger rows 16/24 already use, so this can never spin.

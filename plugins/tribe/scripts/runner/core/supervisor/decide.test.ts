@@ -376,6 +376,39 @@ test('G5: a run that finalised `escalations_pending` while nobody watched routes
   expect(a).toEqual({ kind: 'spawn_session', session: 'ruling', cardId: 'c1' });
 });
 
+test('G5 (fix B-F1): a run that finalised SUCCESSFULLY while nobody watched routes into rows '
+  + '1-3 (runner_done) and NEVER parks `error`. `run.json` says `done`; decide()\'s rows are '
+  + 'keyed on the watchdog vocabulary\'s `runner_done`, so the raw reason fell past every row '
+  + 'into the residual backstop.', () => {
+  const finishedClean = (over: Partial<SupervisorObservation> = {}) => staleStalledTerminal({
+    runs: [{
+      runId: RUN_B, pid: 21744, alive: false,
+      endedAt: '2026-09-19T22:48:45.898Z', exitCode: 0, reason: 'done',
+    }],
+    ...over,
+  });
+  // Row 3: nothing closing-verified yet, no unratified rulings -> the closing session.
+  expect(decide(finishedClean()))
+    .toEqual({ kind: 'spawn_session', session: 'closing', cardId: null });
+  // Row 1: the campaign is already closing-verified -> it closes.
+  expect(decide(finishedClean({ state: { ...base().state, closingVerified: true } })))
+    .toEqual({ kind: 'exit', status: 'done', reason: 'campaign_closed' });
+  // Row 2: unratified rulings are ratified first.
+  expect(decide(finishedClean({ unratifiedRulings: ['R1'] })))
+    .toEqual({ kind: 'spawn_session', session: 'ratify', cardId: null });
+});
+
+test('fix B-F1: an UNRECOGNISED run reason is never passed through — the watchdog\'s own '
+  + 'terminal stands, so an unknown run reason can never decide anything', () => {
+  const a = decide(staleStalledTerminal({
+    runs: [{
+      runId: RUN_B, pid: 21744, alive: false,
+      endedAt: '2026-09-19T22:48:45.898Z', exitCode: 7, reason: 'a_reason_from_the_future',
+    }],
+  }));
+  expect(a).toEqual({ kind: 'park', reason: 'stalled', detail: 'the watchdog observed a stalled runner' });
+});
+
 test('G5: a finalised run carrying NO reason of its own leaves the terminal\'s reason in force', () => {
   const a = decide(staleStalledTerminal({
     runs: [{

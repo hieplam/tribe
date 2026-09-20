@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { parkStillHolds, terminalContradiction } from './truth.ts';
+import { parkStillHolds, terminalContradiction, terminalReasonForRunReason } from './truth.ts';
 import type { RunFact, SupervisorObservation } from './model.ts';
 
 /** Every field `terminalContradiction`/`parkStillHolds` could read, defaulted to the
@@ -176,4 +176,37 @@ test('stalled park WITH a contradiction on disk -> superseded (false)', () => {
     ],
   });
   expect(parkStillHolds(o)).toBe(false);
+});
+
+// ---------------------------------------------------------------------------------------------
+// terminalReasonForRunReason — the two vocabularies are NOT the same vocabulary (fix B-F1).
+// `run.json`'s `reason` is `core/report.ts#ExitReason`; decide()'s rows are keyed on the
+// WATCHDOG's terminal-reason vocabulary. They differ on the success value (`done` vs
+// `runner_done`), so a finished-successfully run substituted raw fell past every row into the
+// residual `park('error')` backstop. The translation is explicit, total, and fails CLOSED.
+// ---------------------------------------------------------------------------------------------
+
+test('the success value is TRANSLATED: run reason `done` -> terminal reason `runner_done`', () => {
+  expect(terminalReasonForRunReason('done')).toBe('runner_done');
+});
+
+test('every ExitReason spelled identically in both vocabularies maps to itself', () => {
+  // This list is `core/report.ts#ExitReason` minus `done`, read off the type itself.
+  for (const shared of ['stop_requested', 'escalations_pending', 'session_incomplete',
+    'error', 'rulings_unratified']) {
+    expect(terminalReasonForRunReason(shared)).toBe(shared);
+  }
+});
+
+test('an UNRECOGNISED run reason makes no substitution (null) — fail closed, never passed '
+  + 'through: a silent pass-through is exactly what caused B-F1', () => {
+  expect(terminalReasonForRunReason('runner_done')).toBeNull();
+  expect(terminalReasonForRunReason('stalled')).toBeNull();
+  expect(terminalReasonForRunReason('')).toBeNull();
+  expect(terminalReasonForRunReason('DONE')).toBeNull();
+  expect(terminalReasonForRunReason('some_future_reason')).toBeNull();
+});
+
+test('a run carrying no reason at all -> null (no substitution)', () => {
+  expect(terminalReasonForRunReason(null)).toBeNull();
 });
