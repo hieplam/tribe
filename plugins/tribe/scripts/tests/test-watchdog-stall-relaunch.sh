@@ -8,6 +8,10 @@
 # runner; before that runner has had time to create its own runs/<id>/ directory, the newest
 # directory on disk is still the previous run's. Until this card, the watchdog judged the new
 # runner against that old log and exited 10 `stalled` within 1 ms of its own launch.
+#
+# fixtures-mirror-reality (fix round 1, M2): probed with BOTH an absolute --home and a relative
+# one (test-watchdog-e2e.sh's Probe 2 shape — "the shape a person actually types") — an untested
+# input SHAPE is a far more common defect source than an untested VALUE.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNNER="$HERE/../runner"
@@ -25,19 +29,24 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 REPO="$TMP/repo"; git init -q -b master "$REPO"
 git -C "$REPO" -c user.email=t@t.test -c user.name=t commit -q --allow-empty -m init
 
-H="$HOME/.tribe/key/campaigns/stall-relaunch"; mkdir -p "$H"
-cat > "$H/campaign-state.json" <<'JSON'
+CAMPAIGNS="$HOME/.tribe/key/campaigns"
+OLD_ID="2026-09-19T05-00-30-073Z-8df1"
+
+# seed_home <home_dir> — a minimal real campaign home plus a PREVIOUS run, finished, whose
+# session log is 2h old (> --stall-minutes 30): the exact shape the field stalls came from.
+seed_home() {
+  local home="$1"
+  mkdir -p "$home"
+  cat > "$home/campaign-state.json" <<'JSON'
 {"v":1,"campaign":"stall-relaunch","mergePolicy":"regular-merge-only","sequence":["E1"],
  "schemaLockPaths":[],"docsOnlyPaths":[],"ownerOnlyEscalations":[],
  "cards":{"E1":{"status":"staged","spec":"docs/never-authored.md","plan":"docs/never-authored.md",
   "branch":null,"baseSha":null,"pr":null,"mergeSha":null,"sessionId":null,"updatedAt":null}}}
 JSON
-: > "$H/answers.md"
+  : > "$home/answers.md"
 
-# --- the PREVIOUS run: finished, and its session log is 2 h old (> --stall-minutes 30) ------
-OLD_ID="2026-09-19T05-00-30-073Z-8df1"
-OLD="$H/runs/$OLD_ID"; mkdir -p "$OLD/logs"
-python3 - "$OLD/run.json" "$OLD_ID" <<'PY'
+  local old="$home/runs/$OLD_ID"; mkdir -p "$old/logs"
+  python3 - "$old/run.json" "$OLD_ID" <<'PY'
 import json, sys
 path, run_id = sys.argv[1], sys.argv[2]
 json.dump({"v": 1, "runId": run_id, "pid": 999999,
@@ -46,56 +55,73 @@ json.dump({"v": 1, "runId": run_id, "pid": 999999,
            "endedAt": "2026-09-19T05:05:50.000Z", "exitCode": 0, "reason": "done"},
           open(path, "w"))
 PY
-OLD_LOG="$OLD/logs/E1-11111111-2222-3333-4444-555555555555.log"
-printf '{"type":"assistant"}\n' > "$OLD_LOG"
-python3 -c 'import os,sys,time;t=time.time()-7200;os.utime(sys.argv[1],(t,t))' "$OLD_LOG"
+  local old_log="$old/logs/E1-11111111-2222-3333-4444-555555555555.log"
+  printf '{"type":"assistant"}\n' > "$old_log"
+  python3 -c 'import os,sys,time;t=time.time()-7200;os.utime(sys.argv[1],(t,t))' "$old_log"
+}
 
-# --- the real watchdog CLI, default --stall-minutes 30 --------------------------------------
+# run_probe <label> <home_dir> <cwd> <home_arg> — runs the real watchdog CLI once from <cwd>
+# with `--home <home_arg>` (absolute or relative — the caller decides which), against a home
+# already seeded by seed_home, and asserts D2 holds.
+#
 # fail-closed-edges obligation 3: every subprocess carries a timeout, so a hang can never block
 # this test forever. There is no `timeout` binary on macOS (same gap already documented in
 # test-watchdog-detached.sh and test-supervisor-kill.sh in this same directory), so the bound is
 # implemented portably: run the CLI in the background, race it against a watchdog sleep that
 # kills it if it outlives 120s, then collect whichever finished first.
-OUT_FILE="$TMP/watchdog-cli.out"
-( cd "$TMP" && bun "$RUNNER/run.ts" watchdog --repo "$REPO" \
-  --model stall-relaunch-model --home "$H" --poll-seconds 1 >"$OUT_FILE" 2>&1 ) &
-cli_pid=$!
-( sleep 120; kill -9 "$cli_pid" 2>/dev/null ) &
-killer_pid=$!
-set +e
-wait "$cli_pid"
-rc=$?
-set -e
-kill "$killer_pid" 2>/dev/null || true
-wait "$killer_pid" 2>/dev/null || true
-out="$(cat "$OUT_FILE")"
-printf '%s\n' "$out"
+run_probe() {
+  local label="$1" home="$2" cwd="$3" home_arg="$4"
+  local out_file="$TMP/watchdog-cli-$label.out"
+  ( cd "$cwd" && bun "$RUNNER/run.ts" watchdog --repo "$REPO" \
+    --model stall-relaunch-model --home "$home_arg" --poll-seconds 1 >"$out_file" 2>&1 ) &
+  local cli_pid=$!
+  ( sleep 120; kill -9 "$cli_pid" 2>/dev/null ) &
+  local killer_pid=$!
+  set +e
+  wait "$cli_pid"
+  local rc=$?
+  set -e
+  kill "$killer_pid" 2>/dev/null || true
+  wait "$killer_pid" 2>/dev/null || true
+  local out; out="$(cat "$out_file")"
+  printf '%s\n' "$out"
 
-reason="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["terminal"]["reason"])' \
-  "$H/watchdog/status.json")"
-actions="$(python3 - "$H/watchdog/events.jsonl" <<'PY'
+  local reason; reason="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["terminal"]["reason"])' \
+    "$home/watchdog/status.json")"
+  local actions; actions="$(python3 - "$home/watchdog/events.jsonl" <<'PY'
 import json, sys
 with open(sys.argv[1]) as fh:
     print(",".join(json.loads(line)["action"] for line in fh if line.strip()))
 PY
 )"
 
-# D2, wall 1: no stall event at all — the new runner was alive the whole time.
-case ",$actions," in
-  *,stall,*) bad "no stall is declared against the previous run's log (actions: $actions)" ;;
-  *)         ok  "no stall is declared against the previous run's log" ;;
-esac
-# D2, wall 2: the terminal reason is the runner's own outcome, never `stalled`.
-if [[ "$reason" == "stalled" ]]; then bad "the terminal reason is not 'stalled'"; else ok "the terminal reason is not 'stalled' (got: $reason)"; fi
-if [[ "$rc" == "10" && "$reason" == "stalled" ]]; then bad "the watchdog does not exit 10 stalled"; else ok "the watchdog does not exit 10 stalled (rc: $rc)"; fi
-# D2, wall 3: nothing the watchdog published may name the PREVIOUS run as the current one.
-stall_json="$(python3 -c 'import json,sys;print(json.dumps(json.load(open(sys.argv[1]))["stall"]))' \
-  "$H/watchdog/status.json")"
-check "status.json publishes no stall record" "$stall_json" "null"
-case "$out" in
-  *"$OLD_ID"*) bad "the watchdog never names the previous run id on stdout" ;;
-  *)           ok  "the watchdog never names the previous run id on stdout" ;;
-esac
+  # D2, wall 1: no stall event at all — the new runner was alive the whole time.
+  case ",$actions," in
+    *,stall,*) bad "$label: no stall is declared against the previous run's log (actions: $actions)" ;;
+    *)         ok  "$label: no stall is declared against the previous run's log" ;;
+  esac
+  # D2, wall 2: the terminal reason is the runner's own outcome, never `stalled`.
+  if [[ "$reason" == "stalled" ]]; then bad "$label: the terminal reason is not 'stalled'"; else ok "$label: the terminal reason is not 'stalled' (got: $reason)"; fi
+  if [[ "$rc" == "10" && "$reason" == "stalled" ]]; then bad "$label: the watchdog does not exit 10 stalled"; else ok "$label: the watchdog does not exit 10 stalled (rc: $rc)"; fi
+  # D2, wall 3: nothing the watchdog published may name the PREVIOUS run as the current one.
+  local stall_json; stall_json="$(python3 -c 'import json,sys;print(json.dumps(json.load(open(sys.argv[1]))["stall"]))' \
+    "$home/watchdog/status.json")"
+  check "$label: status.json publishes no stall record" "$stall_json" "null"
+  case "$out" in
+    *"$OLD_ID"*) bad "$label: the watchdog never names the previous run id on stdout" ;;
+    *)           ok  "$label: the watchdog never names the previous run id on stdout" ;;
+  esac
+}
+
+# --- Probe 1: the minimal real home (state + answers), ABSOLUTE --home ----------------------
+H1="$CAMPAIGNS/stall-relaunch-abs"
+seed_home "$H1"
+run_probe abs "$H1" "$TMP" "$H1"
+
+# --- Probe 2: the same thing with a RELATIVE --home (the shape a person types) --------------
+H2="$CAMPAIGNS/stall-relaunch-rel"
+seed_home "$H2"
+run_probe rel "$H2" "$CAMPAIGNS" "stall-relaunch-rel"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

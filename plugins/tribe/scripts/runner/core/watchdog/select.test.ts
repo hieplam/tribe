@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isOwnRunVisible, isStale, newestLog, newestRunId, watchdogPathsOf } from './select.ts';
+import { isStale, newestLog, newestRunId, newestRunIdExcluding, watchdogPathsOf } from './select.ts';
 
 describe('newestRunId', () => {
   test('run ids are ISO-prefixed, so lexicographic max is chronological max', () => {
@@ -59,22 +59,29 @@ describe('isStale', () => {
   });
 });
 
-describe('isOwnRunVisible — D2: only a directory newer than everything present at spawn is ours', () => {
-  const cases: Array<[newest: string | null, prior: string | null, want: boolean, why: string]> = [
-    [null, null, false, 'nothing on disk yet, nothing before: our run is not visible'],
-    [null, 'r1', false, 'nothing on disk at all'],
-    ['r1', null, true, 'nothing preceded this child, so the one directory present is its own'],
-    ['r1', 'r1', false, 'the newest directory is the SAME one that predated the spawn'],
-    ['r1', 'r2', false, 'the newest directory is OLDER than what predated the spawn'],
-    ['r2', 'r1', true, 'a strictly newer directory appeared after the spawn'],
-    ['2026-09-19T20-30-30-069Z-6185', '2026-09-19T19-29-58-328Z-dcb2', true,
-      'the recorded supervisor-hardening pair: the new run dir is newer than the old one'],
-    ['2026-09-19T19-29-58-328Z-dcb2', '2026-09-19T19-29-58-328Z-dcb2', false,
-      'the recorded supervisor-hardening old run, still the newest 2 ms after the relaunch'],
+describe('newestRunIdExcluding — D2: only a directory that is NOT one that predated the spawn is ours', () => {
+  const cases: Array<[runIds: string[], excluded: string[], want: string | null, why: string]> = [
+    [[], [], null, 'nothing on disk yet, nothing before: our run is not visible'],
+    [['r1'], ['r1'], null, 'only the excluded id is present — our directory has not appeared yet'],
+    [['r1'], [], 'r1', 'nothing preceded this child, so the one directory present is its own'],
+    [['r1', 'r2'], ['r1'], 'r2', 'a new id appeared alongside the excluded one'],
+    [['r1', 'r2'], ['r1', 'r2'], null, 'both ids present are excluded: our directory has not appeared yet'],
+    // FIX F1 (fix round 1) regression, at the pure level: the OLD ordering-based predicate
+    // (`isOwnRunVisible`, deleted) compared the single newest id on disk against the single id
+    // that predated the spawn — so whenever the EXCLUDED id sorted lexicographically ABOVE the
+    // new, non-excluded id, it stayed "not visible" FOREVER. Identity (set membership) is not
+    // fooled by how the ids happen to sort.
+    [['r1', 'r2'], ['r2'], 'r1',
+      'F1 regression: the new (non-excluded) id sorts BELOW the excluded one, but is still found by identity'],
+    [['2026-09-19T19-29-58-328Z-dcb2', '2026-09-19T20-30-30-069Z-6185'],
+      ['2026-09-19T19-29-58-328Z-dcb2'], '2026-09-19T20-30-30-069Z-6185',
+      'the recorded supervisor-hardening pair: the new run dir is found once excluded'],
+    [['2026-09-19T19-29-58-328Z-dcb2'], ['2026-09-19T19-29-58-328Z-dcb2'], null,
+      'the recorded supervisor-hardening old run, still the newest 2 ms after the relaunch: excluded, so not visible'],
   ];
-  for (const [newest, prior, want, why] of cases) {
-    test(`newest=${String(newest)} prior=${String(prior)} -> ${want} (${why})`, () => {
-      expect(isOwnRunVisible(newest, prior)).toBe(want);
+  for (const [runIds, excluded, want, why] of cases) {
+    test(`runIds=${JSON.stringify(runIds)} excluded=${JSON.stringify(excluded)} -> ${String(want)} (${why})`, () => {
+      expect(newestRunIdExcluding(runIds, new Set(excluded))).toBe(want);
     });
   }
 });

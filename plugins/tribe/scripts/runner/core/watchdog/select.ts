@@ -12,25 +12,41 @@ export function newestRunId(runIds: string[]): string | null {
 
 /**
  * D2 (card watchdog-stall-after-quota-relaunch): the stall verdict only ever concerns the run
- * the watchdog is supervising RIGHT NOW. While this invocation owns a live child, a run
+ * the watchdog is supervising RIGHT NOW. While this invocation owns a live child, any run
  * directory that already existed at the instant that child was spawned belongs to an EARLIER
  * run — the child's own directory does not exist yet, because a real forked process needs real
  * wall-clock time to create it (63-170 ms in the three recorded field sequences). Judging the
  * new runner against that earlier run's hours-old log is the whole defect: 11 of 11 recorded
  * `stall` events were false, each fired 1-20 ms after a launch/relaunch.
  *
- * `newestRunId`'s own contract already establishes that run ids compare chronologically as
- * strings, so "newer than everything that was present at spawn time" is exactly `>`.
- * `priorNewestRunId === null` means nothing at all preceded this child, so the first directory
- * to appear is necessarily its own.
+ * FIX F1 (fix round 1): the first version of this predicate (`isOwnRunVisible`, now deleted)
+ * answered "is MY run visible yet" by ORDERING — "is the newest id on disk greater than the
+ * single id that predated the spawn". That is wrong whenever some OTHER, unrelated directory
+ * already on disk (e.g. an earlier run, never deleted) sorts LEXICOGRAPHICALLY HIGHER than the
+ * new child's own run id: the newest-on-disk id then stays pinned at that old value FOREVER —
+ * not just for the 63-170 ms startup race this predicate was built for — and a genuinely
+ * healthy, continuously-logging runner reads as "alive with no log" for its entire run, until
+ * `noLogSince` fires a false `stall` after exactly `--stall-minutes`. Comparing by IDENTITY
+ * (set difference) instead of ORDER fixes this and is immune to it BY CONSTRUCTION: it asks
+ * "which ids on disk are NOT one of the ones that predated the spawn", never "is the newest
+ * thing on disk newer than one particular id" — so it cannot be misled by any other id on disk,
+ * however that id happens to sort, and needs no assumption about clock skew, NTP corrections or
+ * drift between hosts sharing one campaign home.
+ *
+ * Returns the newest id among `runIds` that is NOT in `excluded` — `null` when every id on disk
+ * is excluded (the honest "my directory has not appeared yet" state, which the caller already
+ * handles by treating a `null` runId as not-yet-visible).
  */
-export function isOwnRunVisible(
-  newestRunId: string | null,
-  priorNewestRunId: string | null,
-): boolean {
-  if (newestRunId === null) return false;
-  if (priorNewestRunId === null) return true;
-  return newestRunId > priorNewestRunId;
+export function newestRunIdExcluding(
+  runIds: readonly string[],
+  excluded: ReadonlySet<string>,
+): string | null {
+  let newest: string | null = null;
+  for (const id of runIds) {
+    if (excluded.has(id)) continue;
+    if (newest === null || id > newest) newest = id;
+  }
+  return newest;
 }
 
 export interface LogEntry { name: string; mtimeMs: number }

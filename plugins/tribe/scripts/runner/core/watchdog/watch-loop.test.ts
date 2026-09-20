@@ -742,6 +742,76 @@ describe('runWatchdog — D2: a relaunched runner is never judged on the PREVIOU
   });
 });
 
+// FIX F1 (fix round 1): the D2 block above only ever seeds ONE prior run whose id sorts
+// BELOW the new spawn's id ('r1' < 'r2') — every case there is satisfied by pure ORDERING
+// ("is the newest thing on disk newer than the one id that predated the spawn"), so it can
+// never catch a defect that only manifests when a stale sibling sorts ABOVE the new run's own
+// id. This block seeds exactly that shape: a finished, unrelated run directory whose id sorts
+// LEXICOGRAPHICALLY ABOVE the freshly-spawned run's own id.
+describe('runWatchdog — F1: a stale sibling sorting ABOVE the new run must not hide it forever', () => {
+  test('a healthy runner that writes a fresh log line on every tick is never falsely stalled, even though an old finished run sorts lexicographically above its own id', async () => {
+    const { io, files, entries, setNow } = fakeIo([]); // no scripted passes: spawnRunner is overridden below
+    const runsDir = join(HOME, 'runs');
+
+    // An old, unrelated, FINISHED run — e.g. left behind by an earlier watchdog invocation and
+    // never deleted — whose id sorts ABOVE any id the fresh spawn below will use ('z' > 'a').
+    const STALE_ID = 'z-stale-sibling';
+    entries.set(runsDir, [{ name: STALE_ID, mtimeMs: 1, isDir: true }]);
+    files.set(join(runsDir, STALE_ID, 'run.json'), JSON.stringify({
+      v: 1, runId: STALE_ID, pid: 1, startedAt: new Date(0).toISOString(),
+      endedAt: new Date(1000).toISOString(), exitCode: 0, reason: 'x',
+    }));
+
+    const NEW_ID = 'a-new-run';
+    const newRunDir = join(runsDir, NEW_ID);
+    const logPath = join(newRunDir, 'logs', 'card-sid.log');
+    // Just past --stall-minutes (30 in CONFIG): long enough that the OLD, ordering-based
+    // predicate has every opportunity to declare a stall before this pass ever finishes.
+    const TOTAL_ALIVE_MS = 31 * 60_000;
+
+    const wrapped: WatchdogIO = {
+      ...io,
+      spawnRunner: () => {
+        // The new run's own directory is on disk from the very first tick — this test isolates
+        // the ORDERING-vs-IDENTITY defect (F1) from the startup-timing race the C1 fix already
+        // covers, by removing the timing race entirely.
+        entries.set(runsDir, [
+          ...(entries.get(runsDir) ?? []),
+          { name: NEW_ID, mtimeMs: io.nowMs(), isDir: true },
+        ]);
+        files.set(join(newRunDir, 'run.json'), JSON.stringify({
+          v: 1, runId: NEW_ID, pid: 9001, startedAt: io.now(), endedAt: null,
+          exitCode: null, reason: null,
+        }));
+        entries.set(join(newRunDir, 'logs'), [{ name: 'card-sid.log', mtimeMs: io.nowMs(), isDir: false }]);
+        files.set(logPath, 'line 0\n');
+        const startedAtMs = io.nowMs();
+        let tick = 0;
+        return {
+          pid: 9001,
+          waitFor: async (waitMs) => {
+            tick += 1;
+            const newNow = io.nowMs() + waitMs;
+            setNow(newNow);
+            // A genuinely healthy runner: a fresh log line lands on EVERY tick.
+            files.set(logPath, `line ${tick}\n`);
+            entries.set(join(newRunDir, 'logs'), [{ name: 'card-sid.log', mtimeMs: newNow, isDir: false }]);
+            if (newNow - startedAtMs > TOTAL_ALIVE_MS) return 0; // finishes, having logged throughout
+            return null;
+          },
+        };
+      },
+    };
+
+    const outcome = await runWatchdog(CONFIG, HOME, wrapped);
+
+    const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
+      .trim().split('\n').map((l) => JSON.parse(l) as { action: string });
+    expect(events.map((e) => e.action)).not.toContain('stall');
+    expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
+  });
+});
+
 describe('runWatchdog — D4(a): a relaunched runner that never writes still stalls, on time', () => {
   test('the stall fires within --stall-minutes + ONE poll interval of the relaunch', async () => {
     // r2 is alive and never writes a log line at all. CONFIG: stallMinutes 30, pollSeconds 30.
@@ -750,7 +820,8 @@ describe('runWatchdog — D4(a): a relaunched runner that never writes still sta
       { exitCode: 3, runId: 'r1', logTail: quotaTail(resetAt) },
       { exitCode: 0, runId: 'r2', endedAt: null },
     ]);
-    io.isProcessAlive; // the record stays unfinalized, so r2 reads as alive throughout
+    // r2's `endedAt: null` keeps its record unfinalized, so it reads as alive throughout —
+    // no `setProcessAlive` scripting is needed for this scenario (T1, fix round 1).
     const outcome = await runWatchdog(CONFIG, HOME, io);
 
     const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
