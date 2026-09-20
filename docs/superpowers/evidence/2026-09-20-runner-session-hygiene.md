@@ -153,6 +153,23 @@ RESULT: PROBE_OK is_error: false subtype: success duration_ms: 2379 elapsed_wall
 `duration_ms: 2379` (2.38s API time, 3.22s wall). Different run, same shape (fails open, no hang);
 recording the measured number, not the brief's.
 
+### (c0) The predicate widened after the audit — and the count held
+
+**Read the stable `4` as a stronger claim than before, not as a stale measurement.** The final
+audit (two independent lenses, converging) found that the original `isFilesystemWideScan`
+under-detected real executing forms of a filesystem-wide scan. It was corrected to additionally
+catch **12 shapes** it previously let through:
+
+`find "/"`, `find '/'`, `find "~"`, `find '~'`, `find "~/"`, `find ${HOME}`,
+`sh -c "find / …"`, `bash -c "find / …"`, `eval "find / …"`, `` `find / …` ``,
+`/usr/bin/find /`, and `FOO=bar find / …`.
+
+Re-run against the same `supervisor-hardening` logs, the corrected predicate still reports
+**`filesystem-wide scans: 4`** — none of the newly-caught shapes occurs in those logs. So the
+baseline did not move and no supersession applies: the same number is now produced by a
+materially stronger detector. The guard that shares this predicate is correspondingly stronger,
+which is the part that actually matters at runtime.
+
 ### (c) The ratchet, re-run — same three roots, same committed tool
 
 ```
