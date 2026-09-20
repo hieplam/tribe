@@ -279,8 +279,28 @@ for `runner-double.sh`). Four scenarios, each red before the fix:
 
 R4 is the card's "keep" clause and the explicit refutation of the blanket-suppression
 non-fix — the adjudication list REFUTES a suppression fix *unless* this test exists and passes.
-It is run with a small `--stall-minutes` so the bound is measurable in seconds, driving the real
-clock (no fake timers): the assertion is on the observed interval, not on a mocked instant.
+
+**R4 is proven at two altitudes, and this split is deliberate (audit round 3, finding GC1).** The
+first draft of this section demanded that the whole bound be measured on the real clock, "no fake
+timers". That demand is not satisfiable: `--stall-minutes` has a floor of 1 minute, so the *upper*
+half of the bound — "no later than `--stall-minutes` + **one poll interval**" — asks a real-clock
+test to discriminate a one-second margin inside a sixty-second wait, on a loaded developer machine.
+A reviewer duly reverted the fix and ran that test twice: it failed once and **passed** once. A
+flaky negative control is not a regression guard.
+
+So each half is proven where it can actually be decided:
+
+- **"Not early" — real clock, real child process** (`watchdog-integration.test.ts`). A genuinely
+  silent relaunched runner must still reach `needs_human:stalled` (exit 10), and must not do so
+  before `--stall-minutes` of its own silence. Wall-clock time cannot run backwards, so this half is
+  robust under load, and it is the half that actually answers "was anything suppressed?".
+- **"Not late" — the exact `--stall-minutes` + one poll interval ceiling** — on the simulated clock
+  (`watch-loop.test.ts`), where the tick schedule is deterministic and the margin is exact rather
+  than a race against the scheduler.
+
+The decision logic under test is pure, so the simulated-clock half is measuring the same arithmetic
+the real clock would; what the real-process half adds is proof that the surrounding machinery
+(spawning, observing, publishing) really reaches it.
 
 D4(b) (a run that writes and then goes silent) is already covered by the existing suite and must
 stay green — it is the mtime path, untouched by this change.
@@ -398,7 +418,7 @@ observation path; no data shape, no persisted state, no migration.
 | goal (card, 2026-09-18 revision + S1 + S2) | proof |
 | --- | --- |
 | 1. before→after regression per cause (`quota`, `crash`, and `initial`); still attaching after the first tick and after `stall-minutes − 1` | R1/R2/R3 (§5.2) + `test-watchdog-stall-relaunch.sh` (§5.4) |
-| 2. a silent relaunched runner still stalls, not earlier than `--stall-minutes`, not later than `--stall-minutes` + one poll interval | R4 (§5.2) |
+| 2. a silent relaunched runner still stalls, not earlier than `--stall-minutes`, not later than `--stall-minutes` + one poll interval | R4, at its two altitudes (§5.2): "not early" + "still stalls" on the real clock with a real child (`watchdog-integration.test.ts`); the exact `+ one poll interval` ceiling on the simulated clock (`watch-loop.test.ts`) |
 | 3. the **three** recorded sequences replay with 0 `stall` within 30 min of their `relaunch` events | `replay.test.ts` (§5.3) |
 | 4. full runner suite + `test-watchdog-e2e.sh` green | gates (§7); floor 1109 pass / 0 fail |
 | S1-2. E2E with the real CLI: the post-relaunch event is `attach` with `status.json.runId` = the new run | `test-watchdog-stall-relaunch.sh` asserts it within one poll interval of the relaunch |
