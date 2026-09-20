@@ -208,7 +208,14 @@ export function buildSessionOptions(
     cwd: config.repoRoot, // --repo input
     model: config.model, // --model input
     systemPrompt: { type: 'preset', preset: 'claude_code' }, // REQUIRED for CLAUDE.md to apply
-    settingSources: ['project'], // defaults to []; 'project' loads the target repo's own config
+    // Parity with a person's session (owner ruling 2026-09-20): the CLI's own default tier list.
+    // 'user' is what carries ~/.claude/settings.json's enabledPlugins, so the C3 plugin is
+    // registered and `Skill c3` resolves; with 'project' alone it returned "Unknown skill: c3".
+    // Written explicitly rather than by omitting the option, so the pinned-option regression test
+    // below keeps a value to assert and an SDK default change cannot move it silently.
+    // PROVEN by real sessions (spec §4.2): the SDK's own `model` and `permissionMode` above still
+    // WIN over this tier's `model` / `permissions.defaultMode`.
+    settingSources: ['user', 'project', 'local'],
     plugins: [{ type: 'local', path: TRIBE_PLUGIN_DIR }], // tribe agents, never ~/.claude/agents
     permissionMode: 'bypassPermissions', // owner-ruled: headless, never hangs
     allowDangerouslySkipPermissions: true, // required by the SDK for the above

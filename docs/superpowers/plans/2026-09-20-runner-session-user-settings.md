@@ -426,10 +426,10 @@ cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit
 ```
 Expected: the whole runner suite green.
 
-- [ ] **Step 4: Commit** — stage this task's files and commit, with the trailers from
+- [x] **Step 4: Commit** — stage this task's files and commit, with the trailers from
   Global Constraints (`Tribe-Card: runner-session-user-settings`, `Tribe-Task: 4/7`) in the
   commit's ONE final paragraph, ticking this task's boxes in that SAME commit.
-- [ ] Task 4 complete
+- [x] Task 4 complete
 
 ---
 

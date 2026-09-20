@@ -193,7 +193,7 @@ export interface PinnedSessionOptions {
   cwd: string;
   model: string;
   systemPrompt: { type: 'preset'; preset: 'claude_code' };
-  settingSources: ['project'];
+  settingSources: ['user', 'project', 'local'];
   plugins: Array<{ type: 'local'; path: string }>;
   permissionMode: 'bypassPermissions';
   allowDangerouslySkipPermissions: true;

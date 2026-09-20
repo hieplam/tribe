@@ -86,7 +86,7 @@ describe('runSession — §D1 option set (regression guard against SDK drift)', 
     expect(options.cwd).toBe('/fixture/repo');
     expect(options.model).toBe('fixture-model');
     expect(options.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code' });
-    expect(options.settingSources).toEqual(['project']);
+    expect(options.settingSources).toEqual(['user', 'project', 'local']);
     expect(options.plugins).toEqual([{ type: 'local', path: TRIBE_PLUGIN_DIR }]);
     expect(options.permissionMode).toBe('bypassPermissions');
     expect(options.allowDangerouslySkipPermissions).toBe(true);
