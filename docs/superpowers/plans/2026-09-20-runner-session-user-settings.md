@@ -231,10 +231,10 @@ cd plugins/tribe/scripts/runner && bun test core/metrics/session-hygiene.test.ts
 ```
 Expected: all tests pass, 0 fail.
 
-- [ ] **Step 4: Commit** — stage this task's files and commit, with the trailers from
+- [x] **Step 4: Commit** — stage this task's files and commit, with the trailers from
   Global Constraints (`Tribe-Card: runner-session-user-settings`, `Tribe-Task: 1/7`) in the
   commit's ONE final paragraph, ticking this task's boxes in that SAME commit.
-- [ ] Task 1 complete
+- [x] Task 1 complete
 
 ---
 
