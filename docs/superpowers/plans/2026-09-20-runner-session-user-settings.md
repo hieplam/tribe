@@ -550,10 +550,10 @@ Expected: the E2E passes with the tier list in place, the default suite stays gr
 skipped, and the R-c probe shows a live session whose tool list simply lacks the playwright tools.
 
 
-- [ ] **Step 4: Commit** — stage this task's files and commit, with the trailers from
+- [x] **Step 4: Commit** — stage this task's files and commit, with the trailers from
   Global Constraints (`Tribe-Card: runner-session-user-settings`, `Tribe-Task: 6/7`) in the
   commit's ONE final paragraph, ticking this task's boxes in that SAME commit.
-- [ ] Task 6 complete
+- [x] Task 6 complete
 
 ---
 
