@@ -714,7 +714,7 @@ git -c user.email=lamhiep16@gmail.com -c user.name=hieplam commit -m 'test(watch
 
 **Expected result:** one commit carrying both trailers; `git status --short` is empty.
 
-- [ ] Task 3 complete
+- [x] Task 3 complete
 
 ---
 

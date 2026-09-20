@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { runWatchdog } from './watch-loop.ts';
 import { parseSessionSignals } from './signals.ts';
+import { countFalseStalls } from './replay.ts';
 import type { WatchdogConfig } from './model.ts';
 import type { RunnerHandle, WatchdogIO } from '../../ports/ports.ts';
 
@@ -850,4 +851,31 @@ describe('runWatchdog — D4(a): a relaunched runner that never writes still sta
     expect(before).not.toContain('stall');
     expect(before).toContain('attach');
   });
+});
+
+describe('runWatchdog — goal 3: the three recorded sequences replay with zero false stalls', () => {
+  // Numbers copied from the recorded events.jsonl files (offsets and log ages only — no paths,
+  // no card names, no owner content):
+  //   gap-gate-2026-09-10       relaunch:quota  after a 107 min wait, prior log 107.3 min old
+  //   viewer-consolidation      relaunch:crash  prior log 169.9 min old
+  //   supervisor-hardening      relaunch:quota  after a 41 min wait, prior log 41.3 min old
+  const recorded: Array<[name: string, waitMinutes: number]> = [
+    ['gap-gate-2026-09-10 (relaunch:quota, 107 min)', 107],
+    ['viewer-consolidation (relaunch, 170 min)', 170],
+    ['supervisor-hardening (relaunch:quota, 41 min)', 41],
+  ];
+  for (const [name, waitMinutes] of recorded) {
+    test(`${name}: zero stall events within 30 min of the relaunch`, async () => {
+      const resetAt = 1_800_000_000 + waitMinutes * 60;
+      const { io, files } = fakeIo([
+        { exitCode: 3, runId: 'prev', logTail: quotaTail(resetAt) },
+        { exitCode: 0, runId: 'next' },
+      ]);
+      const outcome = await runWatchdog(CONFIG, HOME, io);
+      const events = (files.get(join(HOME, 'watchdog', 'events.jsonl')) as string)
+        .trim().split('\n').map((l) => JSON.parse(l) as { at: string; action: string });
+      expect(countFalseStalls(events)).toEqual([]);
+      expect([outcome.exitCode, outcome.reason]).toEqual([0, 'runner_done']);
+    });
+  }
 });
