@@ -285,7 +285,7 @@ Read that file and follow its structure; it already encodes every environment fa
 Use the same `ok`/`bad`/`check` helpers and the same `PASS`/`FAIL` counting as
 `test-supervisor-e2e.sh`, exit non-zero when `FAIL > 0`, and `chmod +x` the file.
 
-- [ ] **Step 1: RED** run it on the untouched tree and paste the output.
+- [x] **Step 1: RED** run it on the untouched tree and paste the output.
 
 ```bash
 bash plugins/tribe/scripts/tests/test-supervisor-park-truth.sh 2>&1 | tail -30
@@ -294,7 +294,7 @@ bash plugins/tribe/scripts/tests/test-supervisor-park-truth.sh 2>&1 | tail -30
 Expected: the G2, G5 and G3 probes report `not ok`; the negative probe reports `ok`; the script exits
 non-zero.
 
-- [ ] **Step 2: Commit** `test(supervisor): reproduce the stale-park and stale-terminal defects E2E`
+- [x] **Step 2: Commit** `test(supervisor): reproduce the stale-park and stale-terminal defects E2E`
 
 ### Task 4: observe what `runs/` says
 
