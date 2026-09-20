@@ -1154,14 +1154,50 @@ ESLint, which is deferred until typescript-eslint supports TS >= 7.1 (plan Amend
   exact path passed unchanged, and a live `--dry-run` later caught an open-PR resume that
   would have opened a duplicate PR. **Any changed `gh`/`git` command must be executed against
   a real repo before it is trusted.**
+- **Session options — the settings tier list and the fourth `PreToolUse` hook** (card
+  `runner-session-user-settings`, 2026-09-20). The pinned §D1 options load
+  `settingSources: ['user', 'project', 'local']` — the CLI's own default tier list, not
+  `['project']` alone — so a spawned session picks up the owner's own `~/.claude/settings.json`
+  (its `enabledPlugins`, `permissions.deny`, `disableClaudeAiConnectors`, MCP servers) the same
+  way a person's own session does, while `project`/`local` still supply the target repo's
+  CLAUDE.md and any repo-local settings. `buildSessionOptions` also wires a **fourth**
+  `PreToolUse` hook, `decideScanGuardHook` (owner ruling R-a), after the anti-livelock, wait-tool,
+  and merge-gate hooks: it denies any `find` rooted at `/`, `~`, `~/`, `$HOME`, `"$HOME"`, or
+  `$HOME/` and redirects the session to the `c3` skill or a scoped directory instead
+  (`SCAN_DENIED_REASON`), sharing its predicate (`isFilesystemWideScan`,
+  `core/metrics/session-hygiene.ts`) with the `session-hygiene.ts` ratchet counter below so the
+  guard and the measurement can never disagree about what a scan is.
 - **What HAS been verified live** (smoke run, 2026-07-16, campaign-runner effort): `--dry-run`
   phase derivation against real merged/open PRs; the D3 five-point replay against a real merged PR
   (all five pass) and its correct rejection of an open PR;
   a real Agent-SDK session spawn under the pinned §D1 options, with the SDK-assigned `session_id`
-  captured from the `system/init` message; `settingSources: ['project']` genuinely loading the
-  target repo's CLAUDE.md; a real `resume` recalling prior session context; a bogus resume id
-  surfacing as a typed `error` (so the fresh-fallback path is reachable); and per-session log
-  files.
+  captured from the `system/init` message; `settingSources: ['user', 'project', 'local']`
+  genuinely loading the target repo's CLAUDE.md; a real `resume` recalling prior session context;
+  a bogus resume id surfacing as a typed `error` (so the fresh-fallback path is reachable); and
+  per-session log files.
+- **What HAS been verified live for the user-settings-tier change** (card
+  `runner-session-user-settings`, 2026-09-20, real spawned Agent-SDK sessions, `haiku`, through
+  `runSession` + the real `sdkSpawnSession`, not a stub — see
+  `docs/superpowers/evidence/2026-09-20-runner-session-hygiene.md` for full transcripts):
+  - `Skill c3` resolves under `settingSources: ['user', 'project', 'local']` — the transcript
+    carries a `tool_use` naming skill `c3` and its resolved content (`skills/c3`, a `C3` title) —
+    and, with the tier temporarily reverted to `['project']` alone, the same brief instead
+    produces `<tool_use_error>Unknown skill: c3. Did you mean cd?</tool_use_error>` and a final
+    result of `SKILL_RESULT=unknown Unknown skill: c3. Did you mean cd?`; both transcripts were
+    captured from real runs.
+  - The SDK's own `model` and `permissionMode` options **win** over the user tier's
+    `model: "opus[1m]"` and `permissions.defaultMode: "auto"` (`~/.claude/settings.json`): every
+    `system/init` message observed reports `model: "claude-haiku-4-5-20251001"` and
+    `permissionMode: "bypassPermissions"` — the pinned options, not the user's own tier, decide.
+  - A failing user-tier hook (a nonexistent command wired on `PreToolUse` and `SessionStart`)
+    does **not** break a session: the session still starts, still runs, and still completes.
+  - The newly-connected `plugin:playwright:playwright` MCP server (present only because the
+    `user` tier is now loaded) **fails open** when it cannot start: with `npx` unresolvable
+    (`PATH` restricted to `/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`), `system/init`'s
+    `mcp_servers` reports `[{"name":"plugin:playwright:playwright","status":"failed","source":"plugin"}]`,
+    no playwright tool appears in `init.tools`, and the session still completes normally
+    (`subtype: "success"`, `is_error: false`) in a few seconds — never a hang, never a startup
+    abort.
 - **What HAS additionally been verified live for this effort's D5′/report-contract changes**
   (campaign-orchestration effort, 2026-07-16, same real-CLI discipline as above, scoped to what
   changed here — not a re-verification of the base runner's surface listed above): `--dry-run`
