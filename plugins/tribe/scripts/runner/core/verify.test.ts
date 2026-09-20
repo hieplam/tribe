@@ -2,9 +2,18 @@
 // mocked through the injected `io.exec`/`io.readFile` seams — these tests never invoke a
 // real binary. Fixture values are deliberately neutral (no repo names, no campaign-specific
 // values) — the stateless-capability wall.
+//
+// ONE deliberate exception, at the bottom of this file: the schema-guard oracle block builds
+// REAL git repositories in temp dirs and lets the `io.exec` seam shell out to real git. A
+// mocked diff can only ever replay the range the guard already asks for, so it cannot tell a
+// right range from a wrong one — only real git commit topology can. `gh` stays mocked there.
 import { describe, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parseGapGateStamp, readAllowsSchemaChange, verifyShipped } from './verify.ts';
-import type { ExecResult, VerifyConfig, VerifyIO } from './verify.ts';
+import type { ExecResult, VerifyConfig, VerifyIO, VerifyPointResult } from './verify.ts';
 import type { Card } from './types.ts';
 
 function fixtureCard(overrides: Partial<Card> = {}): Card {
@@ -612,5 +621,169 @@ describe('parseGapGateStamp', () => {
   test('none means an empty list; a truncated stamp is not a stamp', () => {
     expect(parseGapGateStamp('<!-- gap-gate v1 card=C1 base=a head=b minted=none matched=none debt-delta=0 ledger=none -->')?.minted).toEqual([]);
     expect(parseGapGateStamp('<!-- gap-gate v1 card=C1 base=a -->')).toBeNull();
+  });
+});
+
+// =======================================================================================
+// The schema guard's oracle, against REAL git (see this file's header note).
+//
+// Oracle (spec §2.1, card verbatim): the guard's subject is the card branch's OWN commits —
+// never `baseSha..<remote>/<baseBranch>`, never `baseSha...mergeSha`. Under-checking (letting
+// a branch-authored locked-path change through) is a BUG; over-checking / failing closed on
+// an undecidable range is BY DESIGN.
+// =======================================================================================
+
+/** Host git config neutralised (`fail-closed-edges.md` obligation 2: an unusual-but-legal
+ * host setting — commit.gpgsign, a global hooks path, a template dir — must not be able to
+ * change this test's verdict) and identity supplied so `git commit` works on any machine. */
+const GIT_TEST_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_SYSTEM: '/dev/null',
+  GIT_AUTHOR_NAME: 't',
+  GIT_AUTHOR_EMAIL: 't@t.test',
+  GIT_COMMITTER_NAME: 't',
+  GIT_COMMITTER_EMAIL: 't@t.test',
+};
+
+/** Every call bounded (`fail-closed-edges.md` obligation 3) — a hung git is indistinguishable
+ * from a broken one. Throws on non-zero exit: fixture construction must never half-succeed. */
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 30_000, env: GIT_TEST_ENV });
+}
+
+/** The same call as `git()`, but shaped as the `VerifyIO.exec` seam's `ExecResult` — a
+ * non-zero git exit is a reportable outcome here, not a throw (that is exactly what the
+ * production `run()` wrapper does with the real adapter). */
+function gitExec(cwd: string, args: string[]): ExecResult {
+  try {
+    const stdout = execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      timeout: 30_000,
+      env: GIT_TEST_ENV,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { stdout, stderr: '', exitCode: 0 };
+  } catch (err) {
+    const e = err as { stdout?: string; stderr?: string; status?: number };
+    return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', exitCode: e.status ?? 1 };
+  }
+}
+
+function commitFile(repo: string, rel: string, body: string, msg: string): void {
+  const abs = join(repo, rel);
+  mkdirSync(join(abs, '..'), { recursive: true });
+  writeFileSync(abs, body);
+  git(repo, 'add', rel);
+  git(repo, 'commit', '-q', '-m', msg);
+}
+
+/** `branchTouchesLockedPath` selects the DIRECTION under test. Both directions contain a
+ * MASTER-side locked-path commit that the card branch absorbed by merging master in — that
+ * is the recorded shape of the false positive (spec §1.1), and it is what makes the two
+ * directions distinguishable only by which commits the guard diffs.
+ *
+ * Returns the repo root, the card's `baseSha`, and the merge commit sha. */
+function makeRepo(branchTouchesLockedPath: boolean): { repo: string; baseSha: string; mergeSha: string } {
+  const repo = mkdtempSync(join(tmpdir(), 'guard-'));
+  git(repo, 'init', '-q', '-b', 'master');
+  commitFile(repo, 'README.md', 'base\n', 'init');
+  const baseSha = git(repo, 'rev-parse', 'HEAD').trim();
+
+  git(repo, 'checkout', '-q', '-b', 'card');
+  commitFile(repo, 'src/feature.ts', 'export const a = 1;\n', 'card work');
+  if (branchTouchesLockedPath) {
+    // A DIFFERENT file under the locked prefix than the master-side commit below. Both
+    // branches creating the same path is an add/add conflict, which would abort the merge
+    // and destroy the fixture before the guard ever ran; what the oracle cares about is
+    // "a commit authored on the card branch touched a locked PATH", which this is.
+    commitFile(repo, 'locked/card-schema.ts', 'export type Y = 2;\n', 'card edits a locked path');
+  }
+
+  git(repo, 'checkout', '-q', 'master');
+  commitFile(repo, 'locked/schema.ts', 'export type X = 1;\n', 'master-side locked-path change');
+
+  git(repo, 'checkout', '-q', 'card');
+  git(repo, 'merge', '-q', '--no-ff', '-m', 'Merge master into card', 'master');
+
+  git(repo, 'checkout', '-q', 'master');
+  git(repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #1', 'card');
+  const mergeSha = git(repo, 'rev-parse', 'HEAD').trim();
+
+  // The guard resolves `<remote>/<baseBranch>`; a real card repo always has that
+  // remote-tracking ref, pointing at master with the card's merge already in it. Created as
+  // a bare ref with NO remote URL, so nothing in this test can reach the network.
+  git(repo, 'update-ref', 'refs/remotes/origin/master', 'master');
+  return { repo, baseSha, mergeSha };
+}
+
+/** Drives the real `checkSchemaGuard` — which is module-private — through `verifyShipped`'s
+ * own seam, and returns the `schemaGuard` point. `gh` is stubbed (the PR is merged, with
+ * `merge_commit_sha = mergeSha`); every `git` call goes to REAL git in the temp repo. */
+async function runGuard(opts: {
+  repo: string;
+  baseSha: string;
+  mergeSha: string;
+  lockedPaths: string[];
+}): Promise<VerifyPointResult> {
+  const card = fixtureCard({
+    branch: 'card',
+    baseSha: opts.baseSha,
+    // No plan on disk: the `allowsSchemaChange` waiver is a separate, already-covered path,
+    // and a waiver would mask the very verdict these two tests measure.
+    plan: null,
+  });
+  const config = fixtureConfig({ repoRoot: opts.repo, schemaLockPaths: opts.lockedPaths });
+  const io: VerifyIO = {
+    fileExists(): boolean {
+      return false;
+    },
+    readFile(): string {
+      throw new Error('no plan file in this fixture; readFile must not be reached');
+    },
+    async exec(cmd: string[], options?: { cwd?: string }): Promise<ExecResult> {
+      const [bin, ...rest] = cmd;
+      if (bin === 'git') return gitExec(options?.cwd ?? opts.repo, rest);
+      if (bin === 'gh' && rest[0] === 'api') {
+        return { stdout: JSON.stringify({ merged: true, merge_commit_sha: opts.mergeSha }), stderr: '', exitCode: 0 };
+      }
+      if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'checks') {
+        return { stdout: JSON.stringify([{ name: 'ci', bucket: 'pass' }]), stderr: '', exitCode: 0 };
+      }
+      if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'view') {
+        return { stdout: JSON.stringify({ body: '' }), stderr: '', exitCode: 0 };
+      }
+      throw new Error(`unmocked exec call: ${cmd.join(' ')}`);
+    },
+  };
+  const result = await verifyShipped(card, config, io, 'C1');
+  const point = result.points.find((p) => p.id === 'schemaGuard');
+  if (!point) throw new Error('verifyShipped reported no schemaGuard point');
+  return point;
+}
+
+describe('checkSchemaGuard: the oracle is the card branch OWN commits', () => {
+  test('PASSES when only MASTER touched a locked path while the card was in flight', async () => {
+    const { repo, baseSha, mergeSha } = makeRepo(false);
+    try {
+      const result = await runGuard({ repo, baseSha, mergeSha, lockedPaths: ['locked/'] });
+      expect(result.passed).toBe(true);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  test('FAILS when the card branch OWN commit touched a locked path', async () => {
+    const { repo, baseSha, mergeSha } = makeRepo(true);
+    try {
+      const result = await runGuard({ repo, baseSha, mergeSha, lockedPaths: ['locked/'] });
+      expect(result.passed).toBe(false);
+      // Fails for the RIGHT reason: the verdict names the locked prefix, not some unrelated
+      // breakage (a missing ref, an unresolvable range) that also yields `passed: false`.
+      expect(result.detail).toContain('locked/');
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

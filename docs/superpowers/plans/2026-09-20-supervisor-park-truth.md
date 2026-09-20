@@ -177,7 +177,7 @@ Write `runGuard` as a thin local helper that calls the module's exported guard p
 that reports the PR merged with `merge_commit_sha = mergeSha`, and read the `schemaGuard` point out
 of `result.points`.
 
-- [ ] **Step 1: RED** run the two tests and paste the real output. Test 1 must FAIL (today's guard sees
+- [x] **Step 1: RED** run the two tests and paste the real output. Test 1 must FAIL (today's guard sees
       master's locked-path commit); test 2 must PASS (it fails for the right reason even today).
       Task 2 is what makes test 1 green **without** breaking test 2.
 
@@ -187,7 +187,7 @@ cd plugins/tribe/scripts/runner && bun test core/verify.test.ts 2>&1 | tail -25
 
 Expected: test 1 fails with the guard reporting that the `locked/` schema-lock path changed since the card base; test 2 passes. Paste both.
 
-- [ ] **Step 2: Commit** `test(verify): pin the schema guard oracle to the card branch own commits`
+- [x] **Step 2: Commit** `test(verify): pin the schema guard oracle to the card branch own commits`
 
 ### Task 2: make the guard diff the branch's own commits
 
