@@ -278,8 +278,18 @@ has "G3: run 2 appended a park_superseded event" "$(events_after "$H_G3" "$befor
 absent "G3: NEEDS_OWNER.md no longer blocks the campaign" "$H_G3/NEEDS_OWNER.md"
 check "G3: exactly one NEEDS_OWNER.md.superseded-* marker (renamed, never deleted)" \
   "$(superseded_count "$H_G3")" "1"
-check "G3: the supersession is counted in supervisor/status.json's counters" \
-  "$(stale_terminals_of "$H_G3")" "1"
+# EXACTLY TWO, and both are real. `staleTerminals` counts every falsified park or terminal THIS
+# invocation found, and run 2 finds two distinct ones, in this order:
+#   1. the PARK on disk (`NEEDS_OWNER.md` + `supervisor/status.json`'s terminal) — superseded;
+#   2. on the very next tick, the stale watchdog TERMINAL itself (`watchdog/status.json` still
+#      says `stalled` about run A while run B is alive) — re-observed, which is the G2
+#      re-trigger visible in the `"retrigger":"stale_terminal"` event printed above.
+# Both are bounded and one-shot, so this can never climb past 2: the park is renamed once, and
+# the re-observation is capped by `retriggers['stale_terminal'] < 1`. A count of 1 would mean the
+# G2 re-observation went UNCOUNTED, which is the defect the card's "counted in `counters`"
+# requirement names.
+check "G3: both falsified facts are counted in supervisor/status.json's counters" \
+  "$(stale_terminals_of "$H_G3")" "2"
 
 # --- Negative probe: a park that IS still true is still obeyed -------------------------------
 # Oracle, direction 2, BY DESIGN: refusing to resume while the park still holds is correct. No

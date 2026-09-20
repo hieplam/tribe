@@ -209,7 +209,24 @@ export interface SessionOutcome {
 
 /** §3.3: exactly one action per tick. */
 export type SupervisorAction =
-  | { kind: 'run_watchdog'; cards: string[] | null; includeEscalated: boolean }
+  | {
+    kind: 'run_watchdog';
+    cards: string[] | null;
+    includeEscalated: boolean;
+    /** G2 (card `supervisor-park-truth`): `'stale_terminal'` when — and only when — this
+     * `run_watchdog` IS the bounded re-observation the contradiction row asked for, `null` for
+     * every other row that returns this action (row 27's first run, row 6's re-scan, rows
+     * 16/24's own retriggers, V7's post-ratify re-run).
+     *
+     * The pure core already knows WHY it returned `run_watchdog`, so it says so rather than
+     * leaving the edge to re-derive it. The edge's re-derivation was wrong on the V7
+     * (`ratified`) early return, which also emits `run_watchdog` and can coincide with an
+     * independently-true contradiction, and so consumed the campaign's one-shot
+     * `retriggers['stale_terminal']` budget for an unrelated action (`pure-core.md`: "an adapter
+     * accumulating business decisions"). Additive: `ParkReason` gains nothing, and no persisted
+     * artifact's shape changes. */
+    retrigger: 'stale_terminal' | null;
+  }
   | { kind: 'await_watchdog'; pid: number }
   | { kind: 'spawn_session'; session: SessionKind; cardId: string | null }
   | { kind: 'archive_escalation'; cardId: string; rulingId: string }
@@ -273,8 +290,10 @@ export interface SupervisorStatus {
     ratifyRounds: number;
     failures: number;
     /** G2/G3 (spec §2.2, card `supervisor-park-truth`): how many times THIS invocation found a
-     * park or terminal the disk had already falsified and superseded it. `supervisor/status.json`
-     * is the supervisor's OWN artifact, so counting here changes nothing about
+     * park or terminal the disk had already falsified and acted on that — G3's superseded park
+     * AND G2's re-observation of a stale terminal, which the card requires to be "counted in
+     * `counters`" too. `supervisor/status.json` is the supervisor's OWN artifact, so counting
+     * here changes nothing about
      * `campaign-state.json` or `campaign-report.json` (owner-only, untouched). Per-invocation,
      * exactly like `failures` — it is a publication counter, not persisted state. */
     staleTerminals: number;

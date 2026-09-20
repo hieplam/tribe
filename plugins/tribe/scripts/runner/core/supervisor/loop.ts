@@ -962,17 +962,18 @@ export async function runSupervisor(
         }
         // G2 (Task 8): the third, symmetric arm — decide()'s contradiction row re-runs the
         // watchdog when a NEWER run is alive, bounded by `retriggers['stale_terminal'] < 1`.
-        // Nothing credited that key, so the bound's retry half was permanently true and the
-        // one-shot intent was unrealised. Read off the SAME pure predicate and the SAME two
-        // counters decide() itself consulted this tick (never a re-decision of whether to run
-        // the watchdog — that has already happened), and guarded by the row's own condition so
-        // a `run_watchdog` decided by some OTHER row can never spend this budget.
-        const contradiction = terminalContradiction(observation);
-        if (contradiction !== null
-          && contradiction.kind === 'newer_run_alive'
-          && supState.watchdogRuns < config.limits.maxWatchdogRuns
-          && (supState.retriggers['stale_terminal'] ?? 0) < 1) {
+        //
+        // The DECISION says whether this is that re-trigger; the edge does not work it out for
+        // itself (B-F5). Re-deriving it here was wrong on the post-session V7 (`ratified`) early
+        // return, which also emits `run_watchdog` and can coincide with an independently-true
+        // contradiction — spending the campaign's one-shot budget on an unrelated action.
+        if (action.retrigger === 'stale_terminal') {
           supState = incrementRetrigger(supState, 'stale_terminal');
+          // B-F2: G2's re-observation is "counted in `counters`" (spec §2.2) — symmetrically
+          // with the `supersede_park` handler below. `state.retriggers` is the PERSISTED budget;
+          // this is the PUBLISHED counter, and incrementing only the former left
+          // `supervisor/status.json` reading `staleTerminals: 0` after a re-trigger really fired.
+          staleTerminals += 1;
         }
         supState = { ...supState, watchdogRuns: supState.watchdogRuns + 1 };
 

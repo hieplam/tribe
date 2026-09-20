@@ -81,6 +81,42 @@ test('P2: a park that STILL holds refuses exactly as before, message unchanged',
   });
 });
 
+// B-F3: superseding is legitimate only while the contradiction is ACTIONABLE. With the G2
+// re-observation budget spent, superseding this park would rename NEEDS_OWNER.md, let the next
+// tick re-derive the same `stalled` reason (the budget being gone) and re-park — forever.
+test('P2: a stale-looking park whose re-observation budget is SPENT is OBEYED, not superseded — '
+  + 'the machine has no remedy left, so a human genuinely is required', () => {
+  const spent = base({
+    needsOwnerPresent: true,
+    parkedTerminal: { reason: 'stalled', atMs: 1_000 },
+    lastWatchdog: terminal('stalled'),
+    watchdogRunId: 'run-0001',
+    runs: [{ runId: 'run-0002', pid: 99, alive: true, endedAt: null, exitCode: null, reason: null }],
+    state: { ...base().state, retriggers: { stale_terminal: 1 } },
+  });
+  expect(decide(spent)).toEqual({
+    kind: 'park',
+    reason: 'resume_blocked',
+    detail: 'NEEDS_OWNER.md is present; resume is blocked until the owner deletes it',
+  });
+});
+
+test('P2: a park contradicted by a FINALISED run is superseded even with every budget spent — '
+  + 'a finalised run changes the effective terminal reason, so the next tick decides differently', () => {
+  const finalised = base({
+    needsOwnerPresent: true,
+    parkedTerminal: { reason: 'stalled', atMs: 1_000 },
+    lastWatchdog: terminal('stalled'),
+    watchdogRunId: 'run-0001',
+    runs: [{
+      runId: 'run-0002', pid: 99, alive: false,
+      endedAt: '2026-09-19T22:48:45.898Z', exitCode: 2, reason: 'escalations_pending',
+    }],
+    state: { ...base().state, watchdogRuns: 20, retriggers: { stale_terminal: 1 } },
+  });
+  expect(decide(finalised).kind).toBe('supersede_park');
+});
+
 test('P1 still beats P2 even when the park is stale: a live foreign supervisor wins', () => {
   const staleButForeignLockHeld = base({
     supervisorLock: { pid: 42, alive: true },
@@ -188,7 +224,7 @@ test('row 6: every escalated card answered this round re-triggers the watchdog',
       stats: { shipped: 0, escalated: 1, blocked: 0, notReached: 1 },
     },
   }));
-  expect(a).toEqual({ kind: 'run_watchdog', cards: ['c1', 'c2'], includeEscalated: false });
+  expect(a).toEqual({ kind: 'run_watchdog', cards: ['c1', 'c2'], includeEscalated: false, retrigger: null });
 });
 
 test('row 7: the next unanswered card carries a park marker a session already wrote', () => {
@@ -284,7 +320,7 @@ test('row 15: rulings_unratified otherwise spawns a ratify session', () => {
 
 test('row 16: session_incomplete retriggers the watchdog once, within budget', () => {
   const a = decide(base({ lastWatchdog: terminal('session_incomplete') }));
-  expect(a).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false });
+  expect(a).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: null });
 });
 
 test('row 17: session_incomplete parks once the one-shot retrigger is already spent', () => {
@@ -347,7 +383,7 @@ const staleStalledTerminal = (over: Partial<SupervisorObservation> = {}) => base
 test('G2: the recorded shape — terminal `stalled` while a NEWER run is alive — re-triggers the '
   + 'watchdog instead of parking stalled', () => {
   expect(decide(staleStalledTerminal()))
-    .toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false });
+    .toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: 'stale_terminal' });
 });
 
 test('G2 is BOUNDED: with the one-shot stale_terminal retrigger already spent, the original '
@@ -460,7 +496,7 @@ test('rows 18-22 are byte-identical when the disk does NOT contradict the termin
 
 test('row 24: the watchdog child exited without a terminal — one bounded retrigger', () => {
   const a = decide(base({ lastWatchdog: { terminal: null, ownedExitCode: null } }));
-  expect(a).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false });
+  expect(a).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: null });
 });
 
 test('row 25: no terminal, retrigger already spent — parks, never loops forever', () => {
@@ -487,7 +523,7 @@ test('row 26: the watchdog child itself exited with a usage error', () => {
 // ---------------------------------------------------------------------------------------------
 
 test('row 27: nothing has run yet this invocation', () => {
-  expect(decide(base())).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false });
+  expect(decide(base())).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: null });
 });
 
 // F1 fix: row 28 (§3.4: `watchdogRuns >= maxWatchdogRuns` -> `park(watchdog_run_cap)`) is a
@@ -586,7 +622,7 @@ test('V7: the unratified list reached empty re-triggers the watchdog on the same
   }));
   // The exact literal decide.ts already uses for rows 16/24 — "same scope" resolves to the base
   // scope, never a card-scoped re-run.
-  expect(a).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false });
+  expect(a).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: null });
 });
 
 test('V8: the final report exists and nothing is unratified — the campaign closes', () => {
@@ -604,7 +640,7 @@ test('a malformed outcome (a "ruled" verdict missing its rulingId) is a contract
   // With no watchdog fact at all, the ordinary rows land on row 27 — proof the post-session
   // block did not silently produce a wrong action for an outcome it does not own. This is now
   // the ONLY class of outcome that reaches this fallthrough: V7/V8 own 'ratified'/'closed'.
-  expect(a).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false });
+  expect(a).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: null });
 });
 
 // ---------------------------------------------------------------------------------------------

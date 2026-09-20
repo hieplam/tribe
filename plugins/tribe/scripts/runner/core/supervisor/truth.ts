@@ -30,24 +30,38 @@ export function terminalContradiction(o: SupervisorObservation): TerminalContrad
   const watchdogRunId = o.watchdogRunId;
   if (watchdogRunId === null) return null;
 
-  // Run ids are `<ISO-with-dashes>-<hex>` (core/run-record.ts#generateRunId), so lexicographic
-  // comparison IS chronological comparison. `runs` arrives ascending; the last strictly-newer
-  // entry is the newest one.
-  const newerRuns = o.runs.filter((r) => r.runId > watchdogRunId);
-  const candidate: RunFact | undefined =
-    newerRuns.length > 0
-      ? newerRuns[newerRuns.length - 1]
-      : o.runs.find((r) => r.runId === watchdogRunId);
+  // Every run that could speak to this terminal: each run strictly NEWER than the one the
+  // terminal is about, PLUS the terminal's own run (which may itself have finalised since the
+  // terminal was published). Run ids are `<ISO-with-dashes>-<hex>`
+  // (core/run-record.ts#generateRunId), so lexicographic comparison IS chronological comparison
+  // and `runs` arrives ascending — this list is ascending too.
+  //
+  // Asking only the NEWEST candidate was a defect (B-F4): a killed relaunch leaves a run
+  // directory behind with a dead pid and no `endedAt` — an INCONCLUSIVE record — and that record
+  // MASKED a genuinely alive run sitting behind it, so the supervisor parked a campaign whose
+  // runner was alive (the Oracle's first sentence). The recorded incident home carries three run
+  // directories; multi-run homes are normal, not exotic.
+  const candidates = o.runs.filter((r) => r.runId >= watchdogRunId);
+  const newestWhere = (matches: (r: RunFact) => boolean): RunFact | undefined => {
+    for (let i = candidates.length - 1; i >= 0; i -= 1) {
+      const candidate: RunFact | undefined = candidates[i];
+      if (candidate !== undefined && matches(candidate)) return candidate;
+    }
+    return undefined;
+  };
 
-  if (candidate === undefined) return null;
+  // LIVENESS WINS over inconclusiveness: a running process is the strongest fact on this disk,
+  // and an inconclusive sibling can never outrank it.
+  const alive = newestWhere((r) => r.endedAt === null && r.alive);
+  if (alive !== undefined) return { kind: 'newer_run_alive', runId: alive.runId };
 
-  if (candidate.endedAt === null && candidate.alive) {
-    return { kind: 'newer_run_alive', runId: candidate.runId };
+  const finalised = newestWhere((r) => r.endedAt !== null && typeof r.exitCode === 'number');
+  if (finalised !== undefined && finalised.exitCode !== null) {
+    return { kind: 'run_finalised', runId: finalised.runId, exitCode: finalised.exitCode, reason: finalised.reason };
   }
-  if (candidate.endedAt !== null && typeof candidate.exitCode === 'number') {
-    return { kind: 'run_finalised', runId: candidate.runId, exitCode: candidate.exitCode, reason: candidate.reason };
-  }
-  // Neither alive nor finalised (e.g. a dead pid with no record of finishing) proves nothing.
+
+  // No candidate is alive and none has finalised (e.g. only dead pids with no record of
+  // finishing) — that proves nothing, so the terminal stands.
   return null;
 }
 
@@ -94,10 +108,39 @@ export function terminalReasonForRunReason(runReason: string | null): string | n
   return RUN_REASON_TO_TERMINAL_REASON.get(runReason) ?? null;
 }
 
-/** "Is this park still true?" `true` for every park reason that is not a runner-liveness claim —
- * refusing to resume while a park is still TRUE is BY DESIGN (the card's oracle). */
+/**
+ * decide()'s G2 bound — "may the supervisor still re-run the watchdog BECAUSE a newer run is
+ * alive?" — written ONCE and read by both callers: the G2 row itself, and `parkStillHolds`
+ * below. Spelling this condition twice is how the two halves drifted apart in the first place.
+ */
+export function staleTerminalRetriggerAvailable(o: SupervisorObservation): boolean {
+  const retries = o.state.retriggers['stale_terminal'] ?? 0;
+  return o.state.watchdogRuns < o.limits.maxWatchdogRuns && retries < 1;
+}
+
+/**
+ * "Is this park still true?" `true` for every park reason that is not a runner-liveness claim —
+ * refusing to resume while a park is still TRUE is BY DESIGN (the card's oracle).
+ *
+ * A contradiction alone is not enough to supersede: it must also be ACTIONABLE, meaning the
+ * supervisor has a remedy left to apply. Without that test (B-F3) a spent budget turned
+ * supersession into infinite churn — the park was superseded, the very next tick re-derived the
+ * same `stalled` reason (the budget being gone) and re-parked with a brand-new identical
+ * `NEEDS_OWNER.md`, on every restart forever, leaving a trail of `.superseded-<ts>` files and
+ * `park_superseded` events that read as "the campaign continued" when nothing was investigated.
+ *
+ * - `run_finalised` is ALWAYS actionable: it changes the effective terminal reason, so the next
+ *   tick decides from a different row than the one that parked.
+ * - `newer_run_alive` is actionable only while the G2 re-trigger is still available — the very
+ *   condition `decide()` bounds that action with.
+ *
+ * When the machine has exhausted its own remedies, a human genuinely IS required.
+ */
 export function parkStillHolds(o: SupervisorObservation): boolean {
   if (o.parkedTerminal === null) return true;
   if (!RUNNER_LIVENESS_PARK_REASONS.has(o.parkedTerminal.reason)) return true;
-  return terminalContradiction(o) === null;
+  const contradiction = terminalContradiction(o);
+  if (contradiction === null) return true;
+  if (contradiction.kind === 'run_finalised') return false;
+  return !staleTerminalRetriggerAvailable(o);
 }

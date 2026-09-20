@@ -15,7 +15,7 @@ import { zeroState } from './state.ts';
 import type { OneShotSessionOptions, OneShotSpawnParams } from './session.ts';
 import type { SessionMessage } from '../session.ts';
 import type { WatchdogHandle } from '../../ports/ports.ts';
-import type { SupervisorLimits } from './model.ts';
+import type { SupervisorLimits, SupervisorState } from './model.ts';
 
 const HOME = '/h/.tribe/k/campaigns/c';
 const REPO = '/repo';
@@ -1028,9 +1028,16 @@ const PARK_AT = '2026-09-19T20:30:30.010Z';    // when the PREVIOUS invocation p
  * A `STOP` file is seeded so the tick AFTER a supersede has an observable, terminating outcome:
  * reaching `exit(stop_requested)` is how "the loop CONTINUED — never exit 20" is proven. P2 is
  * evaluated before P3, so the STOP file can never pre-empt the park decision under test. */
-function parkedSeam(runB: 'alive' | null): ReturnType<typeof fakeSeam> {
+function parkedSeam(
+  runB: 'alive' | null,
+  persistedState: Partial<SupervisorState> = {},
+): ReturnType<typeof fakeSeam> {
   const initialFiles: Record<string, string> = {
     [join(HOME, 'STOP')]: '',
+    // What the PREVIOUS invocation's own counters were when it parked. Defaults to the zero
+    // state (which `parseState` also reads an ABSENT file as), so every existing caller is
+    // unaffected; B-F3's churn probe below seeds a SPENT re-observation budget.
+    [join(HOME, 'supervisor', 'state.json')]: JSON.stringify({ v: 1, ...zeroState(), ...persistedState }),
     [join(HOME, 'NEEDS_OWNER.md')]: '# Campaign needs the owner: c\n\n**Park reason:** stalled\n',
     [join(HOME, 'campaign-state.json')]: campaignStateFixture(),
     // What the PREVIOUS invocation published when it parked (spec §13's own shape, verbatim).
@@ -1173,5 +1180,92 @@ describe('runSupervisor — Task 8 (G2): the stale-terminal retrigger is CREDITE
       retriggers: Record<string, number>;
     };
     expect(state.retriggers['stale_terminal']).toBe(1);
+    // B-F2: the card requires G2's re-observation to be "counted in `counters`" (spec §2.2), and
+    // `state.retriggers` is the PERSISTED budget, not the PUBLISHED counter. The assertions above
+    // (spawn calls, events, retriggers) all passed while `supervisor/status.json`'s
+    // `counters.staleTerminals` still read 0 — which is exactly why this shipped uncounted.
+    expect(lastStatus(seam)['counters']['staleTerminals']).toBe(1);
+  });
+});
+
+describe('runSupervisor — B-F3: a SPENT re-observation budget must not turn supersede into '
+  + 'infinite churn', () => {
+  test('with the one-shot stale_terminal retrigger already spent and the contradiction unchanged, '
+    + 'the park is OBEYED — not superseded, then re-derived, then re-parked forever', async () => {
+    const seam = parkedSeam('alive', { retriggers: { stale_terminal: 1 } });
+    // No STOP file for this probe: the churn is only observable if the tick AFTER a supersede is
+    // allowed to reach its own decision. With STOP present, `exit(stop_requested)` would pre-empt
+    // the re-park and hide exactly the loop under test.
+    seam.files.delete(join(HOME, 'STOP'));
+
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+
+    // The Oracle's second half: the machine has exhausted its own remedies (the watchdog cannot be
+    // re-triggered again), so a human genuinely is required and the park stands.
+    expect(result.exitCode).toBe(20);
+    expect(result.reason).toBe('resume_blocked');
+    // The churn signature, all four parts absent: no archived park document, no park_superseded
+    // event, no re-derived `stalled` park, and no watchdog spawned to justify any of it.
+    expect([...seam.files.keys()].filter((k) => k.includes('.superseded-'))).toEqual([]);
+    expect(eventLines(seam).map((e) => e['action'])).toEqual(['park']);
+    expect(seam.files.has(join(HOME, 'NEEDS_OWNER.md'))).toBe(true);
+    expect(seam.spawnWatchdogCalls).toBe(0);
+    expect(lastStatus(seam)['counters']['staleTerminals']).toBe(0);
+  });
+});
+
+describe('runSupervisor — B-F5: the stale-terminal budget is spent only by the decision that '
+  + 'actually asked for the stale-terminal re-trigger', () => {
+  test('V7 (a verified ratify) also returns run_watchdog; when a contradiction happens to be '
+    + 'independently true on that same tick, the campaign\'s one-shot stale_terminal budget must '
+    + 'NOT be consumed by it', async () => {
+    const seam = fakeSeam({
+      initialFiles: {
+        [join(HOME, 'campaign-state.json')]: campaignStateFixture(),
+        [join(HOME, 'answers.md')]: '## R1\n\nratified-as: pending\n\nSome earlier context.\n',
+        // Run A: started, never finalised, pid long dead — INCONCLUSIVE, so nothing contradicts
+        // the terminal on the tick that spawns the ratify session.
+        [join(HOME, 'runs', RUN_A, 'run.json')]: JSON.stringify({
+          v: 1, runId: RUN_A, pid: 999999, endedAt: null, exitCode: null, reason: null,
+        }),
+      },
+      initialDeadPids: [999999],
+      watchdogRuns: [
+        // Run 1's terminal is about run A, so `watchdogRunId` is populated from here on.
+        { reason: 'rulings_unratified', exitCode: 11, runId: RUN_A },
+        // Run 2 is the watchdog V7 asks for; it carries no runId, so no contradiction can be
+        // derived afterwards and the scenario terminates deterministically.
+        { reason: 'stop_requested', exitCode: 0 },
+      ],
+      sessions: [
+        {
+          effect: () => {
+            seam.files.set(join(HOME, 'answers.md'), '## R1\n\nratified-as: operational\n\nSome earlier context.\n');
+            // While the ratify session ran, a NEWER run started and is alive — a contradiction
+            // that is independently true and has nothing to do with V7's re-trigger.
+            seam.files.set(join(HOME, 'runs', RUN_B, 'run.json'), JSON.stringify({
+              v: 1, runId: RUN_B, pid: 7777, endedAt: null, exitCode: null, reason: null,
+            }));
+          },
+        },
+      ],
+    });
+
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+    expect(result.reason).toBe('stop_requested');
+    const kinds = eventLines(seam).map((e) => e['action']);
+    // The second `run_watchdog` is V7's, produced by the post-session row — not the G2 row.
+    expect(kinds).toEqual([
+      'run_watchdog', 'await_watchdog', 'spawn_session', 'run_watchdog', 'await_watchdog', 'exit',
+    ]);
+
+    const state = JSON.parse(seam.files.get(join(HOME, 'supervisor', 'state.json')) as string) as {
+      retriggers: Record<string, number>;
+    };
+    // The budget bounds ONE action: re-running the watchdog BECAUSE a newer run is alive. V7's
+    // re-trigger is a different action for a different reason, so it may not spend it — nor may it
+    // be counted as a stale-terminal re-observation.
+    expect(state.retriggers['stale_terminal'] ?? 0).toBe(0);
+    expect(lastStatus(seam)['counters']['staleTerminals']).toBe(0);
   });
 });
