@@ -1200,8 +1200,18 @@ export async function runSupervisor(
         // The categorical `ParkReason` — matching `WatchdogTerminal`'s own precedent of a
         // machine-checkable reason, not the free-text `action.detail` sentence (which is
         // rendered into `NEEDS_OWNER.md` above, and nowhere else).
+        //
+        // F-F1: `action.recordedReason` (set by decide() alone, and only on row P2's refusal to
+        // resume an EXISTING park) is what gets published instead. This carries out a decision
+        // the pure core already made — the edge never works out for itself which parks are
+        // refusals. `lastAction` below still names the refusal (`park:resume_blocked`), and
+        // `recordIntent` above has already recorded it in `events.jsonl`, so the refusal is
+        // fully trailed while the park's own condition stays on `terminal.reason` for the next
+        // restart to re-check.
         publish('terminal', `park:${action.reason}`, {
-          status: 'needs_owner', reason: action.reason, exitCode: exitCodeOf('needs_owner'),
+          status: 'needs_owner',
+          reason: action.recordedReason ?? action.reason,
+          exitCode: exitCodeOf('needs_owner'),
         });
         return {
           exitCode: exitCodeOf('needs_owner'), kind: 'needs_owner', reason: action.reason, statusPath: paths.status,

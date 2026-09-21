@@ -78,6 +78,22 @@ test('P2: a park that STILL holds refuses exactly as before, message unchanged',
     kind: 'park',
     reason: 'resume_blocked',
     detail: 'NEEDS_OWNER.md is present; resume is blocked until the owner deletes it',
+    // F-F1: the refusal names the condition it is refusing to resume, so the edge can leave THAT
+    // standing in `supervisor/status.json` — a refusal is not a new park about a new condition.
+    recordedReason: 'stalled',
+  });
+});
+
+// F-F1: the same refusal when nothing on disk records what the park was about (an absent or
+// malformed `supervisor/status.json`, which `readParkedTerminal` degrades to `null`). There is
+// no condition to preserve, so the action carries none and the edge records the refusal itself,
+// exactly as it always did — fail closed, never invent a reason.
+test('P2: a refusal with NO recorded park condition carries none', () => {
+  const noRecord = base({ needsOwnerPresent: true, parkedTerminal: null });
+  expect(decide(noRecord)).toEqual({
+    kind: 'park',
+    reason: 'resume_blocked',
+    detail: 'NEEDS_OWNER.md is present; resume is blocked until the owner deletes it',
   });
 });
 
@@ -98,6 +114,9 @@ test('P2: a stale-looking park whose re-observation budget is SPENT is OBEYED, n
     kind: 'park',
     reason: 'resume_blocked',
     detail: 'NEEDS_OWNER.md is present; resume is blocked until the owner deletes it',
+    // F-F1: obeying the park must not destroy its condition either — a budget can be restored
+    // (a fresh campaign-level re-run) while `stalled` is still what the park was about.
+    recordedReason: 'stalled',
   });
 });
 

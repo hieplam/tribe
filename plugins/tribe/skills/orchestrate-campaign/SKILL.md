@@ -694,6 +694,13 @@ original park stands and step 1 above (starting the supervisor) will simply park
 **A park whose stated condition is still genuinely true is still refused, exactly as before — that
 is by design, not a gap this leaves open.**
 
+**Restarting more than once does not wear this out.** A restart that refuses (because the park was
+still true at that moment) leaves the park's *original* reason recorded in
+`<campaign-home>/supervisor/status.json`'s `terminal.reason` — the refusal is recorded separately,
+as that file's `lastAction` and as a `park` line in `supervisor/events.jsonl`. So the ordinary
+sequence — you restart, it refuses, and only later does the run finish or a newer one go live —
+still supersedes the park on the restart after that.
+
 ## A campaign can outlive this session
 
 A multi-card campaign can run for hours; the session that triggered it may not still be open

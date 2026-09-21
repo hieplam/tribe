@@ -230,7 +230,27 @@ export type SupervisorAction =
   | { kind: 'await_watchdog'; pid: number }
   | { kind: 'spawn_session'; session: SessionKind; cardId: string | null }
   | { kind: 'archive_escalation'; cardId: string; rulingId: string }
-  | { kind: 'park'; reason: ParkReason; detail: string }
+  | {
+    kind: 'park';
+    reason: ParkReason;
+    detail: string;
+    /** F-F1 (card `supervisor-park-truth`): set ONLY when this park is a REFUSAL to resume a
+     * park that already exists on disk (row P2), and then it carries the reason that park was
+     * ORIGINALLY recorded with. The edge publishes THIS on `supervisor/status.json`'s
+     * `terminal.reason` instead of `reason`, so the condition the park is about survives any
+     * number of refusal restarts.
+     *
+     * A refusal is not a new park about a new condition — it is a refusal to resume the
+     * existing one, and `terminal.reason` is the only typed record of what that condition was
+     * (`SupervisorObservation.parkedTerminal`). Overwriting it with `resume_blocked` — a
+     * statement about the RESTART, never about the park — made `parkStillHolds` permanently
+     * true (`resume_blocked` is not a runner-liveness claim), so a contradiction appearing
+     * AFTER the first restart could never supersede the park.
+     *
+     * Absent (`undefined`) on every other park, which records its own reason exactly as before.
+     * `ParkReason` gains nothing, and no persisted artifact's SHAPE changes. */
+    recordedReason?: string;
+  }
   /** G3 (spec §2.2, card `supervisor-park-truth`): a park whose stated condition the disk has
    * already falsified — superseding is an ACTION, never a `ParkReason` (`ParkReason` gains
    * nothing here). `priorReason` names the park being superseded. */

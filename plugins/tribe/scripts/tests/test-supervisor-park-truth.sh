@@ -291,6 +291,52 @@ check "G3: exactly one NEEDS_OWNER.md.superseded-* marker (renamed, never delete
 check "G3: both falsified facts are counted in supervisor/status.json's counters" \
   "$(stale_terminals_of "$H_G3")" "2"
 
+# --- Probe F-F1: the contradiction appears AFTER a refusal restart ---------------------------
+# The recorded incident's OWN ordering (spec §1.2), which the single-restart G3 probe above
+# cannot reach: the supervisor parks, the owner restarts, it REFUSES (the park is still true —
+# by design), and only LATER does a newer run go live. A refusal is not a new park about a new
+# condition; it is a refusal to resume the existing one, so the condition the park was recorded
+# with must survive it in `supervisor/status.json`. When it did not, `parkStillHolds` was
+# permanently true afterwards and G3 could only ever fire when the FIRST restart already saw the
+# contradiction.
+section "F-F1 — park, then a REFUSAL restart, and only THEN the contradiction"
+new_campaign ff1; H_FF1="$CAMPAIGN_HOME"
+run_supervise "$H_FF1"
+printf 'run 1 exit: %s\n' "$RC"
+not_timeout "F-F1: run 1 finished on its own, inside the suite's bound"
+check "F-F1: run 1 parks — the terminal is uncontradicted, so exit 20 is correct" "$RC" "20"
+present "F-F1: run 1 wrote NEEDS_OWNER.md (the probe's precondition)" "$H_FF1/NEEDS_OWNER.md"
+before_ff1_run2="$(event_count "$H_FF1")"
+run_supervise "$H_FF1"   # the REFUSAL restart: the world is still unchanged, so the park holds
+printf 'run 2 exit: %s\n' "$RC"
+printf -- '--- events appended by run 2 ---\n%s\n' "$(events_after "$H_FF1" "$before_ff1_run2")"
+printf -- '--- supervisor/status.json terminal after the refusal ---\n%s\n' "$(terminal_of "$H_FF1")"
+not_timeout "F-F1: run 2 finished on its own, inside the suite's bound"
+check "F-F1: run 2 refuses to resume — exit 20" "$RC" "20"
+has "F-F1: run 2 recorded a refusal in events.jsonl" \
+  "$(events_after "$H_FF1" "$before_ff1_run2")" '"reason":"resume_blocked"'
+present "F-F1: run 2 left NEEDS_OWNER.md exactly where the owner must find it" "$H_FF1/NEEDS_OWNER.md"
+# THE FIX, pinned on disk: the park's own condition — not the refusal — is what `status.json`
+# still records, because that is what run 3 re-checks against `runs/`.
+has "F-F1: the refusal did not overwrite the park's recorded condition" \
+  "$(terminal_of "$H_FF1")" '"reason":"stalled"'
+before_ff1_run3="$(event_count "$H_FF1")"
+add_run_b "$H_FF1" alive   # ONLY NOW does the park's stated condition become false on disk
+run_supervise "$H_FF1"
+printf 'run 3 exit: %s\n' "$RC"
+printf -- '--- events appended by run 3 ---\n%s\n' "$(events_after "$H_FF1" "$before_ff1_run3")"
+printf -- '--- superseded markers ---\n%s\n' "$(find "$H_FF1" -maxdepth 1 -name 'NEEDS_OWNER.md.superseded-*' -print)"
+# POSITIVE EVIDENCE, in place of run 3's `not_timeout` (see that helper's own comment): once the
+# park is superseded the campaign CONTINUES, so run 3 is expected to still be supervising when
+# the bound expires. A hung supervisor writes no `park_superseded` event and renames nothing.
+has "F-F1: run 3 appended a park_superseded event after the refusal restart" \
+  "$(events_after "$H_FF1" "$before_ff1_run3")" 'park_superseded'
+has "F-F1: the superseded park names the ORIGINAL condition, not the refusal" \
+  "$(events_after "$H_FF1" "$before_ff1_run3")" '"priorReason":"stalled"'
+absent "F-F1: NEEDS_OWNER.md no longer blocks the campaign" "$H_FF1/NEEDS_OWNER.md"
+check "F-F1: exactly one NEEDS_OWNER.md.superseded-* marker (renamed, never deleted)" \
+  "$(superseded_count "$H_FF1")" "1"
+
 # --- Negative probe: a park that IS still true is still obeyed -------------------------------
 # Oracle, direction 2, BY DESIGN: refusing to resume while the park still holds is correct. No
 # run B is ever added here, so nothing on disk contradicts the terminal the park was written

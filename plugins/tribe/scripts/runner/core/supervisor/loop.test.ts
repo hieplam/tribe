@@ -1269,3 +1269,131 @@ describe('runSupervisor — B-F5: the stale-terminal budget is spent only by the
     expect(lastStatus(seam)['counters']['staleTerminals']).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------------------
+// F-F1: a REFUSAL to resume must not destroy the park's own recorded condition.
+//
+// Refusing to resume an existing park is not a NEW park about a NEW condition — it is a refusal
+// to resume the existing one. `supervisor/status.json`'s `terminal.reason` is the only typed
+// record of what the park was ABOUT (`parkedTerminal`, spec §2.2), and it is exactly what a
+// later restart re-checks against the disk. Publishing the refusal's own `resume_blocked` over
+// it destroyed that record: `resume_blocked` is not a runner-liveness claim, so `parkStillHolds`
+// answered `true` for ever after and G3 could only ever fire when the FIRST restart already saw
+// the contradiction.
+//
+// The recorded incident's own shape is the opposite: the owner restarts, it refuses, and only
+// LATER does a newer run go live. This drives that sequence through the REAL `runSupervisor`
+// three times over one persistent fake disk — park, refusal restart, contradiction appears,
+// restart again — which is the sequence the single-restart probes above cannot reach.
+// ---------------------------------------------------------------------------------------
+describe('runSupervisor — F-F1: a contradiction that appears AFTER a refusal restart still '
+  + 'supersedes the park', () => {
+  let seam: ReturnType<typeof fakeSeam>;
+  let parkRun: SupervisorTerminal;
+  let refusalRun: SupervisorTerminal;
+  let statusAfterRefusal: Record<string, any>;
+  let supersedeRun: SupervisorTerminal;
+  // Snapshots taken INSIDE `beforeAll`, at the moment each restart returns: one seam serves all
+  // three invocations, so reading the live disk from a test body would read the END state and
+  // silently attribute restart 3's writes to restart 2.
+  let refusalEvents: Array<Record<string, unknown>> = [];
+  let supersedeEvents: Array<Record<string, unknown>> = [];
+  let needsOwnerAfterPark = false;
+  let needsOwnerAfterRefusal = false;
+  let markersAfterRefusal: string[] = [];
+
+  beforeAll(async () => {
+    // One seam, three invocations: the files map IS the campaign home, surviving each restart
+    // exactly as a real one on disk does. `currentPid` is this process for all three, so the
+    // supervisor lock is reclaimed as its own (`readForeignLock` ignores our own pid) rather
+    // than refused — the same thing a real restart of a dead supervisor does.
+    seam = fakeSeam({
+      initialFiles: {
+        [join(HOME, 'campaign-state.json')]: campaignStateFixture(),
+        // Run A: started, never finalised, its pid long gone — INCONCLUSIVE, so nothing
+        // contradicts the watchdog's terminal while restart 1 is deciding.
+        [join(HOME, 'runs', RUN_A, 'run.json')]: JSON.stringify({
+          v: 1, runId: RUN_A, pid: 999999, startedAt: '2026-09-19T19:29:58.328Z',
+          endedAt: null, exitCode: null, reason: null,
+        }),
+      },
+      initialDeadPids: [999999],
+      watchdogRuns: [{ reason: 'stalled', exitCode: 10, runId: RUN_A }],
+    });
+
+    // Restart 1 — the campaign parks for real. The park is TRUE when it is written.
+    parkRun = await runSupervisor(baseConfig(), HOME, seam.io);
+    needsOwnerAfterPark = seam.files.has(join(HOME, 'NEEDS_OWNER.md'));
+    const eventsBeforeRefusal = eventLines(seam).length;
+
+    // Restart 2 — the owner restarts with the world UNCHANGED. The park still holds, so refusing
+    // is BY DESIGN (the Oracle's second half). This is the invocation that destroyed the record.
+    refusalRun = await runSupervisor(baseConfig(), HOME, seam.io);
+    statusAfterRefusal = lastStatus(seam);
+    refusalEvents = eventLines(seam).slice(eventsBeforeRefusal);
+    needsOwnerAfterRefusal = seam.files.has(join(HOME, 'NEEDS_OWNER.md'));
+    markersAfterRefusal = [...seam.files.keys()].filter((k) => k.includes('.superseded-'));
+
+    // ONLY NOW does the world move on: the newer run B is alive, falsifying the park's stated
+    // condition — the recorded incident's own ordering (spec §1.2).
+    seam.files.set(join(HOME, 'runs', RUN_B, 'run.json'), JSON.stringify({
+      v: 1, runId: RUN_B, pid: 7777, startedAt: '2026-09-19T20:30:30.074Z',
+      endedAt: null, exitCode: null, reason: null,
+    }));
+    // Seeded here, never earlier: a STOP file gives the tick AFTER the supersede an observable,
+    // terminating outcome, and P2 is evaluated before P3 so it can never pre-empt the decision
+    // under test. Before restart 3 it would have short-circuited restarts 1 and 2 instead.
+    seam.files.set(join(HOME, 'STOP'), '');
+    const eventsBeforeSupersede = eventLines(seam).length;
+
+    // Restart 3 — the contradiction appeared AFTER a refusal. The park must still be superseded.
+    supersedeRun = await runSupervisor(baseConfig(), HOME, seam.io);
+    supersedeEvents = eventLines(seam).slice(eventsBeforeSupersede);
+  });
+
+  test('restart 1 parks `stalled` — the precondition, and a park that is TRUE when written', () => {
+    expect(parkRun.exitCode).toBe(20);
+    expect(parkRun.reason).toBe('stalled');
+    expect(needsOwnerAfterPark).toBe(true);
+  });
+
+  test('restart 2 refuses to resume: exit 20, a refusal recorded in events.jsonl, and '
+    + 'NEEDS_OWNER.md left exactly where the owner must find it', () => {
+    expect(refusalRun.exitCode).toBe(20);
+    expect(refusalRun.reason).toBe('resume_blocked');
+    expect(refusalEvents.map((e) => e['action'])).toEqual(['park']);
+    // The recorded intent is decide()'s own verdict: a refusal (`resume_blocked`) that names the
+    // condition it is refusing to resume, so events.jsonl carries the whole story too.
+    expect(refusalEvents[0]?.['detail']).toEqual({
+      kind: 'park', reason: 'resume_blocked', detail: expect.any(String), recordedReason: 'stalled',
+    });
+    expect(needsOwnerAfterRefusal).toBe(true);
+    expect(markersAfterRefusal).toEqual([]);
+  });
+
+  test('the refusal leaves the park\'s ORIGINALLY recorded condition standing in status.json — '
+    + 'a refusal is not a new park about a new condition', () => {
+    expect(statusAfterRefusal['terminal'])
+      .toEqual({ status: 'needs_owner', reason: 'stalled', exitCode: 20 });
+  });
+
+  test('restart 3 SUPERSEDES the park the disk has now falsified, and the campaign continues', () => {
+    expect(supersedeEvents.map((e) => e['action']))
+      .toEqual(['supersede_park', 'park_superseded', 'exit']);
+    const event = supersedeEvents.find((e) => e['action'] === 'park_superseded') as Record<string, unknown>;
+    const detail = event['detail'] as Record<string, unknown>;
+    // The prior reason is the park's OWN condition — never the refusal that was layered over it.
+    expect(detail['priorReason']).toBe('stalled');
+    expect(detail['supersededBy']).toEqual({ kind: 'newer_run_alive', runId: RUN_B });
+    expect(seam.files.has(join(HOME, 'NEEDS_OWNER.md'))).toBe(false);
+    expect([...seam.files.keys()].filter((k) => k.startsWith(`${join(HOME, 'NEEDS_OWNER.md')}.superseded-`)).length)
+      .toBe(1);
+    expect(supersedeRun).toEqual({
+      exitCode: 0, kind: 'done', reason: 'stop_requested', statusPath: join(HOME, 'supervisor', 'status.json'),
+    });
+  });
+
+  test('the write surface stays S-P5\'s across all three restarts', () => {
+    assertWriteSurface(seam.writes);
+  });
+});

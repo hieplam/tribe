@@ -15,7 +15,12 @@ import {
   parkStillHolds, staleTerminalRetriggerAvailable, terminalContradiction, terminalReasonForRunReason,
 } from './truth.ts';
 
-function park(reason: ParkReason, detail: string): SupervisorAction {
+/** The park arm of `SupervisorAction`, named so `park()` below returns the MEMBER rather than
+ * the whole union — a union return type widens `{ ...park(…), recordedReason }` into "some
+ * action", which the compiler then rejects. */
+type ParkAction = Extract<SupervisorAction, { kind: 'park' }>;
+
+function park(reason: ParkReason, detail: string): ParkAction {
   return { kind: 'park', reason, detail };
 }
 
@@ -129,7 +134,15 @@ export function decide(o: SupervisorObservation): SupervisorAction {
         detail: 'the park condition no longer holds on disk; re-observing and continuing',
       };
     }
-    return park('resume_blocked', 'NEEDS_OWNER.md is present; resume is blocked until the owner deletes it');
+    // F-F1: the park still holds, so this refuses exactly as before — but a refusal is a refusal
+    // to resume the EXISTING park, never a new park about a new condition. The reason that park
+    // was recorded with travels with the action so the edge can leave it standing in
+    // `supervisor/status.json`; a later restart re-checks THAT condition against the disk, and
+    // overwriting it with `resume_blocked` disabled G3 for every restart after the first.
+    const refusal = park(
+      'resume_blocked', 'NEEDS_OWNER.md is present; resume is blocked until the owner deletes it',
+    );
+    return o.parkedTerminal === null ? refusal : { ...refusal, recordedReason: o.parkedTerminal.reason };
   }
   // P3: a STOP file honoured immediately, every tick.
   if (o.stopFilePresent) {

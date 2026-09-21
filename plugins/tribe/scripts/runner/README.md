@@ -1044,7 +1044,7 @@ comments; first match wins)
 | Observation | Action |
 | --- | --- |
 | A live foreign supervisor holds `.supervisor.lock` (P1) | `park(resume_blocked)` — never a second supervisor. |
-| `NEEDS_OWNER.md` is present (P2) | The supervisor re-observes before it refuses: a park whose stated condition the disk has already falsified yields `supersede_park` (`park_superseded` in `events.jsonl`, the file renamed to `NEEDS_OWNER.md.superseded-<ts>`, `counters.staleTerminals` incremented, the campaign continuing); a park that still holds yields `park(resume_blocked)` — resume stays blocked until the owner deletes it. |
+| `NEEDS_OWNER.md` is present (P2) | The supervisor re-observes before it refuses: a park whose stated condition the disk has already falsified yields `supersede_park` (`park_superseded` in `events.jsonl`, the file renamed to `NEEDS_OWNER.md.superseded-<ts>`, `counters.staleTerminals` incremented, the campaign continuing); a park that still holds yields `park(resume_blocked)` — resume stays blocked until the owner deletes it. A refusal is a refusal to resume the *existing* park, not a new park about a new condition, so it leaves `status.json`'s `terminal.reason` naming the condition the park was originally recorded with (the refusal itself is `lastAction: park:resume_blocked` and a `park` line in `events.jsonl`). That recorded condition is exactly what the NEXT restart re-checks against `runs/`, so a contradiction that only appears after several refused restarts is still detected. |
 | `STOP` file present (P3) | `exit(done:stop_requested)`. |
 | A watchdog is already live (P4) | `await_watchdog` — adopted, never relaunched. |
 | No watchdog has run yet this invocation (row 27) | `run_watchdog` over the whole campaign. |
