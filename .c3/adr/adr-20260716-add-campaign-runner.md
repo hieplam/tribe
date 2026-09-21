@@ -1,6 +1,6 @@
 ---
 id: adr-20260716-add-campaign-runner
-c3-seal: f2f809c1510ce52a8d7888408472b55cbfd98f8c4b0f0bbbd391b65c3308c44a
+c3-seal: 0f1dc5be873d62676dead63826b0390dc8291ef4855f159939594661bcc7595c
 title: add-campaign-runner
 type: adr
 goal: |-
@@ -123,7 +123,7 @@ self-contradictory at rest.
 
 | Surface | Behavior | Evidence |
 | --- | --- | --- |
-| verifyShipped (D3 six-point replay) | Rejects an agent's SHIPPED claim unless the PR is merged, the merge commit has exactly 2 parents (squash/rebase fails — this is what makes the no-squash rule mechanical), the sha is an ancestor of origin/master, checks are green, the worktree/branch are gone, and the schema guard is clean | plugins/tribe/scripts/runner/verify.test.ts |
+| verifyShipped (D3 six-point replay) | Rejects an agent's SHIPPED claim unless the PR is merged, the merge commit has exactly 2 parents (squash/rebase fails — this is what makes the no-squash rule mechanical), the sha is an ancestor of origin/master, checks are green, the worktree/branch are gone, and the schema guard is clean over the CARD BRANCH's OWN commits — git diff <mergeSha>^1...<mergeSha>^2 on the configured schema-lock paths, never baseSha..<remote>/<baseBranch>, which diffed the base branch's own concurrent movement and so failed in-flight cards for locked files they had never touched. That range is also what makes the 2-parent requirement above enforced rather than merely asserted: the guard derives its range from the merge commit's two parents and FAILS CLOSED — passed: false with an honest detail, never a silent pass — on an unknown mergeSha, a parent lookup that could not be read at all, a parent count that is not exactly 2 (a squash or rebase-merge leaves no such anchor), or a git diff that itself exits non-zero. Under-checking is a bug; over-checking by refusing on an undecidable range is by design | plugins/tribe/scripts/runner/core/verify.test.ts — both directions on REAL git repositories: master-side locked-path movement PASSES, a card-branch-authored locked-path commit FAILS |
 | bun test in plugins/tribe/scripts/runner/ | 114 tests over the loop, resume matrix, escalation, verification, D6 retry/waiver policy, and CLI; all seams mocked, no network | bun test → 114 pass / 0 fail |
 | bunx tsc --noEmit | Type-checks the pinned §D1 option block against the SDK's real Options type — a wrong option shape fails the gate rather than failing at runtime | exit 0 |
 | Stateless-capability grep | No repo name, absolute path, model name, or campaign value in the runner source | grep -rniE "ai-dict |

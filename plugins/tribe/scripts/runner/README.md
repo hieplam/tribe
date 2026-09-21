@@ -186,7 +186,7 @@ byte-identical.
 | `planning` | `{ mode: "shaman" \| "warchief-fanout" }` | **optional** | Records which Stage-A authorship mode produced this campaign's specs/plans (design §O2) — `"shaman"` when the orchestrating session authored the How docs itself, `"warchief-fanout"` when it dispatched one planning-Warchief per card — so a session resuming the campaign later knows without re-deriving it. Not declared in `state.ts`'s `CampaignStateSchema`/`CardSchema` at all: both use `z.looseObject`, which preserves unknown top-level keys through a load→save cycle instead of stripping them (the same property that keeps the v1 byte-identical round-trip true), so `planning` — and any future campaign metadata a caller invents — survives even though the runner itself never reads or interprets it. |
 | `mergePolicy` | `string` | yes | Free-form; carried through into every executor brief, not itself interpreted by this runner. |
 | `sequence` | `string[]` | yes | Card ids, in build order. Every id **must** have a matching entry under `cards` — a dangling id is rejected at load (`UndefinedSequenceCardError`). |
-| `schemaLockPaths` | `string[]` | yes (`[]` is valid) | Paths whose diff from a card's `baseSha` must stay empty unless that card's plan front-matter declares `allowsSchemaChange: true` (D3 point 6). The plan is read **after** the merge, and a card may delete its own planning docs as part of its work — a plan that is gone by then simply grants no waiver (the guard still passes on an empty diff, and names the missing plan when it fails); it never crashes the finalise step. Campaign config, never hardcoded (W1). |
+| `schemaLockPaths` | `string[]` | yes (`[]` is valid) | Paths whose diff across the card branch's **own commits** must stay empty unless that card's plan front-matter declares `allowsSchemaChange: true` (D3 point 6; see "The schema guard's range" below for exactly what "own commits" means and why it changed from `baseSha`). The plan is read **after** the merge, and a card may delete its own planning docs as part of its work — a plan that is gone by then simply grants no waiver (the guard still passes on an empty diff, and names the missing plan when it fails); it never crashes the finalise step. Campaign config, never hardcoded (W1). |
 | `docsOnlyPaths` | `string[]` | yes (`[]` is valid) | Path prefixes that count as "docs-only" for the D6 flake waiver. **Fails CLOSED: an empty list means nothing counts as docs-only, so a code diff never auto-waives a red check.** Campaign config, never hardcoded (W1). |
 | `ownerOnlyEscalations` | `string[]` | yes (`[]` is valid) | Trigger names that always escalate to the human owner, regardless of what an executor session claims (D5). Campaign config, never hardcoded (W1). |
 | `cards` | `Record<string, Card>` | yes | Every card in the campaign, keyed by its id. |
@@ -196,6 +196,26 @@ three are safety config that a Stage-A author must set deliberately, carried **i
 file rather than baked into this capability — an author who leaves `docsOnlyPaths` empty gets
 the safe (fails-closed) default, not a silent free pass for code diffs.
 
+#### The schema guard's range: the card branch's own commits, not `baseSha`
+
+The guard used to diff `baseSha..<remote>/<baseBranch>` — literally "every commit the base branch
+gained since the card started" — so any concurrent PR that touched a locked path while the card
+was in flight failed the guard for every other in-flight card, whether or not that card's own work
+went near a locked path (a real incident: PR #160 was flagged for five viewer files it never
+touched, because two unrelated master-side PRs had landed on the base branch first). The guard now
+diffs `<mergeSha>^1...<mergeSha>^2` instead — the merge commit's own two parents, i.e. exactly the
+commits the card branch authored (or absorbed from a sub-branch it merged in), never anything the
+base branch moved. This range is derived, not stored: `mergeSha` is read fresh from the card's
+own record at verify time and its parents are looked up then, so `baseSha` plays no part in this
+check any more.
+
+The guard **fails closed** whenever that range cannot be determined — an unknown `mergeSha`, a
+merge commit whose parent count isn't exactly 2 (a squash or a rebase merge leaves no such
+anchor), a parent lookup that itself couldn't be read, or a `git diff` that exits non-zero — it
+reports the guard as failed with an honest reason rather than silently passing. Under-checking
+(missing a real locked-path change) is a bug; over-checking by refusing on an undecidable range is
+by design.
+
 ### Per-card fields (`cards.<cardId>`)
 
 | Field | Type | Required | Meaning |
@@ -204,7 +224,7 @@ the safe (fails-closed) default, not a silent free pass for code diffs.
 | `spec` | `string \| null` | yes (nullable) | Path (relative to `--repo`) to the card's spec file. Missing on disk (or `null`) when the card is next up triggers `PLANNING_NEEDED`, which the loop escalates. Resolved against `--repo`'s **working tree**, so if that checkout is parked on another ref (a detached HEAD at a release tag, say) every card reads as missing; the escalation — and `--dry-run`'s `planningNeeded.note` — then names the checkout and the `git -C <repo> checkout <base>` that restores it. |
 | `plan` | `string \| null` | yes (nullable) | Same, for the plan file. |
 | `branch` | `string \| null` | yes (nullable) | The card's git branch, once work starts. `null` at authoring time — this is exactly what makes the D4 resume matrix classify a freshly-authored card `fresh`. The loop fills it in from the card's own PR (`gh pr view --json headRefName`) as soon as a PR number is known, because the executor session picks the branch name itself and never reports it back. |
-| `baseSha` | `string \| null` | yes (nullable) | The commit the card's branch is built from; D3's schema-lock diff is taken from this. `null` at authoring time; the loop records `origin/<baseBranch>` into it immediately **before** spawning the card's session, and never overwrites an existing value (a resumed card keeps the base it originally started from) — except a blind-fresh spawn (no prior session/PR/digest), which always re-stamps it (P11, ruling R3). To retry a card from scratch, use the `reset-card` subcommand below — never hand-edit this field; a hand-reset card that keeps a stale `baseSha` is the exact incident R3 exists to prevent. |
+| `baseSha` | `string \| null` | yes (nullable) | The commit the card's branch is built from. **No longer where D3's schema-lock diff is taken from** — see "The schema guard's range" below; `baseSha` is still recorded and still used elsewhere (e.g. as the anchor a hand-reset card must not keep stale, per R3 below). `null` at authoring time; the loop records `origin/<baseBranch>` into it immediately **before** spawning the card's session, and never overwrites an existing value (a resumed card keeps the base it originally started from) — except a blind-fresh spawn (no prior session/PR/digest), which always re-stamps it (P11, ruling R3). To retry a card from scratch, use the `reset-card` subcommand below — never hand-edit this field; a hand-reset card that keeps a stale `baseSha` is the exact incident R3 exists to prevent. |
 | `pr` | `number \| null` | yes (nullable) | The card's PR number, once opened. `null` at authoring time. |
 | `mergeSha` | `string \| null` | yes (nullable) | The merge commit sha, once shipped. `null` until shipped. |
 | `sessionId` | `string \| null` | yes (nullable) | The SDK-assigned executor session id, written the instant a session starts (crash-safe write, before anything else). `null` at authoring time. |
@@ -289,6 +309,26 @@ runs, never discovered card-by-card mid-campaign:
 | `UndefinedSequenceCardError` | `sequence` names a card id with no matching entry under `cards` (e.g. a typo). |
 | `UndefinedDependencyCardError` | A card's `dependsOn` names an id with no matching entry under `cards`. |
 | `CircularDependencyError` | The `dependsOn` graph contains a cycle — a direct self-dependency (`A -> A`) or an indirect one (`A -> B -> A`). The error carries the full cycle path. |
+
+### The supervisor's additional input: `runs/<runId>/run.json`
+
+`campaign-state.json` above is not the only state a supervisor pass consults. On every
+observation cycle it also lists `<home>/runs/` and reads each `run.json` it finds — the same
+schema the "Run record" section above documents in full, written by the plain runner and never by
+the supervisor itself — and narrows every record it can parse down to three questions:
+
+| Fields read | What the supervisor concludes |
+| --- | --- |
+| `endedAt` and `pid` | **Liveness** — `endedAt === null` and the recorded `pid` is still alive (`isProcessAlive`) means this run is still going. |
+| `endedAt` and `exitCode` | **Finalisation** — both present means this run is over, and its outcome is on disk whether or not any watchdog was watching when it happened. |
+| `reason` | **The run's own exit reason** — `run.json`'s `reason` is spelled in `core/report.ts`'s `ExitReason` vocabulary (success is `done`); when the supervisor needs to act on it, it is translated into the watchdog's own terminal-reason vocabulary first (success there is `runner_done`) rather than substituted raw, and an unrecognised reason is never passed through. |
+
+A `run.json` that is missing, unreadable, or fails to parse degrades to "no entry for this run"
+rather than throwing — one bad record never takes down the tick loop. This is how a supervisor
+pass tells a watchdog terminal it published earlier apart from what has actually happened on disk
+since; see the "Supervisor" section's decision table below, and the doorbell's automatic path in
+`orchestrate-campaign/SKILL.md`, for the park-supersession behaviour this observation makes
+possible.
 
 ## `reset-card` subcommand (P11 fix-list follow-up)
 
@@ -991,7 +1031,9 @@ written by the supervisor):
   spec §11) — the owner-facing park artifact: park reason, what happened, the escalated card's
   question (verbatim), what was already tried, what unblocks it, and the run's ledger lines.
   **Deleting it is the owner's explicit "I have handled it" signal** — row P2 refuses to resume
-  while it exists.
+  while it exists *and the park it records still holds*. A runner-liveness park the disk has
+  since falsified is superseded by the supervisor itself rather than obeyed, leaving
+  `NEEDS_OWNER.md.superseded-<ts>` behind as the trail (see the decision table below).
 - **an escalation file renamed** `<home>/escalations/<card>.md` → `.resolved-R<n>` — performed
   by the supervisor only after a ruling is verified against `answers.md` (§5.5), never by a
   session.
@@ -1002,7 +1044,7 @@ comments; first match wins)
 | Observation | Action |
 | --- | --- |
 | A live foreign supervisor holds `.supervisor.lock` (P1) | `park(resume_blocked)` — never a second supervisor. |
-| `NEEDS_OWNER.md` is present (P2) | `park(resume_blocked)` — resume stays blocked until the owner deletes it. |
+| `NEEDS_OWNER.md` is present (P2) | The supervisor re-observes before it refuses: a park whose stated condition the disk has already falsified yields `supersede_park` (`park_superseded` in `events.jsonl`, the file renamed to `NEEDS_OWNER.md.superseded-<ts>`, `counters.staleTerminals` incremented, the campaign continuing); a park that still holds yields `park(resume_blocked)` — resume stays blocked until the owner deletes it. A refusal is a refusal to resume the *existing* park, not a new park about a new condition, so it leaves `status.json`'s `terminal.reason` naming the condition the park was originally recorded with (the refusal itself is `lastAction: park:resume_blocked` and a `park` line in `events.jsonl`). That recorded condition is exactly what the NEXT restart re-checks against `runs/`, so a contradiction that only appears after several refused restarts is still detected. |
 | `STOP` file present (P3) | `exit(done:stop_requested)`. |
 | A watchdog is already live (P4) | `await_watchdog` — adopted, never relaunched. |
 | No watchdog has run yet this invocation (row 27) | `run_watchdog` over the whole campaign. |

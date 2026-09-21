@@ -660,6 +660,47 @@ be miscounted as one of the two bounded auto-answer rounds. The marker exists so
 reports can say "2 of 2 auto-answer rounds used, plus one owner ruling" honestly, rather than
 reading as a forbidden third auto-answer.
 
+### The automatic path — the supervisor can supersede its own stale park
+
+The manual procedure above (steps 1-6, including step 5's deletion of `NEEDS_OWNER.md`) is always
+valid and stays exactly as written — both paths coexist. But on every observation cycle, starting
+from the moment you start or restart the supervisor, it re-checks the park it itself is sitting
+behind, before deciding it is blocked. If that park was recorded for reason `stalled` (a claim
+that the runner was still alive) and the disk no longer supports that claim — the run the watchdog
+terminal named has since finished, or a newer run is alive and this campaign's one-shot
+re-observation budget has not already been spent on this — the supervisor treats the park as
+**superseded**, not obeyed, and continues the campaign on its own. No doorbell wake-up happens for
+that park at all; nobody has to delete anything.
+
+What you will see on disk when this fires, so the two paths are easy to tell apart:
+
+- `<campaign-home>/supervisor/events.jsonl` gains a `park_superseded` line, carrying the prior park
+  reason and the disk fact that overrode it;
+- `<campaign-home>/NEEDS_OWNER.md` is gone, but `<campaign-home>/NEEDS_OWNER.md.superseded-<ISO
+  timestamp>` exists in its place — the file is **renamed, never deleted**, so both the owner's
+  original document and the trail that overrode it survive;
+- `<campaign-home>/supervisor/status.json`'s `counters.staleTerminals` has gone up by one;
+- the supervisor keeps running instead of exiting `20` — there is no `NEEDS_OWNER.md` for the
+  doorbell session above to relay.
+
+**This is bounded, not a blanket override.** Only a `stalled` park — a claim about the runner's
+own liveness — can ever be superseded this way; every other park reason (an owner-only escalation,
+a `too_hard` marker, and so on) is not something a fact about a run's liveness could ever falsify,
+so it keeps refusing exactly as before until the owner deletes `NEEDS_OWNER.md` themselves. And
+even a `stalled` park is only superseded when the supervisor has an actual remedy left: a run that
+has since finalised always supersedes it, but a still-alive newer run only supersedes it while the
+one-shot re-observation budget for this campaign is unspent — once that budget is gone, the
+original park stands and step 1 above (starting the supervisor) will simply park again.
+**A park whose stated condition is still genuinely true is still refused, exactly as before — that
+is by design, not a gap this leaves open.**
+
+**Restarting more than once does not wear this out.** A restart that refuses (because the park was
+still true at that moment) leaves the park's *original* reason recorded in
+`<campaign-home>/supervisor/status.json`'s `terminal.reason` — the refusal is recorded separately,
+as that file's `lastAction` and as a `park` line in `supervisor/events.jsonl`. So the ordinary
+sequence — you restart, it refuses, and only later does the run finish or a newer one go live —
+still supersedes the park on the restart after that.
+
 ## A campaign can outlive this session
 
 A multi-card campaign can run for hours; the session that triggered it may not still be open
