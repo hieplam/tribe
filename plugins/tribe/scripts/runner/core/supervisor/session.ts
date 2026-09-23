@@ -13,7 +13,7 @@
  * "PURE-except-for-the-one-injected-call" shape `core/session.ts`'s `consumeSession` already
  * uses — every effect (spawn, log, clock via `setTimeout`) arrives through the injected seam.
  */
-import type { HookDecision, SessionMessage } from '../session.ts';
+import { decideScanGuardHook, type HookDecision, type SessionMessage } from '../session.ts';
 import type { SessionKind } from './model.ts';
 import type { LedgerEntryUsage } from './model.ts';
 import { buildContainmentHook } from './permit.ts';
@@ -43,6 +43,15 @@ const CLOSING_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash', 
  * (above) because `closing` legitimately runs `verify-shipped` and lands the governance PR
  * (§5.4's named exception); this list only removes the tools nothing in Stage D needs. */
 const CLOSING_DISALLOWED_TOOLS = ['Task', 'Agent', 'WebFetch', 'WebSearch', 'Monitor', 'ScheduleWakeup'];
+
+/** The scan wall (issue #163; card D2/D3): the executor's own `decideScanGuardHook`, reused —
+ * never a second predicate — as its own PreToolUse entry. A supervisor session is the unattended
+ * case the wall exists for: a `find /` there raises an OS folder-consent prompt nobody is present
+ * to answer. Only this hook is added; the executor's backgrounding, wait-tool and merge-gate
+ * hooks are deliberately NOT ported (card D2). */
+const SCAN_GUARD_ENTRY = {
+  hooks: [(hookInput: unknown) => Promise.resolve(decideScanGuardHook(hookInput))],
+};
 
 /** spec §5.1's envelope, for the three one-shot kinds. Deliberately has NO `resume` field at
  * all — not even optional — because G3 says every one-shot session starts from a rendered brief,
@@ -137,6 +146,9 @@ export function buildOneShotOptions(
     if (config.verifyShippedPluginDir !== undefined) {
       options.plugins = [{ type: 'local', path: config.verifyShippedPluginDir }];
     }
+    // Still NO containment hook — `closing` legitimately writes the repo (§5.4). The scan wall is
+    // not containment: it refuses only a filesystem- or home-rooted `find`.
+    options.hooks = { PreToolUse: [SCAN_GUARD_ENTRY] };
     return options;
   }
 
@@ -148,9 +160,14 @@ export function buildOneShotOptions(
     // no repo access at all (§5.3).
     options.additionalDirectories = [config.repoRoot];
   }
-  // "The ONLY enforcement there is" (S-P12) — permit.ts's buildContainmentHook, the impure edge.
+  // "The ONLY enforcement there is" (S-P12) — permit.ts's buildContainmentHook, the impure edge —
+  // stays first; the scan wall runs alongside it as defence in depth (card D2), since this
+  // envelope already denies Bash.
   options.hooks = {
-    PreToolUse: [{ hooks: [buildContainmentHook(config.homeDir, { realpath: config.realpath })] }],
+    PreToolUse: [
+      { hooks: [buildContainmentHook(config.homeDir, { realpath: config.realpath })] },
+      SCAN_GUARD_ENTRY,
+    ],
   };
   return options;
 }

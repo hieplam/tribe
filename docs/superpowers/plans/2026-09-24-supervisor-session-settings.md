@@ -456,9 +456,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && command grep -c "isF
 Expected: all pass, `tsc` exit 0, `40 passed, 0 failed`, and the last count `0` (the predicate is
 imported by name via `decideScanGuardHook`, never re-declared here).
 
-- [ ] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
   (`Tribe-Task: 4/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 4 complete
+- [x] Task 4 complete
 
 ---
 
