@@ -578,9 +578,9 @@ Expected: all pass, `tsc` exit 0, `40 passed, 0 failed`, and the real permission
 `N passed, 0 failed` — its `closing` probe (Write + `git rev-parse` via Bash, empty
 `permissionDenials`) must stay green, proving the grant hook does not deny Stage D's own tools.
 
-- [ ] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
   (`Tribe-Task: 5/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 5 complete
+- [x] Task 5 complete
 
 ---
 

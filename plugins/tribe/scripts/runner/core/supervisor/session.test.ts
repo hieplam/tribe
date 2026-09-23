@@ -343,4 +343,12 @@ describe('the scan wall is wired into every supervisor envelope (issue #163, G2)
     const decisions = await wiredDecisions(options, { tool_name: 'Write', tool_input: { file_path: '/abs/repo/src/touched.txt' } });
     expect(decisions.every((d) => d.hookSpecificOutput?.permissionDecision !== 'deny')).toBe(true);
   });
+
+  test('closing: the wired hooks deny an un-granted tool (Workflow) and allow Bash', async () => {
+    const options = buildOneShotOptions('closing', fixtureConfig(), new AbortController());
+    const denied = await wiredDecisions(options, { tool_name: 'Workflow', tool_input: {} });
+    expect(denied.some((d) => d.hookSpecificOutput?.permissionDecision === 'deny')).toBe(true);
+    const allowed = await wiredDecisions(options, { tool_name: 'Bash', tool_input: { command: 'git status' } });
+    expect(allowed.every((d) => d.hookSpecificOutput?.permissionDecision !== 'deny')).toBe(true);
+  });
 });

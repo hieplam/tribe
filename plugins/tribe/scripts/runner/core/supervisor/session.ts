@@ -16,7 +16,7 @@
 import { decideScanGuardHook, type HookDecision, type SessionMessage } from '../session.ts';
 import type { SessionKind } from './model.ts';
 import type { LedgerEntryUsage } from './model.ts';
-import { buildContainmentHook } from './permit.ts';
+import { buildContainmentHook, decideClosingGrantHook } from './permit.ts';
 
 /** spec §5.2/§5.3: the tool grant for a `ruling`/`ratify` session. `closing` (§5.4) carries its
  * OWN, wider grant — R11 (Task 20), below `CLOSING_ALLOWED_TOOLS`/`CLOSING_DISALLOWED_TOOLS` —
@@ -148,7 +148,14 @@ export function buildOneShotOptions(
     }
     // Still NO containment hook — `closing` legitimately writes the repo (§5.4). The scan wall is
     // not containment: it refuses only a filesystem- or home-rooted `find`.
-    options.hooks = { PreToolUse: [SCAN_GUARD_ENTRY] };
+    options.hooks = {
+      PreToolUse: [
+        // The grant, enforced (card supervisor-session-settings, ruling R1): a host allow rule in a
+        // loaded settings tier can never add a tool to CLOSING_ALLOWED_TOOLS.
+        { hooks: [(hookInput: unknown) => Promise.resolve(decideClosingGrantHook(CLOSING_ALLOWED_TOOLS, hookInput))] },
+        SCAN_GUARD_ENTRY,
+      ],
+    };
     return options;
   }
 

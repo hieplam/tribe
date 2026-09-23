@@ -4,6 +4,7 @@
 // `ruling`/`ratify` session); one escaped write is the defect.
 import { expect, test, describe } from 'bun:test';
 import { buildContainmentHook, containPath, decideContainmentHook } from './permit.ts';
+import { decideClosingGrantHook } from './permit.ts';
 
 const HOME = '/abs/home/.tribe/key/campaigns/slug';
 const ev = (tool: string, input: Record<string, unknown>) => ({ tool_name: tool, tool_input: input });
@@ -179,4 +180,28 @@ describe('buildContainmentHook — the impure edge (injected realpath, the symli
     const decision = await hook(null);
     expect(decision.hookSpecificOutput?.permissionDecision).toBe('deny');
   });
+});
+
+describe('decideClosingGrantHook — closing\'s grant, enforced (card supervisor-session-settings, R1)', () => {
+  const GRANT = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash', 'Skill'];
+
+  for (const tool of GRANT) {
+    test(`allows granted tool ${tool}`, () => {
+      expect(decideClosingGrantHook(GRANT, { tool_name: tool, tool_input: {} })).toEqual({});
+    });
+  }
+
+  for (const tool of ['Workflow', 'TaskCreate', 'CronCreate', 'SendMessage', 'ToolSearch', 'WebFetch', 'mcp__x__y']) {
+    test(`denies un-granted tool ${tool}, naming the grant`, () => {
+      const d = decideClosingGrantHook(GRANT, { tool_name: tool, tool_input: {} });
+      expect(d.hookSpecificOutput?.permissionDecision).toBe('deny');
+      expect(d.hookSpecificOutput?.permissionDecisionReason).toContain('Read, Grep, Glob, Write, Edit, Bash, Skill');
+    });
+  }
+
+  for (const malformed of [undefined, null, {}, { tool_name: 42 }, { tool_name: '' }]) {
+    test(`denies malformed input ${JSON.stringify(malformed)} (fail closed)`, () => {
+      expect(decideClosingGrantHook(GRANT, malformed).hookSpecificOutput?.permissionDecision).toBe('deny');
+    });
+  }
 });

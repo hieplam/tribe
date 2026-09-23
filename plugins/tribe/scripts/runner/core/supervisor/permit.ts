@@ -143,3 +143,20 @@ export function buildContainmentHook(
     return decideContainmentHook(homeDir, { tool_name: toolName, tool_input: { file_path: resolvedPath } });
   };
 }
+
+/** PURE (card supervisor-session-settings, ruling R1): enforces `closing`'s explicit grant. `closing`
+ * loads the user/project/local settings tiers, and any of them may carry a `permissions.allow`
+ * rule that would auto-approve a tool outside the grant (MEASURED: `Workflow` ran once such a
+ * rule was loaded). A PreToolUse deny beats an allow rule, so this hook is what keeps the grant
+ * exactly the listed tools on every host. Fails CLOSED: a malformed or unnamed tool denies. The
+ * grant arrives as an argument so this module never imports session.ts (which imports it). */
+export function decideClosingGrantHook(grantedTools: readonly string[], input: unknown): HookDecision {
+  const event = (input ?? {}) as { tool_name?: unknown };
+  const toolName = typeof event.tool_name === 'string' ? event.tool_name : '';
+  const isGranted = toolName !== '' && grantedTools.includes(toolName);
+  if (isGranted) return {};
+  return deny(
+    `This closing session is not granted this tool; only ${grantedTools.join(', ')} are ` +
+      'permitted, and a settings-file allow rule cannot extend that grant.',
+  );
+}
