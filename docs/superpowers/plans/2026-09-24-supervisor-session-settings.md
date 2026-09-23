@@ -208,9 +208,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && bash plugins/tribe/s
 Expected: all `cli/main.test.ts` tests pass, `tsc` exit 0, and the double suite prints
 `40 passed, 0 failed`.
 
-- [ ] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
   (`Tribe-Task: 2/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 2 complete
+- [x] Task 2 complete
 
 ---
 

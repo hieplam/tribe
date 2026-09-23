@@ -601,18 +601,18 @@ export function buildSupervisorLoopConfig(
 
 /** Task 17 (card `campaign-supervisor`, `fixtures-mirror-reality.md`): infers which of the
  * three one-shot kinds a spawn is for, FROM THE OPTIONS THEMSELVES — `OneShotSpawnParams`
- * (`core/supervisor/session.ts`) carries only `prompt`/`options`, no `kind` field, and this
- * seam exists precisely so a real subprocess double can stand in for `spawnSession` without
- * `core/supervisor/loop.ts` (outside this task's fence) ever being asked to pass one.
- * `buildOneShotOptions`'s own branches (`session.ts`) make the inference exact, not a guess:
- * `closing` is the ONLY kind whose `settingSources` is non-empty (§5.4's named exception); of
- * the remaining two, only `ruling` carries `additionalDirectories` (repo read access, §5.2) —
- * `ratify` never does (§5.3: "no repo access at all"). Exercised end-to-end by
- * `tests/test-supervisor-e2e.sh`; deliberately not unit-tested, like the rest of this
- * composition root. */
+ * (`core/supervisor/session.ts`) carries only `prompt`/`options`, no `kind` field. The inference
+ * keys on the GRANT, which is fixed per kind, never on `settingSources`, which is the same
+ * `['user','project','local']` for all three (card supervisor-session-settings, G3):
+ * `closing` is the only kind granted `Bash` (`CLOSING_ALLOWED_TOOLS`); of the other two, only
+ * `ruling` carries `additionalDirectories` (repo read access, §5.2) — `ratify` never does
+ * (§5.3: "no repo access at all"). Unit-tested in `cli/main.test.ts` against the real
+ * `buildOneShotOptions` output for every kind. */
 export function inferOneShotKind(options: OneShotSessionOptions): SessionKind {
-  if (options.settingSources.length > 0) return 'closing';
-  return options.additionalDirectories !== undefined ? 'ruling' : 'ratify';
+  const isGrantedShell = options.allowedTools?.includes('Bash') === true;
+  if (isGrantedShell) return 'closing';
+  const hasRepoReadAccess = options.additionalDirectories !== undefined;
+  return hasRepoReadAccess ? 'ruling' : 'ratify';
 }
 
 // ---------------------------------------------------------------------------------------
