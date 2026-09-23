@@ -177,6 +177,15 @@ describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () =>
       expect(options.maxTurns).toBe(17);
     }
   });
+
+  // Card supervisor-session-settings (G3): the executor path's tier list, for every kind — the
+  // 'user' tier is what registers ~/.claude/settings.json's enabledPlugins (the C3 plugin).
+  test('settingSources is ["user","project","local"] for every kind (parity with core/session.ts)', () => {
+    for (const kind of ['ruling', 'ratify', 'closing'] as SessionKind[]) {
+      const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
+      expect(options.settingSources).toEqual(['user', 'project', 'local']);
+    }
+  });
 });
 
 describe('runOneShotSession — the message stream, log path, and typed result (Task 13, Step 3)', () => {

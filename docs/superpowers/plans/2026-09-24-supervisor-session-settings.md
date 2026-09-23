@@ -307,9 +307,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && command grep -n "\['
 ```
 Expected: all pass, `tsc` exit 0, `40 passed, 0 failed`, and `no stale tier claim`.
 
-- [ ] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
   (`Tribe-Task: 3/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 3 complete
+- [x] Task 3 complete
 
 ---
 
