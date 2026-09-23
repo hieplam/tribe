@@ -21,8 +21,10 @@ import { buildContainmentHook, decideClosingGrantHook } from './permit.ts';
 /** spec §5.2/§5.3: the tool grant for a `ruling`/`ratify` session. `closing` (§5.4) carries its
  * OWN, wider grant — R11 (Task 20), below `CLOSING_ALLOWED_TOOLS`/`CLOSING_DISALLOWED_TOOLS` —
  * because no loaded settings tier grants `closing` anything by itself (spec §5.4, R11): an
- * un-granted `closing` session cannot run headless at all. */
-const JUDGMENT_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit'];
+ * un-granted `closing` session cannot run headless at all. `Skill` by owner ruling R2 (card
+ * supervisor-session-settings), so `/c3` loads its content here; its CLI still cannot run,
+ * because this envelope has no `Bash` (`JUDGMENT_DISALLOWED_TOOLS`) — a known, accepted limit. */
+const JUDGMENT_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Skill'];
 
 /** spec §5.1: no shell, no subagents, no network, and no wait-tool for a ruling/ratify session —
  * the same wall `core/session.ts`'s executor envelope holds (a one-shot session that arms a

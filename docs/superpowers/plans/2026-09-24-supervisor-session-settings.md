@@ -711,9 +711,9 @@ Expected: all pass; `tsc` exit 0; `40 passed, 0 failed`; the real permission tes
 the last command prints exactly two lines — the old and new `JUDGMENT_ALLOWED_TOOLS` — proving no
 other grant constant changed since the base.
 
-- [ ] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
   (`Tribe-Task: 6/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 6 complete
+- [x] Task 6 complete
 
 ---
 

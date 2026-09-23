@@ -35,8 +35,8 @@ const CONTAINMENT_DENIED_REASON =
 // Write/Edit whose resolved target escaped the campaign home — so it gets its own message, never
 // borrowing `CONTAINMENT_DENIED_REASON`.
 const NOT_GRANTED_REASON =
-  'This judgment session is not granted this tool; only Read, Grep, Glob and Write/Edit under ' +
-  'the campaign home are permitted.';
+  'This judgment session is not granted this tool; only Read, Grep, Glob, Skill and Write/Edit ' +
+  'under the campaign home are permitted.';
 
 function deny(reason: string = CONTAINMENT_DENIED_REASON): HookDecision {
   return {
@@ -62,19 +62,25 @@ export function containPath(target: string, homeDir: string): boolean {
 /** PURE: the containment decision table. Fails CLOSED by default — the shapes ever ALLOWED are
  * `Read`/`Grep`/`Glob` (any location: spec §5.1's allowedTools row grants all three to
  * ruling/ratify; they are read-only, so — same as `Read` — no `path`/`file_path` argument of
- * theirs can ever write, hence no containment check applies to them) and a `Write`/`Edit` whose
- * `tool_input.file_path` passes `containPath`. Every other tool — including `Bash`, which is also
- * on `disallowedTools`, denied here too as the ordinary fail-closed default rather than a
- * special-cased carve-out — and every malformed/absent event denies rather than throwing, with
- * `NOT_GRANTED_REASON` (never the write-containment message, which would misstate the reason).
- * This table operates on `file_path` LEXICALLY (no filesystem access): it is what
- * `buildContainmentHook` below calls, once for the fast Read/Grep/Glob/Bash/malformed cases and
- * once more with a symlink-RESOLVED `file_path` for `Write`/`Edit`. */
+ * theirs can ever write, hence no containment check applies to them), `Skill` (owner ruling R2 —
+ * loading a skill's content writes nothing, so it needs no path check either), and a
+ * `Write`/`Edit` whose `tool_input.file_path` passes `containPath`. Every other tool — including
+ * `Bash`, which is also on `disallowedTools`, denied here too as the ordinary fail-closed default
+ * rather than a special-cased carve-out — and every malformed/absent event denies rather than
+ * throwing, with `NOT_GRANTED_REASON` (never the write-containment message, which would misstate
+ * the reason). This table operates on `file_path` LEXICALLY (no filesystem access): it is what
+ * `buildContainmentHook` below calls, once for the fast Read/Grep/Glob/Skill/Bash/malformed cases
+ * and once more with a symlink-RESOLVED `file_path` for `Write`/`Edit`. */
 export function decideContainmentHook(homeDir: string, input: unknown): HookDecision {
   const event = (input ?? {}) as { tool_name?: unknown; tool_input?: unknown };
   const toolName = typeof event.tool_name === 'string' ? event.tool_name : '';
 
   if (toolName === 'Read' || toolName === 'Grep' || toolName === 'Glob') return {};
+
+  // Owner ruling R2: loading a skill's content writes nothing, so Skill needs no path check. A
+  // tool the loaded skill then asks for still comes through THIS table and is judged on its own.
+  const isSkillLoad = toolName === 'Skill';
+  if (isSkillLoad) return {};
 
   if (toolName === 'Write' || toolName === 'Edit') {
     const toolInput = (event.tool_input ?? {}) as { file_path?: unknown };

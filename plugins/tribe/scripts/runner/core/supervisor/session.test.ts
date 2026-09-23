@@ -181,6 +181,27 @@ describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () =>
       expect(options.settingSources).toEqual(['user', 'project', 'local']);
     }
   });
+
+  // Owner ruling R2: JUDGMENT_ALLOWED_TOOLS gains Skill — and ONLY Skill.
+  test('ruling and ratify are granted the old five tools plus Skill, and nothing else', () => {
+    for (const kind of ['ruling', 'ratify'] as SessionKind[]) {
+      const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
+      expect(options.allowedTools).toEqual(['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Skill']);
+      expect(options.disallowedTools).toContain('Bash');
+    }
+  });
+
+  for (const kind of ['ruling', 'ratify'] as SessionKind[]) {
+    test(`${kind}: through the WIRED hooks, Skill passes while Bash and an out-of-home Write are refused`, async () => {
+      const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
+      const skill = await wiredDecisions(options, { tool_name: 'Skill', tool_input: { skill: 'c3' } });
+      expect(skill.every((d) => d.hookSpecificOutput?.permissionDecision !== 'deny')).toBe(true);
+      const bash = await wiredDecisions(options, { tool_name: 'Bash', tool_input: { command: 'git status' } });
+      expect(bash.some((d) => d.hookSpecificOutput?.permissionDecision === 'deny')).toBe(true);
+      const write = await wiredDecisions(options, { tool_name: 'Write', tool_input: { file_path: '/abs/repo/src/touched.txt' } });
+      expect(write.some((d) => d.hookSpecificOutput?.permissionDecision === 'deny')).toBe(true);
+    });
+  }
 });
 
 describe('runOneShotSession — the message stream, log path, and typed result (Task 13, Step 3)', () => {

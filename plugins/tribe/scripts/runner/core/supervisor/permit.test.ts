@@ -205,3 +205,28 @@ describe('decideClosingGrantHook — closing\'s grant, enforced (card supervisor
     });
   }
 });
+
+// Owner ruling R2 (card supervisor-session-settings): "Allow the Skill tool" — Skill ONLY.
+describe('Skill is granted to ruling/ratify, and nothing else opened (R2)', () => {
+  test('Skill is allowed, with or without args', () => {
+    expect(decideContainmentHook(HOME, ev('Skill', { skill: 'c3' }))).toEqual({});
+    expect(decideContainmentHook(HOME, ev('Skill', { skill: 'c3-skill:c3', args: 'check' }))).toEqual({});
+  });
+
+  for (const tool of ['Bash', 'ToolSearch', 'WebFetch', 'Task', 'Agent', 'Workflow', 'NotebookEdit']) {
+    test(`${tool} is still refused with the not-granted reason`, () => {
+      const d = decideContainmentHook(HOME, ev(tool, { command: 'find / -name x' }));
+      expect(denied(d)).toBe(true);
+      expect(d.hookSpecificOutput?.permissionDecisionReason).toMatch(/not granted/i);
+    });
+  }
+
+  test('a Write outside the campaign home is still refused', () => {
+    expect(denied(decideContainmentHook(HOME, ev('Write', { file_path: '/abs/repo/src/index.ts' })))).toBe(true);
+  });
+
+  test('the not-granted reason names the actual grant, Skill included', () => {
+    const d = decideContainmentHook(HOME, ev('Bash', { command: 'ls' }));
+    expect(d.hookSpecificOutput?.permissionDecisionReason).toContain('Skill');
+  });
+});
