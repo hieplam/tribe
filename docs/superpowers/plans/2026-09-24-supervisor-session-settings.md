@@ -126,9 +126,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && command grep -c '"fi
 ```
 Expected: `3` or more (one JSON block per root), and the RED command above now exits 0.
 
-- [ ] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
+- [x] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
   trailers (`Tribe-Task: 1/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 1 complete
+- [x] Task 1 complete
 
 ---
 
