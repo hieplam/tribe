@@ -7,13 +7,12 @@
 **Execution worktree:** `/Users/hiep/repo/tribe-wt/supervisor-session-settings` (branch
 `feat/supervisor-session-settings`); every absolute path below assumes it.
 
-> **Blocked on two Shaman rulings — spec §10.** This plan is written for the recommended option of
-> each: **Q1 = (b)** (a closing grant hook; Task 5 exists only under that ruling) and **Q2 = (b)**
-> (G1 for `ruling`/`ratify` = registered, no `Unknown skill`, refused by the containment hook).
-> Under Q1 = (a) delete Task 5 and Task 6's Q1 case. Under Q2 = (a) the plan needs an
-> amendment round (a grant change for `ruling`/`ratify`) before it is executable.
+> **Rulings (spec §10; `answers.md` R1/R2):** **R1 (Shaman), Q1 = (b)** — `closing`'s grant is
+> enforced by `decideClosingGrantHook` (Task 5). **R2 (owner), Q2 = (a), "Allow the Skill tool"** —
+> `JUDGMENT_ALLOWED_TOOLS` gains `Skill` and the containment hook allows it, `Skill` only (Task 6);
+> G1 holds as the issue wrote it for all three kinds (Task 7).
 
-Eight tasks, **sequential, one wave, one branch, one PR.** Tasks 3, 4 and 5 all edit
+Nine tasks, **sequential, one wave, one branch, one PR.** Tasks 3, 4, 5 and 6 all edit
 `core/supervisor/session.ts` and its test, so no two tasks have disjoint `owns_files` worth a
 second worktree.
 
@@ -34,12 +33,14 @@ No task touches either, so this plan carries no `allowsSchemaChange` front-matte
 - **TDD is mandatory:** write the failing test, run it, see it fail **for the stated reason**, then
   implement. A test that never failed first proves nothing.
 - **Every commit** carries, in its ONE final paragraph, these lines in this order:
-  `Tribe-Card: supervisor-session-settings`, `Tribe-Task: N/8`, `Campaign: fu-supervisor-settings`,
+  `Tribe-Card: supervisor-session-settings`, `Tribe-Task: N/9`, `Campaign: fu-supervisor-settings`,
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Tick this plan's checkboxes for the
   task in the SAME commit as the code.
-- **The grants stay byte-identical:** `JUDGMENT_ALLOWED_TOOLS`, `JUDGMENT_DISALLOWED_TOOLS`,
+- **The grants stay byte-identical, with ONE owner-ruled exception:** `JUDGMENT_DISALLOWED_TOOLS`,
   `CLOSING_ALLOWED_TOOLS`, `CLOSING_DISALLOWED_TOOLS` (`core/supervisor/session.ts:26-47`) and
   `permissionMode: 'default'` do not change in any task (issue #163 scope fence).
+  **`JUDGMENT_ALLOWED_TOOLS` gains `Skill` by owner ruling R2** (Task 6) — `Skill` only; `Bash`
+  stays in `JUDGMENT_DISALLOWED_TOOLS` and no other tool is added anywhere.
 - **One predicate (card D3):** import `decideScanGuardHook` / `isFilesystemWideScan`; never copy,
   wrap with new logic, or fork them.
 - **Do not touch:** `core/session.ts` (value-import only), `core/metrics/session-hygiene.ts`,
@@ -49,19 +50,21 @@ No task touches either, so this plan carries no `allowsSchemaChange` front-matte
   timeout, never with `timeout`. Real-session commands run with `env -u ANTHROPIC_API_KEY`
   (sessions authenticate via Claude Code login, as `tests/test-supervisor-permission-real.sh`
   already does).
-- **Real sessions cost tokens:** only Tasks 5 and 6 spawn them, only behind `RUN_SESSION_E2E=1`
+- **Real sessions cost tokens:** only Tasks 5, 6 and 7 spawn them, only behind `RUN_SESSION_E2E=1`
   or `TRIBE_REAL_E2E=1`, always on `claude-haiku-4-5-20251001`.
 
 ## Oracle (the contract — no external standard overrides it)
 
 - Issue #163's "What done looks like" checklist, as quoted in the card, is the goal; the card's
   per-goal Oracle section says how each row is proven. **An options-object assertion alone never
-  satisfies G1** — only a real session's transcript does (Task 6).
+  satisfies G1** — only a real session's transcript does (Task 7).
 - **Scan detection:** `isFilesystemWideScan` at `d6cad2f` is the oracle for what a scan is
   (under-detecting is a bug, over-detecting is by design); this card does not change it.
-- **Grant enforcement (Task 5):** a tool name absent from `CLOSING_ALLOWED_TOOLS`, or a malformed
-  event, is denied. Over-denying a tool nothing in Stage D uses is by design; letting one
-  un-granted tool through is the bug.
+- **Grant enforcement (Task 5, R1):** a tool name absent from `CLOSING_ALLOWED_TOOLS`, or a
+  malformed event, is denied. Over-denying a tool nothing in Stage D uses is by design (R1 accepts
+  losing `TaskCreate`/`CronList`/`ListAgents`); letting one un-granted tool through is the bug.
+- **`Skill` in judgment sessions (Task 6, R2):** `Skill` is allowed; every tool that was denied
+  before R2 is still denied. Granting anything besides `Skill` is the bug.
 
 ## Adjudication rule — REFUTED in advance (copied verbatim from the card)
 
@@ -71,9 +74,11 @@ No task touches either, so this plan carries no `allowsSchemaChange` front-matte
   `test-supervisor-kill.sh` inside a loaded full sweep. Each is refuted only if it also fails on base.
 - Findings about the executor path (`core/session.ts`) that #162 already settled.
 
-Also settled by the spec, so not findings: the hand-load of `verify-shipped` is **kept** on purpose
-(spec §4.4); `TaskCreate`/`CronList`/`ListAgents` reaching `closing` today is pre-existing
-(spec §9 F1); the scan wall is `find`-only by its oracle (spec §9 F2).
+Also settled by the spec and the rulings, so not findings: the hand-load of `verify-shipped` is
+**kept** on purpose (spec §4.4); `closing` losing `TaskCreate`/`CronList`/`ListAgents` is accepted
+by R1; `Skill` in `JUDGMENT_ALLOWED_TOOLS` is owner ruling R2, not a fence breach; the C3 CLI not
+running in `ruling`/`ratify` (no `Bash`) is R2's known, accepted limit (spec §4.8); the scan wall
+is `find`-only by its oracle (spec §9 F2).
 
 ---
 
@@ -110,8 +115,8 @@ tables copied verbatim (the plan-time measurement: `~/.tribe` empty; the probe c
 
 > The supervisor-session root G5 speaks about (`<campaign home>/supervisor/sessions/`) is empty on
 > this machine, so its before-count of 0 proves nothing on its own. The ratchet that decides G5 is
-> Task 6's own sessions, run once with the envelope reverted (`before/`) and once as built
-> (`after/`), measured by this same tool in Task 7. Historical totals under `~/.claude/projects`
+> Task 7's own sessions, run once with the envelope reverted (`before/`) and once as built
+> (`after/`), measured by this same tool in Task 8. Historical totals under `~/.claude/projects`
 > can only grow; they are context, not the target.
 
 ### Verify
@@ -122,7 +127,7 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && command grep -c '"fi
 Expected: `3` or more (one JSON block per root), and the RED command above now exits 0.
 
 - [ ] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
-  trailers (`Tribe-Task: 1/8`), ticking this task's boxes in the SAME commit.
+  trailers (`Tribe-Task: 1/9`), ticking this task's boxes in the SAME commit.
 - [ ] Task 1 complete
 
 ---
@@ -204,7 +209,7 @@ Expected: all `cli/main.test.ts` tests pass, `tsc` exit 0, and the double suite 
 `40 passed, 0 failed`.
 
 - [ ] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
-  (`Tribe-Task: 2/8`), ticking this task's boxes in the SAME commit.
+  (`Tribe-Task: 2/9`), ticking this task's boxes in the SAME commit.
 - [ ] Task 2 complete
 
 ---
@@ -303,7 +308,7 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && command grep -n "\['
 Expected: all pass, `tsc` exit 0, `40 passed, 0 failed`, and `no stale tier claim`.
 
 - [ ] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
-  (`Tribe-Task: 3/8`), ticking this task's boxes in the SAME commit.
+  (`Tribe-Task: 3/9`), ticking this task's boxes in the SAME commit.
 - [ ] Task 3 complete
 
 ---
@@ -452,14 +457,15 @@ Expected: all pass, `tsc` exit 0, `40 passed, 0 failed`, and the last count `0` 
 imported by name via `decideScanGuardHook`, never re-declared here).
 
 - [ ] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
-  (`Tribe-Task: 4/8`), ticking this task's boxes in the SAME commit.
+  (`Tribe-Task: 4/9`), ticking this task's boxes in the SAME commit.
 - [ ] Task 4 complete
 
 ---
 
-## Task 5 — CONDITIONAL on spec §10 Q1 = (b): enforce `closing`'s grant with a hook
+## Task 5 — enforce `closing`'s grant with a hook (ruling R1)
 
-**Delete this task (and Task 6's Q1 case) if the Shaman rules Q1 = (a).**
+**Accepted consequence (R1):** `closing` stops running `TaskCreate`, `CronList` and `ListAgents`
+(spec §4.2); the closing stage uses none of them.
 
 **Model: `sonnet`.** A pure allowlist predicate plus wiring.
 
@@ -484,7 +490,7 @@ Add to `permit.test.ts`:
 ```ts
 import { decideClosingGrantHook } from './permit.ts';
 
-describe('decideClosingGrantHook — closing\'s grant, enforced (card supervisor-session-settings, Q1)', () => {
+describe('decideClosingGrantHook — closing\'s grant, enforced (card supervisor-session-settings, R1)', () => {
   const GRANT = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash', 'Skill'];
 
   for (const tool of GRANT) {
@@ -530,7 +536,7 @@ Expected failure: `SyntaxError: Export named 'decideClosingGrantHook' not found`
 In `permit.ts`, below `decideContainmentHook`:
 
 ```ts
-/** PURE (card supervisor-session-settings, Q1): enforces `closing`'s explicit grant. `closing`
+/** PURE (card supervisor-session-settings, ruling R1): enforces `closing`'s explicit grant. `closing`
  * loads the user/project/local settings tiers, and any of them may carry a `permissions.allow`
  * rule that would auto-approve a tool outside the grant (MEASURED: `Workflow` ran once such a
  * rule was loaded). A PreToolUse deny beats an allow rule, so this hook is what keeps the grant
@@ -553,7 +559,7 @@ In `session.ts`, import it alongside `buildContainmentHook`, and make the `closi
 ```ts
     options.hooks = {
       PreToolUse: [
-        // The grant, enforced (card supervisor-session-settings, Q1): a host allow rule in a
+        // The grant, enforced (card supervisor-session-settings, ruling R1): a host allow rule in a
         // loaded settings tier can never add a tool to CLOSING_ALLOWED_TOOLS.
         { hooks: [(hookInput: unknown) => Promise.resolve(decideClosingGrantHook(CLOSING_ALLOWED_TOOLS, hookInput))] },
         SCAN_GUARD_ENTRY,
@@ -573,12 +579,146 @@ Expected: all pass, `tsc` exit 0, `40 passed, 0 failed`, and the real permission
 `permissionDenials`) must stay green, proving the grant hook does not deny Stage D's own tools.
 
 - [ ] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
-  (`Tribe-Task: 5/8`), ticking this task's boxes in the SAME commit.
+  (`Tribe-Task: 5/9`), ticking this task's boxes in the SAME commit.
 - [ ] Task 5 complete
 
 ---
 
-## Task 6 — the E2E: real sessions through the supervisor's own spawn path (G1, G2, G4, Q1)
+## Task 6 — grant `Skill` to `ruling`/`ratify`, and only `Skill` (owner ruling R2)
+
+**Model: `sonnet`.** A one-word grant change whose whole risk is opening something else; the tests
+pin that nothing else opened.
+
+**owns_files:** `plugins/tribe/scripts/runner/core/supervisor/session.ts`,
+`plugins/tribe/scripts/runner/core/supervisor/session.test.ts`,
+`plugins/tribe/scripts/runner/core/supervisor/permit.ts`,
+`plugins/tribe/scripts/runner/core/supervisor/permit.test.ts`.
+
+**Why (spec §4.6, §4.8; owner ruling R2, verbatim "Allow the Skill tool"):** with the tiers
+loaded, `c3` is registered in `ruling`/`ratify`, but the containment hook refuses the `Skill` tool,
+so G1's "`Skill c3` returns C3 content" cannot hold. R2 grants `Skill` only. The C3 CLI still
+cannot run there (no `Bash`) — a known, accepted limit, not a defect; do not try to fix it.
+
+### RED — why it fails today
+
+`JUDGMENT_ALLOWED_TOOLS` is `['Read', 'Grep', 'Glob', 'Write', 'Edit']` (`session.ts:26`) and
+`decideContainmentHook` sends `Skill` to its not-granted default-deny (`permit.ts:84`).
+
+Add to `permit.test.ts`:
+
+```ts
+// Owner ruling R2 (card supervisor-session-settings): "Allow the Skill tool" — Skill ONLY.
+describe('Skill is granted to ruling/ratify, and nothing else opened (R2)', () => {
+  test('Skill is allowed, with or without args', () => {
+    expect(decideContainmentHook(HOME, ev('Skill', { skill: 'c3' }))).toEqual({});
+    expect(decideContainmentHook(HOME, ev('Skill', { skill: 'c3-skill:c3', args: 'check' }))).toEqual({});
+  });
+
+  for (const tool of ['Bash', 'ToolSearch', 'WebFetch', 'Task', 'Agent', 'Workflow', 'NotebookEdit']) {
+    test(`${tool} is still refused with the not-granted reason`, () => {
+      const d = decideContainmentHook(HOME, ev(tool, { command: 'find / -name x' }));
+      expect(denied(d)).toBe(true);
+      expect(d.hookSpecificOutput?.permissionDecisionReason).toMatch(/not granted/i);
+    });
+  }
+
+  test('a Write outside the campaign home is still refused', () => {
+    expect(denied(decideContainmentHook(HOME, ev('Write', { file_path: '/abs/repo/src/index.ts' })))).toBe(true);
+  });
+
+  test('the not-granted reason names the actual grant, Skill included', () => {
+    const d = decideContainmentHook(HOME, ev('Bash', { command: 'ls' }));
+    expect(d.hookSpecificOutput?.permissionDecisionReason).toContain('Skill');
+  });
+});
+```
+
+Add to `session.test.ts`, inside `describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', …)`
+(`wiredDecisions` is the helper Task 4 added):
+
+```ts
+  // Owner ruling R2: JUDGMENT_ALLOWED_TOOLS gains Skill — and ONLY Skill.
+  test('ruling and ratify are granted the old five tools plus Skill, and nothing else', () => {
+    for (const kind of ['ruling', 'ratify'] as SessionKind[]) {
+      const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
+      expect(options.allowedTools).toEqual(['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Skill']);
+      expect(options.disallowedTools).toContain('Bash');
+    }
+  });
+
+  for (const kind of ['ruling', 'ratify'] as SessionKind[]) {
+    test(`${kind}: through the WIRED hooks, Skill passes while Bash and an out-of-home Write are refused`, async () => {
+      const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
+      const skill = await wiredDecisions(options, { tool_name: 'Skill', tool_input: { skill: 'c3' } });
+      expect(skill.every((d) => d.hookSpecificOutput?.permissionDecision !== 'deny')).toBe(true);
+      const bash = await wiredDecisions(options, { tool_name: 'Bash', tool_input: { command: 'git status' } });
+      expect(bash.some((d) => d.hookSpecificOutput?.permissionDecision === 'deny')).toBe(true);
+      const write = await wiredDecisions(options, { tool_name: 'Write', tool_input: { file_path: '/abs/repo/src/touched.txt' } });
+      expect(write.some((d) => d.hookSpecificOutput?.permissionDecision === 'deny')).toBe(true);
+    });
+  }
+```
+
+Run: `bun test core/supervisor/permit.test.ts core/supervisor/session.test.ts`
+Expected failure: `Skill is allowed` fails (`Received` a deny decision); the reason-names-Skill test
+fails (`Expected to contain: "Skill"`); the `allowedTools` test fails
+(`Received: ["Read","Grep","Glob","Write","Edit"]`); both wired-hook tests fail on the `Skill`
+assertion. The `Bash`/`ToolSearch`/`WebFetch`/`Task`/`Agent`/`Workflow`/`NotebookEdit` and
+out-of-home `Write` cases PASS already — they pin behaviour that must not change.
+
+### GREEN
+
+1. `session.ts:26`:
+
+```ts
+const JUDGMENT_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Skill'];
+```
+
+   and add one sentence to its doc comment: "`Skill` by owner ruling R2 (card
+   supervisor-session-settings), so `/c3` loads its content here; its CLI still cannot run,
+   because this envelope has no `Bash` (`JUDGMENT_DISALLOWED_TOOLS`) — a known, accepted limit."
+
+2. `permit.ts`: in `decideContainmentHook`, name the case and allow it, right after the
+   `Read`/`Grep`/`Glob` line:
+
+```ts
+  // Owner ruling R2: loading a skill's content writes nothing, so Skill needs no path check. A
+  // tool the loaded skill then asks for still comes through THIS table and is judged on its own.
+  const isSkillLoad = toolName === 'Skill';
+  if (isSkillLoad) return {};
+```
+
+   and change `NOT_GRANTED_REASON` to:
+
+```ts
+const NOT_GRANTED_REASON =
+  'This judgment session is not granted this tool; only Read, Grep, Glob, Skill and Write/Edit ' +
+  'under the campaign home are permitted.';
+```
+
+   Update the `decideContainmentHook` doc comment's list of allowed shapes to include `Skill`.
+
+### Verify
+
+```bash
+cd plugins/tribe/scripts/runner && bun test core/supervisor/ cli/main.test.ts && bunx tsc --noEmit
+cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh 2>&1 | tail -1
+cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && env -u ANTHROPIC_API_KEY TRIBE_REAL_E2E=1 bash plugins/tribe/scripts/tests/test-supervisor-permission-real.sh 2>&1 | tail -1
+cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && git diff d6cad2f -- plugins/tribe/scripts/runner/core/supervisor/session.ts | command grep -E "^[-+]const (JUDGMENT|CLOSING)_"
+```
+Expected: all pass; `tsc` exit 0; `40 passed, 0 failed`; the real permission test ends
+`N passed, 0 failed` (its `ruling` probe still refuses the repo, `/tmp` and symlink writes); and
+the last command prints exactly two lines — the old and new `JUDGMENT_ALLOWED_TOOLS` — proving no
+other grant constant changed since the base.
+
+- [ ] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
+  (`Tribe-Task: 6/9`), ticking this task's boxes in the SAME commit.
+- [ ] Task 6 complete
+
+---
+
+
+## Task 7 — the E2E: real sessions through the supervisor's own spawn path (G1, G2, G4, R1)
 
 **Model: `sonnet`.** Transcript assertions on a real model; the failure mode the issue names (a
 stub-passing test) is the one to avoid.
@@ -597,7 +737,7 @@ stub-passing test) is the one to avoid.
 5. When `SUPERVISOR_E2E_LOG_DIR` is set, each transcript is also written to
    `$SUPERVISOR_E2E_LOG_DIR/sessions/<kind>-<label>.jsonl` (ordinary sessions) or
    `$SUPERVISOR_E2E_LOG_DIR/adversarial/<kind>-<label>.jsonl` (sessions told to break a wall) —
-   Task 7's ratchet reads these.
+   Task 8's ratchet reads these.
 
 ### RED — write the file
 
@@ -617,7 +757,7 @@ import type { SessionKind } from './model.ts';
 import { runOneShotSession, type OneShotSessionResult, type OneShotSessionSeam } from './session.ts';
 
 const RUN_E2E = process.env.RUN_SESSION_E2E === '1';
-/** Optional: where Task 7's ratchet reads the transcripts. Unset = keep them in memory only. */
+/** Optional: where Task 8's ratchet reads the transcripts. Unset = keep them in memory only. */
 const LOG_DIR = process.env.SUPERVISOR_E2E_LOG_DIR;
 const MODEL = 'claude-haiku-4-5-20251001';
 const REPO_ROOT = join(TRIBE_PLUGIN_DIR, '..', '..');
@@ -749,16 +889,17 @@ describe('supervisor sessions — real model, the supervisor\'s own spawn path (
     expect(run.result.outcome).toBe('success');
   }, TEST_TIMEOUT_MS);
 
-  // G1, ruling/ratify — per spec §10 Q2 option (b): registered, no Unknown skill, refused by the
-  // containment hook because Skill is not in JUDGMENT_ALLOWED_TOOLS (the grant the fence keeps).
+  // G1, ruling/ratify — the SAME oracle as closing (owner ruling R2 granted Skill): Skill c3
+  // RETURNS C3 content. The C3 CLI itself cannot run here (no Bash) — accepted, not asserted.
   for (const kind of ['ruling', 'ratify'] as const) {
-    test.skipIf(!RUN_E2E)(`${kind}: c3 is registered, no Unknown skill, and the grant refuses the Skill call`, async () => {
+    test.skipIf(!RUN_E2E)(`${kind}: Skill c3 returns C3 content and no Unknown skill appears`, async () => {
       const run = await runKind(kind, C3_PROMPT, 'c3');
-      expect(run.transcript).not.toContain('Unknown skill');
+      expect(run.transcript).not.toContain('Unknown skill'); // first, so a tier regression fails HERE
       expect(initSkills(run.lines).some(isC3)).toBe(true);
       expect(toolUses(run.lines, 'Skill').some((u) => isC3(u.input?.skill))).toBe(true);
-      expect(run.transcript).toContain('This judgment session is not granted this tool');
-      expect(deniedTools(run.result)).toContain('Skill');
+      expect(deniedTools(run.result)).not.toContain('Skill'); // R2: the grant lets it through
+      expect(run.transcript).toContain('skills/c3'); // the loaded body's own base-directory line
+      expect(run.result.outcome).toBe('success');
     }, TEST_TIMEOUT_MS);
   }
 
@@ -791,7 +932,7 @@ describe('supervisor sessions — real model, the supervisor\'s own spawn path (
     expect(run.result.outcome).toBe('success');
   }, TEST_TIMEOUT_MS);
 
-  // Q1 (b) — delete this case if the Shaman rules Q1 = (a): a host allow rule cannot widen closing.
+  // Ruling R1: a host allow rule cannot widen closing.
   test.skipIf(!RUN_E2E)('closing: a loaded allow rule for Workflow does not let Workflow run', async () => {
     const run = await runKind('closing', GRANT_PROMPT, 'grant', { hostAllow: ['Workflow', 'ToolSearch'], adversarial: true });
     expect(run.transcript).not.toContain('Workflow launched');
@@ -802,20 +943,21 @@ describe('supervisor sessions — real model, the supervisor\'s own spawn path (
 
 ### The empty-implementation check — mandatory, and it IS the RED
 
-The code under test already exists (Tasks 3-5), so RED is proven by reverting it: with the
+The code under test already exists (Tasks 3-6), so RED is proven by reverting it: with the
 envelope back at `d6cad2f`'s, these tests must fail **for the stated reasons**, and that same run
-produces Task 7's BEFORE corpus.
+produces Task 8's BEFORE corpus.
 
 ```bash
 cd /Users/hiep/repo/tribe-wt/supervisor-session-settings
 E=~/.tribe/-Users-hiep-repo-tribe/campaigns/fu-supervisor-settings/evidence
 git show d6cad2f:plugins/tribe/scripts/runner/core/supervisor/session.ts > plugins/tribe/scripts/runner/core/supervisor/session.ts
+git show d6cad2f:plugins/tribe/scripts/runner/core/supervisor/permit.ts > plugins/tribe/scripts/runner/core/supervisor/permit.ts
 cd plugins/tribe/scripts/runner && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 SUPERVISOR_E2E_LOG_DIR="$E/before" bun test core/supervisor/session.e2e.test.ts 2>&1 | tee /tmp/sss-e2e-before.txt | tail -40
-cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && git checkout -- plugins/tribe/scripts/runner/core/supervisor/session.ts && git status --short
+cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && git checkout -- plugins/tribe/scripts/runner/core/supervisor/session.ts plugins/tribe/scripts/runner/core/supervisor/permit.ts && git status --short
 ```
-Expected (BEFORE): the `closing` c3 test and both `ruling`/`ratify` tests FAIL on
+Expected (BEFORE): the `closing` c3 test and both `ruling`/`ratify` c3 tests FAIL on
 `expect(received).not.toContain(expected)` with `Unknown skill` in the received text; the scan
-test FAILS on the `Filesystem-wide scans are disabled` assertion (the `find` ran); the Q1 grant
+test FAILS on the `Filesystem-wide scans are disabled` assertion (the `find` ran); the R1 grant
 test FAILS on `toContain('This closing session is not granted this tool')` (at base the `local`
 tier is not loaded, so the SDK itself denies `Workflow` — spec §4.2 already MEASURED that with the
 tiers loaded and no grant hook, `Workflow` runs); the with-plugin `verify-shipped` test PASSES
@@ -835,12 +977,12 @@ Paste both transcripts' failure/pass summaries (`/tmp/sss-e2e-before.txt`,
 
 - [ ] **Step 4: Commit** — stage ONLY `core/supervisor/session.e2e.test.ts` (the revert was
   restored, and the evidence corpora live under `~/.tribe`, outside the repo) and commit with the
-  Global Constraints trailers (`Tribe-Task: 6/8`), ticking this task's boxes in the SAME commit.
-- [ ] Task 6 complete
+  Global Constraints trailers (`Tribe-Task: 7/9`), ticking this task's boxes in the SAME commit.
+- [ ] Task 7 complete
 
 ---
 
-## Task 7 — the ratchet AFTER, on the same tool (G5), plus the G4 verdict
+## Task 8 — the ratchet AFTER, on the same tool (G5), plus the G4 verdict
 
 **Model: `sonnet`.** Must report measured numbers without overclaiming.
 
@@ -865,16 +1007,16 @@ done
 
 Expected (the G5 gate): `after/sessions` reads `"unknownSkills": {}` and
 `"filesystemWideScans": 0`. `before/sessions` shows `Unknown skill: c3` at least 3 times (one per
-kind). `after/adversarial` shows `filesystemWideScans` ≥ 1 — every one an attempt the Task 6 scan
+kind). `after/adversarial` shows `filesystemWideScans` ≥ 1 — every one an attempt the Task 7 scan
 test proved refused (its `permissionDenials` contains `Bash`). **If `after/sessions` is not
 exactly 0/0, stop and report — do not adjust the expectation.**
 
 Add to the evidence document:
 1. `## AFTER` — the four commands and their JSON verbatim, a before → after table for
    `sessions` (unknown skills, scans) and for `adversarial` (scan attempts, refusals).
-2. `## E2E` — the exact Task 6 commands and the pass/fail summaries of the before and after
+2. `## E2E` — the exact Task 7 commands and the pass/fail summaries of the before and after
    runs, verbatim from the task report.
-3. `## G4 verdict` — the kept hand-load, spec §4.4's table, and the two `G4_*` lines Task 6
+3. `## G4 verdict` — the kept hand-load, spec §4.4's table, and the two `G4_*` lines Task 7
    printed, ending with the sentence the PR body will carry: "The `verify-shipped` hand-load
    (`options.plugins`) is kept: it resolves the skill from the repo on every host, where the user
    tier resolves it only where install.sh ran; with both present the session registers it once."
@@ -890,12 +1032,12 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && for h in '## BEFORE'
 Expected: five `ok` lines.
 
 - [ ] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
-  trailers (`Tribe-Task: 7/8`), ticking this task's boxes in the SAME commit.
-- [ ] Task 7 complete
+  trailers (`Tribe-Task: 8/9`), ticking this task's boxes in the SAME commit.
+- [ ] Task 8 complete
 
 ---
 
-## Task 8 — phase-end governance: C3 and README facts this card made stale
+## Task 9 — phase-end governance: C3 and README facts this card made stale
 
 **Model: `sonnet`.** Reconciliation through the C3 CLI, following the precedent change-unit.
 
@@ -928,10 +1070,13 @@ no hook.
 1. Through one change-unit, patch the `c3-215` Change Safety row named above so it states: all
    three kinds load `['user','project','local']`; `ruling`/`ratify` carry the containment hook
    and the scan-wall hook; `closing` carries no containment hook, but the scan-wall hook and (if
-   Task 5 shipped) the closing grant hook; the grants are unchanged. Add
+   the closing grant hook (R1); `ruling`/`ratify` carry allowedTools
+   [Read, Grep, Glob, Write, Edit, Skill] by owner ruling R2 (`Skill` only; the C3 CLI cannot run
+   there without `Bash` — an accepted limit), and the containment hook allows `Skill`; every
+   other grant is unchanged. Add
    `core/supervisor/session.e2e.test.ts` (opt-in `RUN_SESSION_E2E=1`) to its Required
-   Verification cell. Record the ADR with the card's decisions (D1 finding and the Q1/Q2
-   rulings, D2, D3, the G4 kept-hand-load decision).
+   Verification cell. Record the ADR with the card's decisions (the D1 finding, rulings R1
+   and R2, D2 as amended by R1, D3, the G4 kept-hand-load decision).
 2. `runner/README.md`: in the supervisor section, add the one-shot envelope's facts where the
    session files are described (near "`sessions/<sessionId>.log`"): the three-tier list, the
    hooks per kind, the kept `verify-shipped` hand-load and why, and add the new E2E to the
@@ -951,20 +1096,23 @@ mention plus the new supervisor one); the whole runner suite green (inherited fa
 Adjudication rule only if they also fail on base) and `tsc` exit 0.
 
 - [ ] **Step 4: Commit** — stage the `.c3/` change-unit files and the README and commit with the
-  Global Constraints trailers (`Tribe-Task: 8/8`), ticking this task's boxes in the SAME commit.
-- [ ] Task 8 complete
+  Global Constraints trailers (`Tribe-Task: 9/9`), ticking this task's boxes in the SAME commit.
+- [ ] Task 9 complete
 
 ---
 
 ## Definition of done (issue #163 checklist → proof)
 
-- [ ] G1 — Task 6: `closing` returns C3 content; `ruling`/`ratify` per the Q2 ruling; all three
+- [ ] G1 — Task 7: `Skill c3` returns C3 content in all three kinds (R2 granted `Skill` to
+  `ruling`/`ratify`, Task 6); all three
   proven to FAIL on `Unknown skill` with the envelope reverted.
-- [ ] G2 — Task 4 unit test over every variant for every kind, and Task 6's real `find /`
+- [ ] G2 — Task 4 unit test over every variant for every kind, and Task 7's real `find /`
   refusal in `closing`; `decideScanGuardHook` imported, never copied.
+- [ ] R1 — Task 5 unit tests + Task 7's real allow-rule session: `closing` cannot be widened.
+- [ ] R2 — Task 6: `Skill` only; `Bash` and an out-of-home `Write` still refused (unit tests).
 - [ ] G3 — Task 3: `['user','project','local']` for every kind; no tier defect found (spec §4.5).
-- [ ] G4 — Task 6 measurement + Task 7 verdict ("kept"), copied into the PR body.
-- [ ] G5 — Task 7: `after/sessions` reads 0 `Unknown skill`, 0 scans, on
+- [ ] G4 — Task 7 measurement + Task 8 verdict ("kept"), copied into the PR body.
+- [ ] G5 — Task 8: `after/sessions` reads 0 `Unknown skill`, 0 scans, on
   `plugins/tribe/scripts/session-hygiene.ts`, next to Task 1's and `before/`'s numbers.
 - [ ] `bun test` + `bunx tsc --noEmit` green in `plugins/tribe/scripts/runner/`;
   `test-supervisor-e2e.sh` 40/40; `c3x check` ok.

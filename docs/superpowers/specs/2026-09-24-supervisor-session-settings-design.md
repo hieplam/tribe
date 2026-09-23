@@ -5,7 +5,8 @@
 **Campaign:** `fu-supervisor-settings`
 **Author:** planning-Warchief, 2026-09-24
 **Base:** `d6cad2f` (master)
-**Status:** plan-verified by 14 real sessions — **and blocked on two open questions (§10)**. Every
+**Status:** plan-verified by 15 real sessions; §10's two questions are **ruled** (R1 Shaman, R2
+owner, 2026-09-24) and this spec is amended to both. Every
 claim marked **MEASURED** below comes from a real Haiku session spawned through
 `runOneShotSession` (`core/supervisor/session.ts:264`) and the real SDK adapter
 (`adapters/session.adapter.ts:11`), not from reading the SDK typings.
@@ -70,20 +71,31 @@ is the only kind whose `allowedTools` contains `Bash` (`session.ts:42` vs `:26`)
 2. **Tier parity (G3):** `settingSources: ['user', 'project', 'local']` for all three kinds, written
    explicitly (the precedent's reason, `core/session.ts:213-216`: an explicit list keeps the
    regression test meaningful and survives an SDK default change). **No concrete defect was found
-   in any tier for the purpose of G3** (§4.5) — but see §10 Q1: loading a tier that can carry
-   `permissions.allow` is itself the D1 trigger for `closing`.
+   in any tier for the purpose of G3** (§4.5). Loading a tier that can carry `permissions.allow`
+   was the D1 trigger for `closing` (§4.2); ruling R1 answers it with item 4.
 3. **The scan wall in all three kinds (G2, D2, D3):** import `decideScanGuardHook` from
-   `../session.ts` and add it as its own `PreToolUse` entry. `closing` gets it as its only hook
-   (unless §10 Q1 rules otherwise); `ruling`/`ratify` get it alongside the containment hook. No
-   second predicate; the executor's backgrounding, wait-tool and merge-gate hooks are **not**
-   ported (D2).
-4. **`verify-shipped` hand-load (G4): kept** — decision and evidence in §4.4. The comments that
+   `../session.ts` and add it as its own `PreToolUse` entry. `closing` gets it beside the grant
+   hook (item 4); `ruling`/`ratify` get it alongside the containment hook. No second predicate;
+   the executor's backgrounding, wait-tool and merge-gate hooks are **not** ported (D2).
+4. **`closing`'s grant, enforced (ruling R1, amends D2):** a pure `decideClosingGrantHook` refuses
+   any tool outside the unchanged `CLOSING_ALLOWED_TOOLS`, so no host `permissions.allow` rule can
+   widen `closing`. **Accepted consequence (R1):** `closing` stops running `TaskCreate`,
+   `CronList` and `ListAgents`, which run today un-granted (§4.2) and which the closing stage
+   does not use.
+5. **`Skill` granted to `ruling`/`ratify` (owner ruling R2, verbatim "Allow the Skill tool"):**
+   `JUDGMENT_ALLOWED_TOOLS` gains `Skill`, and `decideContainmentHook`
+   (`core/supervisor/permit.ts`) allows it. `Skill` only — `Bash` stays in
+   `JUDGMENT_DISALLOWED_TOOLS`, nothing else is added. This is the one owner-ratified exception
+   to the fence line "the grants stay as they are". **Known, accepted limit — not a defect:** the
+   C3 skill's content loads in `ruling`/`ratify`, but its CLI (`bash <skill-dir>/bin/c3x.sh`)
+   cannot run there, because those sessions have no `Bash` (MEASURED, §4.8).
+6. **`verify-shipped` hand-load (G4): kept** — decision and evidence in §4.4. The comments that
    say "`settingSources` never loads it" (`session.ts:61-65`, `:128-131`) become false and are
    rewritten to say why it is kept.
-5. **The E2E (G1, G2, G4):** a real-model session per kind, through `runOneShotSession` + the real
-   adapter, asserting from the transcript.
-6. **The ratchet (G5):** before → after with `plugins/tribe/scripts/session-hygiene.ts`.
-7. **Phase-end governance:** C3 `c3-215-tribe` risk row and the runner README.
+7. **The E2E (G1, G2, G4, R1, R2):** a real-model session per kind, through `runOneShotSession` +
+   the real adapter, asserting from the transcript; G1 in its original form for all three kinds.
+8. **The ratchet (G5):** before → after with `plugins/tribe/scripts/session-hygiene.ts`.
+9. **Phase-end governance:** C3 `c3-215-tribe` risk row and the runner README.
 
 ---
 
@@ -96,9 +108,14 @@ is the only kind whose `allowedTools` contains `Bash` (`session.ts:42` vs `:26`)
   `buildContainmentHook(homeDir, { realpath })`, the one injected capability).
 - `inferOneShotKind` stays pure (options in, kind out) and gains the unit test its doc comment
   says it never had (`cli/main.ts:610-611`: "deliberately not unit-tested").
-- If §10 Q1 is ruled (b), the closing grant hook is a **pure** predicate
-  `decideClosingGrantHook(input): HookDecision` beside `decideContainmentHook` in `permit.ts` — an
-  allowlist over `tool_name`, no filesystem, no clock.
+- The closing grant hook (R1) is a **pure** predicate
+  `decideClosingGrantHook(grantedTools, input): HookDecision` beside `decideContainmentHook` in
+  `permit.ts` — an allowlist over `tool_name`, no filesystem, no clock. The grant arrives as an
+  argument, so `permit.ts` never imports `session.ts` (which imports it).
+- R2's change to `decideContainmentHook` is one more row in its already-pure table: `Skill`
+  joins `Read`/`Grep`/`Glob` as allowed without a path check (loading a skill writes nothing).
+  Its not-granted message is updated to name `Skill`, so the denial states the actual grant
+  (`readable-code.md` symptom 6).
 - The E2E is the edge: it constructs the real adapter and a throwaway campaign home, exactly as
   `tests/test-supervisor-permission-real.sh` already does for the same module.
 
@@ -111,7 +128,7 @@ real `sdkSpawnSession`, builds a campaign home under `/private/tmp/sss-probe/`, 
 "treatment" runs rewrites **only** `options.settingSources` inside the `spawnSession` seam — every
 other field is exactly what `buildOneShotOptions` produced at `d6cad2f`, including the containment
 hook and `options.plugins`. Model `claude-haiku-4-5-20251001`, `maxTurns: 12`,
-`sessionTimeoutMs: 240000`. 14 real sessions, all `outcome: success`, none timed out.
+`sessionTimeoutMs: 240000`. 15 real sessions (14 before the rulings, 1 after — §4.8), all `outcome: success`, none timed out.
 
 ### 4.1 What the tier change does to each kind (MEASURED)
 
@@ -242,7 +259,7 @@ measured). It also keeps `decide.ts`'s existing fail-closed guard (`verifyShippe
 **No tier carries a defect that justifies a bespoke subset.** Dropping `local` would not close §10
 Q1 (the `user` tier carries `permissions.allow` just the same), and dropping `user` defeats G1.
 
-### 4.6 What G1 can mean for `ruling`/`ratify` (MEASURED) — §10 Q2
+### 4.6 What G1 could mean for `ruling`/`ratify` before R2 (MEASURED) — §10 Q2
 
 With the tiers loaded, `c3` **resolves** in `ruling`/`ratify` — it is in the init `skills` list as
 `c3-skill:c3`, and a `Skill c3` call no longer yields `Unknown skill` — but the call is then
@@ -255,7 +272,8 @@ With the tiers loaded, `c3` **resolves** in `ruling`/`ratify` — it is in the i
 Also relevant: the C3 skill's own body says its CLI is invoked as
 `C3X_MODE=agent bash "<skill-dir>/bin/c3x.sh" …` (SKILL.md, "CLI invocation") — it needs `Bash`,
 which `ruling`/`ratify` are deliberately denied (`JUDGMENT_DISALLOWED_TOOLS`, `session.ts:32`). So
-granting `Skill` alone would put the C3 router's text in the session, not a working C3.
+granting `Skill` alone would put the C3 router's text in the session, not a working C3. The
+owner ruled (R2) to grant `Skill` with that limit accepted; §4.8 measures it.
 
 ### 4.7 The scan predicate already covers every issue variant (MEASURED)
 
@@ -265,17 +283,48 @@ granting `Skill` alone would put the C3 router's text in the session, not a work
 `find $HOME …`, and allows `find . …` and `find /Users/hiep/repo/tribe …`. Nothing in the
 predicate changes; the card needs only the wiring.
 
+### 4.8 Re-probe after R2: a `ruling` session with `Skill` granted (MEASURED)
+
+One more real session, same probe program, `ruling` kind, tiers loaded, with R2 simulated exactly
+inside the `spawnSession` seam: `allowedTools` became `['Read','Grep','Glob','Write','Edit','Skill']`
+and the containment hook was wrapped to return `{}` for `Skill` and defer to the real hook for
+everything else (`GRANT_SKILL=1`, prompt `c3follow`: invoke `Skill c3`, then follow the loaded
+skill's CLI instructions to run its `check` command via `Bash`, loading `Bash` with `ToolSearch`
+if needed). Transcript, verbatim:
+
+```
+USE Skill {"skill": "c3-skill:c3", "args": "check"}
+RES Launching skill: c3-skill:c3
+USE ToolSearch {"query": "select:Bash", "max_results": 1}
+RES PreToolUse:ToolSearch hook error: This judgment session is not granted this tool; only Read, Grep, Glob and Write/Edit under the campaign home are permitted.
+FINAL SKILL_RESULT=ok The skill c3-skill:c3 loaded successfully. C3 is your architecture's own vocabulary, frozen into shared truth, that work edits only through reviewed change-units.
+      BASH_RESULT=unavailable This judgment session is not granted Bash tool access; only Read, Grep, Glob, and Write/Edit are permitted.
+```
+
+- **`Skill c3` loads C3 content** in `ruling`: the transcript carries the skill's own base-directory
+  line (`skills/c3`, 2 occurrences) and its opening sentence; no `Unknown skill`.
+- **The loaded instructions cannot reach `Bash`.** `Bash` is not in the session's tool list at
+  all (`JUDGMENT_DISALLOWED_TOOLS`), and the attempt to load it through `ToolSearch` was refused by
+  the containment hook. `permission_denials: [ToolSearch]`; no `Bash` `tool_use` was ever emitted.
+  So the C3 CLI does not run there: the accepted limit of R2, measured.
+- The C3 skill's `SKILL.md` carries no `allowed-tools` front-matter. Even if some skill did, the
+  containment hook runs on every tool call and a `PreToolUse` deny beats an allow (MEASURED §4.2).
+  Plan Task 6's unit tests pin `Bash` and an out-of-home `Write` as still refused.
+
 ---
 
 ## 5. Scope fence (issue #163, verbatim in the card)
 
 **In:** `core/supervisor/session.ts`, `core/supervisor/session.test.ts`, the new
 `core/supervisor/session.e2e.test.ts`, `cli/main.ts#inferOneShotKind` + `cli/main.test.ts`, the
-evidence document, `runner/README.md`, `.c3/c3-2-plugins/c3-215-tribe.md` (via the `c3` skill), and
-— only if §10 Q1 is ruled (b) — `core/supervisor/permit.ts` + `permit.test.ts`.
+evidence document, `runner/README.md`, `.c3/c3-2-plugins/c3-215-tribe.md` (via the `c3` skill),
+`core/supervisor/permit.ts` + `permit.test.ts` (R1's grant hook and R2's `Skill` row).
 
-**Out:** `permissionMode` (stays `'default'`); `JUDGMENT_ALLOWED_TOOLS`,
-`JUDGMENT_DISALLOWED_TOOLS`, `CLOSING_ALLOWED_TOOLS`, `CLOSING_DISALLOWED_TOOLS` (byte-identical);
+**Fence exception, by owner ruling R2:** `JUDGMENT_ALLOWED_TOOLS` gains `Skill`, and
+`decideContainmentHook` allows it. Nothing else in any grant changes.
+
+**Out:** `permissionMode` (stays `'default'`); `JUDGMENT_DISALLOWED_TOOLS`, `CLOSING_ALLOWED_TOOLS`,
+`CLOSING_DISALLOWED_TOOLS` (byte-identical), and `JUDGMENT_ALLOWED_TOOLS` except for `Skill`;
 the executor path `core/session.ts` (only a value import from it); the predicate in
 `core/metrics/session-hygiene.ts`; the executor's other three hooks; the inherited
 `evals-file-has-52-evals` failure.
@@ -294,22 +343,20 @@ front-matter.
 | Unit (pure) | `inferOneShotKind` maps each kind's REAL options to the right kind, with non-empty `settingSources` on all three | `cli/main.test.ts` |
 | Unit (options) | all three kinds carry `['user','project','local']`; grants and `permissionMode` unchanged | `core/supervisor/session.test.ts` |
 | Unit (wired hooks) | for each kind, invoking the built `PreToolUse` hooks on every issue variant yields a `deny` carrying `SCAN_DENIED_REASON`; a scoped `find` in `closing` gets no deny; `ruling`/`ratify` still deny a Write outside the home (containment unchanged) | `core/supervisor/session.test.ts` |
-| Unit (grant hook, only if Q1=(b)) | `decideClosingGrantHook` allows exactly `CLOSING_ALLOWED_TOOLS`, denies `Workflow`/`TaskCreate`/`CronCreate`/malformed input | `core/supervisor/permit.test.ts` |
-| **E2E, real model** | G1 per kind, G2 real refusal in `closing`, G4 with/without hand-load | `core/supervisor/session.e2e.test.ts` (opt-in `RUN_SESSION_E2E=1`) |
+| Unit (grant hook, R1) | `decideClosingGrantHook` allows exactly `CLOSING_ALLOWED_TOOLS`, denies `Workflow`/`TaskCreate`/`CronCreate`/malformed input | `core/supervisor/permit.test.ts` |
+| Unit (Skill grant, R2) | `ruling`/`ratify` `allowedTools` = the old five + `Skill`; `decideContainmentHook` allows `Skill`; **`Bash`, `ToolSearch`, `WebFetch` and a `Write` outside the campaign home are still refused**, directly and through the wired hooks | `permit.test.ts`, `session.test.ts` |
+| **E2E, real model** | G1 (content returned) for all three kinds, G2 real refusal in `closing`, G4 with/without hand-load, R1 allow rule cannot widen `closing` | `core/supervisor/session.e2e.test.ts` (opt-in `RUN_SESSION_E2E=1`) |
 | Ratchet | G5 before → after, same tool | evidence doc |
-| Regression (existing) | `tests/test-supervisor-e2e.sh` stays 40/40 (it cannot detect a misrouted kind — see §1 — which is why Task 2's unit test exists); `tests/test-supervisor-permission-real.sh` (opt-in, real) stays green with the new hooks | Tasks 3, 4, 6 |
+| Regression (existing) | `tests/test-supervisor-e2e.sh` stays 40/40 (it cannot detect a misrouted kind — see §1 — which is why Task 2's unit test exists); `tests/test-supervisor-permission-real.sh` (opt-in, real) stays green with the new hooks | Tasks 2-6 |
 
 ### The E2E — card G1's oracle, exactly
 
 Through `runOneShotSession` with `io.spawnSession = (p) => sdkSpawnSession(p as never)`, the same
 wiring `cli/main.ts:844-845` uses; transcript captured through `io.appendLog`. Per kind:
 
-- `closing`: the transcript shows a `Skill` `tool_use` whose skill matches `/(^|:)c3$/`, the text
-  `skills/c3` (the loaded body's own base-directory line), and **no** `Unknown skill`.
-- `ruling`/`ratify`: per the ruling on §10 Q2 (the plan is written for the recommended option (b):
-  the init message's `skills` list contains an entry matching `/(^|:)c3$/`, a `Skill c3` attempt
-  appears, the transcript contains **no** `Unknown skill`, and the attempt is refused with the
-  containment hook's not-granted text).
+- **All three kinds (G1 as the issue wrote it, R2):** the transcript shows a `Skill` `tool_use`
+  whose skill matches `/(^|:)c3$/`, the text `skills/c3` (the loaded body's own base-directory
+  line), **no** `Unknown skill`, and no `Skill` entry in `permissionDenials`.
 - `closing` scan wall (G2): a session told to run `find / -maxdepth 1 -name X` records the
   `SCAN_DENIED_REASON` text in its transcript and a `Bash` entry in `permissionDenials`.
 - G4: two `closing` sessions invoking `verify-shipped`, one with `verifyShippedPluginDir` set and
@@ -345,13 +392,15 @@ Same tool before and after: `bun plugins/tribe/scripts/session-hygiene.ts --root
 
 | Risk | Disposition |
 | --- | --- |
-| A host `permissions.allow` rule silently widens `closing` (MEASURED, §4.2) | **Owner decision — §10 Q1.** Not absorbed. |
+| A host `permissions.allow` rule silently widens `closing` (MEASURED, §4.2) | **Closed by R1** — `decideClosingGrantHook`; proven by a real session in the E2E. |
+| Granting `Skill` to judgment sessions opens more than `Skill` | **R2 grants `Skill` only.** Unit tests pin `Bash`/`ToolSearch`/out-of-home `Write` as refused; §4.8 measured the loaded C3 instructions unable to reach `Bash`. |
+| C3 CLI unusable in `ruling`/`ratify` | **Known, accepted limit of R2** (no `Bash` by decision 4) — not a defect. |
 | `inferOneShotKind` misroutes the session double once tiers are non-empty | Fixed first (plan Task 2), with a unit test it never had. |
 | Supervisor sessions now depend on host settings (reproducibility) | Accepted by parity (G3), as in #162; `model`/`permissionMode` proven SDK-pinned (§4.1). |
 | Context cost (+12 skills; Playwright where a host enables it) | #162's measured price of parity; re-use, not re-derived. |
 | A failing user-tier hook breaks a session | #162 proved it does not; re-use. |
 | The scan guard over-refuses | By design (the predicate's oracle). |
-| `closing` runs `TaskCreate`/`CronList`/`ListAgents` today, un-granted | Pre-existing, not this card; follow-up F1. Closed as a side effect if Q1 = (b). |
+| `closing` runs `TaskCreate`/`CronList`/`ListAgents` today, un-granted | Pre-existing; **stopped by R1's grant hook, accepted by R1** (the closing stage uses none of them). |
 
 **Rollback:** one commit reverts the tier literal; the hook entries and E2E are additive.
 
@@ -359,9 +408,10 @@ Same tool before and after: `bun plugins/tribe/scripts/session-hygiene.ts --root
 
 ## 9. Follow-ups discovered (not in this card)
 
-- **F1** — un-gated CLI tools reach `closing` today regardless of this card (`TaskCreate`,
-  `CronList`, `ListAgents` MEASURED; `CronCreate`, `SendMessage`, `RemoteTrigger`,
-  `PushNotification`, `EnterWorktree` are in the same tool list and were not probed).
+- **F1** — un-gated CLI tools reached `closing` before this card (`TaskCreate`, `CronList`,
+  `ListAgents` MEASURED; `CronCreate`, `SendMessage`, `RemoteTrigger`, `PushNotification`,
+  `EnterWorktree` in the same tool list). **Resolved in this card by R1's grant hook**; no
+  follow-up remains.
 - **F2** — the scan wall's oracle is `find`-only; `ruling`/`ratify` hold `Glob`/`Grep`, which can
   also walk `/` (a `Glob` with `path: "/"`). Out of the card's G2, which names `find`.
 - **F3** — `cli/main.ts:607-611`'s doc comment says `inferOneShotKind` is "deliberately not
@@ -369,7 +419,20 @@ Same tool before and after: `bun plugins/tribe/scripts/session-hygiene.ts --root
 
 ---
 
-## 10. Open questions for the Shaman
+## 10. Questions for the Shaman — RULED
+
+**Rulings (2026-09-24; `answers.md` R1/R2, card section "Rulings after planning"):**
+
+- **R1 (Shaman), Q1 = (b).** Add `decideClosingGrantHook`, refusing any tool outside the
+  unchanged `CLOSING_ALLOWED_TOOLS`. Amends D2. Plan Task 5 is unconditional. The loss of
+  `TaskCreate`/`CronList`/`ListAgents` in `closing` is accepted.
+- **R2 (owner), Q2 = (a), verbatim: "Allow the Skill tool".** Fence exception:
+  **`JUDGMENT_ALLOWED_TOOLS` gains `Skill` by owner ruling R2**, and `decideContainmentHook` allows
+  it. `Skill` only: `Bash` stays in `JUDGMENT_DISALLOWED_TOOLS`, and no other tool is added. G1
+  stays as the issue wrote it for all three kinds. The C3 CLI still cannot run in
+  `ruling`/`ratify` (no `Bash`) — a known, accepted limit (§4.8). Plan Task 6.
+
+The questions as they were put, kept for the record:
 
 ### Q1 — `closing`'s grant becomes extendable by host settings (D1 trigger, owner-only "new permissions")
 
@@ -393,8 +456,7 @@ rule — MEASURED). D1 says a widened grant stops the card.
   recommended.
 
 **Recommendation: (b).** It is the only option that keeps G1, G3 and the fence's "grants stay as
-they are" all true at once. The plan is written for (b); its Task 5 is marked **conditional** and
-is deleted if the ruling is (a).
+they are" all true at once. **Ruled (b) — R1.**
 
 ### Q2 — G1 for `ruling`/`ratify` cannot show "`Skill c3` returns C3 content" inside the fence
 
@@ -414,8 +476,8 @@ granted, the C3 skill's CLI needs `Bash`, which judgment sessions are denied by 
   the full oracle (content returned).
 - **(c) Drop `ruling`/`ratify` from G1.** Loses the no-`Unknown skill` assertion. Not recommended.
 
-**Recommendation: (b).** The plan's E2E (Task 6) is written for (b); under (a), its
-`ruling`/`ratify` cases switch to the `closing` assertions, and a grant-change task is added.
+**Recommendation was (b). Ruled (a) by the owner — R2.** The plan adds the grant-change task
+(Task 6) and its E2E (Task 7) asserts the `closing` oracle for `ruling`/`ratify` too.
 
 ---
 
@@ -453,4 +515,6 @@ const result = await runOneShotSession(
 
 The allow-rule probes pre-create `<home>/.claude/settings.local.json` with
 `{"permissions":{"allow":["Workflow"]}}` (closing) or `{"permissions":{"allow":["Skill","ToolSearch","Bash"]}}`
-(ruling) before the run.
+(ruling) before the run. The §4.8 re-probe sets `GRANT_SKILL=1`, which appends `'Skill'` to
+`allowedTools` and wraps `PreToolUse[0]` so `Skill` returns `{}` and every other tool defers to the
+real containment hook.
