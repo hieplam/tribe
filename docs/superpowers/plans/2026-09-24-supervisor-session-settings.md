@@ -975,10 +975,10 @@ report); and the second, un-flagged run shows `7 skip`, proving `bun test` stays
 Paste both transcripts' failure/pass summaries (`/tmp/sss-e2e-before.txt`,
 `/tmp/sss-e2e-after.txt`) into the task report.
 
-- [ ] **Step 4: Commit** — stage ONLY `core/supervisor/session.e2e.test.ts` (the revert was
+- [x] **Step 4: Commit** — stage ONLY `core/supervisor/session.e2e.test.ts` (the revert was
   restored, and the evidence corpora live under `~/.tribe`, outside the repo) and commit with the
   Global Constraints trailers (`Tribe-Task: 7/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 7 complete
+- [x] Task 7 complete
 
 ---
 
