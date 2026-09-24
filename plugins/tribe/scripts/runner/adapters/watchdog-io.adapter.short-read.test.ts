@@ -15,6 +15,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+// DEBT debt-runner-temp-dir-leak — this temp dir has no cleanup path; see rule-temp-dir-cleanup.
 const tmp = () => mkdtempSync(join(tmpdir(), 'wd-adapter-short-read-'));
 
 describe('buildWatchdogIo.readTail - a short readSync (S5)', () => {

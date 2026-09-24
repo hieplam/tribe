@@ -55,6 +55,7 @@ interface RunOptions {
 
 async function runKind(kind: SessionKind, prompt: string, label: string, opts: RunOptions = {}): Promise<Run> {
   // realpath now: macOS tmpdir is a symlink, and the containment hook realpaths what it checks.
+  // DEBT debt-runner-temp-dir-leak — this temp dir has no cleanup path; see rule-temp-dir-cleanup.
   const homeDir = realpathSync(mkdtempSync(join(tmpdir(), `sss-e2e-${kind}-`)));
   if (opts.hostAllow !== undefined) {
     mkdirSync(join(homeDir, '.claude'), { recursive: true });

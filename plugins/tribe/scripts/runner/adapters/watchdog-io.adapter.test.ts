@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildWatchdogIo, withHome } from './watchdog-io.adapter.ts';
 
+// DEBT debt-runner-temp-dir-leak — this temp dir has no cleanup path; see rule-temp-dir-cleanup.
 const tmp = () => mkdtempSync(join(tmpdir(), 'wd-adapter-'));
 
 describe('buildWatchdogIo — the real edge', () => {

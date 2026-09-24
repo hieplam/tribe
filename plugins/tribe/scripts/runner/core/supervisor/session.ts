@@ -24,13 +24,13 @@ import { buildContainmentHook, decideClosingGrantHook } from './permit.ts';
  * un-granted `closing` session cannot run headless at all. `Skill` by owner ruling R2 (card
  * supervisor-session-settings), so `/c3` loads its content here; its CLI still cannot run,
  * because this envelope has no `Bash` (`JUDGMENT_DISALLOWED_TOOLS`) — a known, accepted limit. */
-const JUDGMENT_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Skill'];
+const JUDGMENT_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Skill'] as const;
 
 /** spec §5.1: no shell, no subagents, no network, and no wait-tool for a ruling/ratify session —
  * the same wall `core/session.ts`'s executor envelope holds (a one-shot session that arms a
  * Monitor dies before the notification can ever reach it), restated here rather than imported
  * because this envelope is otherwise unrelated to the executor's `PinnedSessionOptions`. */
-const JUDGMENT_DISALLOWED_TOOLS = ['Bash', 'Task', 'Agent', 'WebFetch', 'WebSearch', 'Monitor', 'ScheduleWakeup'];
+const JUDGMENT_DISALLOWED_TOOLS = ['Bash', 'Task', 'Agent', 'WebFetch', 'WebSearch', 'Monitor', 'ScheduleWakeup'] as const;
 
 /** R11 (owner ruling, Task 20, spec §5.4): the `closing` session's own explicit tool grant —
  * exactly the tools Stage D uses, nothing more. Before R11, `closing` carried NO
@@ -39,12 +39,12 @@ const JUDGMENT_DISALLOWED_TOOLS = ['Bash', 'Task', 'Agent', 'WebFetch', 'WebSear
  * `allowedTools`/`disallowedTools` here still do not "confine" anything by themselves (§5.1's
  * own hook-is-the-enforcement-layer finding) — they are what makes a `'default'`-permissionMode
  * session headless in the first place (an allowlisted tool never prompts). */
-const CLOSING_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash', 'Skill'];
+const CLOSING_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash', 'Skill'] as const;
 
 /** R11: no subagents, no network, no wait-tool for `closing` either — `Bash` stays granted
  * (above) because `closing` legitimately runs `verify-shipped` and lands the governance PR
  * (§5.4's named exception); this list only removes the tools nothing in Stage D needs. */
-const CLOSING_DISALLOWED_TOOLS = ['Task', 'Agent', 'WebFetch', 'WebSearch', 'Monitor', 'ScheduleWakeup'];
+const CLOSING_DISALLOWED_TOOLS = ['Task', 'Agent', 'WebFetch', 'WebSearch', 'Monitor', 'ScheduleWakeup'] as const;
 
 /** The scan wall (issue #163; card D2/D3): the executor's own `decideScanGuardHook`, reused —
  * never a second predicate — as its own PreToolUse entry. A supervisor session is the unattended
@@ -64,8 +64,8 @@ export interface OneShotSessionOptions {
   model: string;
   settingSources: string[];
   permissionMode: 'default';
-  allowedTools?: string[];
-  disallowedTools?: string[];
+  allowedTools?: readonly string[];
+  disallowedTools?: readonly string[];
   additionalDirectories?: string[];
   /** R11 (Task 20, spec §5.4 item 4): the SDK's local-plugin option, set on `closing` only, so
    * `verify-shipped` resolves BY NAME inside the session from the repo itself. Kept after the

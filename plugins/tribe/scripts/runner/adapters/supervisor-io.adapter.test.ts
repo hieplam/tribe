@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSupervisorIo, PathEscapesHomeError } from './supervisor-io.adapter.ts';
 
+// DEBT debt-runner-temp-dir-leak — this temp dir has no cleanup path; see rule-temp-dir-cleanup.
 const tmp = () => mkdtempSync(join(tmpdir(), 'sup-io-'));
 
 describe('buildSupervisorIo — the real edge', () => {
