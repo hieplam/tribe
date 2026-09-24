@@ -3,7 +3,7 @@
 // buildOneShotOptions -> the real SDK adapter, wired exactly as cli/main.ts wires it. Opt-in via
 // RUN_SESSION_E2E=1 (costs tokens, needs Claude Code login auth).
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sdkSpawnSession } from '../../adapters/session.adapter.ts';
@@ -55,50 +55,56 @@ interface RunOptions {
 
 async function runKind(kind: SessionKind, prompt: string, label: string, opts: RunOptions = {}): Promise<Run> {
   // realpath now: macOS tmpdir is a symlink, and the containment hook realpaths what it checks.
-  // DEBT debt-runner-temp-dir-leak — this temp dir has no cleanup path; see rule-temp-dir-cleanup.
   const homeDir = realpathSync(mkdtempSync(join(tmpdir(), `sss-e2e-${kind}-`)));
-  if (opts.hostAllow !== undefined) {
-    mkdirSync(join(homeDir, '.claude'), { recursive: true });
-    writeFileSync(join(homeDir, '.claude', 'settings.local.json'), JSON.stringify({ permissions: { allow: opts.hostAllow } }));
-  }
-  const lines: string[] = [];
-  const io: OneShotSessionSeam = {
-    // Byte-for-byte the composition root's production wiring (cli/main.ts).
-    spawnSession: (params) => sdkSpawnSession(params as unknown as SpawnSessionParams),
-    onSessionStart: () => {},
-    appendLog: (_logPath, line) => {
-      lines.push(line);
-    },
-  };
-  const attachesVerifyShipped = kind === 'closing' && opts.withoutVerifyShippedPlugin !== true;
-  const result = await runOneShotSession(
-    {
-      kind,
-      prompt,
-      config: {
-        homeDir,
-        model: MODEL,
-        maxTurns: 8,
-        ...(kind === 'ratify' ? {} : { repoRoot: REPO_ROOT }),
-        realpath: (p: string) => {
-          try {
-            return realpathSync(p);
-          } catch {
-            return p; // the seam's contract: a path that does not exist comes back unchanged
-          }
-        },
-        ...(attachesVerifyShipped ? { verifyShippedPluginDir: VERIFY_SHIPPED_DIR } : {}),
+  // `rule-temp-dir-cleanup`: the transcript leaves here in `lines` (and, when LOG_DIR is set, is
+  // written OUTSIDE homeDir), so nothing reads this tree after the try block — it is removed even
+  // when an assertion below throws.
+  try {
+    if (opts.hostAllow !== undefined) {
+      mkdirSync(join(homeDir, '.claude'), { recursive: true });
+      writeFileSync(join(homeDir, '.claude', 'settings.local.json'), JSON.stringify({ permissions: { allow: opts.hostAllow } }));
+    }
+    const lines: string[] = [];
+    const io: OneShotSessionSeam = {
+      // Byte-for-byte the composition root's production wiring (cli/main.ts).
+      spawnSession: (params) => sdkSpawnSession(params as unknown as SpawnSessionParams),
+      onSessionStart: () => {},
+      appendLog: (_logPath, line) => {
+        lines.push(line);
       },
-      sessionTimeoutMs: SESSION_TIMEOUT_MS,
-    },
-    io,
-  );
-  if (LOG_DIR !== undefined) {
-    const dir = join(LOG_DIR, opts.adversarial === true ? 'adversarial' : 'sessions');
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${kind}-${label}.jsonl`), `${lines.join('\n')}\n`);
+    };
+    const attachesVerifyShipped = kind === 'closing' && opts.withoutVerifyShippedPlugin !== true;
+    const result = await runOneShotSession(
+      {
+        kind,
+        prompt,
+        config: {
+          homeDir,
+          model: MODEL,
+          maxTurns: 8,
+          ...(kind === 'ratify' ? {} : { repoRoot: REPO_ROOT }),
+          realpath: (p: string) => {
+            try {
+              return realpathSync(p);
+            } catch {
+              return p; // the seam's contract: a path that does not exist comes back unchanged
+            }
+          },
+          ...(attachesVerifyShipped ? { verifyShippedPluginDir: VERIFY_SHIPPED_DIR } : {}),
+        },
+        sessionTimeoutMs: SESSION_TIMEOUT_MS,
+      },
+      io,
+    );
+    if (LOG_DIR !== undefined) {
+      const dir = join(LOG_DIR, opts.adversarial === true ? 'adversarial' : 'sessions');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${kind}-${label}.jsonl`), `${lines.join('\n')}\n`);
+    }
+    return { lines, transcript: lines.join('\n'), result };
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
   }
-  return { lines, transcript: lines.join('\n'), result };
 }
 
 /** Every parsed message; a line that is not JSON contributes nothing (narrow catch). */

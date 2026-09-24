@@ -1,15 +1,17 @@
 // adapters/supervisor-io.adapter.test.ts — Task 12's Step-1 test contract, run against a real
 // `mktemp -d` tree (fixtures-mirror-reality.md: a bare directory, never a convenience fixture
 // the test happens to have already built). Never touches
-// `~/.tribe/-Users-hip-repo-tribe/campaigns/` — every test builds its own throwaway home and
-// the OS cleans it up.
-import { describe, expect, test } from 'bun:test';
+// `~/.tribe/-Users-hip-repo-tribe/campaigns/` — every test builds its own throwaway home, and
+// this file removes each one in its own afterAll (`rule-temp-dir-cleanup`: the OS reaping the
+// system temp dir is explicitly NOT a cleanup path).
+import { afterAll, describe, expect, test } from 'bun:test';
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -17,8 +19,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSupervisorIo, PathEscapesHomeError } from './supervisor-io.adapter.ts';
 
-// DEBT debt-runner-temp-dir-leak — this temp dir has no cleanup path; see rule-temp-dir-cleanup.
-const tmp = () => mkdtempSync(join(tmpdir(), 'sup-io-'));
+// `rule-temp-dir-cleanup`: every dir `tmp()` hands out is recorded here and removed in the
+// afterAll below, so a failing assertion never leaks the tree it created.
+const tmpDirs: string[] = [];
+const tmp = () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sup-io-'));
+  tmpDirs.push(dir);
+  return dir;
+};
+
+afterAll(() => {
+  for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 describe('buildSupervisorIo — the real edge', () => {
   test('an atomic write survives a concurrent read — never a truncated read', async () => {

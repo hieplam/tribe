@@ -10,13 +10,23 @@
 // replace node:fs BEFORE watchdog-io.adapter.ts's own `import { readSync } from 'node:fs'`
 // resolves - the sibling file already imports the adapter statically at its top, so the mock
 // would install too late to affect that binding.
-import { describe, expect, mock, test } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// DEBT debt-runner-temp-dir-leak — this temp dir has no cleanup path; see rule-temp-dir-cleanup.
-const tmp = () => mkdtempSync(join(tmpdir(), 'wd-adapter-short-read-'));
+// `rule-temp-dir-cleanup`: every dir `tmp()` hands out is recorded here and removed in the
+// afterAll below, so a failing assertion never leaks the tree it created.
+const tmpDirs: string[] = [];
+const tmp = () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wd-adapter-short-read-'));
+  tmpDirs.push(dir);
+  return dir;
+};
+
+afterAll(() => {
+  for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 describe('buildWatchdogIo.readTail - a short readSync (S5)', () => {
   test('a readSync that returns fewer bytes than requested never NUL-pads the result', async () => {
