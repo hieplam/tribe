@@ -1031,9 +1031,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && for h in '## BEFORE'
 ```
 Expected: five `ok` lines.
 
-- [ ] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
+- [x] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
   trailers (`Tribe-Task: 8/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 8 complete
+- [x] Task 8 complete
 
 ---
 
