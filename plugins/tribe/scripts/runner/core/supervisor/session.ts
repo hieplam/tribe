@@ -86,7 +86,8 @@ export interface OneShotSessionOptions {
  * `additionalDirectories`) and repo access for `closing` (§5.4's named exception); `ratify` never
  * reads it (§5.3: "No repo access at all"). `realpath` is the containment hook's one injected
  * capability (`permit.ts`'s `buildContainmentHook`) — never `fs` directly (`pure-core.md`).
- * Unused for `closing`, which carries no hook. */
+ * Unused for `closing`: its two hooks (`decideClosingGrantHook`, the scan wall) are pure
+ * predicates that resolve no paths. */
 export interface OneShotSessionConfig {
   /** The campaign home (S-P9) — `cwd` for every one-shot session, and the containment root for
    * `ruling`/`ratify` (spec §14: this is what makes the transcript attributable in the viewer

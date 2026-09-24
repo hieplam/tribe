@@ -33,9 +33,9 @@ No task touches either, so this plan carries no `allowsSchemaChange` front-matte
 - **TDD is mandatory:** write the failing test, run it, see it fail **for the stated reason**, then
   implement. A test that never failed first proves nothing.
 - **Every commit** carries, in its ONE final paragraph, these lines in this order:
-  `Tribe-Card: supervisor-session-settings`, `Tribe-Task: N/9`, `Campaign: fu-supervisor-settings`,
-  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Tick this plan's checkboxes for the
-  task in the SAME commit as the code.
+  `Tribe-Card: supervisor-session-settings`, `Tribe-Task: N/9`, `Campaign: fu-supervisor-settings`.
+  This campaign's executor dispatch supersedes the earlier `Co-Authored-By` line and forbids an
+  agent co-author trailer. Tick this plan's checkboxes for the task in the SAME commit as the code.
 - **The grants stay byte-identical, with ONE owner-ruled exception:** `JUDGMENT_DISALLOWED_TOOLS`,
   `CLOSING_ALLOWED_TOOLS`, `CLOSING_DISALLOWED_TOOLS` (`core/supervisor/session.ts:26-47`) and
   `permissionMode: 'default'` do not change in any task (issue #163 scope fence).
