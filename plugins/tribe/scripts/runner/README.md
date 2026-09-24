@@ -1027,6 +1027,36 @@ written by the supervisor):
   (`core/supervisor/session.ts`).
 - **`final-report.md`** — written by the closing session itself, per its own brief
   (`core/supervisor/brief-closing.md`'s `{{FINAL_REPORT_PATH}}`), never by the loop.
+
+### The one-shot session envelope (card `supervisor-session-settings`, `buildOneShotOptions`)
+
+All three one-shot kinds — `ruling`, `ratify`, `closing` — load
+`settingSources: ['user', 'project', 'local']`, the same three-tier list the executor path loads
+(`core/session.ts`): the `user` tier is what registers `~/.claude/settings.json`'s
+`enabledPlugins` (the C3 plugin), so `Skill c3` resolves in every kind rather than returning
+`Unknown skill: c3`. Each kind's `PreToolUse` hooks:
+
+- **`ruling`/`ratify`** carry the containment hook (`decideContainmentHook` — the ONLY write
+  enforcement layer; `additionalDirectories` is a read convenience, never a write boundary) AND
+  the scan-wall hook (`decideScanGuardHook`, imported from the executor path, never copied or
+  forked — card D3), wired alongside it as defence in depth. Their `allowedTools` is
+  `[Read, Grep, Glob, Write, Edit, Skill]` — `Skill` by owner ruling R2, verbatim "Allow the Skill
+  tool" — so the C3 skill's content loads, though its CLI still cannot run there (no `Bash`, a
+  known, accepted limit); the containment hook allows the `Skill` load at any location alongside
+  `Read`/`Grep`/`Glob`.
+- **`closing`** carries NO containment hook (it legitimately writes the repo to land the
+  governance PR, R11), but carries the scan-wall hook (same predicate, defence in depth) AND the
+  closing-grant hook (`decideClosingGrantHook`, ruling R1): a pure allowlist predicate that
+  enforces the unchanged `CLOSING_ALLOWED_TOOLS` itself, so a `permissions.allow` rule loaded from
+  any of the three settings tiers can never widen the grant beyond it — MEASURED: with the tiers
+  loaded and no grant hook, an un-granted tool (`Workflow`) ran. Accepted consequence: `closing`
+  stops running `TaskCreate`/`CronList`/`ListAgents`, which ran un-granted before and which the
+  closing stage does not use.
+- **`verify-shipped`'s hand-load is kept.** `closing`'s `options.plugins` hand-load (pointing at
+  the repo's own `verify-shipped` plugin directory) predates the tier fix and stays, on purpose:
+  MEASURED, the `user` tier resolves `verify-shipped` only where `install.sh` symlinked it into
+  `~/.claude/skills/` — a host fact — while the hand-load resolves it from the repo on every host;
+  where both are present the session registers it once.
 - **`<home>/NEEDS_OWNER.md`** (home root, **not** under `supervisor/`, for discoverability —
   spec §11) — the owner-facing park artifact: park reason, what happened, the escalated card's
   question (verbatim), what was already tried, what unblocks it, and the run's ledger lines.
@@ -1219,14 +1249,23 @@ ESLint, which is deferred until typescript-eslint supports TS >= 7.1 (plan Amend
   per-session log files.
 - **What HAS been verified live for the user-settings-tier change** (card
   `runner-session-user-settings`, 2026-09-20, real spawned Agent-SDK sessions, `haiku`, through
-  `runSession` + the real `sdkSpawnSession`, not a stub — see
-  `docs/superpowers/evidence/2026-09-20-runner-session-hygiene.md` for full transcripts):
+  `runSession` + the real `sdkSpawnSession`, not a stub — `core/session.e2e.test.ts`, opt-in
+  `RUN_SESSION_E2E=1`; see `docs/superpowers/evidence/2026-09-20-runner-session-hygiene.md` for
+  full transcripts):
   - `Skill c3` resolves under `settingSources: ['user', 'project', 'local']` — the transcript
     carries a `tool_use` naming skill `c3` and its resolved content (`skills/c3`, a `C3` title) —
     and, with the tier temporarily reverted to `['project']` alone, the same brief instead
     produces `<tool_use_error>Unknown skill: c3. Did you mean cd?</tool_use_error>` and a final
     result of `SKILL_RESULT=unknown Unknown skill: c3. Did you mean cd?`; both transcripts were
     captured from real runs.
+  - The supervisor's own one-shot session envelope (card `supervisor-session-settings`,
+    `core/supervisor/session.e2e.test.ts`, opt-in `RUN_SESSION_E2E=1`) carries the same fix: real
+    `claude-haiku-4-5-20251001` sessions through `runOneShotSession` + the real SDK adapter, never
+    a stub, prove `Skill c3` returns C3 content in all three kinds (`ruling`, `ratify`, `closing`),
+    a real `find /` is refused by the scan wall in `closing`, the `verify-shipped` hand-load is
+    measured with and without `options.plugins`, and a host `permissions.allow` rule for
+    `Workflow` still cannot run it in `closing` (ruling R1) — all failing for the stated reason
+    with the envelope reverted to base, and all `7 pass, 0 fail` as built.
   - The SDK's own `model` and `permissionMode` options **win** over the user tier's
     `model: "opus[1m]"` and `permissions.defaultMode: "auto"` (`~/.claude/settings.json`): every
     `system/init` message observed reports `model: "claude-haiku-4-5-20251001"` and

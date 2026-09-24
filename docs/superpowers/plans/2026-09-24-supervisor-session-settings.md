@@ -1095,24 +1095,24 @@ Expected: `ok: true`; `stale fact gone`; a count of at least `2` (the executor's
 mention plus the new supervisor one); the whole runner suite green (inherited failures per the
 Adjudication rule only if they also fail on base) and `tsc` exit 0.
 
-- [ ] **Step 4: Commit** — stage the `.c3/` change-unit files and the README and commit with the
+- [x] **Step 4: Commit** — stage the `.c3/` change-unit files and the README and commit with the
   Global Constraints trailers (`Tribe-Task: 9/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 9 complete
+- [x] Task 9 complete
 
 ---
 
 ## Definition of done (issue #163 checklist → proof)
 
-- [ ] G1 — Task 7: `Skill c3` returns C3 content in all three kinds (R2 granted `Skill` to
+- [x] G1 — Task 7: `Skill c3` returns C3 content in all three kinds (R2 granted `Skill` to
   `ruling`/`ratify`, Task 6); all three
   proven to FAIL on `Unknown skill` with the envelope reverted.
-- [ ] G2 — Task 4 unit test over every variant for every kind, and Task 7's real `find /`
+- [x] G2 — Task 4 unit test over every variant for every kind, and Task 7's real `find /`
   refusal in `closing`; `decideScanGuardHook` imported, never copied.
-- [ ] R1 — Task 5 unit tests + Task 7's real allow-rule session: `closing` cannot be widened.
-- [ ] R2 — Task 6: `Skill` only; `Bash` and an out-of-home `Write` still refused (unit tests).
-- [ ] G3 — Task 3: `['user','project','local']` for every kind; no tier defect found (spec §4.5).
-- [ ] G4 — Task 7 measurement + Task 8 verdict ("kept"), copied into the PR body.
-- [ ] G5 — Task 8: `after/sessions` reads 0 `Unknown skill`, 0 scans, on
+- [x] R1 — Task 5 unit tests + Task 7's real allow-rule session: `closing` cannot be widened.
+- [x] R2 — Task 6: `Skill` only; `Bash` and an out-of-home `Write` still refused (unit tests).
+- [x] G3 — Task 3: `['user','project','local']` for every kind; no tier defect found (spec §4.5).
+- [x] G4 — Task 7 measurement + Task 8 verdict ("kept"), copied into the PR body.
+- [x] G5 — Task 8: `after/sessions` reads 0 `Unknown skill`, 0 scans, on
   `plugins/tribe/scripts/session-hygiene.ts`, next to Task 1's and `before/`'s numbers.
-- [ ] `bun test` + `bunx tsc --noEmit` green in `plugins/tribe/scripts/runner/`;
+- [x] `bun test` + `bunx tsc --noEmit` green in `plugins/tribe/scripts/runner/`;
   `test-supervisor-e2e.sh` 40/40; `c3x check` ok.
