@@ -1276,3 +1276,27 @@ describe('quoteShellArg / renderRerunCommand — unit-level (Fix 4)', () => {
     expect(renderRerunCommand(['--repo', '/r'])).toBe('bun run.ts supervise --repo /r');
   });
 });
+
+import { inferOneShotKind } from './main.ts';
+import { buildOneShotOptions, type OneShotSessionConfig } from '../core/supervisor/session.ts';
+
+describe('inferOneShotKind — keys on the grant, never on the tier list (card supervisor-session-settings)', () => {
+  const config: OneShotSessionConfig = {
+    homeDir: '/abs/home/.tribe/key/campaigns/slug',
+    model: 'claude-haiku-fixture',
+    maxTurns: 5,
+    repoRoot: '/abs/repo',
+    realpath: (p: string) => p,
+    verifyShippedPluginDir: '/abs/plugins/verify-shipped',
+  };
+  const TIER_LISTS: string[][] = [[], ['project'], ['user', 'project', 'local']];
+
+  for (const kind of ['ruling', 'ratify', 'closing'] as const) {
+    test(`the REAL ${kind} options infer "${kind}" whatever settingSources holds`, () => {
+      const options = buildOneShotOptions(kind, config, new AbortController());
+      for (const settingSources of TIER_LISTS) {
+        expect(inferOneShotKind({ ...options, settingSources })).toBe(kind);
+      }
+    });
+  }
+});

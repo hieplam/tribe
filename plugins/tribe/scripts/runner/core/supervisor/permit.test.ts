@@ -4,6 +4,7 @@
 // `ruling`/`ratify` session); one escaped write is the defect.
 import { expect, test, describe } from 'bun:test';
 import { buildContainmentHook, containPath, decideContainmentHook } from './permit.ts';
+import { decideClosingGrantHook } from './permit.ts';
 
 const HOME = '/abs/home/.tribe/key/campaigns/slug';
 const ev = (tool: string, input: Record<string, unknown>) => ({ tool_name: tool, tool_input: input });
@@ -178,5 +179,54 @@ describe('buildContainmentHook — the impure edge (injected realpath, the symli
     const hook = buildContainmentHook(HOME, { realpath: (p: string) => p });
     const decision = await hook(null);
     expect(decision.hookSpecificOutput?.permissionDecision).toBe('deny');
+  });
+});
+
+describe('decideClosingGrantHook — closing\'s grant, enforced (card supervisor-session-settings, R1)', () => {
+  const GRANT = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash', 'Skill'];
+
+  for (const tool of GRANT) {
+    test(`allows granted tool ${tool}`, () => {
+      expect(decideClosingGrantHook(GRANT, { tool_name: tool, tool_input: {} })).toEqual({});
+    });
+  }
+
+  for (const tool of ['Workflow', 'TaskCreate', 'CronCreate', 'SendMessage', 'ToolSearch', 'WebFetch', 'mcp__x__y']) {
+    test(`denies un-granted tool ${tool}, naming the grant`, () => {
+      const d = decideClosingGrantHook(GRANT, { tool_name: tool, tool_input: {} });
+      expect(d.hookSpecificOutput?.permissionDecision).toBe('deny');
+      expect(d.hookSpecificOutput?.permissionDecisionReason).toContain('Read, Grep, Glob, Write, Edit, Bash, Skill');
+    });
+  }
+
+  for (const malformed of [undefined, null, {}, { tool_name: 42 }, { tool_name: '' }]) {
+    test(`denies malformed input ${JSON.stringify(malformed)} (fail closed)`, () => {
+      expect(decideClosingGrantHook(GRANT, malformed).hookSpecificOutput?.permissionDecision).toBe('deny');
+    });
+  }
+});
+
+// Owner ruling R2 (card supervisor-session-settings): "Allow the Skill tool" — Skill ONLY.
+describe('Skill is granted to ruling/ratify, and nothing else opened (R2)', () => {
+  test('Skill is allowed, with or without args', () => {
+    expect(decideContainmentHook(HOME, ev('Skill', { skill: 'c3' }))).toEqual({});
+    expect(decideContainmentHook(HOME, ev('Skill', { skill: 'c3-skill:c3', args: 'check' }))).toEqual({});
+  });
+
+  for (const tool of ['Bash', 'ToolSearch', 'WebFetch', 'Task', 'Agent', 'Workflow', 'NotebookEdit']) {
+    test(`${tool} is still refused with the not-granted reason`, () => {
+      const d = decideContainmentHook(HOME, ev(tool, { command: 'find / -name x' }));
+      expect(denied(d)).toBe(true);
+      expect(d.hookSpecificOutput?.permissionDecisionReason).toMatch(/not granted/i);
+    });
+  }
+
+  test('a Write outside the campaign home is still refused', () => {
+    expect(denied(decideContainmentHook(HOME, ev('Write', { file_path: '/abs/repo/src/index.ts' })))).toBe(true);
+  });
+
+  test('the not-granted reason names the actual grant, Skill included', () => {
+    const d = decideContainmentHook(HOME, ev('Bash', { command: 'ls' }));
+    expect(d.hookSpecificOutput?.permissionDecisionReason).toContain('Skill');
   });
 });

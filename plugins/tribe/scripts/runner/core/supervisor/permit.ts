@@ -35,8 +35,8 @@ const CONTAINMENT_DENIED_REASON =
 // Write/Edit whose resolved target escaped the campaign home — so it gets its own message, never
 // borrowing `CONTAINMENT_DENIED_REASON`.
 const NOT_GRANTED_REASON =
-  'This judgment session is not granted this tool; only Read, Grep, Glob and Write/Edit under ' +
-  'the campaign home are permitted.';
+  'This judgment session is not granted this tool; only Read, Grep, Glob, Skill and Write/Edit ' +
+  'under the campaign home are permitted.';
 
 function deny(reason: string = CONTAINMENT_DENIED_REASON): HookDecision {
   return {
@@ -62,19 +62,25 @@ export function containPath(target: string, homeDir: string): boolean {
 /** PURE: the containment decision table. Fails CLOSED by default — the shapes ever ALLOWED are
  * `Read`/`Grep`/`Glob` (any location: spec §5.1's allowedTools row grants all three to
  * ruling/ratify; they are read-only, so — same as `Read` — no `path`/`file_path` argument of
- * theirs can ever write, hence no containment check applies to them) and a `Write`/`Edit` whose
- * `tool_input.file_path` passes `containPath`. Every other tool — including `Bash`, which is also
- * on `disallowedTools`, denied here too as the ordinary fail-closed default rather than a
- * special-cased carve-out — and every malformed/absent event denies rather than throwing, with
- * `NOT_GRANTED_REASON` (never the write-containment message, which would misstate the reason).
- * This table operates on `file_path` LEXICALLY (no filesystem access): it is what
- * `buildContainmentHook` below calls, once for the fast Read/Grep/Glob/Bash/malformed cases and
- * once more with a symlink-RESOLVED `file_path` for `Write`/`Edit`. */
+ * theirs can ever write, hence no containment check applies to them), `Skill` (owner ruling R2 —
+ * loading a skill's content writes nothing, so it needs no path check either), and a
+ * `Write`/`Edit` whose `tool_input.file_path` passes `containPath`. Every other tool — including
+ * `Bash`, which is also on `disallowedTools`, denied here too as the ordinary fail-closed default
+ * rather than a special-cased carve-out — and every malformed/absent event denies rather than
+ * throwing, with `NOT_GRANTED_REASON` (never the write-containment message, which would misstate
+ * the reason). This table operates on `file_path` LEXICALLY (no filesystem access): it is what
+ * `buildContainmentHook` below calls, once for the fast Read/Grep/Glob/Skill/Bash/malformed cases
+ * and once more with a symlink-RESOLVED `file_path` for `Write`/`Edit`. */
 export function decideContainmentHook(homeDir: string, input: unknown): HookDecision {
   const event = (input ?? {}) as { tool_name?: unknown; tool_input?: unknown };
   const toolName = typeof event.tool_name === 'string' ? event.tool_name : '';
 
   if (toolName === 'Read' || toolName === 'Grep' || toolName === 'Glob') return {};
+
+  // Owner ruling R2: loading a skill's content writes nothing, so Skill needs no path check. A
+  // tool the loaded skill then asks for still comes through THIS table and is judged on its own.
+  const isSkillLoad = toolName === 'Skill';
+  if (isSkillLoad) return {};
 
   if (toolName === 'Write' || toolName === 'Edit') {
     const toolInput = (event.tool_input ?? {}) as { file_path?: unknown };
@@ -142,4 +148,21 @@ export function buildContainmentHook(
 
     return decideContainmentHook(homeDir, { tool_name: toolName, tool_input: { file_path: resolvedPath } });
   };
+}
+
+/** PURE (card supervisor-session-settings, ruling R1): enforces `closing`'s explicit grant. `closing`
+ * loads the user/project/local settings tiers, and any of them may carry a `permissions.allow`
+ * rule that would auto-approve a tool outside the grant (MEASURED: `Workflow` ran once such a
+ * rule was loaded). A PreToolUse deny beats an allow rule, so this hook is what keeps the grant
+ * exactly the listed tools on every host. Fails CLOSED: a malformed or unnamed tool denies. The
+ * grant arrives as an argument so this module never imports session.ts (which imports it). */
+export function decideClosingGrantHook(grantedTools: readonly string[], input: unknown): HookDecision {
+  const event = (input ?? {}) as { tool_name?: unknown };
+  const toolName = typeof event.tool_name === 'string' ? event.tool_name : '';
+  const isGranted = toolName !== '' && grantedTools.includes(toolName);
+  if (isGranted) return {};
+  return deny(
+    `This closing session is not granted this tool; only ${grantedTools.join(', ')} are ` +
+      'permitted, and a settings-file allow rule cannot extend that grant.',
+  );
 }

@@ -33,9 +33,9 @@ No task touches either, so this plan carries no `allowsSchemaChange` front-matte
 - **TDD is mandatory:** write the failing test, run it, see it fail **for the stated reason**, then
   implement. A test that never failed first proves nothing.
 - **Every commit** carries, in its ONE final paragraph, these lines in this order:
-  `Tribe-Card: supervisor-session-settings`, `Tribe-Task: N/9`, `Campaign: fu-supervisor-settings`,
-  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Tick this plan's checkboxes for the
-  task in the SAME commit as the code.
+  `Tribe-Card: supervisor-session-settings`, `Tribe-Task: N/9`, `Campaign: fu-supervisor-settings`.
+  This campaign's executor dispatch supersedes the earlier `Co-Authored-By` line and forbids an
+  agent co-author trailer. Tick this plan's checkboxes for the task in the SAME commit as the code.
 - **The grants stay byte-identical, with ONE owner-ruled exception:** `JUDGMENT_DISALLOWED_TOOLS`,
   `CLOSING_ALLOWED_TOOLS`, `CLOSING_DISALLOWED_TOOLS` (`core/supervisor/session.ts:26-47`) and
   `permissionMode: 'default'` do not change in any task (issue #163 scope fence).
@@ -126,9 +126,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && command grep -c '"fi
 ```
 Expected: `3` or more (one JSON block per root), and the RED command above now exits 0.
 
-- [ ] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
+- [x] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
   trailers (`Tribe-Task: 1/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 1 complete
+- [x] Task 1 complete
 
 ---
 
@@ -208,9 +208,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && bash plugins/tribe/s
 Expected: all `cli/main.test.ts` tests pass, `tsc` exit 0, and the double suite prints
 `40 passed, 0 failed`.
 
-- [ ] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
   (`Tribe-Task: 2/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 2 complete
+- [x] Task 2 complete
 
 ---
 
@@ -307,9 +307,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && command grep -n "\['
 ```
 Expected: all pass, `tsc` exit 0, `40 passed, 0 failed`, and `no stale tier claim`.
 
-- [ ] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
   (`Tribe-Task: 3/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 3 complete
+- [x] Task 3 complete
 
 ---
 
@@ -456,9 +456,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && command grep -c "isF
 Expected: all pass, `tsc` exit 0, `40 passed, 0 failed`, and the last count `0` (the predicate is
 imported by name via `decideScanGuardHook`, never re-declared here).
 
-- [ ] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the two files and commit with the Global Constraints trailers
   (`Tribe-Task: 4/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 4 complete
+- [x] Task 4 complete
 
 ---
 
@@ -578,9 +578,9 @@ Expected: all pass, `tsc` exit 0, `40 passed, 0 failed`, and the real permission
 `N passed, 0 failed` — its `closing` probe (Write + `git rev-parse` via Bash, empty
 `permissionDenials`) must stay green, proving the grant hook does not deny Stage D's own tools.
 
-- [ ] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
   (`Tribe-Task: 5/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 5 complete
+- [x] Task 5 complete
 
 ---
 
@@ -711,9 +711,9 @@ Expected: all pass; `tsc` exit 0; `40 passed, 0 failed`; the real permission tes
 the last command prints exactly two lines — the old and new `JUDGMENT_ALLOWED_TOOLS` — proving no
 other grant constant changed since the base.
 
-- [ ] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
   (`Tribe-Task: 6/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 6 complete
+- [x] Task 6 complete
 
 ---
 
@@ -975,10 +975,10 @@ report); and the second, un-flagged run shows `7 skip`, proving `bun test` stays
 Paste both transcripts' failure/pass summaries (`/tmp/sss-e2e-before.txt`,
 `/tmp/sss-e2e-after.txt`) into the task report.
 
-- [ ] **Step 4: Commit** — stage ONLY `core/supervisor/session.e2e.test.ts` (the revert was
+- [x] **Step 4: Commit** — stage ONLY `core/supervisor/session.e2e.test.ts` (the revert was
   restored, and the evidence corpora live under `~/.tribe`, outside the repo) and commit with the
   Global Constraints trailers (`Tribe-Task: 7/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 7 complete
+- [x] Task 7 complete
 
 ---
 
@@ -1031,9 +1031,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-session-settings && for h in '## BEFORE'
 ```
 Expected: five `ok` lines.
 
-- [ ] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
+- [x] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
   trailers (`Tribe-Task: 8/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 8 complete
+- [x] Task 8 complete
 
 ---
 
@@ -1095,24 +1095,24 @@ Expected: `ok: true`; `stale fact gone`; a count of at least `2` (the executor's
 mention plus the new supervisor one); the whole runner suite green (inherited failures per the
 Adjudication rule only if they also fail on base) and `tsc` exit 0.
 
-- [ ] **Step 4: Commit** — stage the `.c3/` change-unit files and the README and commit with the
+- [x] **Step 4: Commit** — stage the `.c3/` change-unit files and the README and commit with the
   Global Constraints trailers (`Tribe-Task: 9/9`), ticking this task's boxes in the SAME commit.
-- [ ] Task 9 complete
+- [x] Task 9 complete
 
 ---
 
 ## Definition of done (issue #163 checklist → proof)
 
-- [ ] G1 — Task 7: `Skill c3` returns C3 content in all three kinds (R2 granted `Skill` to
+- [x] G1 — Task 7: `Skill c3` returns C3 content in all three kinds (R2 granted `Skill` to
   `ruling`/`ratify`, Task 6); all three
   proven to FAIL on `Unknown skill` with the envelope reverted.
-- [ ] G2 — Task 4 unit test over every variant for every kind, and Task 7's real `find /`
+- [x] G2 — Task 4 unit test over every variant for every kind, and Task 7's real `find /`
   refusal in `closing`; `decideScanGuardHook` imported, never copied.
-- [ ] R1 — Task 5 unit tests + Task 7's real allow-rule session: `closing` cannot be widened.
-- [ ] R2 — Task 6: `Skill` only; `Bash` and an out-of-home `Write` still refused (unit tests).
-- [ ] G3 — Task 3: `['user','project','local']` for every kind; no tier defect found (spec §4.5).
-- [ ] G4 — Task 7 measurement + Task 8 verdict ("kept"), copied into the PR body.
-- [ ] G5 — Task 8: `after/sessions` reads 0 `Unknown skill`, 0 scans, on
+- [x] R1 — Task 5 unit tests + Task 7's real allow-rule session: `closing` cannot be widened.
+- [x] R2 — Task 6: `Skill` only; `Bash` and an out-of-home `Write` still refused (unit tests).
+- [x] G3 — Task 3: `['user','project','local']` for every kind; no tier defect found (spec §4.5).
+- [x] G4 — Task 7 measurement + Task 8 verdict ("kept"), copied into the PR body.
+- [x] G5 — Task 8: `after/sessions` reads 0 `Unknown skill`, 0 scans, on
   `plugins/tribe/scripts/session-hygiene.ts`, next to Task 1's and `before/`'s numbers.
-- [ ] `bun test` + `bunx tsc --noEmit` green in `plugins/tribe/scripts/runner/`;
+- [x] `bun test` + `bunx tsc --noEmit` green in `plugins/tribe/scripts/runner/`;
   `test-supervisor-e2e.sh` 40/40; `c3x check` ok.

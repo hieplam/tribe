@@ -13,17 +13,18 @@
  * "PURE-except-for-the-one-injected-call" shape `core/session.ts`'s `consumeSession` already
  * uses — every effect (spawn, log, clock via `setTimeout`) arrives through the injected seam.
  */
-import type { HookDecision, SessionMessage } from '../session.ts';
+import { decideScanGuardHook, type HookDecision, type SessionMessage } from '../session.ts';
 import type { SessionKind } from './model.ts';
 import type { LedgerEntryUsage } from './model.ts';
-import { buildContainmentHook } from './permit.ts';
+import { buildContainmentHook, decideClosingGrantHook } from './permit.ts';
 
 /** spec §5.2/§5.3: the tool grant for a `ruling`/`ratify` session. `closing` (§5.4) carries its
  * OWN, wider grant — R11 (Task 20), below `CLOSING_ALLOWED_TOOLS`/`CLOSING_DISALLOWED_TOOLS` —
- * because `settingSources: ['project']` alone grants nothing when the target repo has no
- * committed `.claude/settings.json` (this repo has none): an un-granted `closing` session cannot
- * run headless at all. */
-const JUDGMENT_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit'];
+ * because no loaded settings tier grants `closing` anything by itself (spec §5.4, R11): an
+ * un-granted `closing` session cannot run headless at all. `Skill` by owner ruling R2 (card
+ * supervisor-session-settings), so `/c3` loads its content here; its CLI still cannot run,
+ * because this envelope has no `Bash` (`JUDGMENT_DISALLOWED_TOOLS`) — a known, accepted limit. */
+const JUDGMENT_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Skill'];
 
 /** spec §5.1: no shell, no subagents, no network, and no wait-tool for a ruling/ratify session —
  * the same wall `core/session.ts`'s executor envelope holds (a one-shot session that arms a
@@ -33,9 +34,8 @@ const JUDGMENT_DISALLOWED_TOOLS = ['Bash', 'Task', 'Agent', 'WebFetch', 'WebSear
 
 /** R11 (owner ruling, Task 20, spec §5.4): the `closing` session's own explicit tool grant —
  * exactly the tools Stage D uses, nothing more. Before R11, `closing` carried NO
- * allowedTools/disallowedTools at all, relying on `settingSources: ['project']` to load the
- * target repo's own `.claude/settings.json` for a grant; but that file grants NOTHING when the
- * target repo has none committed (this repo has none), so the session could not run headless.
+ * allowedTools/disallowedTools at all, relying on a loaded settings tier for a grant; but no
+ * settings tier supplies one for this envelope, so the session could not run headless.
  * `allowedTools`/`disallowedTools` here still do not "confine" anything by themselves (§5.1's
  * own hook-is-the-enforcement-layer finding) — they are what makes a `'default'`-permissionMode
  * session headless in the first place (an allowlisted tool never prompts). */
@@ -45,6 +45,15 @@ const CLOSING_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash', 
  * (above) because `closing` legitimately runs `verify-shipped` and lands the governance PR
  * (§5.4's named exception); this list only removes the tools nothing in Stage D needs. */
 const CLOSING_DISALLOWED_TOOLS = ['Task', 'Agent', 'WebFetch', 'WebSearch', 'Monitor', 'ScheduleWakeup'];
+
+/** The scan wall (issue #163; card D2/D3): the executor's own `decideScanGuardHook`, reused —
+ * never a second predicate — as its own PreToolUse entry. A supervisor session is the unattended
+ * case the wall exists for: a `find /` there raises an OS folder-consent prompt nobody is present
+ * to answer. Only this hook is added; the executor's backgrounding, wait-tool and merge-gate
+ * hooks are deliberately NOT ported (card D2). */
+const SCAN_GUARD_ENTRY = {
+  hooks: [(hookInput: unknown) => Promise.resolve(decideScanGuardHook(hookInput))],
+};
 
 /** spec §5.1's envelope, for the three one-shot kinds. Deliberately has NO `resume` field at
  * all — not even optional — because G3 says every one-shot session starts from a rendered brief,
@@ -59,9 +68,11 @@ export interface OneShotSessionOptions {
   disallowedTools?: string[];
   additionalDirectories?: string[];
   /** R11 (Task 20, spec §5.4 item 4): the SDK's local-plugin option, set on `closing` only, so
-   * `verify-shipped` resolves BY NAME inside the session instead of failing `Unknown skill` —
-   * the skill ships in the separate `plugins/verify-shipped/` plugin, which `settingSources`
-   * alone never loads. `ruling`/`ratify` never carry this field. */
+   * `verify-shipped` resolves BY NAME inside the session from the repo itself. Kept after the
+   * user tier loaded (card supervisor-session-settings, G4, MEASURED): the user tier finds
+   * `verify-shipped` only where install.sh symlinked it into ~/.claude/skills — a host fact — while
+   * this load works on every host, and where both exist the session registers it once.
+   * `ruling`/`ratify` never carry this field. */
   plugins?: Array<{ type: 'local'; path: string }>;
   abortController: AbortController;
   hooks?: { PreToolUse: Array<{ hooks: Array<(input: unknown) => Promise<HookDecision>> }> };
@@ -75,7 +86,8 @@ export interface OneShotSessionOptions {
  * `additionalDirectories`) and repo access for `closing` (§5.4's named exception); `ratify` never
  * reads it (§5.3: "No repo access at all"). `realpath` is the containment hook's one injected
  * capability (`permit.ts`'s `buildContainmentHook`) — never `fs` directly (`pure-core.md`).
- * Unused for `closing`, which carries no hook. */
+ * Unused for `closing`: its two hooks (`decideClosingGrantHook`, the scan wall) are pure
+ * predicates that resolve no paths. */
 export interface OneShotSessionConfig {
   /** The campaign home (S-P9) — `cwd` for every one-shot session, and the containment root for
    * `ruling`/`ratify` (spec §14: this is what makes the transcript attributable in the viewer
@@ -108,9 +120,14 @@ export function buildOneShotOptions(
   const options: OneShotSessionOptions = {
     cwd: config.homeDir,
     model: config.model,
-    // §5.4's override: `closing` loads the target repo's own project settings; `ruling`/`ratify`
-    // get none — the campaign home is not a repo (§5.1).
-    settingSources: kind === 'closing' ? ['project'] : [],
+    // Parity with the executor path (card supervisor-session-settings, G3; core/session.ts has
+    // the same list): 'user' carries ~/.claude/settings.json's enabledPlugins, so the C3 plugin
+    // registers and `Skill c3` no longer returns "Unknown skill: c3". Written explicitly, never by
+    // omitting the option, so the regression test keeps a value to assert. MEASURED (spec §4.1):
+    // the SDK's own `model` and `permissionMode: 'default'` still win over the user tier's. For a
+    // supervisor session `cwd` is the campaign home, so 'project'/'local' read
+    // <home>/.claude/settings(.local).json, which no campaign home carries.
+    settingSources: ['user', 'project', 'local'],
     permissionMode: 'default',
     abortController,
     maxTurns: config.maxTurns,
@@ -118,20 +135,30 @@ export function buildOneShotOptions(
 
   if (kind === 'closing') {
     // R11 (Task 20): §5.4's named exception, now an EXPLICIT tool grant rather than "no
-    // list at all" — `settingSources: ['project']` above grants nothing when the target repo
-    // has no committed `.claude/settings.json` (this repo has none), so without this grant the
-    // session could not run headless. Still NO containment hook — this session legitimately
-    // lands the governance PR, and `Bash`/repo write are named IN the grant, not left ungoverned.
+    // list at all" — the settings tiers above grant nothing to this envelope, so without this
+    // grant the session could not run headless. Still NO containment hook — this session
+    // legitimately lands the governance PR, and `Bash`/repo write are named IN the grant, not
+    // left ungoverned.
     options.allowedTools = CLOSING_ALLOWED_TOOLS;
     options.disallowedTools = CLOSING_DISALLOWED_TOOLS;
     if (config.repoRoot !== undefined) options.additionalDirectories = [config.repoRoot];
-    // R11 item 4: `verify-shipped` ships in its own plugin directory, which `settingSources`
-    // never loads — without this, Stage D's `verify-shipped` invocation fails `Unknown skill`
-    // inside the session. Absent only when the edge (`decide.ts`) has already fail-closed the
-    // spawn itself; see that module's `verifyShippedPluginAvailable` guard.
+    // R11 item 4, kept by card supervisor-session-settings (G4): load `verify-shipped` from the
+    // repo so it resolves on a host that never ran install.sh. Absent only when the edge
+    // (`decide.ts`) has already fail-closed the spawn itself; see its
+    // `verifyShippedPluginAvailable` guard.
     if (config.verifyShippedPluginDir !== undefined) {
       options.plugins = [{ type: 'local', path: config.verifyShippedPluginDir }];
     }
+    // Still NO containment hook — `closing` legitimately writes the repo (§5.4). The scan wall is
+    // not containment: it refuses only a filesystem- or home-rooted `find`.
+    options.hooks = {
+      PreToolUse: [
+        // The grant, enforced (card supervisor-session-settings, ruling R1): a host allow rule in a
+        // loaded settings tier can never add a tool to CLOSING_ALLOWED_TOOLS.
+        { hooks: [(hookInput: unknown) => Promise.resolve(decideClosingGrantHook(CLOSING_ALLOWED_TOOLS, hookInput))] },
+        SCAN_GUARD_ENTRY,
+      ],
+    };
     return options;
   }
 
@@ -143,9 +170,14 @@ export function buildOneShotOptions(
     // no repo access at all (§5.3).
     options.additionalDirectories = [config.repoRoot];
   }
-  // "The ONLY enforcement there is" (S-P12) — permit.ts's buildContainmentHook, the impure edge.
+  // "The ONLY enforcement there is" (S-P12) — permit.ts's buildContainmentHook, the impure edge —
+  // stays first; the scan wall runs alongside it as defence in depth (card D2), since this
+  // envelope already denies Bash.
   options.hooks = {
-    PreToolUse: [{ hooks: [buildContainmentHook(config.homeDir, { realpath: config.realpath })] }],
+    PreToolUse: [
+      { hooks: [buildContainmentHook(config.homeDir, { realpath: config.realpath })] },
+      SCAN_GUARD_ENTRY,
+    ],
   };
   return options;
 }
