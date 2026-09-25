@@ -221,3 +221,115 @@ failed`; runner `bun test` → `1335 pass, 8 skip, 0 fail` (1343 tests, 54 files
 
 Task 9 re-runs `session.e2e.test.ts` and `test-supervisor-e2e.sh` AFTER the card's fix lands; this
 task only cites the `db3bd53` baseline.
+
+## AFTER
+
+**Branch HEAD at measurement time:** `28c0866` (Tasks 1-8 landed: `isHomeConfigSurface`,
+`planHomeConfigRestore`, layer 1's `HOME_CONFIG_DENIED_REASON` refusal for `ruling`/`ratify`/
+`closing`, and layer 2's `runOneShotSession` snapshot-before / restore-after).
+
+### The ratchet — `home-config.e2e.test.ts`
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts 2>&1 | tail -20
+bun test v1.4.2 (744846f84)
+
+ 3 pass
+ 0 fail
+ 24 expect() calls
+Ran 3 tests across 1 file. [71.11s]
+```
+
+**Ratchet: G2 E2E before 0/3 -> after 3/3**
+
+### G4 — `session.e2e.test.ts`
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/session.e2e.test.ts 2>&1 | tail -8
+bun test v1.4.2 (744846f84)
+
+core/supervisor/session.e2e.test.ts:
+G4_WITH_PLUGIN registered as: ["verify-shipped","verify-shipped:verify-shipped"]
+G4_WITHOUT_PLUGIN=resolved registered as: ["verify-shipped"]
+
+ 7 pass
+ 0 fail
+ 25 expect() calls
+Ran 7 tests across 1 file. [87.81s]
+```
+
+### G4 — `test-supervisor-permission-real.sh`
+
+```
+$ cd /Users/hiep/repo/tribe-wt/supervisor-home-settings-containment && env -u ANTHROPIC_API_KEY TRIBE_REAL_E2E=1 bash plugins/tribe/scripts/tests/test-supervisor-permission-real.sh 2>&1 | tail -15
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "totalCostUsd": 0.032922700000000006,
+  "permissionDenials": []
+}
+ok - closing: the run ended subtype=success with no prompt and no hang
+closing permission_denials payload: []
+ok - closing: permissionDenials is empty — R11's grant covers Write and Bash with no denial
+ok - closing: the Write inside repoRoot landed on disk (/private/var/folders/yw/qq7jhg792dzblfszsspp9vgr0000gn/T/tmp.USetY1Gqxq/closing-repo/closing-probe-note.txt)
+ok - closing: the Bash step actually ran — bash-probe.txt holds the throwaway repo HEAD sha
+
+11 passed, 0 failed
+```
+Note on the pre-existing `link-out` symlink in this script's campaign home: it is in the BEFORE
+snapshot, so layer 2's restore leaves it alone by design. The script is green, which is the
+expected result under that design, not luck — this run reported no denial and no restore failure.
+
+### G4 — `test-supervisor-e2e.sh`
+
+```
+$ cd /Users/hiep/repo/tribe-wt/supervisor-home-settings-containment && bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh 2>&1 | tail -3
+ok - probe10: the verdict file carries a PASS verdict
+
+40 passed, 0 failed
+```
+
+G4: session.e2e.test.ts 7/7 -> 7/7; test-supervisor-e2e.sh 40/40 -> 40/40
+
+### Full runner suite and typecheck
+
+```
+$ cd $RUNNER && bun test 2>&1 | tail -6
+ 1432 pass
+ 11 skip
+ 0 fail
+ 3397 expect() calls
+Ran 1443 tests across 57 files. [297.67s]
+```
+No failures — so the Adjudication rule's inherited-failure list (`evals-file-has-52-evals`,
+`core/watchdog/**`, `watchdog-integration.test.ts`, a `launchViewer` test,
+`test-input-asymmetry.sh`, `test-supervisor-kill.sh`) needed no adjudication this run: none of
+those, nor any other test, failed.
+
+```
+$ cd $RUNNER && bunx tsc --noEmit && echo TSC_OK
+TSC_OK
+```
+
+### `home_config_restored` — the observable proof layer 2 acted
+
+Not found in the captured transcripts. `home-config.e2e.test.ts`'s `io.appendLog` implementation
+(`appendLog: (_logPath, line) => { lines.push(line); }`) only stores each logged line in an
+in-memory array for the test's own assertions; the test file contains no `console.*` call that
+would print `lines` to stdout (`command grep -n 'console\.' core/supervisor/home-config.e2e.test.ts`
+returns nothing), so `bun test`'s stdout — the only transcript this task is permitted to capture,
+since touching the test file is out of scope for this task — never carries it. Separately,
+`session.test.ts:425-426` unit-pins the exact shape of this log line
+(`{ type: 'tribe', subtype: 'home_config_restored', removed: [...], rewritten: [...] }`), and that
+unit test is part of the `1432 pass, 0 fail` full-suite run above, so the mechanism itself is
+exercised and green even though this task did not observe its output in a real-session transcript.
+
+### Result
+
+Ratchet 3/3 (up from 0/3, may only rise — did not fall). G4 held exactly: `session.e2e.test.ts`
+7/7 (same as the `db3bd53` baseline), `test-supervisor-e2e.sh` 40/40 (same as baseline). Full
+runner suite green (1432 pass, 11 skip, 0 fail — no inherited failures to adjudicate this run).
+`bunx tsc --noEmit` clean. No test, assertion, or source file was changed to produce these
+results.

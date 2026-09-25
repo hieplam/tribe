@@ -1742,9 +1742,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-home-settings-containment && command gre
 ```
 Expected: `3` (Task 1's line, the AFTER ratchet line, the G4 line).
 
-- [ ] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
+- [x] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
   trailers (`Tribe-Task: 9/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 9 complete
+- [x] Task 9 complete
 
 ---
 
