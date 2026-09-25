@@ -356,6 +356,12 @@ destination file and refusing to touch a campaign whose `.runner.lock` is held b
 bash plugins/tribe/scripts/migrate-campaign-home.sh <target-repo> [--campaign <slug>] [--dry-run]
 ```
 
+`scripts/tests/test-no-campaign-state-in-repo.sh` keeps it that way: it fails when the repo tracks
+any campaign operational file (`campaign-state.json`, `campaign-report.*`, `answers.md`,
+`escalations/`, or anything under `.claude/state/`, `docs/tribe/campaigns/` or `docs/tribe/state/`),
+and `pre-gate.sh` runs it before every card's audit. Durable decisions go to the Decision Log in
+`docs/tribe/ROADMAP.md`; the runner's own test fixtures are the one allowed exception.
+
 Old session logs (caller-chosen via `--logs-dir`) are **not** migrated — there is no
 deterministic source path to scan; the script prints a reminder listing every campaign it
 touched so they can be moved by hand if wanted.

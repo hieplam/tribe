@@ -12,7 +12,8 @@ A ruling not written down was never made.
 
 ### 2026-09-24 · campaign `fu-supervisor-settings` · card `supervisor-session-settings`
 
-Full grounding for every entry below: `docs/tribe/campaigns/fu-supervisor-settings/answers.md`.
+Each entry below stands alone. The campaign's working notes (`answers.md`) lived in its campaign
+home, `~/.tribe/<repo-key>/campaigns/fu-supervisor-settings/`, and are not tracked in the repo.
 
 #### D-2026-09-24-1 — The supervisor's campaign home is also its own settings root
 
