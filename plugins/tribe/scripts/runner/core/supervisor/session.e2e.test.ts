@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sdkSpawnSession } from '../../adapters/session.adapter.ts';
+import { restoreHomeConfig, snapshotHomeConfig } from '../../adapters/home-config.adapter.ts';
 import { isFilesystemWideScan } from '../metrics/session-hygiene.ts';
 import { TRIBE_PLUGIN_DIR, type SpawnSessionParams } from '../session.ts';
 import type { SessionKind } from './model.ts';
@@ -72,6 +73,8 @@ async function runKind(kind: SessionKind, prompt: string, label: string, opts: R
       appendLog: (_logPath, line) => {
         lines.push(line);
       },
+      snapshotHomeConfig,
+      restoreHomeConfig,
     };
     const attachesVerifyShipped = kind === 'closing' && opts.withoutVerifyShippedPlugin !== true;
     const result = await runOneShotSession(

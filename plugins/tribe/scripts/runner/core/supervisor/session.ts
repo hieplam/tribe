@@ -17,6 +17,7 @@ import { decideScanGuardHook, type HookDecision, type SessionMessage } from '../
 import type { SessionKind } from './model.ts';
 import type { LedgerEntryUsage } from './model.ts';
 import { buildContainmentHook, buildHomeConfigWriteHook, decideClosingGrantHook } from './permit.ts';
+import { isEmptyRestorePlan, planHomeConfigRestore, type HomeConfigRestorePlan, type HomeConfigSnapshot } from './home-config.ts';
 
 /** spec §5.2/§5.3: the tool grant for a `ruling`/`ratify` session. `closing` (§5.4) carries its
  * OWN, wider grant — R11 (Task 20), below `CLOSING_ALLOWED_TOOLS`/`CLOSING_DISALLOWED_TOOLS` —
@@ -125,7 +126,10 @@ export function buildOneShotOptions(
     // omitting the option, so the regression test keeps a value to assert. MEASURED (spec §4.1):
     // the SDK's own `model` and `permissionMode: 'default'` still win over the user tier's. For a
     // supervisor session `cwd` is the campaign home, so 'project'/'local' read
-    // <home>/.claude/settings(.local).json, which no campaign home carries.
+    // <home>/.claude/settings(.local).json and <home>/CLAUDE.md — MEASURED live (card
+    // supervisor-home-settings-containment, spec §4). No session may leave one there for the next:
+    // the hooks refuse the write (`permit.ts`) and `runOneShotSession` restores the home's
+    // configuration surface after every session.
     settingSources: ['user', 'project', 'local'],
     permissionMode: 'default',
     abortController,
@@ -202,6 +206,12 @@ export interface OneShotSessionSeam {
   spawnSession(params: OneShotSpawnParams): AsyncIterable<SessionMessage>;
   onSessionStart(sessionId: string): void;
   appendLog(logPath: string, line: string): void;
+  /** Card supervisor-home-settings-containment (spec §6.3): every configuration-surface entry of
+   * the campaign home, never following a symlink. Throws when the home cannot be read. Required,
+   * never optional: an optional member would let a caller skip the restore silently. */
+  snapshotHomeConfig(homeDir: string): HomeConfigSnapshot;
+  /** Applies `plan` inside the home, proving containment first. Throws when it cannot. */
+  restoreHomeConfig(homeDir: string, plan: HomeConfigRestorePlan): void;
 }
 
 export type OneShotSessionOutcome = 'success' | 'error' | 'timeout';
@@ -229,8 +239,10 @@ export interface RunOneShotInput {
   sessionTimeoutMs?: number;
 }
 
+const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
 function errorResult(err: unknown): OneShotSessionResult {
-  const message = err instanceof Error ? err.message : String(err);
+  const message = messageOf(err);
   return { outcome: 'error', sessionId: null, finalText: message, usage: null, totalCostUsd: null, permissionDenials: null };
 }
 
@@ -294,19 +306,49 @@ async function consumeOneShot(
 
 /** Runs one judgment/closing session end-to-end: builds spec §5.1's options, streams messages to
  * `<homeDir>/supervisor/sessions/<sessionId>.log`, and resolves to a typed `OneShotSessionResult`
- * — never throws, never rejects (a spawn failure, a mid-stream failure, and a timeout all resolve
- * to a typed outcome instead), mirroring `core/session.ts`'s `runSession` contract exactly. */
+ * — never throws, never rejects, mirroring `core/session.ts`'s `runSession` contract exactly.
+ * Card supervisor-home-settings-containment (spec §6.3): the campaign home is also the NEXT
+ * session's settings root, so its configuration surface is snapshotted before the spawn and
+ * restored to that snapshot after it — whoever wrote the change, including `closing`'s `Bash`. */
 export async function runOneShotSession(input: RunOneShotInput, io: OneShotSessionSeam): Promise<OneShotSessionResult> {
+  const homeDir = input.config.homeDir;
+  // A home whose configuration cannot be read cannot be restored afterwards, so no session is
+  // spawned into it (fail closed).
+  let before: HomeConfigSnapshot;
+  try {
+    before = io.snapshotHomeConfig(homeDir);
+  } catch (err) {
+    return errorResult(new Error(`refusing to spawn: the campaign home's configuration could not be read (${messageOf(err)})`));
+  }
+
   const abortController = new AbortController();
   const options = buildOneShotOptions(input.kind, input.config, abortController);
   const sessionPromise = consumeOneShot(input, io, options);
+  const result = await raceWallClock(sessionPromise, input.sessionTimeoutMs, abortController);
 
-  if (input.sessionTimeoutMs === undefined) {
-    return sessionPromise;
+  if (result.outcome === 'timeout') {
+    // The race resolved before the aborted stream ended, so a write can still land after the pass
+    // below: restore once more when the stream settles (`consumeOneShot` never rejects).
+    void sessionPromise.then(() => restoreHomeAfterSession(io, homeDir, before, result.sessionId));
   }
+  const restoreFailure = restoreHomeAfterSession(io, homeDir, before, result.sessionId);
+  if (restoreFailure === null) return result;
+  return {
+    ...result,
+    outcome: 'error',
+    finalText: `the campaign home's configuration could not be restored after the session (${restoreFailure})`,
+  };
+}
 
+/** The wall-clock bound (`fail-closed-edges.md` obligation 3), unchanged from before this card:
+ * on expiry the session is aborted and a typed `timeout` result wins the race. */
+async function raceWallClock(
+  sessionPromise: Promise<OneShotSessionResult>,
+  timeoutMs: number | undefined,
+  abortController: AbortController,
+): Promise<OneShotSessionResult> {
+  if (timeoutMs === undefined) return sessionPromise;
   let timer: ReturnType<typeof setTimeout>;
-  const timeoutMs = input.sessionTimeoutMs;
   const timeoutPromise = new Promise<OneShotSessionResult>((resolve) => {
     timer = setTimeout(() => {
       abortController.abort();
@@ -320,10 +362,33 @@ export async function runOneShotSession(input: RunOneShotInput, io: OneShotSessi
       });
     }, timeoutMs);
   });
-
   try {
     return await Promise.race([sessionPromise, timeoutPromise]);
   } finally {
     clearTimeout(timer!);
+  }
+}
+
+/** Undoes every change the session made to the home's configuration surface (spec §6.3). Returns
+ * `null` when the home is as it was before the session — untouched, or restored — and otherwise
+ * the failure's message. Never throws: the caller decides what an unverifiable home means. */
+function restoreHomeAfterSession(
+  io: OneShotSessionSeam, homeDir: string, before: HomeConfigSnapshot, sessionId: string | null,
+): string | null {
+  try {
+    const plan = planHomeConfigRestore(before, io.snapshotHomeConfig(homeDir));
+    if (isEmptyRestorePlan(plan)) return null;
+    io.restoreHomeConfig(homeDir, plan);
+    // No `init` message means no session id to name the log after.
+    const logName = sessionId === null || sessionId === '' ? 'unattributed' : sessionId;
+    io.appendLog(`${homeDir}/supervisor/sessions/${logName}.log`, JSON.stringify({
+      type: 'tribe',
+      subtype: 'home_config_restored',
+      removed: plan.remove.map((entry) => entry.path),
+      rewritten: plan.write.map((entry) => entry.path),
+    }));
+    return null;
+  } catch (err) {
+    return messageOf(err);
   }
 }

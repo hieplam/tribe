@@ -1693,9 +1693,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-home-settings-containment && git diff db
 Expected: `0 fail` and `TSC_OK`; `40 passed, 0 failed`; the E2E diff shows exactly three added
 lines (the import, `snapshotHomeConfig,`, `restoreHomeConfig,`) and no removed line.
 
-- [ ] **Step 4: Commit** — stage the eight files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the eight files and commit with the Global Constraints trailers
   (`Tribe-Task: 8/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 8 complete
+- [x] Task 8 complete
 
 ---
 

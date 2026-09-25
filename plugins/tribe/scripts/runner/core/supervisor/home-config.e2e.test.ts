@@ -9,6 +9,7 @@ import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFile
 import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { sdkSpawnSession } from '../../adapters/session.adapter.ts';
+import { restoreHomeConfig, snapshotHomeConfig } from '../../adapters/home-config.adapter.ts';
 import { TRIBE_PLUGIN_DIR, type SpawnSessionParams } from '../session.ts';
 import type { SessionKind } from './model.ts';
 import { runOneShotSession, type OneShotSessionResult, type OneShotSessionSeam } from './session.ts';
@@ -104,6 +105,8 @@ async function runInHome(kind: SessionKind, prompt: string, homeDir: string): Pr
     appendLog: (_logPath, line) => {
       lines.push(line);
     },
+    snapshotHomeConfig,
+    restoreHomeConfig,
   };
   const result = await runOneShotSession(
     {
