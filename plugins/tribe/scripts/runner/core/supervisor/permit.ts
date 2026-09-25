@@ -20,8 +20,9 @@
  * same way `core/session.ts`'s `decideMergeGateHook(io)` already is — a builder that closes over
  * an injected capability and returns the actual `PreToolUse` hook function.
  */
-import { isAbsolute, normalize, sep } from 'node:path';
+import { isAbsolute, normalize, relative, sep } from 'node:path';
 import { containHome } from '../watchdog/args.ts';
+import { isHomeConfigSurface } from './home-config.ts';
 import type { HookDecision } from '../session.ts';
 
 const CONTAINMENT_DENIED_REASON =
@@ -37,6 +38,15 @@ const CONTAINMENT_DENIED_REASON =
 const NOT_GRANTED_REASON =
   'This judgment session is not granted this tool; only Read, Grep, Glob, Skill and Write/Edit ' +
   'under the campaign home are permitted.';
+
+/** Card supervisor-home-settings-containment (spec §6.2): the campaign home is also the next
+ * supervisor session's settings root (its `cwd`, with the `project`/`local` tiers loaded), so a
+ * configuration file written here would load as that session's settings or instructions —
+ * MEASURED: hooks in either tier run shell commands, and `CLAUDE.md` reaches its context. */
+export const HOME_CONFIG_DENIED_REASON =
+  'Writing Claude Code configuration inside the campaign home is refused (.claude/, CLAUDE*.md, ' +
+  '.mcp.json): the campaign home is the next supervisor session\'s settings root, so this file ' +
+  'would load as that session\'s settings or instructions.';
 
 function deny(reason: string = CONTAINMENT_DENIED_REASON): HookDecision {
   return {
@@ -64,7 +74,8 @@ export function containPath(target: string, homeDir: string): boolean {
  * ruling/ratify; they are read-only, so — same as `Read` — no `path`/`file_path` argument of
  * theirs can ever write, hence no containment check applies to them), `Skill` (owner ruling R2 —
  * loading a skill's content writes nothing, so it needs no path check either), and a
- * `Write`/`Edit` whose `tool_input.file_path` passes `containPath`. Every other tool — including
+ * `Write`/`Edit` whose `tool_input.file_path` passes `containPath` and is not a configuration
+ * surface (`home-config.ts#isHomeConfigSurface`). Every other tool — including
  * `Bash`, which is also on `disallowedTools`, denied here too as the ordinary fail-closed default
  * rather than a special-cased carve-out — and every malformed/absent event denies rather than
  * throwing, with `NOT_GRANTED_REASON` (never the write-containment message, which would misstate
@@ -85,7 +96,12 @@ export function decideContainmentHook(homeDir: string, input: unknown): HookDeci
   if (toolName === 'Write' || toolName === 'Edit') {
     const toolInput = (event.tool_input ?? {}) as { file_path?: unknown };
     const filePath = typeof toolInput.file_path === 'string' ? toolInput.file_path : '';
-    return filePath !== '' && containPath(filePath, homeDir) ? {} : deny();
+    const isInsideHome = filePath !== '' && containPath(filePath, homeDir);
+    if (!isInsideHome) return deny();
+    // The home is also the next session's settings root (spec §6.2): a configuration surface
+    // written here would load as that session's configuration.
+    const isConfigSurface = isHomeConfigSurface(relative(homeDir, normalize(filePath)));
+    return isConfigSurface ? deny(HOME_CONFIG_DENIED_REASON) : {};
   }
 
   return deny(NOT_GRANTED_REASON);

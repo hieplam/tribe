@@ -850,9 +850,9 @@ cd $RUNNER && bun test core/supervisor/permit.test.ts core/supervisor/session.te
 ```
 Expected: `0 fail` (every existing row unchanged and green, plus the 25 new tests), then `TSC_OK`.
 
-- [ ] **Step 4: Commit** — stage `permit.ts` and `permit.test.ts` and commit with the Global
+- [x] **Step 4: Commit** — stage `permit.ts` and `permit.test.ts` and commit with the Global
   Constraints trailers (`Tribe-Task: 4/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 4 complete
+- [x] Task 4 complete
 
 ---
 
