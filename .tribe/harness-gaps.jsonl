@@ -9,3 +9,5 @@
 {"id":"G-005","event":"seen","pr":0,"hits_now":1}
 {"id":"G-006","event":"opened","category":"resource-cleanup","paths":["plugins/tribe/scripts/runner","adapters/cut.test.ts","adapters/session-double.adapter.test.ts","adapters/transcript-io.adapter.test.ts","adapters/watchdog-io.adapter.test.ts","cli/main.test.ts","core/verify.test.ts","adapters/supervisor-io.adapter.test.ts","adapters/watchdog-io.adapter.short-read.test.ts","core/supervisor/session.e2e.test.ts"],"fingerprint":"grep -rl mkdtempSync --include=\"*.ts\" plugins/tribe/scripts/runner","hits_at_detection":9,"first_seen_pr":0}
 {"id":"G-006","event":"ruled","disposition":"dismissed-duplicate","ref":"rule-temp-dir-cleanup","ratified_by":"shaman"}
+{"id":"G-007","event":"opened","category":"test-presence","paths":["core/supervisor/home-config.e2e.test.ts"],"fingerprint":"grep -rn writerAttempted --include=*.test.ts .","hits_at_detection":5,"first_seen_pr":0}
+{"id":"G-008","event":"opened","category":"concurrency-async","paths":["core/supervisor/home-config.e2e.test.ts"],"fingerprint":"grep -rln subcommandResults .","hits_at_detection":1,"first_seen_pr":0}
