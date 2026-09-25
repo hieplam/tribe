@@ -1910,22 +1910,22 @@ Expected: `ok: true`; a count of at least `2` (the `uses` list and the Governanc
 least `2` (the envelope facts and the verified-live entry); the runner suite green (inherited
 failures per the Adjudication rule only) and `TSC_OK`.
 
-- [ ] **Step 4: Commit** — stage the `.c3/` change-unit files and the README and commit with the
+- [x] **Step 4: Commit** — stage the `.c3/` change-unit files and the README and commit with the
   Global Constraints trailers (`Tribe-Task: 11/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 11 complete
+- [x] Task 11 complete
 
 ---
 
 ## Definition of done (card goals → proof)
 
-- [ ] G1 — spec §4: 32 real sessions, commands and results recorded; Task 1 re-measures on base
+- [x] G1 — spec §4: 32 real sessions, commands and results recorded; Task 1 re-measures on base
   through the committed E2E.
-- [ ] G2 — Task 9: `home-config.e2e.test.ts` **0/3 before → 3/3 after** (the ratchet, one committed
+- [x] G2 — Task 9: `home-config.e2e.test.ts` **0/3 before → 3/3 after** (the ratchet, one committed
   check, same tool); Tasks 2-8 unit tests pin both layers.
-- [ ] G3 — Task 10: `rule-session-cwd-config-restored`, authored with `c3x add rule`, cited from
+- [x] G3 — Task 10: `rule-session-cwd-config-restored`, authored with `c3x add rule`, cited from
   `c3-215-tribe` by Task 11's change-unit; no registry line hand-written.
-- [ ] G4 — Task 9: `session.e2e.test.ts` 7/7 (assertions unchanged: `/c3` in all three kinds, the
+- [x] G4 — Task 9: `session.e2e.test.ts` 7/7 (assertions unchanged: `/c3` in all three kinds, the
   scan wall, R1's grant hook, `verify-shipped`), the viewer attribution asserted in every G2 test,
   `test-supervisor-e2e.sh` 40/40, `bun test` + `tsc` green.
-- [ ] Fence — `git diff db3bd53` shows no change to any grant list, `permissionMode`,
+- [x] Fence — `git diff db3bd53` shows no change to any grant list, `permissionMode`,
   `settingSources`, `cwd`, `options.plugins`, `core/state.ts` or `core/types.ts`.
