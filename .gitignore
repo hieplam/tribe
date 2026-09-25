@@ -2,3 +2,5 @@
 .c3/c3.db
 docs/tribe/state/
 .DS_Store
+.claude/state/
+docs/tribe/campaigns/
