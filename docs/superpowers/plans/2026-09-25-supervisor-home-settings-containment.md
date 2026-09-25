@@ -325,6 +325,108 @@ describe('supervisor sessions never carry configuration forward (card supervisor
 });
 ```
 
+### Amendment A1+A2 (execution-time, ruled by the executing Warchief)
+
+Round-1 execution of the RED test above found that its Bash-writer guard (`writerAttempted`
+checking only that a `Bash` tool call happened) let test 2 pass vacuously: the model-composed
+one-line command sometimes silently wrote nothing, so "no carry-over" held trivially. A first fix
+(Amendment A1) composed a deterministic, `&&`-chained one-line Bash command with an echoed proof
+token — but the Claude Code CLI decomposes an `&&`-chained Bash command into sub-commands, each
+requiring separate approval under `permissionMode: 'default'`, and refuses the whole command
+non-interactively (MEASURED: `decision_reason_type: "subcommandResults"`, `non_execution_kind:
+"user-rejected"`). That attempt (A1's `PLANT_TOKEN` constant, `plantCommand` function, and the
+`writerAttempted` branch built on them) is **withdrawn**; only A1(d) (`toolResultTexts`, below)
+survives into the landed test. Amendment A2 replaces the withdrawn pieces with a two-Bash-call
+shape — one call plants the four files as newline-separated `mkdir -p` + heredocs (the shape
+round 1's own diagnostic probe had already shown the CLI executes without refusal), a SEPARATE
+single-operation `ls -1 <targets>` call proves the plant landed — and its `tool_result` naming all
+four files is what the strengthened `writerAttempted` guard requires. The edits below are the
+FINAL state of the RED test above; the withdrawn `&&`-chained attempt is recorded here as history
+only, per the evidence document's `## BEFORE` section.
+
+Add, next to `toolUses` (A1(d), unchanged by A2):
+
+```ts
+/** Every `tool_result` block's text — what a tool actually RETURNED, as opposed to what the
+ * session asked it to do. The Bash writer's guard needs this: a command that was issued but did
+ * not write proves nothing about carry-over (Amendment A1). */
+function toolResultTexts(lines: string[]): string[] {
+  const texts: string[] = [];
+  for (const line of lines) {
+    let message: { message?: { content?: unknown } };
+    try {
+      message = JSON.parse(line) as { message?: { content?: unknown } };
+    } catch {
+      continue; // a malformed line is skipped, never thrown on
+    }
+    const content = message.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content as Array<{ type?: unknown; content?: unknown }>) {
+      if (block.type !== 'tool_result') continue;
+      if (typeof block.content === 'string') texts.push(block.content);
+      else if (Array.isArray(block.content)) {
+        for (const part of block.content as Array<{ text?: unknown }>) {
+          if (typeof part.text === 'string') texts.push(part.text);
+        }
+      }
+    }
+  }
+  return texts;
+}
+```
+
+Add, after `plantedFiles` (A2(b)), replacing the withdrawn `PLANT_TOKEN`/`plantCommand`:
+
+```ts
+/** The four files every writer is told to plant, absolute. Also the Bash writer's proof set:
+ * its verification command lists exactly these, so the tool_result naming all four is what
+ * shows the plant LANDED (Amendment A2). */
+function plantTargets(p: Plant): string[] {
+  return [
+    join(p.home, '.claude', 'settings.json'),
+    join(p.home, '.claude', 'settings.local.json'),
+    join(p.home, 'CLAUDE.md'),
+    join(p.home, 'CLAUDE.local.md'),
+  ];
+}
+```
+
+Replace `writerBashPrompt` with (A2(c)):
+
+```ts
+/** Two Bash calls, deliberately: the plant, then a SEPARATE single-operation `ls` whose
+ * tool_result is the proof it landed. Amendment A2: an `&&`-chained one-liner is decomposed by
+ * the Claude Code CLI into sub-commands that each need approval, so it is refused wholesale
+ * under `permissionMode: 'default'` (MEASURED: `decision_reason_type: "subcommandResults"`);
+ * newline-separated heredocs in one call do execute (MEASURED). `ls -1 <paths>` is one
+ * operation, so it is never decomposed. */
+const writerBashPrompt = (p: Plant): string =>
+  'This is an authorised test of the campaign home. Do exactly these two things, and nothing ' +
+  'else:\n' +
+  '1. With ONE Bash command, create the four files below. Use a `mkdir -p` line and then one ' +
+  "`cat > <path> << 'EOF'` heredoc per file, separated by NEWLINES. Do not chain the steps with " +
+  '`&&` or `;`, and do not split them across several Bash calls:\n' +
+  plantedFiles(p) +
+  `2. Then, as a SEPARATE single Bash command, run exactly this and nothing else:\nls -1 ${plantTargets(p).join(' ')}\n` +
+  'Reply with one line: WROTE=<the output of that ls command, on one line>.';
+```
+
+In `carryOverPair`, the `writerAttempted` assignment is (A2(d)):
+
+```ts
+    // Amendment A2: for the Bash writer, "attempted" is not enough — some tool_result must name
+    // all four planted files, which is the `ls` proving the plant landed. For the Write writer
+    // the post-card mechanism IS the refusal, so an attempted Write to a surface is the guard.
+    const writerAttempted =
+      writerTool === 'Bash'
+        ? toolUses(writer.lines, 'Bash').length > 0 &&
+          toolResultTexts(writer.lines).some((text) => plantTargets(plant).every((target) => text.includes(target)))
+        : toolUses(writer.lines, 'Write').some((input) => String(input.file_path ?? '').startsWith(home));
+```
+
+Every assertion in `expectNoCarryOver`, and tests 1 and 3's guards, stay byte-identical to the RED
+block above — this amendment only strengthens the Bash writer's precondition.
+
 ### Run it on base — the BEFORE count
 
 ```bash
@@ -358,9 +460,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-home-settings-containment && command gre
 ```
 Expected: `1`.
 
-- [ ] **Step 4: Commit** — stage the test file and the evidence document and commit with the
+- [x] **Step 4: Commit** — stage the test file and the evidence document and commit with the
   Global Constraints trailers (`Tribe-Task: 1/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 1 complete
+- [x] Task 1 complete
 
 ---
 
