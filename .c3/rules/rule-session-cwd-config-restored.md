@@ -1,6 +1,6 @@
 ---
 id: rule-session-cwd-config-restored
-c3-seal: 2a300677405a745d11b6173c572c1508b0a3c1d0313bf06d77bcc6d8af7f5459
+c3-seal: 2e9858548dfd2c293685cc0a9a1470c420b0bc6c2c5e7b64d283aa1c17a7a0cd
 title: session-cwd-config-restored
 type: rule
 goal: |-
@@ -12,7 +12,12 @@ goal: |-
     `.claude/settings.local.json` ran at `SessionStart`, `UserPromptSubmit`, `PreToolUse` and `Stop`
     in `ruling`, `ratify` and `closing` sessions; `CLAUDE.md`, `CLAUDE.local.md`, a nested or
     lower-case `claude.md`, `.claude/skills` and `.mcp.json` all loaded; and a `closing` session's
-    single `Bash` command planted hooks that ran in the next session.
+    single `Bash` command planted hooks that ran in the next session. RE-MEASURED in fix round 1
+    (same card, 2026-09-25): `AGENTS.md` — the memory file Claude Code loads BY DEFAULT wherever
+    `cwd` has no `CLAUDE.md`, the exact steady state this rule's own restore creates — loads at any
+    depth by the same two mechanisms as `CLAUDE.md`, and a `closing` session's single `Bash` command
+    planted `<home>/AGENTS.md` whose codeword reached the next `ruling` session before the predicate
+    was widened to cover it.
 ---
 
 ## Goal
@@ -25,7 +30,12 @@ spec §4): with `cwd` = the campaign home, a `hooks` block in `.claude/settings.
 `.claude/settings.local.json` ran at `SessionStart`, `UserPromptSubmit`, `PreToolUse` and `Stop`
 in `ruling`, `ratify` and `closing` sessions; `CLAUDE.md`, `CLAUDE.local.md`, a nested or
 lower-case `claude.md`, `.claude/skills` and `.mcp.json` all loaded; and a `closing` session's
-single `Bash` command planted hooks that ran in the next session.
+single `Bash` command planted hooks that ran in the next session. RE-MEASURED in fix round 1
+(same card, 2026-09-25): `AGENTS.md` — the memory file Claude Code loads BY DEFAULT wherever
+`cwd` has no `CLAUDE.md`, the exact steady state this rule's own restore creates — loads at any
+depth by the same two mechanisms as `CLAUDE.md`, and a `closing` session's single `Bash` command
+planted `<home>/AGENTS.md` whose codeword reached the next `ruling` session before the predicate
+was widened to cover it.
 
 ## Rule
 
@@ -37,7 +47,7 @@ to the pre-session snapshot before the next session can start.
 `core/supervisor/home-config.ts` — `isHomeConfigSurface`, whole function:
 
 ```ts
-// REQUIRED: the case-insensitive compare and the three shapes (.claude/**, CLAUDE*.md, .mcp.json)
+// REQUIRED: the case-insensitive compare and the four shapes (.claude/**, CLAUDE*.md, AGENTS*.md, .mcp.json)
 /** PURE. Is `relativePath` (relative to the campaign home) a configuration surface?
  * Oracle (spec §6.1): under-matching a path Claude Code loads is a bug; over-matching a path
  * nothing loads is by design. Compared case-insensitively, because the macOS file system is:
@@ -55,10 +65,17 @@ export function isHomeConfigSurface(relativePath: string): boolean {
   const isInsideDotClaude = segments.includes('.claude');
   // CLAUDE.md, CLAUDE.local.md: memory files; a nested one loads when the session reads a file
   // in its directory (MEASURED, spec §4.3 m1b).
-  const isMemoryFile = name.startsWith('claude') && name.endsWith('.md');
+  const isClaudeMemoryFile = name.startsWith('claude') && name.endsWith('.md');
+  // AGENTS.md is the memory file Claude Code loads BY DEFAULT wherever the project has no
+  // CLAUDE.md — which is precisely the steady state this card's own restore creates, so the
+  // aggravation is that the fix makes this path the live one. MEASURED (card
+  // supervisor-home-settings-containment, fix round 1): a `closing` session wrote `<home>/AGENTS.md`
+  // and the next `ruling` session in that home read the codeword out of it; a nested
+  // `<home>/escalations/AGENTS.md` loaded too, by the same on-demand mechanism as spec §4.3 m1b.
+  const isAgentsMemoryFile = name.startsWith('agents') && name.endsWith('.md');
   // A project MCP server's command runs at session start (MEASURED, spec §4.3 m3).
   const isMcpConfig = name === '.mcp.json';
-  return isInsideDotClaude || isMemoryFile || isMcpConfig;
+  return isInsideDotClaude || isClaudeMemoryFile || isAgentsMemoryFile || isMcpConfig;
 }
 ```
 

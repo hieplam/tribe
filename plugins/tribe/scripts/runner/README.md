@@ -1057,8 +1057,15 @@ All three one-shot kinds — `ruling`, `ratify`, `closing` — load
   the NEXT one-shot session's settings root, so a `hooks` block in `.claude/settings.json` or
   `.claude/settings.local.json`, or `CLAUDE.md`/`CLAUDE.local.md`/a nested or lower-case
   `claude.md`/`.claude/skills`/`.mcp.json` written into the home would load in the next session
-  (MEASURED). The one definition of that surface, `isHomeConfigSurface`
-  (`core/supervisor/home-config.ts`), is shared by both layers below — never restated.
+  (MEASURED). Fix round 1 (2026-09-25) re-measured the same class and found one more member:
+  `AGENTS.md` — the memory file the Claude Code CLI loads BY DEFAULT wherever `cwd` has no
+  `CLAUDE.md`, the exact steady state this section's own restore creates — loads at any depth,
+  including a nested `escalations/AGENTS.md`, by the same on-demand mechanism as `CLAUDE.md`; a
+  `closing` session's single `Bash` write of `<home>/AGENTS.md` carried its codeword into the next
+  `ruling` session before the predicate below widened to close it. The one definition of that
+  surface, `isHomeConfigSurface` (`core/supervisor/home-config.ts`, matching `.claude/**`,
+  `CLAUDE*.md` and `AGENTS*.md`, case-insensitive, plus `.mcp.json`), is shared by both layers
+  below — never restated.
   `ruling`/`ratify`'s `decideContainmentHook` denies a `Write`/`Edit` to any such configuration
   surface inside the home with its own reason, `HOME_CONFIG_DENIED_REASON` — never the
   out-of-home containment reason; `closing` carries a third `PreToolUse` hook,
@@ -1298,7 +1305,10 @@ ESLint, which is deferred until typescript-eslint supports TS >= 7.1 (plan Amend
     carried appears in the reader's final text or transcript. Ratchet: G2 E2E **0/3 before → 3/3
     after** on the identical suite, same tool. The reader's transcript is also independently
     attributed to its own campaign-home project directory under `~/.claude/projects/`, pinning
-    that the restore did not move `cwd` (spec §4.5).
+    that the restore did not move `cwd` (spec §4.5). Fix round 1 (2026-09-25) added a fourth
+    pair — a `closing` writer's single `Bash` command planting `<home>/AGENTS.md` -> the next
+    `ruling` session — after an adversarial audit measured that file carrying over uncontained;
+    ratchet moved to **0/4 before → 4/4 after** on the same suite.
   - The SDK's own `model` and `permissionMode` options **win** over the user tier's
     `model: "opus[1m]"` and `permissions.defaultMode: "auto"` (`~/.claude/settings.json`): every
     `system/init` message observed reports `model: "claude-haiku-4-5-20251001"` and

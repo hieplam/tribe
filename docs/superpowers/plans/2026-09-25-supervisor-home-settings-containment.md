@@ -1916,6 +1916,97 @@ failures per the Adjudication rule only) and `TSC_OK`.
 
 ---
 
+## Fix round 1 — AGENTS.md (execution-time, ruled by the executing Warchief)
+
+**Finding.** An adversarial Skinner audit of the eleven landed tasks measured a **Blocker** against
+G2 (finding C1): the Claude Code CLI loads `<home>/AGENTS.md` as project instructions **by default
+when the project has no `CLAUDE.md`** — the exact steady state this card's own restore creates.
+`isHomeConfigSurface('AGENTS.md')` was `false`, so both layer-1 hooks allowed the write and layer 2
+never restored it. Through the supervisor's own spawn path (`runOneShotSession` + the real
+`sdkSpawnSession`, Haiku, a throwaway `mkdtemp` home), a `closing` session's single `Bash` heredoc
+wrote `<home>/AGENTS.md`, and the next `ruling` session's `finalText` carried the codeword it
+planted (`CARRY-OVER (B saw A-written codeword) = true`). Two smaller accepted findings rode along:
+**M1** (the E2E's Bash-writer guard was satisfiable by an `ls` *failure*, since `ls`'s stderr
+carries every missing target's path and the guard only checked substring presence) and **M2**
+(`restoreHomeConfig`'s `remove`-escapes-the-home branch and the parent-real-path symlink-swap
+branch were never proven red by mutation).
+
+**Measurement table (fix round 1, spec §4.3 rows f1-f4; full session ids and RED/GREEN runs in
+`docs/superpowers/evidence/2026-09-25-supervisor-home-settings-containment.md`'s `## FIX ROUND 1`):**
+
+| Candidate planted | LOADED | The session's own reply |
+| --- | --- | --- |
+| `<home>/AGENTS.md` | **YES** | `READ=done\nCODEWORD=ZEBRA-FIX1-AGENTSMD-1790304522747` |
+| `<home>/escalations/AGENTS.md` (nested, `m1b`) | **YES** | `READ=done\nCODEWORD=ZEBRA-FIX1-NESTEDAGENTSMD-1790304533952` |
+| `<home>/AGENTS.override.md` | no | `READ=done\nCODEWORD=none` |
+| `<home>/.claude.json` (memory line AND a `hooks` block) | no | `READ=done\nCODEWORD=none`; markers `[]` |
+
+**Ruling.** No new principle was needed: the campaign's standing **R4** — "cover the whole measured
+configuration set … the card's G2 is 'no carry-over', and every one of those files was measured
+live, so a narrower list fails G2" — already covers a newly-measured member of the class. `C1`
+reproduces; fix it under R4. `AGENTS.override.md` matching anyway is by-design over-match (the
+Oracle, spec §6.1); `.claude.json` matching nothing is correct, since it was measured not loaded.
+
+**The widened predicate.** `core/supervisor/home-config.ts#isHomeConfigSurface` gained one clause,
+`isAgentsMemoryFile = name.startsWith('agents') && name.endsWith('.md')`, mirroring the existing
+`claude*.md` clause exactly (case-insensitive, last segment, any depth); `HOME_CONFIG_DENIED_REASON`
+now names `AGENTS*.md` alongside the other three shapes. `permit.test.ts` and `home-config.test.ts`
+were RED for the new cases before the clause landed, GREEN after (`148 pass, 0 fail` for the two
+files together).
+
+**The fourth E2E pair.** `core/supervisor/home-config.e2e.test.ts` gained a fifth planted file
+(`AGENTS.md`) and a fourth pair — `closing` plants with `Bash` -> the next `ruling` sees no
+`AGENTS.md` instruction (C1) — using the unchanged `expectNoCarryOver` helper. RED before the
+predicate change (codeword leaked); with the predicate still unwidened, the full file was
+**0 pass, 4 fail** (`AGENTS.md` alone defeated every pair, since the restore that closed the other
+three left it in place); with the predicate landed, **4 pass, 0 fail**.
+
+**Ratchet: `0/4 -> 4/4`**, superseding the card's original `0/3 -> 3/3` (spec §8; the original
+numbers are kept as a record, not deleted).
+
+**M1 fix.** The guard `toolResultTexts(...).some((text) => plantTargets(plant).every((target) =>
+text.includes(target)))` passed on a total planting *failure*, because `ls -1 <targets>` names each
+missing path in its own stderr `tool_result`, and `every(includes)` is vacuously satisfiable by an
+error line. Reproduced deterministically on a home where nothing was planted (`every(...) = true`
+on the measured `ls: … No such file or directory` output). Fixed with `isGenuineListing(text,
+targets)`: each target must appear on a line that is **exactly** that path, which `ls -1` produces
+on success and no `ls:` error line can ever produce.
+
+**M2 fix.** `adapters/home-config.adapter.test.ts` gained two tests, both green on first run since
+the code was already correct; each guard was temporarily mutated (mutations reverted, never
+committed) to prove neither is vacuous: mutation C (the `remove` loop no longer proves containment)
+flipped the "a plan REMOVE entry that escapes the home is refused" test to fail; mutation B (the
+parent-real-path guard disabled via `if (false && !isInsideHome)`) flipped the symlink-swap test to
+fail. Both reverted; `git diff --stat adapters/home-config.adapter.ts` empty; `14 pass, 0 fail`.
+
+**Not fixed — Finding I1, recorded as follow-up F3.** The timeout path's second snapshot/restore
+pass in `runOneShotSession` is unawaited, so a write landing after a timed-out session can reach
+the next session's before-snapshot. Ruled a follow-up escalated to the owner: every fix changes
+either the typed timeout result (fenced off — "D-2026-09-24-3 is another card") or the timeout's
+observable timing, a decision this plan does not make. `runOneShotSession`'s timeout path is left
+exactly as it was.
+
+**Observed flake, recorded, not fixed.** `session.e2e.test.ts`'s `closing: Skill c3 returns C3
+content` tripped its `not.toContain('Unknown skill')` assertion once, on a model-guessed wrong
+skill name (`Unknown skill: c3:c3`, the real name is `c3-skill:c3`) — model non-determinism, not a
+tier regression. Immediate unchanged re-run: `7 pass, 0 fail`. No change made.
+
+**Gates (fix round 1):** `core/supervisor/ adapters/ cli/ structure.test.ts` — `699 tests, 0 fail`;
+`bunx tsc --noEmit` — `TSC_OK`; `home-config.e2e.test.ts` (RUN_SESSION_E2E=1) — `4 pass, 0 fail`;
+`session.e2e.test.ts` (RUN_SESSION_E2E=1) — `7 pass, 0 fail`; `test-supervisor-e2e.sh` — `40
+passed, 0 failed`; full runner `bun test` — `1447 pass, 12 skip, 0 fail`; the fence (`git diff
+db3bd53` over the grant/permission surfaces) — `FENCE_INTACT`.
+
+- [x] **Fix round 1 governance reconciliation (this task, fix round 1b):** the spec (§4.3, §6.1,
+  §8), this plan section, and the frozen C3 artifacts (`rule-session-cwd-config-restored`'s Golden
+  Example and Goal, `c3-215-tribe`'s Change Safety row, both via change-unit
+  `adr-20260925-fix1b-agentsmd-config-surface`) and the runner README brought current with the
+  landed code, in the same delivery as the code (`rule-change-unit-ships-with-code`).
+- [x] Fix round 1 complete: C1 **FIXED**, M1 **FIXED**, M2 **FIXED**, I1 recorded as follow-up F3
+  (not fixed).
+
+---
+
 ## Definition of done (card goals → proof)
 
 - [x] G1 — spec §4: 32 real sessions, commands and results recorded; Task 1 re-measures on base
