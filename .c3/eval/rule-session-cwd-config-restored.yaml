@@ -1,0 +1,8 @@
+fact: rule-session-cwd-config-restored
+claim: >
+  A supervisor one-shot session (ruling/ratify/closing) snapshots its campaign home's
+  configuration surface before spawn and restores it to that snapshot after the session,
+  whether the session wrote through Write/Edit or Bash.
+code:
+  - plugins/tribe/scripts/runner/core/supervisor/{session,permit,home-config}.ts
+# no pipeline ⇒ default: every declared code: glob must resolve to ≥1 file

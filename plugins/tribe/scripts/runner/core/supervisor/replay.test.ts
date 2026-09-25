@@ -211,6 +211,10 @@ function fakeSeam(opts: { watchdogRuns: ScriptedWatchdogRun[]; sessions: Scripte
     appendLog: (p, line) => {
       files.set(p, `${files.get(p) ?? ''}${line}\n`);
     },
+    // Card supervisor-home-settings-containment (spec §6.3): this fake file map holds no
+    // configuration surface, so the snapshot is empty and the restore is never planned.
+    snapshotHomeConfig: () => [],
+    restoreHomeConfig: () => {},
   };
 
   return { io, files, spawnLog };

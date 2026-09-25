@@ -148,6 +148,13 @@ them to run shell commands anyway — in the *next* session.
 
 ### 4.3 The same class, beyond the three named files (MEASURED)
 
+**Fix round 1 note (2026-09-25):** this table was re-measured after an adversarial audit of the
+landed card found `AGENTS.md` uncovered — `isHomeConfigSurface` did not match it, so a `closing`
+session's `Bash` write of `<home>/AGENTS.md` carried its codeword into the next `ruling` session
+(the campaign's ruling **R4**: "cover the whole measured configuration set … a narrower list fails
+G2" already settled that a newly-measured member of this class is in scope). The enumeration below
+was incomplete once; rows `f1`-`f4` are how it was closed.
+
 | # | Kind | Planted | Result |
 | --- | --- | --- | --- |
 | p7 | ruling | `<home>/CLAUDE.local.md`, `<home>/.claude/CLAUDE.md`, `<home>/.claude/skills/probeskill/SKILL.md` | `CODEWORD=ZEBRA-p7-DOTCLAUDEMD`; `probeskill` registered in the `init` skills list |
@@ -157,11 +164,30 @@ them to run shell commands anyway — in the *next* session.
 | m2 | ruling | `<home>/claude.md` (lower case) | **`CODEWORD=ZEBRA-m2-LOWER`** — the macOS file system is case-insensitive |
 | m3 | closing | `<home>/.mcp.json` whose stdio server command is `sh -c 'touch <markers>/mcp-started'` | **`mcp-started` marker present** — the MCP server command ran with no approval setting anywhere (this host's user tier sets neither `enableAllProjectMcpServers` nor `enabledMcpjsonServers`) |
 | m3b | closing | `.mcp.json` plus `.claude/settings.local.json` `{"enableAllProjectMcpServers":true}` | `mcp-started` present |
+| f1 | ruling (fix round 1 probe) | `<home>/AGENTS.md`, prompt reads `<home>/answers.md` | **YES** — `READ=done\nCODEWORD=ZEBRA-FIX1-AGENTSMD-1790304522747` |
+| f2 | ruling (fix round 1 probe) | `<home>/escalations/AGENTS.md` (nested, `m1b` mechanism), prompt reads `<home>/escalations/card.md` | **YES** — `READ=done\nCODEWORD=ZEBRA-FIX1-NESTEDAGENTSMD-1790304533952` |
+| f3 | ruling (fix round 1 probe) | `<home>/AGENTS.override.md`, prompt reads `<home>/answers.md` | MEASURED **NOT loaded** — `READ=done\nCODEWORD=none` |
+| f4 | ruling (fix round 1 probe) | `<home>/.claude.json` (a memory line AND a `hooks` block, so either mechanism would show), prompt reads `<home>/answers.md` | MEASURED **NOT loaded** — `READ=done\nCODEWORD=none`; markers `[]` |
 
 So the surface a session loads from its settings root is wider than the three files D-2026-09-24-1
 names: **any `.claude/` directory, any file whose name is `CLAUDE*.md` in any letter case at any
 depth, and `.mcp.json`**. The design (§6) covers that whole class — the card's intent is "no
 carry-over", and each of these is a carry-over path of exactly the same kind.
+
+**Fix round 1 (2026-09-25, rows f1-f4):** an adversarial Skinner audit measured, through the
+supervisor's own spawn path, that `<home>/AGENTS.md` — the memory file the Claude Code CLI loads
+BY DEFAULT wherever `cwd` has no `CLAUDE.md`, precisely the steady state this card's own restore
+creates — loads at any depth (f1, f2), by the same two mechanisms as `CLAUDE.md` (a settings-root
+file directly, and `m1b`'s on-demand nested load). The neighbours a reviewer might also suspect
+were measured, not inferred: `AGENTS.override.md` (f3) and a `.claude.json` carrying both a memory
+line and a `hooks` block (f4) were both measured **not loaded**. `AGENTS.override.md` is matched
+anyway by the widened predicate (§6.1) — over-matching a path nothing loads is by design, per the
+Oracle below — while `.claude.json` is matched by nothing and stays a `NOT_SURFACES` fixture, so
+the negative measurement is not silently lost. The one predicate widened by one clause,
+`agents*.md`, mirroring the existing `claude*.md` clause exactly; the committed G2 E2E
+(`core/supervisor/home-config.e2e.test.ts`) gained a fourth pair (closing plants `AGENTS.md` with
+`Bash` -> the next ruling reads it), and see docs/superpowers/evidence/2026-09-25-supervisor-home-settings-containment.md's `## FIX ROUND 1` for
+the full record (session ids, RED/GREEN runs, and findings M1/M2 closed alongside C1).
 
 ### 4.4 The base carry-over E2E, run by hand (card G2's "before", MEASURED)
 
@@ -271,6 +297,11 @@ runner `bun test` → `1335 pass, 8 skip, 0 fail` (1343 tests, 54 files); `bunx 
 
 ### 6.1 One definition: the configuration surface
 
+**Fix round 1 note (2026-09-25):** the `agents*.md` clause below was added after fix round 1
+re-measured the class (§4.3 rows f1-f4) and found `AGENTS.md` uncovered — see that section for the
+measurement. The Oracle sentence is unchanged; `agents*.md` is a member of the same class the
+Oracle already governs, not a new principle.
+
 A path **inside the campaign home** is a *configuration surface* when, compared case-insensitively
 (`m2`: the file system is case-insensitive, so `claude.md` *is* `CLAUDE.md`):
 
@@ -278,6 +309,9 @@ A path **inside the campaign home** is a *configuration surface* when, compared 
   agents, commands), at any depth; or
 - its last segment matches `claude*.md` — `CLAUDE.md`, `CLAUDE.local.md`, `claude.md`, at any depth
   (`m1b`: a nested one loads on demand); or
+- its last segment matches `agents*.md` — `AGENTS.md`, `AGENTS.local.md`, at any depth, by the same
+  `m1b` on-demand nested-load mechanism (fix round 1, f1-f2: `AGENTS.md` is a memory file the
+  Claude Code CLI loads BY DEFAULT wherever `cwd` has no `CLAUDE.md`); or
 - its last segment is `.mcp.json`, at any depth.
 
 The rule is deliberately **wider** than what the host loads today (e.g. `.mcp.json` below the top,
@@ -457,6 +491,33 @@ implementation leaves every one of them red.
 
 The count may only rise. Supporting, not the ratchet: the unit table in `home-config.test.ts` goes
 from not existing to covering every shape in §4.2–4.3.
+
+**Superseded by fix round 1 (2026-09-25): `0/3 -> 3/3` is superseded by `0/4 -> 4/4`.** The
+original three numbers are kept above as a record, not deleted — the history is part of it. Fix
+round 1 added a fourth pair to the same committed test (`closing` plants `<home>/AGENTS.md` with
+`Bash` -> the next `ruling` reads it, §4.3 rows f1-f2), and re-ran the whole file with the
+predicate still unwidened: **0 of 4 pass** (every pair carried over — the uncovered `AGENTS.md`
+alone defeated all four, since the restore that closed the other three left it in place). With the
+`agents*.md` clause landed: **4 of 4 pass.** Same tool, same file, one more measured pair; the
+count only rose.
+
+**Further reconciled by fix round 2a (2026-09-25), finding m4: the fourth pair itself changed, the
+count did not.** Fix round 1's fourth pair — `closing` plants `<home>/AGENTS.md` with `Bash` -> the
+next `ruling` reads it — was found to be the second pair's exact call
+(`carryOverPair('closing', writerBashPrompt, 'Bash', 'ruling', ...)`) with only a different label,
+so the count had risen from 3 to 4 partly by repetition rather than by a new mechanism. It was
+replaced (`core/supervisor/home-config.e2e.test.ts:348`) by the **nested**
+`<home>/escalations/AGENTS.md` pair — the other on-demand load path §4.3 row `m1b` measured —
+whose reader is pointed at `<home>/escalations/card-1.md`, a file **inside that directory**,
+because a nested memory file loads only on demand and a reader of `<home>/answers.md` would never
+load it. Proven non-vacuous: RED with the `agents*.md` clause removed from `isHomeConfigSurface`
+(mutation reverted, never committed), one real `closing` -> `ruling` pair on
+`claude-haiku-4-5-20251001` leaked the codeword; GREEN with the clause restored, the whole file
+**4 of 4 pass**. The ratchet number is unchanged at `0/4 -> 4/4`; what changed is that the four
+pairs are now four genuinely distinct mechanisms — (1) `ruling` plants with `Write` -> `ruling`,
+(2) `closing` plants with `Bash` -> `ruling`, (3) `closing` plants with `Write` -> `closing`, and
+(4) `closing` plants the nested `<home>/escalations/AGENTS.md` with `Bash` -> `ruling` — not three
+distinct mechanisms plus a repeat. See the evidence document's `## FIX ROUND 2`, finding m4.
 
 ---
 

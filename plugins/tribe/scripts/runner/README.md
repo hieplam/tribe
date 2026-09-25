@@ -1052,6 +1052,32 @@ All three one-shot kinds — `ruling`, `ratify`, `closing` — load
   loaded and no grant hook, an un-granted tool (`Workflow`) ran. Accepted consequence: `closing`
   stops running `TaskCreate`/`CronList`/`ListAgents`, which ran un-granted before and which the
   closing stage does not use.
+- **Every kind refuses a configuration write into the home, and the home is restored after every
+  session regardless** (card `supervisor-home-settings-containment`): the campaign home doubles as
+  the NEXT one-shot session's settings root, so a `hooks` block in `.claude/settings.json` or
+  `.claude/settings.local.json`, or `CLAUDE.md`/`CLAUDE.local.md`/a nested or lower-case
+  `claude.md`/`.claude/skills`/`.mcp.json` written into the home would load in the next session
+  (MEASURED). Fix round 1 (2026-09-25) re-measured the same class and found one more member:
+  `AGENTS.md` — the memory file the Claude Code CLI loads BY DEFAULT wherever `cwd` has no
+  `CLAUDE.md`, the exact steady state this section's own restore creates — loads at any depth,
+  including a nested `escalations/AGENTS.md`, by the same on-demand mechanism as `CLAUDE.md`; a
+  `closing` session's single `Bash` write of `<home>/AGENTS.md` carried its codeword into the next
+  `ruling` session before the predicate below widened to close it. The one definition of that
+  surface, `isHomeConfigSurface` (`core/supervisor/home-config.ts`, matching `.claude/**`,
+  `CLAUDE*.md` and `AGENTS*.md`, case-insensitive, plus `.mcp.json`), is shared by both layers
+  below — never restated.
+  `ruling`/`ratify`'s `decideContainmentHook` denies a `Write`/`Edit` to any such configuration
+  surface inside the home with its own reason, `HOME_CONFIG_DENIED_REASON` — never the
+  out-of-home containment reason; `closing` carries a third `PreToolUse` hook,
+  `buildHomeConfigWriteHook`, refusing the same surfaces inside the home only (a write outside the
+  home, e.g. the repo's own `CLAUDE.md`, is unaffected). Because a `closing` session's single
+  `Bash` command bypasses every `Write`/`Edit` hook, `runOneShotSession` also snapshots the home's
+  configuration surface before every spawn (`adapters/home-config.adapter.ts#snapshotHomeConfig`)
+  — refusing to spawn at all when it cannot be read — and restores it to that snapshot after the
+  session ends (`#restoreHomeConfig`), whoever wrote the change, appending one
+  `{"type":"tribe","subtype":"home_config_restored","removed":[…],"rewritten":[…]}` line to
+  `sessions/<sessionId>.log` when anything was undone, and failing the session to `outcome:
+  'error'` when the home cannot be restored (`rule-session-cwd-config-restored`).
 - **`verify-shipped`'s hand-load is kept.** `closing`'s `options.plugins` hand-load (pointing at
   the repo's own `verify-shipped` plugin directory) predates the tier fix and stays, on purpose:
   MEASURED, the `user` tier resolves `verify-shipped` only where `install.sh` symlinked it into
@@ -1266,6 +1292,23 @@ ESLint, which is deferred until typescript-eslint supports TS >= 7.1 (plan Amend
     measured with and without `options.plugins`, and a host `permissions.allow` rule for
     `Workflow` still cannot run it in `closing` (ruling R1) — all failing for the stated reason
     with the envelope reverted to base, and all `7 pass, 0 fail` as built.
+  - **No configuration a session writes into the campaign home ever reaches the next session**
+    (card `supervisor-home-settings-containment`, `core/supervisor/home-config.e2e.test.ts`,
+    opt-in `RUN_SESSION_E2E=1`; see
+    `docs/superpowers/evidence/2026-09-25-supervisor-home-settings-containment.md`): two real
+    `claude-haiku-4-5-20251001` sessions per test, both through `runOneShotSession` + the real SDK
+    adapter, in the SAME campaign home. A `ruling` writer's `Write`-tool plant of `CLAUDE.md`, a
+    `closing` writer's single `Bash` command planting hooks in `.claude/settings.json` and
+    `.claude/settings.local.json` plus `CLAUDE.md`/`CLAUDE.local.md`, and a `closing` writer's
+    `Write`-tool plant — none of the three reach the next `ruling`/`closing` session: no marker
+    file the planted hook would have touched exists after, and no codeword the planted `CLAUDE.md`
+    carried appears in the reader's final text or transcript. Ratchet: G2 E2E **0/3 before → 3/3
+    after** on the identical suite, same tool. The reader's transcript is also independently
+    attributed to its own campaign-home project directory under `~/.claude/projects/`, pinning
+    that the restore did not move `cwd` (spec §4.5). Fix round 1 (2026-09-25) added a fourth
+    pair — a `closing` writer's single `Bash` command planting `<home>/AGENTS.md` -> the next
+    `ruling` session — after an adversarial audit measured that file carrying over uncontained;
+    ratchet moved to **0/4 before → 4/4 after** on the same suite.
   - The SDK's own `model` and `permissionMode` options **win** over the user tier's
     `model: "opus[1m]"` and `permissions.defaultMode: "auto"` (`~/.claude/settings.json`): every
     `system/init` message observed reports `model: "claude-haiku-4-5-20251001"` and

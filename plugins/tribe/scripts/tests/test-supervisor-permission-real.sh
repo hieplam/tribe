@@ -62,6 +62,7 @@ PROBE="$TMP/probe.ts"
 cat > "$PROBE" <<TS
 import { runOneShotSession } from '${RUNNER}/core/supervisor/session.ts';
 import { sdkSpawnSession } from '${RUNNER}/adapters/session.adapter.ts';
+import { restoreHomeConfig, snapshotHomeConfig } from '${RUNNER}/adapters/home-config.adapter.ts';
 import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -92,6 +93,8 @@ const io = {
     mkdirSync(dirname(path), { recursive: true });
     appendFileSync(path, line + '\\n');
   },
+  snapshotHomeConfig,
+  restoreHomeConfig,
 };
 
 const result = await runOneShotSession(
@@ -281,6 +284,7 @@ PROBE_CLOSING="$TMP/probe-closing.ts"
 cat > "$PROBE_CLOSING" <<TS
 import { runOneShotSession } from '${RUNNER}/core/supervisor/session.ts';
 import { sdkSpawnSession } from '${RUNNER}/adapters/session.adapter.ts';
+import { restoreHomeConfig, snapshotHomeConfig } from '${RUNNER}/adapters/home-config.adapter.ts';
 import { appendFileSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -305,6 +309,8 @@ const io = {
     mkdirSync(dirname(path), { recursive: true });
     appendFileSync(path, line + '\\n');
   },
+  snapshotHomeConfig,
+  restoreHomeConfig,
 };
 
 const result = await runOneShotSession(

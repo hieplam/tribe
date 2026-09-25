@@ -325,6 +325,108 @@ describe('supervisor sessions never carry configuration forward (card supervisor
 });
 ```
 
+### Amendment A1+A2 (execution-time, ruled by the executing Warchief)
+
+Round-1 execution of the RED test above found that its Bash-writer guard (`writerAttempted`
+checking only that a `Bash` tool call happened) let test 2 pass vacuously: the model-composed
+one-line command sometimes silently wrote nothing, so "no carry-over" held trivially. A first fix
+(Amendment A1) composed a deterministic, `&&`-chained one-line Bash command with an echoed proof
+token — but the Claude Code CLI decomposes an `&&`-chained Bash command into sub-commands, each
+requiring separate approval under `permissionMode: 'default'`, and refuses the whole command
+non-interactively (MEASURED: `decision_reason_type: "subcommandResults"`, `non_execution_kind:
+"user-rejected"`). That attempt (A1's `PLANT_TOKEN` constant, `plantCommand` function, and the
+`writerAttempted` branch built on them) is **withdrawn**; only A1(d) (`toolResultTexts`, below)
+survives into the landed test. Amendment A2 replaces the withdrawn pieces with a two-Bash-call
+shape — one call plants the four files as newline-separated `mkdir -p` + heredocs (the shape
+round 1's own diagnostic probe had already shown the CLI executes without refusal), a SEPARATE
+single-operation `ls -1 <targets>` call proves the plant landed — and its `tool_result` naming all
+four files is what the strengthened `writerAttempted` guard requires. The edits below are the
+FINAL state of the RED test above; the withdrawn `&&`-chained attempt is recorded here as history
+only, per the evidence document's `## BEFORE` section.
+
+Add, next to `toolUses` (A1(d), unchanged by A2):
+
+```ts
+/** Every `tool_result` block's text — what a tool actually RETURNED, as opposed to what the
+ * session asked it to do. The Bash writer's guard needs this: a command that was issued but did
+ * not write proves nothing about carry-over (Amendment A1). */
+function toolResultTexts(lines: string[]): string[] {
+  const texts: string[] = [];
+  for (const line of lines) {
+    let message: { message?: { content?: unknown } };
+    try {
+      message = JSON.parse(line) as { message?: { content?: unknown } };
+    } catch {
+      continue; // a malformed line is skipped, never thrown on
+    }
+    const content = message.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content as Array<{ type?: unknown; content?: unknown }>) {
+      if (block.type !== 'tool_result') continue;
+      if (typeof block.content === 'string') texts.push(block.content);
+      else if (Array.isArray(block.content)) {
+        for (const part of block.content as Array<{ text?: unknown }>) {
+          if (typeof part.text === 'string') texts.push(part.text);
+        }
+      }
+    }
+  }
+  return texts;
+}
+```
+
+Add, after `plantedFiles` (A2(b)), replacing the withdrawn `PLANT_TOKEN`/`plantCommand`:
+
+```ts
+/** The four files every writer is told to plant, absolute. Also the Bash writer's proof set:
+ * its verification command lists exactly these, so the tool_result naming all four is what
+ * shows the plant LANDED (Amendment A2). */
+function plantTargets(p: Plant): string[] {
+  return [
+    join(p.home, '.claude', 'settings.json'),
+    join(p.home, '.claude', 'settings.local.json'),
+    join(p.home, 'CLAUDE.md'),
+    join(p.home, 'CLAUDE.local.md'),
+  ];
+}
+```
+
+Replace `writerBashPrompt` with (A2(c)):
+
+```ts
+/** Two Bash calls, deliberately: the plant, then a SEPARATE single-operation `ls` whose
+ * tool_result is the proof it landed. Amendment A2: an `&&`-chained one-liner is decomposed by
+ * the Claude Code CLI into sub-commands that each need approval, so it is refused wholesale
+ * under `permissionMode: 'default'` (MEASURED: `decision_reason_type: "subcommandResults"`);
+ * newline-separated heredocs in one call do execute (MEASURED). `ls -1 <paths>` is one
+ * operation, so it is never decomposed. */
+const writerBashPrompt = (p: Plant): string =>
+  'This is an authorised test of the campaign home. Do exactly these two things, and nothing ' +
+  'else:\n' +
+  '1. With ONE Bash command, create the four files below. Use a `mkdir -p` line and then one ' +
+  "`cat > <path> << 'EOF'` heredoc per file, separated by NEWLINES. Do not chain the steps with " +
+  '`&&` or `;`, and do not split them across several Bash calls:\n' +
+  plantedFiles(p) +
+  `2. Then, as a SEPARATE single Bash command, run exactly this and nothing else:\nls -1 ${plantTargets(p).join(' ')}\n` +
+  'Reply with one line: WROTE=<the output of that ls command, on one line>.';
+```
+
+In `carryOverPair`, the `writerAttempted` assignment is (A2(d)):
+
+```ts
+    // Amendment A2: for the Bash writer, "attempted" is not enough — some tool_result must name
+    // all four planted files, which is the `ls` proving the plant landed. For the Write writer
+    // the post-card mechanism IS the refusal, so an attempted Write to a surface is the guard.
+    const writerAttempted =
+      writerTool === 'Bash'
+        ? toolUses(writer.lines, 'Bash').length > 0 &&
+          toolResultTexts(writer.lines).some((text) => plantTargets(plant).every((target) => text.includes(target)))
+        : toolUses(writer.lines, 'Write').some((input) => String(input.file_path ?? '').startsWith(home));
+```
+
+Every assertion in `expectNoCarryOver`, and tests 1 and 3's guards, stay byte-identical to the RED
+block above — this amendment only strengthens the Bash writer's precondition.
+
 ### Run it on base — the BEFORE count
 
 ```bash
@@ -358,9 +460,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-home-settings-containment && command gre
 ```
 Expected: `1`.
 
-- [ ] **Step 4: Commit** — stage the test file and the evidence document and commit with the
+- [x] **Step 4: Commit** — stage the test file and the evidence document and commit with the
   Global Constraints trailers (`Tribe-Task: 1/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 1 complete
+- [x] Task 1 complete
 
 ---
 
@@ -486,9 +588,9 @@ cd $RUNNER && bun test core/supervisor/home-config.test.ts 2>&1 | tail -4 && bun
 ```
 Expected: `29 pass`, `0 fail`, then `TSC_OK`.
 
-- [ ] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
   (`Tribe-Task: 2/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 2 complete
+- [x] Task 2 complete
 
 ---
 
@@ -627,9 +729,9 @@ cd $RUNNER && bun test core/supervisor/home-config.test.ts 2>&1 | tail -4 && bun
 ```
 Expected: `36 pass`, `0 fail`, then `TSC_OK`.
 
-- [ ] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
   (`Tribe-Task: 3/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 3 complete
+- [x] Task 3 complete
 
 ---
 
@@ -748,9 +850,9 @@ cd $RUNNER && bun test core/supervisor/permit.test.ts core/supervisor/session.te
 ```
 Expected: `0 fail` (every existing row unchanged and green, plus the 25 new tests), then `TSC_OK`.
 
-- [ ] **Step 4: Commit** — stage `permit.ts` and `permit.test.ts` and commit with the Global
+- [x] **Step 4: Commit** — stage `permit.ts` and `permit.test.ts` and commit with the Global
   Constraints trailers (`Tribe-Task: 4/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 4 complete
+- [x] Task 4 complete
 
 ---
 
@@ -934,9 +1036,9 @@ cd $RUNNER && git diff db3bd53 -- core/supervisor/session.ts | command grep -E "
 Expected: `0 fail` (including the unchanged test "closing still has no write containment — a Write
 into the repo is not denied"), `TSC_OK`, then `FENCE_INTACT`.
 
-- [ ] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
   (`Tribe-Task: 5/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 5 complete
+- [x] Task 5 complete
 
 ---
 
@@ -1110,9 +1212,9 @@ cd $RUNNER && bun test adapters/home-config.adapter.test.ts structure.test.ts 2>
 Expected: `0 fail` (the 5 new tests, and `structure.test.ts` still green: `node:fs` only in an
 `adapters/*.adapter.ts` file), then `TSC_OK`.
 
-- [ ] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
   (`Tribe-Task: 6/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 6 complete
+- [x] Task 6 complete
 
 ---
 
@@ -1305,9 +1407,9 @@ cd $RUNNER && bun test adapters/home-config.adapter.test.ts structure.test.ts 2>
 ```
 Expected: `0 fail` (12 adapter tests), then `TSC_OK`.
 
-- [ ] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
   (`Tribe-Task: 7/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 7 complete
+- [x] Task 7 complete
 
 ---
 
@@ -1591,9 +1693,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-home-settings-containment && git diff db
 Expected: `0 fail` and `TSC_OK`; `40 passed, 0 failed`; the E2E diff shows exactly three added
 lines (the import, `snapshotHomeConfig,`, `restoreHomeConfig,`) and no removed line.
 
-- [ ] **Step 4: Commit** — stage the eight files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the eight files and commit with the Global Constraints trailers
   (`Tribe-Task: 8/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 8 complete
+- [x] Task 8 complete
 
 ---
 
@@ -1640,9 +1742,9 @@ cd /Users/hiep/repo/tribe-wt/supervisor-home-settings-containment && command gre
 ```
 Expected: `3` (Task 1's line, the AFTER ratchet line, the G4 line).
 
-- [ ] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
+- [x] **Step 4: Commit** — stage the evidence document and commit with the Global Constraints
   trailers (`Tribe-Task: 9/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 9 complete
+- [x] Task 9 complete
 
 ---
 
@@ -1740,10 +1842,10 @@ cd /Users/hiep/repo/tribe-wt/supervisor-home-settings-containment && git status 
 Expected: the rule's front-matter; `ok: true`; then no line from `git status` before
 `REGISTRY_UNTOUCHED`.
 
-- [ ] **Step 4: Commit** — stage exactly the files the CLI created plus the eval binding and commit
+- [x] **Step 4: Commit** — stage exactly the files the CLI created plus the eval binding and commit
   with the Global Constraints trailers (`Tribe-Task: 10/11`), ticking this task's boxes in the SAME
   commit.
-- [ ] Task 10 complete
+- [x] Task 10 complete
 
 ---
 
@@ -1808,22 +1910,120 @@ Expected: `ok: true`; a count of at least `2` (the `uses` list and the Governanc
 least `2` (the envelope facts and the verified-live entry); the runner suite green (inherited
 failures per the Adjudication rule only) and `TSC_OK`.
 
-- [ ] **Step 4: Commit** — stage the `.c3/` change-unit files and the README and commit with the
+- [x] **Step 4: Commit** — stage the `.c3/` change-unit files and the README and commit with the
   Global Constraints trailers (`Tribe-Task: 11/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 11 complete
+- [x] Task 11 complete
+
+---
+
+## Fix round 1 — AGENTS.md (execution-time, ruled by the executing Warchief)
+
+**Finding.** An adversarial Skinner audit of the eleven landed tasks measured a **Blocker** against
+G2 (finding C1): the Claude Code CLI loads `<home>/AGENTS.md` as project instructions **by default
+when the project has no `CLAUDE.md`** — the exact steady state this card's own restore creates.
+`isHomeConfigSurface('AGENTS.md')` was `false`, so both layer-1 hooks allowed the write and layer 2
+never restored it. Through the supervisor's own spawn path (`runOneShotSession` + the real
+`sdkSpawnSession`, Haiku, a throwaway `mkdtemp` home), a `closing` session's single `Bash` heredoc
+wrote `<home>/AGENTS.md`, and the next `ruling` session's `finalText` carried the codeword it
+planted (`CARRY-OVER (B saw A-written codeword) = true`). Two smaller accepted findings rode along:
+**M1** (the E2E's Bash-writer guard was satisfiable by an `ls` *failure*, since `ls`'s stderr
+carries every missing target's path and the guard only checked substring presence) and **M2**
+(`restoreHomeConfig`'s `remove`-escapes-the-home branch and the parent-real-path symlink-swap
+branch were never proven red by mutation).
+
+**Measurement table (fix round 1, spec §4.3 rows f1-f4; full session ids and RED/GREEN runs in
+`docs/superpowers/evidence/2026-09-25-supervisor-home-settings-containment.md`'s `## FIX ROUND 1`):**
+
+| Candidate planted | LOADED | The session's own reply |
+| --- | --- | --- |
+| `<home>/AGENTS.md` | **YES** | `READ=done\nCODEWORD=ZEBRA-FIX1-AGENTSMD-1790304522747` |
+| `<home>/escalations/AGENTS.md` (nested, `m1b`) | **YES** | `READ=done\nCODEWORD=ZEBRA-FIX1-NESTEDAGENTSMD-1790304533952` |
+| `<home>/AGENTS.override.md` | no | `READ=done\nCODEWORD=none` |
+| `<home>/.claude.json` (memory line AND a `hooks` block) | no | `READ=done\nCODEWORD=none`; markers `[]` |
+
+**Ruling.** No new principle was needed: the campaign's standing **R4** — "cover the whole measured
+configuration set … the card's G2 is 'no carry-over', and every one of those files was measured
+live, so a narrower list fails G2" — already covers a newly-measured member of the class. `C1`
+reproduces; fix it under R4. `AGENTS.override.md` matching anyway is by-design over-match (the
+Oracle, spec §6.1); `.claude.json` matching nothing is correct, since it was measured not loaded.
+
+**The widened predicate.** `core/supervisor/home-config.ts#isHomeConfigSurface` gained one clause,
+`isAgentsMemoryFile = name.startsWith('agents') && name.endsWith('.md')`, mirroring the existing
+`claude*.md` clause exactly (case-insensitive, last segment, any depth); `HOME_CONFIG_DENIED_REASON`
+now names `AGENTS*.md` alongside the other three shapes. `permit.test.ts` and `home-config.test.ts`
+were RED for the new cases before the clause landed, GREEN after (`148 pass, 0 fail` for the two
+files together).
+
+**The fourth E2E pair.** `core/supervisor/home-config.e2e.test.ts` gained a fifth planted file
+(`AGENTS.md`) and a fourth pair — `closing` plants with `Bash` -> the next `ruling` sees no
+`AGENTS.md` instruction (C1) — using the unchanged `expectNoCarryOver` helper. (Fix round 2, finding
+m4: that pair's mechanism was identical to the second pair's, so it is now the **nested**
+`<home>/escalations/AGENTS.md` pair instead; see the evidence document's `## FIX ROUND 2`.) RED before the
+predicate change (codeword leaked); with the predicate still unwidened, the full file was
+**0 pass, 4 fail** (`AGENTS.md` alone defeated every pair, since the restore that closed the other
+three left it in place); with the predicate landed, **4 pass, 0 fail**.
+
+**Ratchet: `0/4 -> 4/4`**, superseding the card's original `0/3 -> 3/3` (spec §8; the original
+numbers are kept as a record, not deleted).
+
+**M1 fix.** The guard `toolResultTexts(...).some((text) => plantTargets(plant).every((target) =>
+text.includes(target)))` passed on a total planting *failure*, because `ls -1 <targets>` names each
+missing path in its own stderr `tool_result`, and `every(includes)` is vacuously satisfiable by an
+error line. Reproduced deterministically on a home where nothing was planted (`every(...) = true`
+on the measured `ls: … No such file or directory` output). Fixed with `isGenuineListing(text,
+targets)`: each target must appear on a line that is **exactly** that path, which `ls -1` produces
+on success and no `ls:` error line can ever produce.
+
+**M2 fix.** `adapters/home-config.adapter.test.ts` gained two tests, both green on first run since
+the code was already correct; each guard was temporarily mutated (mutations reverted, never
+committed) to prove neither is vacuous: mutation C (the `remove` loop no longer proves containment)
+flipped the "a plan REMOVE entry that escapes the home is refused" test to fail; mutation B (the
+parent-real-path guard disabled via `if (false && !isInsideHome)`) flipped the symlink-swap test to
+fail. Both reverted; `git diff --stat adapters/home-config.adapter.ts` empty; `14 pass, 0 fail`.
+
+**Not fixed — Finding I1, recorded as follow-up F3.** The timeout path's second snapshot/restore
+pass in `runOneShotSession` is unawaited, so a write landing after a timed-out session can reach
+the next session's before-snapshot. Ruled a follow-up escalated to the owner: every fix changes
+either the typed timeout result (fenced off — "D-2026-09-24-3 is another card") or the timeout's
+observable timing, a decision this plan does not make. `runOneShotSession`'s timeout path is left
+exactly as it was.
+
+**Observed flake, recorded, not fixed.** `session.e2e.test.ts`'s `closing: Skill c3 returns C3
+content` tripped its `not.toContain('Unknown skill')` assertion once, on a model-guessed wrong
+skill name (`Unknown skill: c3:c3`, the real name is `c3-skill:c3`) — model non-determinism, not a
+tier regression. Immediate unchanged re-run: `7 pass, 0 fail`. No change made.
+
+**Gates (fix round 1):** `core/supervisor/ adapters/ cli/ structure.test.ts` — `699 tests, 0 fail`;
+`bunx tsc --noEmit` — `TSC_OK`; `home-config.e2e.test.ts` (RUN_SESSION_E2E=1) — `4 pass, 0 fail`;
+`session.e2e.test.ts` (RUN_SESSION_E2E=1) — `7 pass, 0 fail`; `test-supervisor-e2e.sh` — `40
+passed, 0 failed`; full runner `bun test` — `1447 pass, 12 skip, 0 fail`; the fence (`git diff
+db3bd53` over the grant/permission surfaces) — `FENCE_INTACT`.
+
+- [x] **Fix round 1 governance reconciliation (this task, fix round 1b):** the spec (§4.3, §6.1,
+  §8), this plan section, and the frozen C3 artifacts (`rule-session-cwd-config-restored`'s Golden
+  Example and Goal, `c3-215-tribe`'s Change Safety row, both via change-unit
+  `adr-20260925-fix1b-agentsmd-config-surface`) and the runner README brought current with the
+  landed code, in the same delivery as the code (`rule-change-unit-ships-with-code`).
+- [x] Fix round 1 complete: C1 **FIXED**, M1 **FIXED**, M2 **FIXED**, I1 recorded as follow-up F3
+  (not fixed).
 
 ---
 
 ## Definition of done (card goals → proof)
 
-- [ ] G1 — spec §4: 32 real sessions, commands and results recorded; Task 1 re-measures on base
+- [x] G1 — spec §4: 32 real sessions, commands and results recorded; Task 1 re-measures on base
   through the committed E2E.
-- [ ] G2 — Task 9: `home-config.e2e.test.ts` **0/3 before → 3/3 after** (the ratchet, one committed
-  check, same tool); Tasks 2-8 unit tests pin both layers.
-- [ ] G3 — Task 10: `rule-session-cwd-config-restored`, authored with `c3x add rule`, cited from
+- [x] G2 — Task 9 and fix rounds 1-2: `home-config.e2e.test.ts` **0/4 before → 4/4 after** (the
+  ratchet, one committed check, same tool) across four **distinct** load mechanisms — (1) `ruling`
+  plants with `Write` -> `ruling`, (2) `closing` plants with `Bash` -> `ruling`, (3) `closing` plants
+  with `Write` -> `closing`, and (4) `closing` plants the **nested** `<home>/escalations/AGENTS.md`
+  with `Bash` -> `ruling`, whose reader reads a file **in that directory** because a nested memory
+  file loads only on demand (spec §4.3 `m1b`). Pair (4) replaced fix round 1's fourth pair, which
+  repeated pair (2)'s mechanism (fix round 2, finding m4); Tasks 2-8 unit tests pin both layers.
+- [x] G3 — Task 10: `rule-session-cwd-config-restored`, authored with `c3x add rule`, cited from
   `c3-215-tribe` by Task 11's change-unit; no registry line hand-written.
-- [ ] G4 — Task 9: `session.e2e.test.ts` 7/7 (assertions unchanged: `/c3` in all three kinds, the
+- [x] G4 — Task 9: `session.e2e.test.ts` 7/7 (assertions unchanged: `/c3` in all three kinds, the
   scan wall, R1's grant hook, `verify-shipped`), the viewer attribution asserted in every G2 test,
   `test-supervisor-e2e.sh` 40/40, `bun test` + `tsc` green.
-- [ ] Fence — `git diff db3bd53` shows no change to any grant list, `permissionMode`,
+- [x] Fence — `git diff db3bd53` shows no change to any grant list, `permissionMode`,
   `settingSources`, `cwd`, `options.plugins`, `core/state.ts` or `core/types.ts`.

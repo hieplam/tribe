@@ -1,0 +1,1172 @@
+# Evidence — supervisor-home-settings-containment
+
+## BEFORE
+
+**Base:** `db3bd53` (master). **This branch's HEAD:** `0d4686e`. `git diff --name-only db3bd53
+HEAD` returns only `docs/superpowers/plans/2026-09-25-supervisor-home-settings-containment.md` and
+`docs/superpowers/specs/2026-09-25-supervisor-home-settings-containment-design.md` — the runner
+code (`plugins/tribe/scripts/runner/**`) is byte-identical to `db3bd53`, so every real-session run
+below measures base behaviour.
+
+### The record, in full — nothing dropped
+
+The test file went through three revisions before it proved carry-over honestly. Every run below
+is real, measured evidence; the earlier, superseded runs are kept in this record because they are
+themselves evidence (of a harness defect and its fix), not because they are the final BEFORE count.
+
+**Round 1 — the plan's original test.** The writer's Bash command was left for the model to
+compose ("Use ONE Bash command (mkdir -p, then printf or a heredoc) …"), and `writerAttempted` for
+the Bash writer only checked that a `Bash` tool call happened, not that it wrote anything:
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts -t 'closing plants with Bash' 2>&1 | tail -60
+bun test v1.4.2 (744846f84)
+
+ 1 pass
+ 2 filtered out
+ 0 fail
+ 8 expect() calls
+Ran 1 test across 1 file. [30.79s]
+```
+
+**This passed vacuously.** A throwaway diagnostic script reproducing the identical scenario
+moments later showed the same shape of pair (model-composed `mkdir -p` + heredocs) both succeeding
+(all four files planted) and failing (full carry-over: reader's `finalText` contained the codeword,
+and all eight markers were present) — proving the round-1 test's `writerAttempted` guard did not
+verify the plant landed, so "no carry-over" could hold trivially when the writer's command silently
+wrote nothing. Test 1 (`ruling`/`Write`) and test 3 (`closing`/`Write`) already failed correctly in
+round 1, for the carry-over reason (see the round-3 results below — those two tests were never
+touched by any amendment).
+
+**Amendment A1 (withdrawn in part).** Composed a deterministic, `&&`-chained one-line Bash command
+(`plantCommand`) with an echoed `PLANT_TOKEN`, and strengthened `writerAttempted` to require the
+token in both the tool_use `command` and a `tool_result`. Result:
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts -t 'closing plants with Bash' 2>&1 | tail -20
+core/supervisor/home-config.e2e.test.ts:
+248 | function expectNoCarryOver(pair: PairResult): void {
+249 |   expect(pair.writerAttempted).toBe(true); // the attempt happened, or this test proves nothing
+                                     ^
+error: expect(received).toBe(expected)
+Expected: true
+Received: false
+      at expectNoCarryOver (…/home-config.e2e.test.ts:249:32)
+(fail) … closing plants with Bash -> the next ruling sees no hook and no instruction [20640.02ms]
+
+ 0 pass
+ 2 filtered out
+ 1 fail
+ 1 expect() calls
+```
+
+A diagnostic reproduction of the exact same scenario captured the writer's transcript. The `&&`-
+chained command was never executed — the Claude Code CLI's own permission gate refused it before
+it reached the shell:
+
+```
+{"type":"system","subtype":"permission_denied","tool_name":"Bash","tool_use_id":"toolu_015u1Cyojva2udZEZqLbwY9d","decision_reason_type":"subcommandResults","message":"This Bash command contains multiple operations. The following parts require approval: mkdir -p …/.claude, printf '%s' '{\"hooks\":…}', printf '%s' '{\"hooks\":…}', printf '%s\\n' 'The campaign codeword is …'"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"This Bash command contains multiple operations. The following parts require approval: …","is_error":true,"tool_use_id":"toolu_015u1Cyojva2udZEZqLbwY9d"}]},…,"tool_use_result":"Error: This Bash command contains multiple operations. …","tool_result_meta":[{"id":"toolu_015u1Cyojva2udZEZqLbwY9d","non_execution_kind":"user-rejected"}]}
+```
+
+Root cause: under `permissionMode: 'default'`, the CLI decomposes an `&&`-chained Bash command
+into sub-commands and requires each to be separately approved; neither `decideClosingGrantHook`
+(tool-level only) nor the scan wall expresses that approval, so the whole command is refused
+non-interactively. This is host behaviour, not a defect in the card's design — the same class as
+spec §4.4 item 1's documented CLI guard around `.claude/`/`.mcp.json` `Write`s, but for a
+multi-part Bash command instead of a single `Write`.
+
+**Amendment A2 (the landed shape).** `PLANT_TOKEN` and the `&&`-chained `plantCommand` were
+withdrawn. The writer is now told to compose the plant itself as ONE Bash call using newline-
+separated `mkdir -p` + `cat > … << 'EOF'` heredocs (the exact shape round 1's own diagnostic probe
+had already shown the CLI executes without refusal), then run a SEPARATE, single-operation
+`ls -1 <the four target paths>` as its own Bash call. `writerAttempted` for the Bash writer now
+requires some `tool_result` to name all four planted files (`plantTargets`) — proof the `ls`
+actually ran against files that exist, which is proof the plant landed; a command that was merely
+issued but never executed, or that wrote nothing, cannot satisfy this.
+
+### The final BEFORE run (Amendment A1+A2, all three tests, this revision)
+
+```
+$ cd $RUNNER && git rev-parse --short HEAD
+0d4686e
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts -t 'closing plants with Bash' 2>&1 | tail -30
+core/supervisor/home-config.e2e.test.ts:
+239 |   }
+240 | }
+241 |
+242 | function expectNoCarryOver(pair: PairResult): void {
+243 |   expect(pair.writerAttempted).toBe(true); // the attempt happened, or this test proves nothing
+244 |   expect(pair.markersAfterReader).toEqual([]); // no hook the writer planted ran in the reader
+                                        ^
+error: expect(received).toEqual(expected)
+
+- []
++ [
++   "local-Stop",
++   "project-SessionStart",
++   "project-UserPromptSubmit",
++   "local-UserPromptSubmit",
++   "project-PreToolUse",
++   "local-PreToolUse",
++   "local-SessionStart",
++   "project-Stop",
++ ]
+
+- Expected  - 1
++ Received  + 10
+
+      at expectNoCarryOver (…/home-config.e2e.test.ts:244:35)
+      at <anonymous> (…/home-config.e2e.test.ts:263:5)
+(fail) supervisor sessions never carry configuration forward (card supervisor-home-settings-containment, G2) > closing plants with Bash -> the next ruling sees no hook and no instruction [26322.01ms]
+
+ 0 pass
+ 2 filtered out
+ 1 fail
+ 2 expect() calls
+```
+`writerAttempted` passed (2 assertions ran before the failure), and the failure is on
+`markersAfterReader` — all eight `project-*`/`local-*` markers are present, matching spec §4.4's
+`e2` row exactly ("all eight `project-*`/`local-*`").
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts -t 'ruling plants with Write' 2>&1 | tail -20
+core/supervisor/home-config.e2e.test.ts:
+242 | function expectNoCarryOver(pair: PairResult): void {
+243 |   expect(pair.writerAttempted).toBe(true); // the attempt happened, or this test proves nothing
+244 |   expect(pair.markersAfterReader).toEqual([]); // no hook the writer planted ran in the reader
+245 |   expect(pair.readerFinal).not.toContain(pair.codeword); // no instruction it planted reached the reader
+                                     ^
+error: expect(received).not.toContain(expected)
+
+Expected to not contain: "ZEBRA-ruling-write-1790298091289"
+Received: "READ=done\nCODEWORD=ZEBRA-ruling-write-1790298091289"
+
+      at expectNoCarryOver (…/home-config.e2e.test.ts:245:32)
+(fail) … ruling plants with Write -> the next ruling sees no hook and no instruction [21341.86ms]
+
+ 0 pass
+ 2 filtered out
+ 1 fail
+ 3 expect() calls
+```
+`writerAttempted` and `markersAfterReader` both passed; the failure is the codeword leaking into
+the reader's final text — matches spec §4.4's `e1` row ("`CLAUDE.md` only", `CODEWORD=…`).
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts -t 'closing plants with Write' 2>&1 | tail -20
+core/supervisor/home-config.e2e.test.ts:
+242 | function expectNoCarryOver(pair: PairResult): void {
+243 |   expect(pair.writerAttempted).toBe(true); // the attempt happened, or this test proves nothing
+244 |   expect(pair.markersAfterReader).toEqual([]); // no hook the writer planted ran in the reader
+245 |   expect(pair.readerFinal).not.toContain(pair.codeword); // no instruction it planted reached the reader
+                                     ^
+error: expect(received).not.toContain(expected)
+
+Expected to not contain: "ZEBRA-closing-write-1790298115115"
+Received: "READ=done\nCODEWORD=ZEBRA-closing-write-1790298115115"
+
+      at expectNoCarryOver (…/home-config.e2e.test.ts:245:32)
+(fail) … closing plants with Write -> the next closing sees no hook and no instruction [24215.53ms]
+
+ 0 pass
+ 2 filtered out
+ 1 fail
+ 3 expect() calls
+```
+`writerAttempted` and `markersAfterReader` both passed; the failure is the codeword leaking into
+the reader's final text — matches spec §4.4's `e3` row ("`CLAUDE.md` only", `CODEWORD=…`).
+
+**Opt-out run (no `RUN_SESSION_E2E`), this revision:**
+```
+$ cd $RUNNER && bun test core/supervisor/home-config.e2e.test.ts 2>&1 | tail -8
+bun test v1.4.2 (744846f84)
+
+ 0 pass
+ 3 skip
+ 0 fail
+Ran 3 tests across 1 file. [50.00ms]
+```
+
+**`bunx tsc --noEmit`, this revision:** exit 0 (no output).
+
+**Result: `0 pass, 3 fail`, each for a carry-over reason** — matches the plan's Task 1 prediction
+exactly.
+
+**Ratchet: G2 E2E before = 0/3**
+
+### Spec §4.4's table, copied verbatim as plan-time corroboration
+
+| Pair | A (writer) | What A managed to write | B | B's markers | B's `CODEWORD=` |
+| --- | --- | --- | --- | --- | --- |
+| e1 | ruling, `Write` tool | `CLAUDE.md` only | ruling | none | **`ZEBRA-e1A-CLAUDEMD`** |
+| e2 | closing, one `Bash` command | all three files | ruling | **all eight** `project-*`/`local-*` | **`ZEBRA-e2A-CLAUDEMD`** |
+| e3 | closing, `Write` tool | `CLAUDE.md` only | closing | none | **`ZEBRA-e3A-CLAUDEMD`** |
+| e4 | ratify, `Write` tool | `CLAUDE.md` only | ratify | none | **`ZEBRA-e4A-CLAUDEMD`** |
+
+## G4 baseline
+
+At `db3bd53` (spec §4.7, MEASURED):
+
+```
+cd plugins/tribe/scripts/runner && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/session.e2e.test.ts
+```
+→ **`7 pass, 0 fail, 25 expect() calls`** (80.12 s), printing
+`G4_WITH_PLUGIN registered as: ["verify-shipped","verify-shipped:verify-shipped"]` and
+`G4_WITHOUT_PLUGIN=resolved registered as: ["verify-shipped"]`. This is the number G4 must hold.
+
+Also at `db3bd53`: `bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh` → `40 passed, 0
+failed`; runner `bun test` → `1335 pass, 8 skip, 0 fail` (1343 tests, 54 files); `bunx tsc --noEmit`
+→ exit 0.
+
+Task 9 re-runs `session.e2e.test.ts` and `test-supervisor-e2e.sh` AFTER the card's fix lands; this
+task only cites the `db3bd53` baseline.
+
+## AFTER
+
+**Branch HEAD at measurement time:** `28c0866` (Tasks 1-8 landed: `isHomeConfigSurface`,
+`planHomeConfigRestore`, layer 1's `HOME_CONFIG_DENIED_REASON` refusal for `ruling`/`ratify`/
+`closing`, and layer 2's `runOneShotSession` snapshot-before / restore-after).
+
+### The ratchet — `home-config.e2e.test.ts`
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts 2>&1 | tail -20
+bun test v1.4.2 (744846f84)
+
+ 3 pass
+ 0 fail
+ 24 expect() calls
+Ran 3 tests across 1 file. [71.11s]
+```
+
+**Ratchet: G2 E2E before 0/3 -> after 3/3**
+
+### G4 — `session.e2e.test.ts`
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/session.e2e.test.ts 2>&1 | tail -8
+bun test v1.4.2 (744846f84)
+
+core/supervisor/session.e2e.test.ts:
+G4_WITH_PLUGIN registered as: ["verify-shipped","verify-shipped:verify-shipped"]
+G4_WITHOUT_PLUGIN=resolved registered as: ["verify-shipped"]
+
+ 7 pass
+ 0 fail
+ 25 expect() calls
+Ran 7 tests across 1 file. [87.81s]
+```
+
+### G4 — `test-supervisor-permission-real.sh`
+
+```
+$ cd /Users/hiep/repo/tribe-wt/supervisor-home-settings-containment && env -u ANTHROPIC_API_KEY TRIBE_REAL_E2E=1 bash plugins/tribe/scripts/tests/test-supervisor-permission-real.sh 2>&1 | tail -15
+        "type": "message"
+      }
+    ],
+    "speed": "standard"
+  },
+  "totalCostUsd": 0.032922700000000006,
+  "permissionDenials": []
+}
+ok - closing: the run ended subtype=success with no prompt and no hang
+closing permission_denials payload: []
+ok - closing: permissionDenials is empty — R11's grant covers Write and Bash with no denial
+ok - closing: the Write inside repoRoot landed on disk (/private/var/folders/yw/qq7jhg792dzblfszsspp9vgr0000gn/T/tmp.USetY1Gqxq/closing-repo/closing-probe-note.txt)
+ok - closing: the Bash step actually ran — bash-probe.txt holds the throwaway repo HEAD sha
+
+11 passed, 0 failed
+```
+Note on the pre-existing `link-out` symlink in this script's campaign home: it is in the BEFORE
+snapshot, so layer 2's restore leaves it alone by design. The script is green, which is the
+expected result under that design, not luck — this run reported no denial and no restore failure.
+
+### G4 — `test-supervisor-e2e.sh`
+
+```
+$ cd /Users/hiep/repo/tribe-wt/supervisor-home-settings-containment && bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh 2>&1 | tail -3
+ok - probe10: the verdict file carries a PASS verdict
+
+40 passed, 0 failed
+```
+
+G4: session.e2e.test.ts 7/7 -> 7/7; test-supervisor-e2e.sh 40/40 -> 40/40
+
+### Full runner suite and typecheck
+
+```
+$ cd $RUNNER && bun test 2>&1 | tail -6
+ 1432 pass
+ 11 skip
+ 0 fail
+ 3397 expect() calls
+Ran 1443 tests across 57 files. [297.67s]
+```
+No failures — so the Adjudication rule's inherited-failure list (`evals-file-has-52-evals`,
+`core/watchdog/**`, `watchdog-integration.test.ts`, a `launchViewer` test,
+`test-input-asymmetry.sh`, `test-supervisor-kill.sh`) needed no adjudication this run: none of
+those, nor any other test, failed.
+
+```
+$ cd $RUNNER && bunx tsc --noEmit && echo TSC_OK
+TSC_OK
+```
+
+### `home_config_restored` — the observable proof layer 2 acted
+
+Not found in the captured transcripts. `home-config.e2e.test.ts`'s `io.appendLog` implementation
+(`appendLog: (_logPath, line) => { lines.push(line); }`) only stores each logged line in an
+in-memory array for the test's own assertions; the test file contains no `console.*` call that
+would print `lines` to stdout (`command grep -n 'console\.' core/supervisor/home-config.e2e.test.ts`
+returns nothing), so `bun test`'s stdout — the only transcript this task is permitted to capture,
+since touching the test file is out of scope for this task — never carries it. Separately,
+`session.test.ts:425-426` unit-pins the exact shape of this log line
+(`{ type: 'tribe', subtype: 'home_config_restored', removed: [...], rewritten: [...] }`), and that
+unit test is part of the `1432 pass, 0 fail` full-suite run above, so the mechanism itself is
+exercised and green even though this task did not observe its output in a real-session transcript.
+
+### Result
+
+Ratchet 3/3 (up from 0/3, may only rise — did not fall). G4 held exactly: `session.e2e.test.ts`
+7/7 (same as the `db3bd53` baseline), `test-supervisor-e2e.sh` 40/40 (same as baseline). Full
+runner suite green (1432 pass, 11 skip, 0 fail — no inherited failures to adjudicate this run).
+`bunx tsc --noEmit` clean. No test, assertion, or source file was changed to produce these
+results.
+
+---
+
+## FIX ROUND 1
+
+An adversarial Skinner audit of the eleven landed tasks found one **Blocker** against G2 (C1) plus
+two accepted smaller findings (M1, M2). Fix round 1 closes all three. It re-opens no ruling: the
+campaign's standing ruling **R4** already settled the principle — *"cover the whole measured
+configuration set … not only the three files D-2026-09-24-1 names. The card's G2 is 'no carry-over',
+and every one of those files was measured live, so a narrower list fails G2."* A newly-measured
+member of that class is in scope by that ruling.
+
+### Finding C1 (Blocker), verbatim as stated in the fix brief
+
+The Skinner measured, end-to-end through the supervisor's own spawn path (`runOneShotSession` + the
+real `sdkSpawnSession`, Haiku, throwaway `mkdtemp` home):
+
+```
+LAYER1 ruling/ratify decision for Write <home>/AGENTS.md = {}        # allowed
+LAYER1 closing decision for Write <home>/AGENTS.md      = {}        # allowed
+A outcome = success | A final = "WROTE=done"                        # closing, ONE Bash heredoc
+AGENTS.md SURVIVED THE RESTORE = true
+home after A = [ "answers.md", "AGENTS.md" ]
+B finalText = "READ=done\nCODEWORD=ZEBRA-PAIR-AGENTSMD-1790303681691"
+CARRY-OVER (B saw A-written codeword) = true
+```
+
+Mechanism, three legs, each evidenced:
+
+1. **Loaded.** The vendored CLI
+   (`node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude` — the exact binary production
+   uses) carries `var z=["AGENTS.md",".claude/AGENTS.md"];var _=["CLAUDE.md",".claude/CLAUDE.md","CLAUDE.local.md"]`
+   and the log string `no CLAUDE.md found; AGENTS.md loaded: `. It is the documented DEFAULT
+   ("AGENTS.md as project instructions: by default loaded where the project has no CLAUDE.md") — no
+   host setting enables it.
+2. **Writable.** `isHomeConfigSurface('AGENTS.md')` is `false`, so both layer-1 hooks allow it, and
+   `closing`'s `Bash` writes it regardless of any hook.
+3. **Not restored.** `snapshotHomeConfig` records only surfaces, so `AGENTS.md` is in neither
+   snapshot and the planner plans nothing.
+
+**Aggravating:** the CLI's precondition — "the project has no `CLAUDE.md`" — is exactly the steady
+state this card creates. The card's own fix makes the uncovered path the live one.
+
+Leg 1 re-verified independently in this worktree's own `node_modules`:
+
+```
+$ B=$RUNNER/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude
+$ strings -a "$B" | command grep -m1 -o 'var [a-zA-Z_$]*=\["AGENTS.md","\.claude/AGENTS\.md"\][^;]*;var [a-zA-Z_$]*=\["CLAUDE.md","\.claude/CLAUDE\.md","CLAUDE\.local\.md"\]'
+var z=["AGENTS.md",".claude/AGENTS.md"];var _=["CLAUDE.md",".claude/CLAUDE.md","CLAUDE.local.md"]
+$ strings -a "$B" | command grep -m1 'no CLAUDE.md found; AGENTS.md loaded'
+no CLAUDE.md found; AGENTS.md loaded:
+```
+
+### Part 1 — MEASURING the neighbours before widening the predicate (spec §4.3's method)
+
+The oracle is unchanged (spec §6.1): **under-matching a path Claude Code loads is a bug;
+over-matching a path nothing loads is by design.** So the neighbours the Skinner named as untested
+were measured before the predicate was touched, never inferred from the binary's lists.
+
+One throwaway probe, `/tmp/shsc-fix1-probe/probe.ts` (**uncommitted**, modelled on spec Appendix A):
+it imports the real `runOneShotSession`, the real `sdkSpawnSession` and the real
+`snapshotHomeConfig`/`restoreHomeConfig` from this worktree, `mkdtemp`s a home under `/tmp`, plants
+**one** candidate file carrying a unique codeword, and runs **one** `ruling` session with spec
+§4.1's `observe` prompt. Model `claude-haiku-4-5-20251001`, `maxTurns: 8`,
+`sessionTimeoutMs: 180000`, run under `env -u ANTHROPIC_API_KEY`. Every probe home and markers
+directory was under `/tmp` and removed in a `finally`; no real campaign home, `~/.claude` or
+`~/.tribe` was ever written. Every session ended `outcome: success`.
+
+| Candidate planted in the home | Prompt reads | LOADED | The session's own reply (`finalText`) |
+| --- | --- | --- | --- |
+| `<home>/AGENTS.md` | `<home>/answers.md` | **YES** | `READ=done\nCODEWORD=ZEBRA-FIX1-AGENTSMD-1790304522747` |
+| `<home>/escalations/AGENTS.md` (nested, `m1b` mechanism) | `<home>/escalations/card.md` | **YES** | `READ=done\nCODEWORD=ZEBRA-FIX1-NESTEDAGENTSMD-1790304533952` |
+| `<home>/AGENTS.override.md` | `<home>/answers.md` | no | `READ=done\nCODEWORD=none` |
+| `<home>/.claude.json` (memory line **and** a `hooks` block, so either mechanism would show) | `<home>/answers.md` | no | `READ=done\nCODEWORD=none`; markers `[]` |
+
+Session ids: `07303621`, `86fb88a9`, `6316a658`, `0cce9507`.
+
+Two conclusions:
+
+- **`AGENTS.md` loads at any depth**, by the same two mechanisms as `CLAUDE.md`: at the settings root
+  directly, and nested on demand when the session reads a file in that directory (spec §4.3 `m1b`).
+  The Skinner's C1 therefore **reproduces**.
+- `AGENTS.override.md` and `.claude.json` were **measured not loaded**. `AGENTS.override.md` appears
+  in the binary only in a codex-import mapping (`{id:"codex:user:override",src:M(n,"AGENTS.override.md"),target:M(c,"CLAUDE.md")}`),
+  not in the memory-loader list — consistent with the measurement. It is nevertheless matched by the
+  `agents*.md` clause below: **over-matching a path nothing loads is by design**, and the unit table
+  records it as such. `.claude.json` is matched by nothing and is pinned in `NOT_SURFACES`, so the
+  measurement is not silently lost.
+
+### Part 2 — RED, then GREEN: one predicate, one clause
+
+`core/supervisor/home-config.ts#isHomeConfigSurface` is the one definition (plan `## Global
+Constraints`, "One predicate"); `permit.ts` and the adapter import it. The module stays **pure** —
+no `node:fs`, no `node:path` (`command grep -n "node:fs\|node:path" core/supervisor/home-config.ts`
+returns nothing, and `structure.test.ts` enforces it for `core/**`).
+
+**RED — the unit table, before the predicate changed:**
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY bun test core/supervisor/home-config.test.ts
+(fail) isHomeConfigSurface — the campaign home paths Claude Code loads as configuration > "AGENTS.md" is a surface [0.13ms]
+(fail) isHomeConfigSurface — the campaign home paths Claude Code loads as configuration > "agents.md" is a surface [0.03ms]
+(fail) isHomeConfigSurface — the campaign home paths Claude Code loads as configuration > "Agents.md" is a surface [0.03ms]
+(fail) isHomeConfigSurface — the campaign home paths Claude Code loads as configuration > "escalations/AGENTS.md" is a surface [0.03ms]
+(fail) isHomeConfigSurface — the campaign home paths Claude Code loads as configuration > "supervisor/deep/agents.md" is a surface [0.04ms]
+(fail) isHomeConfigSurface — the campaign home paths Claude Code loads as configuration > "AGENTS.override.md" is a surface [0.03ms]
+ 40 pass
+ 6 fail
+Ran 46 tests across 1 file. [3.00ms]
+```
+
+`.claude/AGENTS.md` was added to `SURFACES` too and passed straight away — it was already covered by
+the `.claude` segment clause. The new `NOT_SURFACES` rows (`AGENTS.md.bak`, `notes/agents.txt`,
+`.claude.json`) also passed straight away, i.e. the widening below does not over-reach into them.
+
+**RED — the two layer-1 hooks, before the predicate changed** (this is exactly the Skinner's
+`LAYER1 … = {}` measurement, now pinned by tests):
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY bun test core/supervisor/permit.test.ts
+(fail) decideContainmentHook refuses configuration surfaces inside the home > Write AGENTS.md -> deny with HOME_CONFIG_DENIED_REASON [0.10ms]
+(fail) decideContainmentHook refuses configuration surfaces inside the home > Edit AGENTS.md -> deny with HOME_CONFIG_DENIED_REASON [0.04ms]
+(fail) buildHomeConfigWriteHook — closing may not write configuration into the home (spec §6.2) > Write AGENTS.md inside the home -> deny [0.05ms]
+ 99 pass
+ 3 fail
+Ran 102 tests across 1 file. [5.00ms]
+```
+
+**GREEN — the clause added**, mirroring the existing `claude*.md` clause exactly (case-insensitive,
+last segment, any depth), each clause carrying its own rule-and-reason comment as the surrounding
+code does:
+
+```ts
+const isClaudeMemoryFile = name.startsWith('claude') && name.endsWith('.md');
+const isAgentsMemoryFile = name.startsWith('agents') && name.endsWith('.md');
+```
+
+`HOME_CONFIG_DENIED_REASON` now names `AGENTS*.md` alongside `.claude/`, `CLAUDE*.md` and
+`.mcp.json`, so the refusal a session is shown states the actual rule (readable-code.md symptom 6).
+Every reference to that constant compares against the constant itself, never its literal text.
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY bun test core/supervisor/home-config.test.ts core/supervisor/permit.test.ts
+ 148 pass
+ 0 fail
+ 191 expect() calls
+Ran 148 tests across 2 files. [7.00ms]
+```
+
+### Part 3 — the committed G2 E2E gains a fourth pair; the ratchet moves 0/4 -> 4/4
+
+`core/supervisor/home-config.e2e.test.ts`: the planted set became five files (`AGENTS.md` added to
+`plantedFiles`, to `plantTargets` — the Bash writer's proof set — and to the Bash writer's prompt),
+and a fourth pair was added: **`closing` plants with `Bash` -> `ruling` reads**, the exact pair the
+Skinner measured carrying over, asserted with the unchanged `expectNoCarryOver` helper.
+
+**RED — the fourth test, run BEFORE the Part 2 predicate change:**
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts -t "C1"
+259 | function expectNoCarryOver(pair: PairResult): void {
+260 |   expect(pair.writerAttempted).toBe(true); // the attempt happened, or this test proves nothing
+261 |   expect(pair.markersAfterReader).toEqual([]); // no hook the writer planted ran in the reader
+262 |   expect(pair.readerFinal).not.toContain(pair.codeword); // no instruction it planted reached the reader
+                                     ^
+error: expect(received).not.toContain(expected)
+
+Expected to not contain: "ZEBRA-c1-agentsmd-1790304672411"
+Received: "READ=done\nCODEWORD=ZEBRA-c1-agentsmd-1790304672411"
+
+(fail) supervisor sessions never carry configuration forward (card supervisor-home-settings-containment, G2) > closing plants with Bash -> the next ruling sees no AGENTS.md instruction (C1) [33737.34ms]
+
+ 0 pass
+ 3 filtered out
+ 1 fail
+ 3 expect() calls
+Ran 1 test across 1 file. [33.79s]
+```
+
+It fails on the codeword, in the reader's own final text — C1 reproduced through the committed
+harness, not only through the Skinner's throwaway probe. Note that `writerAttempted` (the guard,
+already fixed per M1 below) passed here: the Bash writer genuinely listed all five files, so the
+plant really landed and the test is not passing its guard vacuously.
+
+**BEFORE — the ratchet baseline, all four, predicate still unchanged:**
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts
+Expected to not contain: "ZEBRA-ruling-write-1790304714195"
+(fail) … > ruling plants with Write -> the next ruling sees no hook and no instruction [23074.71ms]
+Expected to not contain: "ZEBRA-closing-bash-1790304737270"
+(fail) … > closing plants with Bash -> the next ruling sees no hook and no instruction [32112.85ms]
+Expected to not contain: "ZEBRA-closing-write-1790304769383"
+(fail) … > closing plants with Write -> the next closing sees no hook and no instruction [17896.32ms]
+Expected to not contain: "ZEBRA-c1-agentsmd-1790304787280"
+(fail) … > closing plants with Bash -> the next ruling sees no AGENTS.md instruction (C1) [32335.07ms]
+ 0 pass
+ 4 fail
+Ran 4 tests across 1 file. [105.47s]
+```
+
+All four carried over, every one on the codeword — `AGENTS.md` alone defeats every pair, because the
+restore that had closed the other four planted files left this one in place.
+
+**AFTER — with the Part 2 predicate in place:**
+
+```
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts
+bun test v1.4.2 (744846f84)
+
+ 4 pass
+ 0 fail
+ 32 expect() calls
+Ran 4 tests across 1 file. [109.53s]
+```
+
+**Ratchet: G2 E2E before 0/4 -> after 4/4**
+
+(The card's original ratchet was 0/3 -> 3/3 on three pairs; the fourth pair is the C1 regression, so
+the same committed tool now measures four. The count only rose.)
+
+### Finding M1 — the Bash-writer guard was satisfiable by an `ls` FAILURE
+
+The guard read `toolResultTexts(...).some((text) => plantTargets(plant).every((target) => text.includes(target)))`.
+`ls` names each **missing** path in its stderr, and the `tool_result` carries stderr — so a total
+failure to plant satisfied the guard. Reproduced deterministically on a home where **nothing** was
+planted:
+
+```
+$ ls -1 $H/.claude/settings.json $H/.claude/settings.local.json $H/CLAUDE.md $H/CLAUDE.local.md $H/AGENTS.md
+ls: /tmp/shsc-m1/home/.claude/settings.json /tmp/shsc-m1/home/.claude/settings.local.json /tmp/shsc-m1/home/CLAUDE.md /tmp/shsc-m1/home/CLAUDE.local.md /tmp/shsc-m1/home/AGENTS.md: No such file or directory
+
+$ bun -e '<the guard, applied to that text>'
+every(target => text.includes(target)) = true          <-- the guard passes on total failure
+FIXED guard: every target on a line that is exactly that path = false
+```
+
+The same holds for the per-invocation shape the Skinner transcribed
+(`ls: …/CLAUDE.md: No such file or directory`, one line per target): `every(includes) = true`,
+`FIXED guard = false`. This is the residue of Amendment A2 — A2 required the plant to be *proved*
+landed, and path presence is not that proof.
+
+**Fix:** assert on the **listing shape**, not mere path presence. A new `isGenuineListing(text,
+targets)` splits the `tool_result` into lines and requires each target to appear on a line that is
+**exactly** that path — which `ls -1` produces on success and no `ls:` error line can ever produce.
+Its comment cites this measurement. No assertion in `expectNoCarryOver` was weakened or changed.
+
+### Finding M2 — two containment branches that were never proven red
+
+`adapters/home-config.adapter.test.ts` gained two tests. The code was already correct, so both pass
+on first run; that green is the point. To prove neither is **vacuous**, each guard was temporarily
+mutated (mutations reverted, never committed):
+
+```
+=== MUTATION C: the REMOVE loop no longer proves containment ===
+   (const target = join(realHome, entry.path);  instead of  containedTarget(realHome, entry.path))
+Expected constructor: HomeConfigError
+Received function did not throw
+(fail) restoreHomeConfig > a plan REMOVE entry that escapes the home is refused before anything is deleted
+ 13 pass
+ 1 fail
+
+=== MUTATION B: the parent-real-path guard disabled ===
+   (if (false && !isInsideHome) throw …)
+(fail) restoreHomeConfig > a write whose parent's real path is outside the home is refused; the outside directory is byte-unchanged
+ 13 pass
+ 1 fail
+
+=== REVERTED ===  (git diff --stat adapters/home-config.adapter.ts -> empty)
+ 14 pass
+ 0 fail
+```
+
+- **`remove` escaping the home.** Only the `write` half of `fail-closed-edges.md` obligation 4 had
+  ever been proven, and `remove` is the destructive half (`rmSync` with `recursive: true, force:
+  true`). The test plants a real file beside the home, plans `remove ../escape.md`, and asserts both
+  the `HomeConfigError` and that the victim is still `OUTSIDE`.
+- **`containedTarget`'s "the parent's real path is outside the home" branch.** The test makes
+  `<home>/.claude` a symlink to an outside directory — the mid-restore swap — plans a write to
+  `.claude/settings.json`, and asserts the refusal plus the outside directory **byte-unchanged**
+  (`'OUTSIDE'` intact, `readdirSync(outside) === ['settings.json']`), as the sibling symlink test
+  already does. A relative-path check alone cannot see this case; only resolving the parent can,
+  which is what mutation B proves.
+
+### Gates
+
+```
+$ cd $RUNNER && bun test core/supervisor/ adapters/ cli/ structure.test.ts 2>&1 | tail -4
+ 11 skip
+ 0 fail
+ 1787 expect() calls
+Ran 699 tests across 24 files. [12.54s]
+
+$ cd $RUNNER && bunx tsc --noEmit && echo TSC_OK
+TSC_OK
+
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts 2>&1 | tail -20
+ 4 pass
+ 0 fail
+ 32 expect() calls
+Ran 4 tests across 1 file. [109.53s]
+
+$ cd $RUNNER && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/session.e2e.test.ts 2>&1 | tail -12
+ 7 pass
+ 0 fail
+Ran 7 tests across 1 file
+
+$ cd <worktree> && bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh 2>&1 | tail -3
+ok - probe10: the verdict file carries a PASS verdict
+
+40 passed, 0 failed
+
+$ cd $RUNNER && bun test 2>&1 | tail -5
+ 1447 pass
+ 12 skip
+ 0 fail
+ 3417 expect() calls
+Ran 1459 tests across 57 files. [297.00s]
+```
+
+The fence, re-verified after every change:
+
+```
+$ git diff db3bd53 -- plugins/tribe/scripts/runner/core/supervisor/session.ts | command grep -E "^[-+].*(ALLOWED_TOOLS|DISALLOWED_TOOLS|permissionMode|settingSources|cwd:)" || echo "FENCE_INTACT"
+FENCE_INTACT
+```
+
+**Observed flake, recorded, not fixed (out of this brief's scope — `session.e2e.test.ts` may not be
+changed).** The first run of `session.e2e.test.ts` gave `6 pass, 1 fail`: `closing: Skill c3 returns
+C3 content` tripped its `expect(run.transcript).not.toContain('Unknown skill')` assertion. The cause
+is in the transcript and is model non-determinism, not a settings-tier regression — the session
+guessed a wrong skill name and the CLI told it so:
+`<tool_use_error>Unknown skill: c3:c3</tool_use_error>` (the real name is `c3-skill:c3`). The
+immediate re-run, unchanged, gave `7 pass, 0 fail`. That assertion is written as a tier-regression
+tripwire, but a model typo produces the identical string, so it can fail for a reason that is not a
+regression. Recorded for the Warchief; no change made.
+
+### Follow-up recorded, not fixed here
+
+**F3 — finding I1:** the timeout path's second snapshot/restore pass in `runOneShotSession` is
+unawaited, so a write landing after a timed-out session can reach the next session's
+before-snapshot. The Warchief ruled this a follow-up escalated to the owner: every fix changes
+either the typed timeout result (which the plan fences off — "D-2026-09-24-3 is another card") or
+the timeout's observable timing, a decision the plan does not make. `runOneShotSession`'s timeout
+path is left exactly as it was.
+
+### Result
+
+C1 **FIXED** (reproduced RED through the committed harness, then fixed; ratchet 0/4 -> 4/4).
+M1 **FIXED** (reproduced with the measured `No such file or directory` output, then fixed).
+M2 **FIXED** (missing-coverage finding: the absence was the reproduction; both new tests
+mutation-proven non-vacuous). I1 recorded as follow-up F3, not fixed here. No assertion was
+weakened, no gate is red or skipped, and the fence is byte-identical.
+
+---
+
+## FIX ROUND 2 — the restore's containment root, and four honest ratchet pairs
+
+A second adversarial Skinner audit of the fix-round-1 branch (`bd9bc08`) raised one Important
+finding and four actionable minors. Every one was reproduced before it was touched; the two that
+were already correct in code are recorded as such, with the citation or the mutation that proves it.
+
+### Finding I-B1 (Important) — the restore's containment root was not tied to the snapshot's root
+
+`restoreHomeConfig` resolved `realHome = realpathSync(homeDir)` at **restore** time and
+`containedTarget` proved every removal and write against that. Nothing tied it to the directory the
+`before` snapshot actually described, so if the home *path* came to resolve somewhere else between
+snapshot and restore, the restore deleted and overwrote in that other directory — while obligation 4
+still said "contained". The Skinner's measurement:
+
+```
+B plan.remove = [".claude/settings.json",".claude"] | plan.write = ["CLAUDE.md"]
+B restore SUCCEEDED (no refusal).
+B victim dir now = ["CLAUDE.md"] | victim CLAUDE.md = HOME-ORIGINAL | victim .claude = <DELETED>
+```
+
+**REPRODUCED, byte-identical**, on `bd9bc08` through the real adapter (a throwaway `mkdtemp` outer
+dir, `<outer>/home` snapshotted as a real directory, a session's plant, then `<outer>/home` replaced
+by a symlink to a victim holding its own `CLAUDE.md` and `.claude/settings.json`):
+
+```
+B plan.remove = [".claude/settings.json",".claude"] | plan.write = ["CLAUDE.md"]
+B restore SUCCEEDED (no refusal).
+B victim dir now = ["CLAUDE.md"] | victim CLAUDE.md = HOME-ORIGINAL | victim .claude = <DELETED>
+```
+
+The committed RED test is the same scenario (`adapters/home-config.adapter.test.ts:203`), and it
+failed first, for the stated reason:
+
+```
+224 |     expect(() => restoreHomeConfig(home, plan)).toThrow(HomeConfigError);
+                                                      ^
+error: expect(received).toThrow(expected)
+Expected constructor: HomeConfigError
+Received function did not throw
+Received value: undefined
+(fail) restoreHomeConfig > the home's final component swapped for a symlink after the snapshot: the restore refuses and the other directory is byte-unchanged [1.77ms]
+ 16 pass
+ 1 fail
+```
+
+**Marginal capability, for the record:** zero. Triggering it needs `closing`'s `Bash`, which already
+has `rm -rf`; `ruling`/`ratify` cannot reach it. It is fixed because spec §6.3, spec §9's risk row
+and `fail-closed-edges.md` obligation 4 make an **unconditional** containment claim, and it is our
+own restore doing the deleting.
+
+**The fix** (`adapters/home-config.adapter.ts:125`, `realHomeAtItsOwnLocation`): before anything is
+removed or written, the home must resolve to **its own lexical location** —
+
+```
+realpathSync(homeDir) === join(realpathSync(dirname(homeDir)), basename(homeDir))
+```
+
+— else a typed `HomeConfigError(..., 'EHOME_NOT_AT_ITS_OWN_LOCATION')`. Both `realpathSync` calls are
+inside the narrow `try` (obligation 1: a typed refusal, never a stack trace). No signature changed:
+`restoreHomeConfig`, `snapshotHomeConfig` and `OneShotSessionSeam` are untouched.
+
+**Two-sided verification of the property, measured before relying on it** (probe over the real file
+system; `equal` is what the guard requires):
+
+```
+LEGIT raw tmpdir  : homeDir=/var/folders/…/T/probe-legit-nqXk51
+                    left=/private/var/folders/…/T/probe-legit-nqXk51
+                    right=/private/var/folders/…/T/probe-legit-nqXk51            equal=true
+LEGIT realpath    : homeDir=/private/var/folders/…/T/probe-legit-nqXk51          equal=true
+ATTACK before swap: homeDir=/var/folders/…/probe-attack-qyOXRM/home              equal=true
+ATTACK after swap : left=/private/var/folders/…/probe-victim-gqEdCn
+                    right=/private/var/folders/…/probe-attack-qyOXRM/home        equal=false
+RELATIVE ('home', cwd=<outer>, final component still the victim link)            equal=false
+```
+
+So a legitimately symlinked **ancestor** (macOS `/var -> /private/var`) is absorbed into the real
+parent and still passes — the case the adapter tests and the real-session E2E both depend on — while
+the measured attack (the final component swapped) is refused. After the fix, the same damage probe:
+
+```
+B plan.remove = [".claude/settings.json",".claude"] | plan.write = ["CLAUDE.md"]
+B restore REFUSED: home configuration restore failed at /var/folders/…/T/ib1-outer-jNApXW/home: EHOME_NOT_AT_ITS_OWN_LOCATION
+B victim dir now = [".claude","CLAUDE.md"] | victim CLAUDE.md = VICTIM-MEMO | victim .claude = ["settings.json"]
+```
+
+The legitimate side is also pinned by a committed test, in **both** spellings of a temp home
+(`adapters/home-config.adapter.test.ts:233`, `fixtures-mirror-reality.md`).
+
+### Finding m5 — the untested half of the containment guard
+
+- **"a plan whose `remove` entry escapes the home"** — **NOT REPRODUCED**: fix round 1 already landed
+  it, at `adapters/home-config.adapter.test.ts:155` (`a plan REMOVE entry that escapes the home is
+  refused before anything is deleted`, asserting the victim file's bytes afterwards). No change.
+- **`containedTarget`'s "deepest existing ancestor's real path is outside the home" branch on the
+  `remove` half** — genuinely absent; only the `write` half had it. Added at
+  `adapters/home-config.adapter.test.ts:188`, and the outside directory is asserted byte-unchanged
+  as the sibling test does. Green on first run (the code was already right), so it was
+  **mutation-proven non-vacuous** (mutation reverted, never committed):
+
+```
+=== MUTATION: parent-real-path guard disabled (if (false && !isInsideHome) throw …) ===
+(fail) restoreHomeConfig > a write whose parent's real path is outside the home is refused; the outside directory is byte-unchanged
+(fail) restoreHomeConfig > a REMOVE whose parent's real path is outside the home is refused; the outside directory is byte-unchanged
+ 15 pass
+ 2 fail
+--- reverted ---
+ 17 pass
+ 0 fail
+```
+
+### Finding m4 — the fourth E2E pair was a duplicate, so the ratchet rose partly by repetition
+
+**REPRODUCED by inspection of the committed file**: fix round 1's fourth pair was
+`carryOverPair('closing', writerBashPrompt, 'Bash', 'ruling', 'c1-agentsmd')` — the second pair's
+call with a different label only. The count went 3 -> 4 without a new mechanism.
+
+**Replaced** (`core/supervisor/home-config.e2e.test.ts:348`) by the **nested** `AGENTS.md` pair, the
+other load path fix round 1 measured (spec §4.3 row `m1b`'s on-demand mechanism): `closing` plants
+`<home>/escalations/AGENTS.md` with one `Bash` heredoc, and the reader is pointed at
+`<home>/escalations/card-1.md` — a file **in that directory** — because that is what makes a nested
+memory file load; a reader of `<home>/answers.md` would never load it and the pair would prove
+nothing. The writer/reader targets are now a `PairShape` (`:116`), so the distinction is in the code,
+not in a label. `expectNoCarryOver` is unchanged.
+
+**Not vacuous — RED with the `agents*.md` clause removed** from `isHomeConfigSurface` (mutation
+`isAgentsMemoryFile` -> `false`; reverted, never committed), one real `closing` + `ruling` pair on
+`claude-haiku-4-5-20251001`:
+
+```
+=== RED DEMO: the nested pair with the agents*.md clause removed ===
+316 |   expect(pair.readerFinal).not.toContain(pair.codeword);
+error: expect(received).not.toContain(expected)
+Expected to not contain: "ZEBRA-c1-nested-agentsmd-1790309977892"
+Received: "READ=done\nCODEWORD=ZEBRA-c1-nested-agentsmd-1790309977892"
+(fail) … closing plants a NESTED AGENTS.md with Bash -> the next ruling sees no instruction (C1, m1b) [17107.21ms]
+ 0 pass
+ 1 fail
+```
+
+The reader's own reply carried the codeword planted in the nested file: the nested path is a real
+carry-over channel, and the fourth pair measures it. With the clause restored, the whole ratchet:
+
+```
+=== GREEN: the full ratchet, four pairs ===
+ 4 pass
+ 0 fail
+ 32 expect() calls
+Ran 4 tests across 1 file. [95.62s]
+```
+
+**Ratchet: holds at `0/4 -> 4/4`, now over four DISTINCT mechanisms** — `Write`-writer refusal,
+`Bash`-writer restore, `closing` -> `closing`, and the nested on-demand memory file. The fourth pair
+no longer duplicates the second.
+
+### Finding m2 — the Write-writer guard's comment did not match its code
+
+**REPRODUCED deterministically.** The branch read
+`String(input.file_path ?? '').startsWith(home)`, which is `true` for `<home>/notes.txt` — not a
+configuration surface, so not the write the pair exists to see refused. The committed test
+(`core/supervisor/home-config.e2e-guard.test.ts`) was RED against that pre-fix guard:
+
+```
+=== RED: the pre-fix m2 guard (home-prefix only) ===
+error: expect(received).toBe(expected)  Expected: false  Received: true
+(fail) isAttemptedWriteToSurface … does NOT count (an ordinary file in the home)
+(fail) isAttemptedWriteToSurface … does NOT count (the file every reader reads)
+(fail) isAttemptedWriteToSurface … does NOT count (the home itself)
+ 12 pass
+ 3 fail
+=== GREEN: the fixed guard ===
+ 15 pass
+ 4 skip
+ 0 fail
+```
+
+**Fix** (`core/supervisor/home-config.e2e.test.ts:252`): the attempted `Write` must be inside the
+home **and** `isHomeConfigSurface(relative(home, filePath))`. The predicate is imported from
+`core/supervisor/home-config.ts`, never restated (the plan's **One predicate** constraint), and it is
+given a home-relative path, which is the only shape it accepts.
+
+### Finding m3 — the M1 guard fix had no test
+
+**TRUE by absence** (a missing-thing finding: the absence is the reproduction — `isGenuineListing`
+was a non-exported local with no test anywhere). It is now a named export (`:79`) with its own unit
+tests in `core/supervisor/home-config.e2e-guard.test.ts`, which runs on every `bun test` and spends
+no tokens: a real four/five-line `ls -1` listing is genuine; **both** measured `ls` failure shapes
+(one `ls:` line naming every target, and one `ls:` line per target) are not — each test first pins
+the defect, `TARGETS.every((t) => failure.includes(t)) === true`, so the file records what M1's
+predecessor accepted; the echoed prompt is not; a listing missing one target is not.
+
+**Mutation-proven non-vacuous** (`isGenuineListing` reverted to the pre-fix substring guard;
+mutation reverted, never committed):
+
+```
+=== MUTATION M1: isGenuineListing back to the pre-fix substring guard ===
+(fail) isGenuineListing … the MEASURED `ls` failure text (one `ls:` line naming every target) is NOT genuine
+(fail) isGenuineListing … the MEASURED `ls` failure text (one `ls:` line per target) is NOT genuine
+(fail) isGenuineListing … the prompt echoed back is NOT genuine
+ 3 pass
+ 3 fail
+=== reverted ===
+ 6 pass
+ 0 fail
+```
+
+### Finding m1 (plan half) — the Definition-of-done number
+
+**TRUE.** The plan's `## Definition of done` G2 line still read `0/3 before → 3/3 after`. Corrected
+to `0/4 before → 4/4 after` and the four pairs are named individually, with pair (4) identified as
+fix round 2's nested replacement. Fix round 1's own narrative paragraph gained one sentence saying
+its fourth pair was superseded, so the plan does not describe a pair that no longer exists. The
+frozen-fact half of m1 (`.c3/`) is a separate task and was not touched here.
+
+### Gates (fix round 2)
+
+```
+$ bun test core/supervisor/ adapters/ cli/ structure.test.ts
+ 706 pass
+ 11 skip
+ 0 fail
+ 1819 expect() calls
+Ran 717 tests across 25 files. [12.52s]
+
+$ bunx tsc --noEmit && echo TSC_OK
+TSC_OK
+
+$ env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts
+ 4 pass
+ 0 fail
+ 32 expect() calls
+Ran 4 tests across 1 file. [95.62s]
+
+$ bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh
+ok - probe10: the verdict file carries a PASS verdict
+40 passed, 0 failed
+
+$ bun test
+ 1465 pass
+ 12 skip
+ 0 fail
+ 3449 expect() calls
+Ran 1477 tests across 58 files. [296.94s]
+
+$ git diff db3bd53 -- …/core/supervisor/session.ts | grep -E "ALLOWED_TOOLS|DISALLOWED_TOOLS|permissionMode|settingSources|cwd:"
+FENCE_INTACT
+
+$ git diff --numstat db3bd53 HEAD -- …/core/supervisor/session.e2e.test.ts
+3	0	plugins/tribe/scripts/runner/core/supervisor/session.e2e.test.ts
+```
+
+`session.e2e.test.ts` is unchanged by this round (`git diff --numstat` against the working tree is
+empty); the `3 0` is fix round 1's. `core/supervisor/session.ts`, `core/session.ts`, `core/state.ts`,
+`core/types.ts`, the spec and `.c3/` were not touched.
+
+### Follow-up still recorded, not fixed here
+
+**F3 — finding I1** (the timeout path's unawaited second snapshot/restore pass in
+`runOneShotSession`) remains a follow-up, and `runOneShotSession`'s timeout path is byte-identical.
+Note for whoever picks F3 up: Skinner B proposed a **third** fix shape — hand the pending restore
+back as a handle that the supervisor loop awaits before the next session starts. It was not
+implemented because it still changes the seam/result shape *and* needs `core/supervisor/loop.ts`,
+which is exactly the decision the plan defers ("D-2026-09-24-3 is another card").
+
+### Result
+
+I-B1 **FIXED** (reproduced byte-identically, RED test first, then fixed; both sides of the new
+obligation measured). m5 **one half FIXED** (the `remove` ancestor branch, mutation-proven), **one
+half NOT REPRODUCED** (already covered at `home-config.adapter.test.ts:155`). m4 **FIXED** (the
+duplicate pair replaced by the nested path, proven RED without the `agents*.md` clause and GREEN with
+it — the ratchet's 4 is now four distinct mechanisms). m2 **FIXED** (reproduced RED against the
+pre-fix guard). m3 **FIXED** (missing-test finding; the new tests are mutation-proven non-vacuous).
+m1 plan half **FIXED**. I1 stays follow-up F3. No assertion was weakened, no gate is red, no test
+skipped for a missing precondition, and the fence is byte-identical.
+
+## FIX ROUND 3 — the E2E guard's containment half, and layer 1's own annotation
+
+A read-only Scout survey of the range `db3bd53..af53a86`
+(`~/.tribe/-Users-hiep-repo-tribe/campaigns/fu-supervisor-settings/reports/scout-supervisor-home-settings-containment.md`)
+found two defects in artifacts **this card itself produced**. Both are fixed here; the Scout's other
+seven proposals ride the PR body for the campaign's closing pass to rule on.
+
+### Scout P4 — `isAttemptedWriteToSurface` hand-rolled containment as a string prefix
+
+The guard fix round 2a added to `core/supervisor/home-config.e2e.test.ts` imported the surface
+predicate correctly and then decided "inside the home" itself:
+
+```ts
+export function isAttemptedWriteToSurface(filePath: string, home: string): boolean {
+  if (!filePath.startsWith(home)) return false;
+  return isHomeConfigSurface(relative(home, filePath));
+}
+```
+
+`permit.ts`'s own header comment names that exact trap, verbatim: *"`fixtures-mirror-reality.md`'s own
+lesson: a string PREFIX is not containment — `<home>-sibling` must DENY"*. The Scout MEASURED the
+consequence against the worktree's own modules:
+
+```
+guard says surface-in-home for SIBLING: true
+production containPath says inside home: false
+relative: ../shsc-e2e-closing-bash-AbCdEf-sibling/.claude/settings.json
+```
+
+So a `Write` to `<home>-sibling/.claude/settings.json` — a path *outside* the home, which layer 1
+denies for a *different* reason and layer 2 never touches — satisfied `writerAttempted`, and
+`expectNoCarryOver`'s remaining assertions then all pass for a home where nothing was ever planted:
+the same vacuous-pass class as fix round 1's M1 and fix round 2's m2, for the third time, in the guard
+that replaced them.
+
+**RED first.** The existing negative row `['a surface OUTSIDE the home', '/Users/somebody/.claude/settings.json']`
+passed for the *wrong* reason — it shares no prefix with the home, so `startsWith` alone rejects it.
+The sibling is the input class that separates a prefix test from containment, so a row for it was added
+to the always-run guard test file (`core/supervisor/home-config.e2e-guard.test.ts`), pinning the defect
+(`expect(sibling.startsWith(HOME)).toBe(true)`) alongside the assertion that must hold. It failed, on
+the guard's line, for the feature's own reason:
+
+```
+core/supervisor/home-config.e2e-guard.test.ts:
+84 |   test('a surface in a SIBLING directory sharing the home name as a string prefix does NOT count', () => {
+85 |     const sibling = `${HOME}-sibling/.claude/settings.json`;
+86 |     expect(sibling.startsWith(HOME)).toBe(true); // the defect, pinned: the prefix test says inside
+87 |     expect(isAttemptedWriteToSurface(sibling, HOME)).toBe(false);
+                                                          ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (.../core/supervisor/home-config.e2e-guard.test.ts:87:54)
+(fail) isAttemptedWriteToSurface (the Write writer attempt guard) > a surface in a SIBLING directory sharing the home name as a string prefix does NOT count [0.16ms]
+
+ 15 pass
+ 4 skip
+ 1 fail
+ 19 expect() calls
+Ran 20 tests across 1 file. [51.00ms]
+```
+
+**GREEN.** The fix deletes the hand-rolled half and imports the production predicate — `containPath`
+from `core/supervisor/permit.ts`, the segment-wise comparison that reuses `containHome` from
+`core/watchdog/args.ts`. Containment is now stated **once** in the repo, and both halves of the guard's
+decision are imported rather than restated:
+
+```ts
+export function isAttemptedWriteToSurface(filePath: string, home: string): boolean {
+  if (!containPath(filePath, home)) return false;
+  return isHomeConfigSurface(relative(home, filePath));
+}
+```
+
+```
+ 16 pass
+ 4 skip
+ 0 fail
+ 19 expect() calls
+Ran 20 tests across 1 file. [48.00ms]
+```
+
+The legitimate rows still count as attempted (`<home>/CLAUDE.md`, `<home>/.claude/settings.json`,
+`<home>/AGENTS.md`, `<home>/escalations/AGENTS.md`, `<home>/.mcp.json` → `true`), and the negatives
+still do not (`<home>/notes.txt`, `<home>/answers.md`, the home itself, a surface outside the home,
+and now the sibling). No assertion in `expectNoCarryOver` was touched.
+
+### Scout P5 — the new C3 rule's own annotation licensed deleting layer 1
+
+`.c3/rules/rule-session-cwd-config-restored.md`'s Golden Example marked the layer-1 row verbatim:
+
+> `// OPTIONAL: refusing the write early is defence in depth; the restore above is the rule.`
+
+That justification is wrong, and this card's own measurements are the evidence. Layer 2 restores
+**after** the session, so it structurally cannot cover two **intra-session** windows:
+
+1. **Mid-session settings reload — the escalation.** Spec §4.4 item 3, verbatim: *"**Settings reload
+   mid-session.** e2's writer A itself left `project-Stop` and `local-Stop` markers: the hooks it
+   wrote with `Bash` were picked up by A's own `Stop` event."* The spec dismisses it with *"`closing`
+   already holds `Bash`, so it gains nothing"* — true for `closing`, **false for `ruling`/`ratify`**,
+   which hold `Write`/`Edit` while `Bash` sits in `JUDGMENT_DISALLOWED_TOOLS`. With layer 1 deleted, a
+   deliberately shell-less judgment session could write `<home>/.claude/settings.json` with a `hooks`
+   block and have its own `Stop` event execute that shell command, inside its own session, before any
+   restore runs.
+2. **On-demand nested memory load — self-injection.** Spec §4.3 row `m1b` (and fix round 1's probe
+   `f2` for `AGENTS.md`): a nested memory file loads when the session reads a file in its directory.
+   A session that writes `<home>/escalations/AGENTS.md` and then reads `<home>/escalations/card.md`
+   joins its own planted instruction to its own context. Layer 2 runs afterwards.
+
+So layer 1 is not defence in depth; for that window it is the only control there is.
+
+**The unmeasured part, stated as a burden on future deletion.** §4.4 item 3 measured the reload after
+a **`Bash`** write. Whether the Claude Code CLI's settings reload keys on the *writing tool* is
+**UNMEASURED**, and nothing in the measurement suggests it does. That is an argument for *keeping*
+layer 1: the measurement is owed by whoever proposes removing it, not by whoever keeps it. The rule
+text now says exactly that, in those terms.
+
+**How it was changed.** `.c3/` is frozen, so the fact was never hand-edited: one change-unit,
+`adr-20260925-fix3-layer1-required-annotations`, with four `block` patches, applied with
+`c3x change apply` and flipped to `done` only after the after-state phrase grepped present. The
+annotation is now:
+
+```
+// REQUIRED (not defence in depth): the restore runs AFTER the session, so this refusal is the ONLY
+control over the intra-session window — spec §4.4 item 3 (a settings file written into cwd is
+reloaded within the WRITING session) and §4.3 m1b (a nested memory file loads on demand), both
+reachable by a ruling/ratify session that holds Write/Edit but has Bash in
+JUDGMENT_DISALLOWED_TOOLS. See the paragraph above.
+```
+
+(one physical line in the fact), with the full argument, both spec citations, the UNMEASURED caveat and
+the named gap in the prose lead-in above the block. Patches 03 and 04 join the two annotations that
+wrapped onto a second and third line into one line each: a continuation line such as
+`// wrote the change.` is indistinguishable from the quoted file's own comments, so those two blocks
+read as NOT-LITERAL to the literality probe. MEASURED at `af53a86`, before this round changed anything
+— so the defect was pre-existing, not introduced:
+
+```
+LITERAL     home-config.ts
+NOT-LITERAL // wrote the change.
+NOT-LITERAL // pass (see the `void sessionPromise.then(...)` line in the block abo
+LITERAL     permit.ts
+```
+
+The Golden Example was never paraphrased: re-measured with *every* leading `//` line stripped,
+`annotation_lines=1,2,3,1` and `code_literal=YES` for all four. After the unit:
+
+```
+LITERAL ['plugins/tribe/scripts/runner/core/supervisor/home-config.ts']
+LITERAL ['plugins/tribe/scripts/runner/core/supervisor/session.ts']
+LITERAL ['plugins/tribe/scripts/runner/core/supervisor/session.ts']
+LITERAL ['plugins/tribe/scripts/runner/core/supervisor/permit.ts']
+```
+
+**Toolchain fact worth recording, because it cost two rollbacks.** A `block` patch on a fenced-code
+node must carry the fence's **info string as the body's first line** (`ts`), then the code — because
+the renderer emits `"```" + content`. A body that carries its own ` ```ts ` fence gets double-fenced
+(measured: a seven-backtick opening fence, `` ```````ts ``), and a body with neither loses the language
+and glues the first code line onto the fence (measured: `` ```// REQUIRED: … ``). Both attempts were
+rolled back with `git checkout -- .c3/rules/…` plus `c3x repair` before anything was committed; node
+numbers shift on every `repair`, so cite handles were re-read each time (hashes are stable, numbers are
+not).
+
+### Named gap — recorded, deliberately NOT built
+
+**No test distinguishes the two layers.** The `Write`-writer E2E pairs assert an *attempted* Write plus
+no carry-over, which holds if **either** layer works, and no pair plants and reads within a single
+session. Layer 1's only oracle is the unit table (`session.test.ts`, `permit.test.ts`). Building the
+intra-session escalation test needs a measurement nobody has taken: **does a judgment session's own
+written `hooks` block fire inside its own session when the write arrived via `Write` rather than
+`Bash`?** Until that is measured, such a test would encode a guess, so it is genuinely new scope and is
+named here and in `adr-20260925-fix3-layer1-required-annotations` rather than built.
+
+### Gates
+
+```
+$ bun test core/supervisor/ adapters/ cli/ structure.test.ts
+ 707 pass / 11 skip / 0 fail / 1821 expect() calls (718 tests, 25 files)
+$ bunx tsc --noEmit && echo TSC_OK
+TSC_OK
+$ bun test
+ 1466 pass / 12 skip / 0 fail / 3451 expect() calls (1478 tests, 58 files)
+$ C3X_MODE=agent bash "$C3/bin/c3x.sh" check
+total: 70
+ok: true
+$ git status --porcelain .tribe/ && echo "REGISTRY_UNTOUCHED"
+REGISTRY_UNTOUCHED
+$ git diff db3bd53 -- .../core/supervisor/session.ts | grep -E "^[-+].*(ALLOWED_TOOLS|DISALLOWED_TOOLS|permissionMode|settingSources|cwd:)" || echo "FENCE_INTACT"
+FENCE_INTACT
+$ env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts
+ 4 pass / 0 fail / 32 expect() calls (4 tests)
+```
+
+The G2 ratchet still reads **4 pass** over the four distinct mechanisms after the guard's containment
+half was tightened — the tightening removed a way for a pair to pass *vacuously*, not a pair.
+
+### Result
+
+Scout **P4 FIXED** (reproduced RED on the sibling input class, then fixed by importing `containPath`;
+the guard now restates neither half of its decision). Scout **P5 FIXED** (annotation `OPTIONAL` →
+`REQUIRED` through one change-unit, with both intra-session windows cited to the spec and the
+unmeasured-reload-keying limit recorded as a burden on any future deletion). The layer-distinguishing
+test is a **named gap, not built**, with the measurement it needs written down. No assertion was
+weakened, no gate is red, no test skipped for a missing precondition, no `expectNoCarryOver` assertion
+was touched, and the fence is byte-identical.
