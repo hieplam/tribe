@@ -3,7 +3,7 @@
 // design. Every SURFACE row below was MEASURED live in a real session (spec §4.2-4.3) or is its
 // case variant (the macOS file system is case-insensitive, spec §4.3 m2).
 import { describe, expect, test } from 'bun:test';
-import { isHomeConfigSurface } from './home-config.ts';
+import { isEmptyRestorePlan, isHomeConfigSurface, planHomeConfigRestore, type HomeConfigEntry } from './home-config.ts';
 
 const SURFACES = [
   '.claude',
@@ -51,4 +51,55 @@ describe('isHomeConfigSurface — the campaign home paths Claude Code loads as c
       expect(isHomeConfigSurface(path)).toBe(false);
     });
   }
+});
+
+const file = (path: string, content: string): HomeConfigEntry => ({ path, kind: 'file', content });
+const dir = (path: string): HomeConfigEntry => ({ path, kind: 'dir', content: '' });
+const link = (path: string, target: string): HomeConfigEntry => ({ path, kind: 'symlink', content: target });
+const paths = (entries: HomeConfigEntry[]): string[] => entries.map((e) => e.path);
+
+describe('planHomeConfigRestore — undo every change a session made to the surface (spec §6.3)', () => {
+  test('an unchanged snapshot plans nothing', () => {
+    const snapshot = [dir('.claude'), file('.claude/settings.local.json', 'e30=')];
+    const plan = planHomeConfigRestore(snapshot, snapshot);
+    expect(isEmptyRestorePlan(plan)).toBe(true);
+  });
+
+  test('a new file is removed', () => {
+    const plan = planHomeConfigRestore([], [file('CLAUDE.md', 'eA==')]);
+    expect(paths(plan.remove)).toEqual(['CLAUDE.md']);
+    expect(plan.write).toEqual([]);
+  });
+
+  test('a new directory is removed AFTER its contents (deepest first)', () => {
+    const plan = planHomeConfigRestore([], [dir('.claude'), file('.claude/settings.json', 'eA==')]);
+    expect(paths(plan.remove)).toEqual(['.claude/settings.json', '.claude']);
+  });
+
+  test('a changed pre-existing file is rewritten with its old content', () => {
+    const plan = planHomeConfigRestore([file('CLAUDE.md', 'b2xk')], [file('CLAUDE.md', 'bmV3')]);
+    expect(plan.remove).toEqual([]);
+    expect(plan.write).toEqual([file('CLAUDE.md', 'b2xk')]);
+  });
+
+  test('a deleted pre-existing file is rewritten, its directory first (shallowest first)', () => {
+    const plan = planHomeConfigRestore([dir('.claude'), file('.claude/settings.local.json', 'e30=')], []);
+    expect(paths(plan.write)).toEqual(['.claude', '.claude/settings.local.json']);
+  });
+
+  test('a directory replaced by a symlink: the symlink is removed, the directory and file rewritten', () => {
+    const before = [dir('.claude'), file('.claude/settings.local.json', 'e30=')];
+    const after = [link('.claude', '/Users/someone/.claude')];
+    const plan = planHomeConfigRestore(before, after);
+    expect(paths(plan.remove)).toEqual(['.claude']);
+    expect(paths(plan.write)).toEqual(['.claude', '.claude/settings.local.json']);
+  });
+
+  test('a pre-existing symlink that is unchanged is left alone; a new one is removed', () => {
+    const before = [link('link-out', '/tmp/outside')];
+    const after = [link('link-out', '/tmp/outside'), link('escalations', '/tmp/evil')];
+    const plan = planHomeConfigRestore(before, after);
+    expect(paths(plan.remove)).toEqual(['escalations']);
+    expect(plan.write).toEqual([]);
+  });
 });

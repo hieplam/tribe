@@ -31,3 +31,52 @@ export function isHomeConfigSurface(relativePath: string): boolean {
   const isMcpConfig = name === '.mcp.json';
   return isInsideDotClaude || isMemoryFile || isMcpConfig;
 }
+
+export type HomeConfigEntryKind = 'dir' | 'file' | 'symlink';
+
+/** One entry of a snapshot. `path` is relative to the campaign home, `/`-separated. `content` is a
+ * file's bytes as base64, a symlink's target verbatim (never resolved), or `''` for a directory. */
+export interface HomeConfigEntry {
+  path: string;
+  kind: HomeConfigEntryKind;
+  content: string;
+}
+
+/** Every entry the adapter's walk records (`adapters/home-config.adapter.ts#snapshotHomeConfig`). */
+export type HomeConfigSnapshot = readonly HomeConfigEntry[];
+
+/** `remove` runs first, deepest first; `write` runs second, shallowest first. */
+export interface HomeConfigRestorePlan {
+  remove: HomeConfigEntry[];
+  write: HomeConfigEntry[];
+}
+
+const depthOf = (entry: HomeConfigEntry): number => entry.path.split('/').length;
+
+/** PURE (spec §6.3). What undoes the difference between the snapshot taken before a session and
+ * the one taken after it. An entry that is new, or whose kind changed, is removed; an entry of
+ * `before` that is missing, or whose kind or content changed, is written back. So anything that
+ * existed before the session — placed by a person or a test — is left exactly as it was. */
+export function planHomeConfigRestore(before: HomeConfigSnapshot, after: HomeConfigSnapshot): HomeConfigRestorePlan {
+  const beforeByPath = new Map(before.map((entry) => [entry.path, entry]));
+  const afterByPath = new Map(after.map((entry) => [entry.path, entry]));
+
+  const remove = after.filter((entry) => {
+    const previous = beforeByPath.get(entry.path);
+    const isNewOrReplaced = previous === undefined || previous.kind !== entry.kind;
+    return isNewOrReplaced;
+  });
+  const write = before.filter((entry) => {
+    const current = afterByPath.get(entry.path);
+    const isMissingOrChanged = current === undefined || current.kind !== entry.kind || current.content !== entry.content;
+    return isMissingOrChanged;
+  });
+
+  remove.sort((a, b) => depthOf(b) - depthOf(a)); // a new directory goes after its contents
+  write.sort((a, b) => depthOf(a) - depthOf(b)); // a directory exists before its files
+  return { remove, write };
+}
+
+export function isEmptyRestorePlan(plan: HomeConfigRestorePlan): boolean {
+  return plan.remove.length === 0 && plan.write.length === 0;
+}
