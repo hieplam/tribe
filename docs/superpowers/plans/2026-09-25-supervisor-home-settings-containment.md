@@ -1842,10 +1842,10 @@ cd /Users/hiep/repo/tribe-wt/supervisor-home-settings-containment && git status 
 Expected: the rule's front-matter; `ok: true`; then no line from `git status` before
 `REGISTRY_UNTOUCHED`.
 
-- [ ] **Step 4: Commit** — stage exactly the files the CLI created plus the eval binding and commit
+- [x] **Step 4: Commit** — stage exactly the files the CLI created plus the eval binding and commit
   with the Global Constraints trailers (`Tribe-Task: 10/11`), ticking this task's boxes in the SAME
   commit.
-- [ ] Task 10 complete
+- [x] Task 10 complete
 
 ---
 
