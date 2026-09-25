@@ -1,11 +1,22 @@
-import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, statSync, readFileSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync, statSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildWatchdogIo, withHome } from './watchdog-io.adapter.ts';
 
-const tmp = () => mkdtempSync(join(tmpdir(), 'wd-adapter-'));
+// `rule-temp-dir-cleanup`: every dir `tmp()` hands out is recorded here and removed in the
+// afterAll below, so a failing assertion never leaks the tree it created.
+const tmpDirs: string[] = [];
+const tmp = () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wd-adapter-'));
+  tmpDirs.push(dir);
+  return dir;
+};
+
+afterAll(() => {
+  for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 describe('buildWatchdogIo — the real edge', () => {
   test('listEntries reports files, dirs and mtimes; a missing dir is empty, never a throw', () => {
