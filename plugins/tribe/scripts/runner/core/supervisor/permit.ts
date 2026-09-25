@@ -20,7 +20,7 @@
  * same way `core/session.ts`'s `decideMergeGateHook(io)` already is — a builder that closes over
  * an injected capability and returns the actual `PreToolUse` hook function.
  */
-import { isAbsolute, normalize, relative, sep } from 'node:path';
+import { isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { containHome } from '../watchdog/args.ts';
 import { isHomeConfigSurface } from './home-config.ts';
 import type { HookDecision } from '../session.ts';
@@ -163,6 +163,48 @@ export function buildContainmentHook(
     }
 
     return decideContainmentHook(homeDir, { tool_name: toolName, tool_input: { file_path: resolvedPath } });
+  };
+}
+
+/** IMPURE EDGE (card supervisor-home-settings-containment, spec §6.2): refuses a `closing`
+ * session's `Write`/`Edit` to a configuration surface inside the campaign home. It ALLOWS by
+ * default — `closing` legitimately writes the repo, including the repo's own `CLAUDE.md` — so it
+ * must not let a surface through on a path-spelling technicality: a relative `file_path` is
+ * relative to the session's `cwd`, which is the home; both the lexical and the symlink-resolved
+ * target are judged; "inside the home" is tested against both `homeDir` and its real path (on
+ * macOS `/var/…` and `/private/var/…` name one directory). A `realpath` that throws denies. Every
+ * other tool is left to the grant hook and the scan wall. */
+export function buildHomeConfigWriteHook(
+  homeDir: string,
+  io: { realpath(path: string): string },
+): (input: unknown) => Promise<HookDecision> {
+  return async (input: unknown): Promise<HookDecision> => {
+    const event = (input ?? {}) as { tool_name?: unknown; tool_input?: unknown };
+    const toolName = typeof event.tool_name === 'string' ? event.tool_name : '';
+    const isFileWrite = toolName === 'Write' || toolName === 'Edit';
+    if (!isFileWrite) return {};
+
+    const toolInput = (event.tool_input ?? {}) as { file_path?: unknown };
+    const rawPath = typeof toolInput.file_path === 'string' ? toolInput.file_path : '';
+    if (rawPath === '') return {}; // the Write tool itself rejects a missing path
+    const lexicalPath = normalize(isAbsolute(rawPath) ? rawPath : join(homeDir, rawPath));
+
+    let resolvedPath: string;
+    let realHome: string;
+    try {
+      resolvedPath = resolveExistingAncestor(io.realpath, lexicalPath);
+      realHome = io.realpath(homeDir);
+    } catch {
+      return deny(HOME_CONFIG_DENIED_REASON);
+    }
+
+    for (const target of [lexicalPath, resolvedPath]) {
+      for (const home of [homeDir, realHome]) {
+        const isSurfaceInsideHome = containPath(target, home) && isHomeConfigSurface(relative(home, target));
+        if (isSurfaceInsideHome) return deny(HOME_CONFIG_DENIED_REASON);
+      }
+    }
+    return {};
   };
 }
 

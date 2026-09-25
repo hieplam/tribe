@@ -3,7 +3,7 @@
 // a `Write`/`Edit` whose resolved target is not inside the campaign home is DENIED for a
 // `ruling`/`ratify` session); one escaped write is the defect.
 import { expect, test, describe } from 'bun:test';
-import { buildContainmentHook, containPath, decideContainmentHook, HOME_CONFIG_DENIED_REASON } from './permit.ts';
+import { buildContainmentHook, buildHomeConfigWriteHook, containPath, decideContainmentHook, HOME_CONFIG_DENIED_REASON } from './permit.ts';
 import { decideClosingGrantHook } from './permit.ts';
 
 const HOME = '/abs/home/.tribe/key/campaigns/slug';
@@ -275,4 +275,55 @@ describe('decideContainmentHook refuses configuration surfaces inside the home',
     const decision = await hook(ev('Write', { file_path: `${HOME}/notes/settings.json` }));
     expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
   });
+});
+
+describe('buildHomeConfigWriteHook — closing may not write configuration into the home (spec §6.2)', () => {
+  const identity = { realpath: (p: string) => p };
+  const reasonOf = (d: Awaited<ReturnType<ReturnType<typeof buildHomeConfigWriteHook>>>) =>
+    d.hookSpecificOutput?.permissionDecisionReason;
+
+  for (const rel of ['CLAUDE.md', 'CLAUDE.local.md', '.claude/settings.json', '.claude/settings.local.json', '.mcp.json', 'escalations/CLAUDE.md']) {
+    test(`Write ${rel} inside the home -> deny`, async () => {
+      const decision = await buildHomeConfigWriteHook(HOME, identity)(ev('Write', { file_path: `${HOME}/${rel}` }));
+      expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
+    });
+  }
+
+  test('a RELATIVE file_path resolves against the home (the session cwd) -> deny', async () => {
+    const decision = await buildHomeConfigWriteHook(HOME, identity)(ev('Edit', { file_path: 'CLAUDE.md' }));
+    expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
+  });
+
+  test('the realpath spelling of the home is inside the home too (/var vs /private/var) -> deny', async () => {
+    const home = '/var/folders/x/T/home';
+    const realpath = (p: string) => (p.startsWith('/var/') ? `/private${p}` : p);
+    const decision = await buildHomeConfigWriteHook(home, { realpath })(ev('Write', { file_path: `/private${home}/CLAUDE.md` }));
+    expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
+  });
+
+  test('a write through a symlink that resolves into <home>/.claude -> deny', async () => {
+    const realpath = (p: string) => (p === `${HOME}/notes` ? `${HOME}/.claude` : p);
+    const decision = await buildHomeConfigWriteHook(HOME, { realpath })(ev('Write', { file_path: `${HOME}/notes/settings.json` }));
+    expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
+  });
+
+  test('a realpath that throws denies (fail closed)', async () => {
+    const realpath = () => {
+      throw new Error('ELOOP');
+    };
+    const decision = await buildHomeConfigWriteHook(HOME, { realpath })(ev('Write', { file_path: `${HOME}/answers.md` }));
+    expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
+  });
+
+  for (const [tool, input] of [
+    ['Write', { file_path: '/abs/repo/CLAUDE.md' }],
+    ['Edit', { file_path: '/abs/repo/.claude/rules/x.md' }],
+    ['Write', { file_path: `${HOME}/final-report.md` }],
+    ['Bash', { command: 'git status' }],
+    ['Read', { file_path: `${HOME}/CLAUDE.md` }],
+  ] as Array<[string, Record<string, unknown>]>) {
+    test(`${tool} ${JSON.stringify(input)} -> allowed by this hook`, async () => {
+      expect(await buildHomeConfigWriteHook(HOME, identity)(ev(tool, input))).toEqual({});
+    });
+  }
 });

@@ -1036,9 +1036,9 @@ cd $RUNNER && git diff db3bd53 -- core/supervisor/session.ts | command grep -E "
 Expected: `0 fail` (including the unchanged test "closing still has no write containment — a Write
 into the repo is not denied"), `TSC_OK`, then `FENCE_INTACT`.
 
-- [ ] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage the four files and commit with the Global Constraints trailers
   (`Tribe-Task: 5/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 5 complete
+- [x] Task 5 complete
 
 ---
 

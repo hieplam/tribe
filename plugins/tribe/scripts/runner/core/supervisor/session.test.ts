@@ -11,6 +11,7 @@ import {
   type OneShotSpawnParams,
 } from './session.ts';
 import { SCAN_DENIED_REASON, type HookDecision, type SessionMessage } from '../session.ts';
+import { HOME_CONFIG_DENIED_REASON } from './permit.ts';
 import type { SessionKind } from './model.ts';
 
 function fixtureConfig(overrides: Partial<OneShotSessionConfig> = {}): OneShotSessionConfig {
@@ -372,4 +373,28 @@ describe('the scan wall is wired into every supervisor envelope (issue #163, G2)
     const allowed = await wiredDecisions(options, { tool_name: 'Bash', tool_input: { command: 'git status' } });
     expect(allowed.every((d) => d.hookSpecificOutput?.permissionDecision !== 'deny')).toBe(true);
   });
+});
+
+describe('closing refuses configuration writes into the home (card supervisor-home-settings-containment)', () => {
+  test('the wired closing hooks deny Write <home>/CLAUDE.md', async () => {
+    const config = fixtureConfig();
+    const options = buildOneShotOptions('closing', config, new AbortController());
+    const decisions = await wiredDecisions(options, { tool_name: 'Write', tool_input: { file_path: `${config.homeDir}/CLAUDE.md` } });
+    expect(decisions.some((d) => d.hookSpecificOutput?.permissionDecisionReason === HOME_CONFIG_DENIED_REASON)).toBe(true);
+  });
+
+  test('the wired closing hooks still allow Write <repo>/CLAUDE.md (closing lands the governance PR)', async () => {
+    const options = buildOneShotOptions('closing', fixtureConfig(), new AbortController());
+    const decisions = await wiredDecisions(options, { tool_name: 'Write', tool_input: { file_path: '/abs/repo/CLAUDE.md' } });
+    expect(decisions.every((d) => d.hookSpecificOutput?.permissionDecision !== 'deny')).toBe(true);
+  });
+
+  for (const kind of ['ruling', 'ratify'] as SessionKind[]) {
+    test(`${kind}: the wired hooks deny Write <home>/CLAUDE.md with the configuration reason`, async () => {
+      const config = fixtureConfig();
+      const options = buildOneShotOptions(kind, config, new AbortController());
+      const decisions = await wiredDecisions(options, { tool_name: 'Write', tool_input: { file_path: `${config.homeDir}/CLAUDE.md` } });
+      expect(decisions.some((d) => d.hookSpecificOutput?.permissionDecisionReason === HOME_CONFIG_DENIED_REASON)).toBe(true);
+    });
+  }
 });
