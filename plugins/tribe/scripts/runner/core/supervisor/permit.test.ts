@@ -245,6 +245,7 @@ describe('decideContainmentHook refuses configuration surfaces inside the home',
     'CLAUDE.local.md',
     'claude.md',
     'escalations/CLAUDE.md',
+    'AGENTS.md',
     '.mcp.json',
   ];
   for (const tool of ['Write', 'Edit']) {
@@ -282,7 +283,7 @@ describe('buildHomeConfigWriteHook — closing may not write configuration into 
   const reasonOf = (d: Awaited<ReturnType<ReturnType<typeof buildHomeConfigWriteHook>>>) =>
     d.hookSpecificOutput?.permissionDecisionReason;
 
-  for (const rel of ['CLAUDE.md', 'CLAUDE.local.md', '.claude/settings.json', '.claude/settings.local.json', '.mcp.json', 'escalations/CLAUDE.md']) {
+  for (const rel of ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.claude/settings.json', '.claude/settings.local.json', '.mcp.json', 'escalations/CLAUDE.md']) {
     test(`Write ${rel} inside the home -> deny`, async () => {
       const decision = await buildHomeConfigWriteHook(HOME, identity)(ev('Write', { file_path: `${HOME}/${rel}` }));
       expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);

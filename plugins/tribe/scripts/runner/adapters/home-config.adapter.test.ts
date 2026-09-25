@@ -148,4 +148,37 @@ describe('restoreHomeConfig', () => {
     const plan = { remove: [], write: [{ path: '../escape.md', kind: 'file' as const, content: 'eA==' }] };
     expect(() => restoreHomeConfig(home, plan)).toThrow(HomeConfigError);
   });
+
+  // The REMOVE loop calls containedTarget too, and a removal is the destructive half: `rmSync` with
+  // `recursive: true, force: true` would delete an escaping path outright. Fix round 1, finding M2:
+  // only the `write` half of obligation 4 was ever proven.
+  test('a plan REMOVE entry that escapes the home is refused before anything is deleted', () => {
+    const outer = tempDir('hc-escape-remove-');
+    const home = join(outer, 'home');
+    mkdirSync(home);
+    const victim = join(outer, 'escape.md'); // sits beside the home, i.e. at `../escape.md`
+    writeFileSync(victim, 'OUTSIDE');
+    const plan = { remove: [{ path: '../escape.md', kind: 'file' as const, content: '' }], write: [] };
+    expect(() => restoreHomeConfig(home, plan)).toThrow(HomeConfigError);
+    expect(readFileSync(victim, 'utf8')).toBe('OUTSIDE'); // the rmSync never ran
+  });
+
+  // Fix round 1, finding M2: containedTarget's OTHER guard — the parent's real path — was never
+  // proven red. It is the one that catches a swap that happens BETWEEN the plan and the write: the
+  // plan was made when `<home>/.claude` was a real directory, and by the time the write runs it is
+  // a symlink out of the home. A relative-path check alone cannot see this; only resolving the
+  // parent can.
+  test("a write whose parent's real path is outside the home is refused; the outside directory is byte-unchanged", () => {
+    const home = tempDir('hc-parent-outside-');
+    const outside = tempDir('hc-outside-');
+    writeFileSync(join(outside, 'settings.json'), 'OUTSIDE');
+    symlinkSync(outside, join(home, '.claude'));
+    const plan = {
+      remove: [],
+      write: [{ path: '.claude/settings.json', kind: 'file' as const, content: 'cGxhbnRlZA==' }],
+    };
+    expect(() => restoreHomeConfig(home, plan)).toThrow(HomeConfigError);
+    expect(readFileSync(join(outside, 'settings.json'), 'utf8')).toBe('OUTSIDE');
+    expect(readdirSync(outside)).toEqual(['settings.json']); // nothing written through the link
+  });
 });

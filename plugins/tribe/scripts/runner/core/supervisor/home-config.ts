@@ -26,10 +26,17 @@ export function isHomeConfigSurface(relativePath: string): boolean {
   const isInsideDotClaude = segments.includes('.claude');
   // CLAUDE.md, CLAUDE.local.md: memory files; a nested one loads when the session reads a file
   // in its directory (MEASURED, spec §4.3 m1b).
-  const isMemoryFile = name.startsWith('claude') && name.endsWith('.md');
+  const isClaudeMemoryFile = name.startsWith('claude') && name.endsWith('.md');
+  // AGENTS.md is the memory file Claude Code loads BY DEFAULT wherever the project has no
+  // CLAUDE.md — which is precisely the steady state this card's own restore creates, so the
+  // aggravation is that the fix makes this path the live one. MEASURED (card
+  // supervisor-home-settings-containment, fix round 1): a `closing` session wrote `<home>/AGENTS.md`
+  // and the next `ruling` session in that home read the codeword out of it; a nested
+  // `<home>/escalations/AGENTS.md` loaded too, by the same on-demand mechanism as spec §4.3 m1b.
+  const isAgentsMemoryFile = name.startsWith('agents') && name.endsWith('.md');
   // A project MCP server's command runs at session start (MEASURED, spec §4.3 m3).
   const isMcpConfig = name === '.mcp.json';
-  return isInsideDotClaude || isMemoryFile || isMcpConfig;
+  return isInsideDotClaude || isClaudeMemoryFile || isAgentsMemoryFile || isMcpConfig;
 }
 
 export type HomeConfigEntryKind = 'dir' | 'file' | 'symlink';

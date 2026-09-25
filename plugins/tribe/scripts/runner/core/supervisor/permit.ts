@@ -45,6 +45,7 @@ const NOT_GRANTED_REASON =
  * MEASURED: hooks in either tier run shell commands, and `CLAUDE.md` reaches its context. */
 export const HOME_CONFIG_DENIED_REASON =
   'Writing Claude Code configuration inside the campaign home is refused (.claude/, CLAUDE*.md, ' +
+  'AGENTS*.md, ' +
   '.mcp.json): the campaign home is the next supervisor session\'s settings root, so this file ' +
   'would load as that session\'s settings or instructions.';
 

@@ -19,6 +19,17 @@ const SURFACES = [
   'Claude.Local.md',
   'escalations/CLAUDE.md',
   'supervisor/deep/claude.md',
+  // AGENTS.md is the CLI's memory file when the project has no CLAUDE.md — which is exactly the
+  // steady state this card creates (MEASURED, card supervisor-home-settings-containment fix round 1).
+  'AGENTS.md',
+  'agents.md',
+  'Agents.md',
+  '.claude/AGENTS.md',
+  'escalations/AGENTS.md',
+  'supervisor/deep/agents.md',
+  // MEASURED not loaded, matched anyway: `agents*.md` mirrors `claude*.md`, and over-matching a
+  // path nothing loads is by design (Oracle, spec §6.1).
+  'AGENTS.override.md',
   '.mcp.json',
   '.MCP.json',
   'runs/r1/.mcp.json',
@@ -36,6 +47,11 @@ const NOT_SURFACES = [
   'CLAUDE.md.bak',
   'notes/claude.txt',
   'claude-notes.json',
+  'AGENTS.md.bak',
+  'notes/agents.txt',
+  // MEASURED not loaded (fix round 1): a `.claude.json` in the home reached neither the session's
+  // context nor ran a hook it carried, and it is not inside a `.claude` segment.
+  '.claude.json',
   'mcp.json',
   'runs/r1/logs/claude.log',
 ];
