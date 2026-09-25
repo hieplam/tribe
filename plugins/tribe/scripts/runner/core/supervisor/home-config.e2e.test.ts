@@ -12,6 +12,7 @@ import { sdkSpawnSession } from '../../adapters/session.adapter.ts';
 import { restoreHomeConfig, snapshotHomeConfig } from '../../adapters/home-config.adapter.ts';
 import { TRIBE_PLUGIN_DIR, type SpawnSessionParams } from '../session.ts';
 import { isHomeConfigSurface } from './home-config.ts';
+import { containPath } from './permit.ts';
 import type { SessionKind } from './model.ts';
 import { runOneShotSession, type OneShotSessionResult, type OneShotSessionSeam } from './session.ts';
 
@@ -246,11 +247,16 @@ function projectDirsHolding(sessionId: string): string[] {
 
 /** Was this `Write` aimed at a configuration surface INSIDE the home? What the Write-writer pairs
  * prove is that layer 1 REFUSES such a write, so the attempt has to be at the thing that gets
- * refused: a Write to `<home>/notes.txt`, or to anywhere outside the home, proves nothing. The
- * surface predicate is imported, never restated (the plan's "One predicate" constraint), and it
- * takes a home-relative path. Exported for its own unit test (`home-config.e2e-guard.test.ts`). */
+ * refused: a Write to `<home>/notes.txt`, or to anywhere outside the home, proves nothing. BOTH
+ * halves of the decision are imported from production, never restated (the plan's "One predicate"
+ * constraint): `containPath` for "inside the home" and `isHomeConfigSurface`, which takes a
+ * home-relative path, for "is a surface". Fix round 3, Scout P4: the containment half was a
+ * `filePath.startsWith(home)` prefix test, which `permit.ts`'s own header comment forbids — "a
+ * string PREFIX is not containment — `<home>-sibling` must DENY" — and the Scout MEASURED the
+ * consequence: a Write to `<home>-sibling/.claude/settings.json`, outside the home entirely,
+ * satisfied this guard. Exported for its own unit test (`home-config.e2e-guard.test.ts`). */
 export function isAttemptedWriteToSurface(filePath: string, home: string): boolean {
-  if (!filePath.startsWith(home)) return false;
+  if (!containPath(filePath, home)) return false;
   return isHomeConfigSurface(relative(home, filePath));
 }
 

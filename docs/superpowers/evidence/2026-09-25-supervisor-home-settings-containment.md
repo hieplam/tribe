@@ -962,3 +962,211 @@ it — the ratchet's 4 is now four distinct mechanisms). m2 **FIXED** (reproduce
 pre-fix guard). m3 **FIXED** (missing-test finding; the new tests are mutation-proven non-vacuous).
 m1 plan half **FIXED**. I1 stays follow-up F3. No assertion was weakened, no gate is red, no test
 skipped for a missing precondition, and the fence is byte-identical.
+
+## FIX ROUND 3 — the E2E guard's containment half, and layer 1's own annotation
+
+A read-only Scout survey of the range `db3bd53..af53a86`
+(`~/.tribe/-Users-hiep-repo-tribe/campaigns/fu-supervisor-settings/reports/scout-supervisor-home-settings-containment.md`)
+found two defects in artifacts **this card itself produced**. Both are fixed here; the Scout's other
+seven proposals ride the PR body for the campaign's closing pass to rule on.
+
+### Scout P4 — `isAttemptedWriteToSurface` hand-rolled containment as a string prefix
+
+The guard fix round 2a added to `core/supervisor/home-config.e2e.test.ts` imported the surface
+predicate correctly and then decided "inside the home" itself:
+
+```ts
+export function isAttemptedWriteToSurface(filePath: string, home: string): boolean {
+  if (!filePath.startsWith(home)) return false;
+  return isHomeConfigSurface(relative(home, filePath));
+}
+```
+
+`permit.ts`'s own header comment names that exact trap, verbatim: *"`fixtures-mirror-reality.md`'s own
+lesson: a string PREFIX is not containment — `<home>-sibling` must DENY"*. The Scout MEASURED the
+consequence against the worktree's own modules:
+
+```
+guard says surface-in-home for SIBLING: true
+production containPath says inside home: false
+relative: ../shsc-e2e-closing-bash-AbCdEf-sibling/.claude/settings.json
+```
+
+So a `Write` to `<home>-sibling/.claude/settings.json` — a path *outside* the home, which layer 1
+denies for a *different* reason and layer 2 never touches — satisfied `writerAttempted`, and
+`expectNoCarryOver`'s remaining assertions then all pass for a home where nothing was ever planted:
+the same vacuous-pass class as fix round 1's M1 and fix round 2's m2, for the third time, in the guard
+that replaced them.
+
+**RED first.** The existing negative row `['a surface OUTSIDE the home', '/Users/somebody/.claude/settings.json']`
+passed for the *wrong* reason — it shares no prefix with the home, so `startsWith` alone rejects it.
+The sibling is the input class that separates a prefix test from containment, so a row for it was added
+to the always-run guard test file (`core/supervisor/home-config.e2e-guard.test.ts`), pinning the defect
+(`expect(sibling.startsWith(HOME)).toBe(true)`) alongside the assertion that must hold. It failed, on
+the guard's line, for the feature's own reason:
+
+```
+core/supervisor/home-config.e2e-guard.test.ts:
+84 |   test('a surface in a SIBLING directory sharing the home name as a string prefix does NOT count', () => {
+85 |     const sibling = `${HOME}-sibling/.claude/settings.json`;
+86 |     expect(sibling.startsWith(HOME)).toBe(true); // the defect, pinned: the prefix test says inside
+87 |     expect(isAttemptedWriteToSurface(sibling, HOME)).toBe(false);
+                                                          ^
+error: expect(received).toBe(expected)
+
+Expected: false
+Received: true
+
+      at <anonymous> (.../core/supervisor/home-config.e2e-guard.test.ts:87:54)
+(fail) isAttemptedWriteToSurface (the Write writer attempt guard) > a surface in a SIBLING directory sharing the home name as a string prefix does NOT count [0.16ms]
+
+ 15 pass
+ 4 skip
+ 1 fail
+ 19 expect() calls
+Ran 20 tests across 1 file. [51.00ms]
+```
+
+**GREEN.** The fix deletes the hand-rolled half and imports the production predicate — `containPath`
+from `core/supervisor/permit.ts`, the segment-wise comparison that reuses `containHome` from
+`core/watchdog/args.ts`. Containment is now stated **once** in the repo, and both halves of the guard's
+decision are imported rather than restated:
+
+```ts
+export function isAttemptedWriteToSurface(filePath: string, home: string): boolean {
+  if (!containPath(filePath, home)) return false;
+  return isHomeConfigSurface(relative(home, filePath));
+}
+```
+
+```
+ 16 pass
+ 4 skip
+ 0 fail
+ 19 expect() calls
+Ran 20 tests across 1 file. [48.00ms]
+```
+
+The legitimate rows still count as attempted (`<home>/CLAUDE.md`, `<home>/.claude/settings.json`,
+`<home>/AGENTS.md`, `<home>/escalations/AGENTS.md`, `<home>/.mcp.json` → `true`), and the negatives
+still do not (`<home>/notes.txt`, `<home>/answers.md`, the home itself, a surface outside the home,
+and now the sibling). No assertion in `expectNoCarryOver` was touched.
+
+### Scout P5 — the new C3 rule's own annotation licensed deleting layer 1
+
+`.c3/rules/rule-session-cwd-config-restored.md`'s Golden Example marked the layer-1 row verbatim:
+
+> `// OPTIONAL: refusing the write early is defence in depth; the restore above is the rule.`
+
+That justification is wrong, and this card's own measurements are the evidence. Layer 2 restores
+**after** the session, so it structurally cannot cover two **intra-session** windows:
+
+1. **Mid-session settings reload — the escalation.** Spec §4.4 item 3, verbatim: *"**Settings reload
+   mid-session.** e2's writer A itself left `project-Stop` and `local-Stop` markers: the hooks it
+   wrote with `Bash` were picked up by A's own `Stop` event."* The spec dismisses it with *"`closing`
+   already holds `Bash`, so it gains nothing"* — true for `closing`, **false for `ruling`/`ratify`**,
+   which hold `Write`/`Edit` while `Bash` sits in `JUDGMENT_DISALLOWED_TOOLS`. With layer 1 deleted, a
+   deliberately shell-less judgment session could write `<home>/.claude/settings.json` with a `hooks`
+   block and have its own `Stop` event execute that shell command, inside its own session, before any
+   restore runs.
+2. **On-demand nested memory load — self-injection.** Spec §4.3 row `m1b` (and fix round 1's probe
+   `f2` for `AGENTS.md`): a nested memory file loads when the session reads a file in its directory.
+   A session that writes `<home>/escalations/AGENTS.md` and then reads `<home>/escalations/card.md`
+   joins its own planted instruction to its own context. Layer 2 runs afterwards.
+
+So layer 1 is not defence in depth; for that window it is the only control there is.
+
+**The unmeasured part, stated as a burden on future deletion.** §4.4 item 3 measured the reload after
+a **`Bash`** write. Whether the Claude Code CLI's settings reload keys on the *writing tool* is
+**UNMEASURED**, and nothing in the measurement suggests it does. That is an argument for *keeping*
+layer 1: the measurement is owed by whoever proposes removing it, not by whoever keeps it. The rule
+text now says exactly that, in those terms.
+
+**How it was changed.** `.c3/` is frozen, so the fact was never hand-edited: one change-unit,
+`adr-20260925-fix3-layer1-required-annotations`, with four `block` patches, applied with
+`c3x change apply` and flipped to `done` only after the after-state phrase grepped present. The
+annotation is now:
+
+```
+// REQUIRED (not defence in depth): the restore runs AFTER the session, so this refusal is the ONLY
+control over the intra-session window — spec §4.4 item 3 (a settings file written into cwd is
+reloaded within the WRITING session) and §4.3 m1b (a nested memory file loads on demand), both
+reachable by a ruling/ratify session that holds Write/Edit but has Bash in
+JUDGMENT_DISALLOWED_TOOLS. See the paragraph above.
+```
+
+(one physical line in the fact), with the full argument, both spec citations, the UNMEASURED caveat and
+the named gap in the prose lead-in above the block. Patches 03 and 04 join the two annotations that
+wrapped onto a second and third line into one line each: a continuation line such as
+`// wrote the change.` is indistinguishable from the quoted file's own comments, so those two blocks
+read as NOT-LITERAL to the literality probe. MEASURED at `af53a86`, before this round changed anything
+— so the defect was pre-existing, not introduced:
+
+```
+LITERAL     home-config.ts
+NOT-LITERAL // wrote the change.
+NOT-LITERAL // pass (see the `void sessionPromise.then(...)` line in the block abo
+LITERAL     permit.ts
+```
+
+The Golden Example was never paraphrased: re-measured with *every* leading `//` line stripped,
+`annotation_lines=1,2,3,1` and `code_literal=YES` for all four. After the unit:
+
+```
+LITERAL ['plugins/tribe/scripts/runner/core/supervisor/home-config.ts']
+LITERAL ['plugins/tribe/scripts/runner/core/supervisor/session.ts']
+LITERAL ['plugins/tribe/scripts/runner/core/supervisor/session.ts']
+LITERAL ['plugins/tribe/scripts/runner/core/supervisor/permit.ts']
+```
+
+**Toolchain fact worth recording, because it cost two rollbacks.** A `block` patch on a fenced-code
+node must carry the fence's **info string as the body's first line** (`ts`), then the code — because
+the renderer emits `"```" + content`. A body that carries its own ` ```ts ` fence gets double-fenced
+(measured: a seven-backtick opening fence, `` ```````ts ``), and a body with neither loses the language
+and glues the first code line onto the fence (measured: `` ```// REQUIRED: … ``). Both attempts were
+rolled back with `git checkout -- .c3/rules/…` plus `c3x repair` before anything was committed; node
+numbers shift on every `repair`, so cite handles were re-read each time (hashes are stable, numbers are
+not).
+
+### Named gap — recorded, deliberately NOT built
+
+**No test distinguishes the two layers.** The `Write`-writer E2E pairs assert an *attempted* Write plus
+no carry-over, which holds if **either** layer works, and no pair plants and reads within a single
+session. Layer 1's only oracle is the unit table (`session.test.ts`, `permit.test.ts`). Building the
+intra-session escalation test needs a measurement nobody has taken: **does a judgment session's own
+written `hooks` block fire inside its own session when the write arrived via `Write` rather than
+`Bash`?** Until that is measured, such a test would encode a guess, so it is genuinely new scope and is
+named here and in `adr-20260925-fix3-layer1-required-annotations` rather than built.
+
+### Gates
+
+```
+$ bun test core/supervisor/ adapters/ cli/ structure.test.ts
+ 707 pass / 11 skip / 0 fail / 1821 expect() calls (718 tests, 25 files)
+$ bunx tsc --noEmit && echo TSC_OK
+TSC_OK
+$ bun test
+ 1466 pass / 12 skip / 0 fail / 3451 expect() calls (1478 tests, 58 files)
+$ C3X_MODE=agent bash "$C3/bin/c3x.sh" check
+total: 70
+ok: true
+$ git status --porcelain .tribe/ && echo "REGISTRY_UNTOUCHED"
+REGISTRY_UNTOUCHED
+$ git diff db3bd53 -- .../core/supervisor/session.ts | grep -E "^[-+].*(ALLOWED_TOOLS|DISALLOWED_TOOLS|permissionMode|settingSources|cwd:)" || echo "FENCE_INTACT"
+FENCE_INTACT
+$ env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts
+ 4 pass / 0 fail / 32 expect() calls (4 tests)
+```
+
+The G2 ratchet still reads **4 pass** over the four distinct mechanisms after the guard's containment
+half was tightened — the tightening removed a way for a pair to pass *vacuously*, not a pair.
+
+### Result
+
+Scout **P4 FIXED** (reproduced RED on the sibling input class, then fixed by importing `containPath`;
+the guard now restates neither half of its decision). Scout **P5 FIXED** (annotation `OPTIONAL` →
+`REQUIRED` through one change-unit, with both intra-session windows cited to the spec and the
+unmeasured-reload-keying limit recorded as a burden on any future deletion). The layer-distinguishing
+test is a **named gap, not built**, with the measurement it needs written down. No assertion was
+weakened, no gate is red, no test skipped for a missing precondition, no `expectNoCarryOver` assertion
+was touched, and the fence is byte-identical.

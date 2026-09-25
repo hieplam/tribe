@@ -72,4 +72,18 @@ describe('isAttemptedWriteToSurface (the Write writer attempt guard)', () => {
   ])('a Write that is not to a surface in the home does NOT count (%s)', (_what, file) => {
     expect(isAttemptedWriteToSurface(file, HOME)).toBe(false);
   });
+
+  // Fix round 3, Scout P4: the row above shares no prefix with the home, so it passed for the
+  // WRONG reason — `startsWith` alone rejects `/Users/somebody/...`. A SIBLING directory is the
+  // input class that separates a prefix test from containment, and it is the exact case
+  // `permit.ts`'s own header comment names: "a string PREFIX is not containment — `<home>-sibling`
+  // must DENY". MEASURED by the Scout against these modules: the guard said `true` for
+  // `<home>-sibling/.claude/settings.json` while production `containPath` said `false`, so a Write
+  // that layer 1 denies for a DIFFERENT reason (outside the home) and layer 2 never touches
+  // satisfied `writerAttempted` — a vacuous pass for a home where nothing was planted.
+  test('a surface in a SIBLING directory sharing the home name as a string prefix does NOT count', () => {
+    const sibling = `${HOME}-sibling/.claude/settings.json`;
+    expect(sibling.startsWith(HOME)).toBe(true); // the defect, pinned: the prefix test says inside
+    expect(isAttemptedWriteToSurface(sibling, HOME)).toBe(false);
+  });
 });
