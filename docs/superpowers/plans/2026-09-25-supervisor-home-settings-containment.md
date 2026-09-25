@@ -588,9 +588,9 @@ cd $RUNNER && bun test core/supervisor/home-config.test.ts 2>&1 | tail -4 && bun
 ```
 Expected: `29 pass`, `0 fail`, then `TSC_OK`.
 
-- [ ] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
   (`Tribe-Task: 2/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 2 complete
+- [x] Task 2 complete
 
 ---
 
