@@ -1212,9 +1212,9 @@ cd $RUNNER && bun test adapters/home-config.adapter.test.ts structure.test.ts 2>
 Expected: `0 fail` (the 5 new tests, and `structure.test.ts` still green: `node:fs` only in an
 `adapters/*.adapter.ts` file), then `TSC_OK`.
 
-- [ ] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
   (`Tribe-Task: 6/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 6 complete
+- [x] Task 6 complete
 
 ---
 
