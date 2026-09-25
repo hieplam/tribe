@@ -196,6 +196,11 @@ home. Both through `runOneShotSession` at `db3bd53`.
 2. **`Bash` bypasses every tool-level check.** e2's `closing` session wrote all three files with one
    `Bash` command, and the next session ran all eight hooks. No `PreToolUse` decision over
    `Write`/`Edit` can see that write — this is the case the card calls out for `closing`.
+3. **Settings reload mid-session.** e2's writer A itself left `project-Stop` and `local-Stop`
+   markers: the hooks it wrote with `Bash` were picked up by A's own `Stop` event. That is the
+   writer running its own hook within its own session — `closing` already holds `Bash`, so it gains
+   nothing — and it is not carry-over, which is what G2 is about. It matters for the E2E only: the
+   markers directory is emptied between A and B, so only B's hooks can fail the assertion.
 
 ### 4.5 Moving `cwd` — measured, and rejected
 
@@ -244,6 +249,8 @@ cd plugins/tribe/scripts/runner && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bu
 At `db3bd53`: **`7 pass, 0 fail, 25 expect() calls`** (80.12 s), printing
 `G4_WITH_PLUGIN registered as: ["verify-shipped","verify-shipped:verify-shipped"]` and
 `G4_WITHOUT_PLUGIN=resolved registered as: ["verify-shipped"]`. This is the number G4 must hold.
+Also at `db3bd53`: `bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh` → `40 passed, 0 failed`;
+runner `bun test` → `1335 pass, 8 skip, 0 fail` (1343 tests, 54 files); `bunx tsc --noEmit` → exit 0.
 
 ---
 
@@ -300,6 +307,12 @@ module `core/supervisor/home-config.ts`, imported by both layers — never resta
   write outside the home (the repo) and every non-`Write`/`Edit` tool (the grant hook and the scan
   wall judge those). Wired into `closing`'s `PreToolUse` list between the grant hook and the scan
   wall. `CLOSING_ALLOWED_TOOLS` is unchanged; this refuses only these configuration writes.
+  Because this hook *allows* by default (unlike the containment hook, which denies by default), it
+  must not let a surface through on a path-spelling technicality: a relative `file_path` is resolved
+  against the home (the session's `cwd`); the candidate target is both the lexical path and its
+  symlink-resolved form; "inside the home" is tested against both `homeDir` and
+  `realpath(homeDir)` (on macOS `/var/…` and `/private/var/…` name the same directory); a surface
+  under any of those combinations denies. A `realpath` that throws denies (fail closed).
 
 ### 6.3 Layer 2 — restore the home's configuration surfaces after every session (all three kinds)
 
@@ -328,8 +341,8 @@ configuration surfaces before and after each session and undoes the difference.
 
 **What "restore" means — the planner, pure (`planHomeConfigRestore(before, after)`):** a snapshot is
 a list of entries `{ path (relative to the home), kind: 'dir' | 'file' | 'symlink', content (file
-bytes as base64, or the symlink's target) }`, covering every configuration-surface entry in the
-home, and every entry inside a `.claude` directory. The plan is:
+bytes as base64, the symlink's target, or `''` for a directory) }` — exactly the entries the
+adapter's walk records (below). The plan is:
 
 - `remove`: every entry in `after` that is not in `before`, or whose `kind` differs — deepest
   first, so a new directory is removed after its contents;
@@ -345,8 +358,16 @@ session."* It is also why the R1 test keeps passing unchanged.
 **The edge — `adapters/home-config.adapter.ts` (new):**
 
 - `snapshotHomeConfig(homeDir)` walks the home with `lstat` semantics (`readdirSync` with
-  `withFileTypes`), **never following a symlink**, and reads only configuration-surface files. A
-  symlink is recorded as a symlink with its target, never resolved.
+  `withFileTypes`), **never following a symlink**, and reads only configuration-surface files. It
+  records every configuration-surface entry, every entry inside a `.claude` directory, and **every
+  symlink anywhere in the home** (as a symlink with its target, never resolved). The last clause
+  closes the one path the name rule alone would miss: a `closing` session could replace
+  `<home>/escalations` with a symlink to a directory holding a `CLAUDE.md`, and the next session
+  would load it on reading an escalation (m1b's mechanism) while the walk, which never follows
+  symlinks, would not see inside. No tool of this repo creates a symlink in a campaign home
+  (checked: the only `symlinkSync` under `plugins/tribe/scripts` is the viewer's test-fixture
+  builder, and `find ~/.tribe -type l` finds none), so a new symlink is removed by the restore
+  like any other new surface — over-removal by design.
 - `restoreHomeConfig(homeDir, plan)` performs removals then writes. Before any remove or write it
   proves containment (`fail-closed-edges.md` obligation 4): the relative path has no `..` segment
   and is not absolute, and the real path of the entry's parent directory is inside the real path of
@@ -390,8 +411,8 @@ carries no `allowsSchemaChange` front-matter).
 | Unit, pure | `isHomeConfigSurface` over every measured shape (§4.2–4.3) plus case variants, and the negatives (the supervisor's own files, `CLAUDE.md.bak`, `claudeX.txt`) | `core/supervisor/home-config.test.ts` |
 | Unit, pure | `planHomeConfigRestore`: new file removed, new dir removed after its file, changed file rewritten, deleted pre-existing file rewritten, file replaced by a symlink (remove + rewrite), unchanged snapshot → empty plan | `core/supervisor/home-config.test.ts` |
 | Unit, table | `decideContainmentHook` denies a `Write`/`Edit` to each surface with `HOME_CONFIG_DENIED_REASON`, still allows `answers.md` and the other supervisor files, still denies out-of-home with the old reason; `buildContainmentHook` denies a write through a symlink into `<home>/.claude` | `core/supervisor/permit.test.ts` |
-| Unit, table | `buildHomeConfigWriteHook`: denies surfaces inside the home, allows `<repo>/CLAUDE.md` and `<repo>/.claude/rules/x.md`, allows `Bash`/`Read`; the wired `closing` hook list carries it | `permit.test.ts`, `session.test.ts` |
-| Unit, real fs | `snapshotHomeConfig` and `restoreHomeConfig` on real temporary homes: absolute and symlinked (`/var` → `/private/var`) home paths; a `.claude` symlink to an outside directory is removed and never followed; the outside directory is byte-unchanged | `adapters/home-config.adapter.test.ts` |
+| Unit, table | `buildHomeConfigWriteHook`: denies surfaces inside the home (absolute, relative to the home, and through the `realpath(homeDir)` spelling), allows `<repo>/CLAUDE.md` and `<repo>/.claude/rules/x.md`, allows `Bash`/`Read`; the wired `closing` hook list carries it | `permit.test.ts`, `session.test.ts` |
+| Unit, real fs | `snapshotHomeConfig` and `restoreHomeConfig` on real temporary homes: absolute and symlinked (`/var` → `/private/var`) home paths; a `.claude` symlink to an outside directory is removed and never followed; the outside directory is byte-unchanged; a new symlink anywhere in the home is recorded and removed | `adapters/home-config.adapter.test.ts` |
 | Unit, runner | `runOneShotSession` calls snapshot before spawn and restore after; a failed before-snapshot never spawns; a failed restore yields `outcome: 'error'`; the log line is appended; a timeout runs a second pass when the stream settles | `core/supervisor/session.test.ts` |
 | **E2E, real model** | G2: three A-then-B pairs; B shows no hook marker and no codeword. G4 viewer: B's transcript lands in the home's encoded project directory with `cwd` = the home | `core/supervisor/home-config.e2e.test.ts` (new, opt-in `RUN_SESSION_E2E=1`) |
 | Regression | G4: `session.e2e.test.ts` 7/7 (assertions unchanged); `tests/test-supervisor-e2e.sh` 40/40; runner `bun test`; `bunx tsc --noEmit` | plan Task 9 |
@@ -411,9 +432,13 @@ carries no `allowsSchemaChange` front-matter).
 3. **closing writes with `Write` → closing reads.** A = `closing`, `Write` tool. Guard as in 1.
    B = `closing`, `observe`. Same assertions.
 
-Plus, on every B: the transcript file exists at
-`~/.claude/projects/<home with every "/" and "." replaced by "-">/<sessionId>.jsonl` and its first
-lines carry `"cwd":"<home>"` (campaign-supervisor spec §14's measured encoding; read-only).
+Between A and B the markers directory is emptied (§4.4 item 3: A's own `Stop` event may fire a hook
+A just wrote); only B's markers count.
+
+Plus, on every B — the G4 viewer check, done the way the viewer itself discovers a transcript
+(`viewer/README.md` § "On-disk discovery", two `readdir` levels under `~/.claude/projects`,
+read-only): exactly one project directory holds `<B's sessionId>.jsonl`, that directory's name
+contains the home's basename, and the transcript's head carries `"cwd":"<home>"`.
 
 **Empty-implementation test, run on base (plan Task 1):** §4.4 predicts all three fail on base —
 test 1 and 3 on the codeword (e1, e3), test 2 on both markers and codeword (e2). A do-nothing
@@ -539,3 +564,26 @@ Session ids, for the viewer: p1 `7052dff7`, p2 `6a840ff5`, p3 `495d63f2`, p4 `45
 `f4ba8c82`, m2 `010add8b`, m3 `1c3cf88f`, m3b `e66a0f36`, m4 `0cd8539c`, e1 A `6b2da865` / B
 `99b15044`, e2 A `6de423fb` / B `9d8d0fa8`, e3 A `b0f8f16a` / B `53ac0173`, e4 A `602f167f` / B
 `e13f638c`, x1 `d963b6d1`.
+
+---
+
+## Appendix B — plan-time experiment: the plan's own code, run for real (MEASURED)
+
+To prove the plan executable rather than only well-formed, every TypeScript block of the plan
+(`docs/superpowers/plans/2026-09-25-supervisor-home-settings-containment.md`, Tasks 1-8) was applied
+by script to two throwaway, uncommitted worktrees of `db3bd53` (`/private/tmp/shsc-before` with only
+Task 1's E2E; `/private/tmp/shsc-verify` with Tasks 1-8, minus the shell script edit of Task 8),
+then removed. Nothing from them is committed.
+
+| Check | Where | Result |
+| --- | --- | --- |
+| `bun test core/supervisor/home-config.test.ts adapters/home-config.adapter.test.ts` | verify | `48 pass, 0 fail` |
+| `bun test core/supervisor/ adapters/home-config.adapter.test.ts cli/ structure.test.ts` | verify | `608 pass, 0 fail` |
+| `bunx tsc --noEmit` | verify | exit 0 |
+| **G2 E2E** `RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts` | **before** (base + Task 1 only) | **`0 pass, 3 fail`** — test 1: `Received: "READ=done\nCODEWORD=ZEBRA-ruling-write-…"`; test 2: reader markers `local-Stop, project-SessionStart, project-UserPromptSubmit, local-UserPromptSubmit, project-PreToolUse, local-PreToolUse, local-SessionStart, project-Stop`; test 3: `Received: "READ=done\nCODEWORD=ZEBRA-closing-write-…"` |
+| **G2 E2E**, same command | **after** (Tasks 1-8) | **`3 pass, 0 fail`, 24 expect() calls** — including the viewer-attribution assertions |
+| G4 `RUN_SESSION_E2E=1 bun test core/supervisor/session.e2e.test.ts` | after | `7 pass, 0 fail, 25 expect() calls` |
+| G4 `bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh` | after | `40 passed, 0 failed` |
+
+So the ratchet's predicted **0/3 → 3/3** is already observed on the plan's code, each "before"
+failure is a carry-over assertion (never the `writerAttempted` guard), and G4 holds.
