@@ -181,4 +181,65 @@ describe('restoreHomeConfig', () => {
     expect(readFileSync(join(outside, 'settings.json'), 'utf8')).toBe('OUTSIDE');
     expect(readdirSync(outside)).toEqual(['settings.json']); // nothing written through the link
   });
+
+  // Fix round 2, finding m5: the same parent-real-path guard on the REMOVE half, which is the
+  // destructive one — `rmSync(…, { recursive: true, force: true })` through a swapped link would
+  // delete the outside directory's contents outright.
+  test("a REMOVE whose parent's real path is outside the home is refused; the outside directory is byte-unchanged", () => {
+    const home = tempDir('hc-parent-outside-remove-');
+    const outside = tempDir('hc-outside-');
+    writeFileSync(join(outside, 'settings.json'), 'OUTSIDE');
+    symlinkSync(outside, join(home, '.claude')); // the mid-restore swap: a real dir when the plan was made
+    const plan = { remove: [{ path: '.claude/settings.json', kind: 'file' as const, content: '' }], write: [] };
+    expect(() => restoreHomeConfig(home, plan)).toThrow(HomeConfigError);
+    expect(readFileSync(join(outside, 'settings.json'), 'utf8')).toBe('OUTSIDE');
+    expect(readdirSync(outside)).toEqual(['settings.json']); // nothing deleted through the link
+  });
+
+  // Fix round 2, finding I-B1 (MEASURED by an adversarial audit): `containedTarget` proves every
+  // target sits inside the real home, but nothing tied that real home to the directory the `before`
+  // snapshot described. With the home's own final component swapped for a link, every removal and
+  // write landed in the victim and obligation 4 still said yes.
+  test("the home's final component swapped for a symlink after the snapshot: the restore refuses and the other directory is byte-unchanged", () => {
+    const outer = tempDir('hc-home-swap-');
+    const home = join(outer, 'home');
+    mkdirSync(home);
+    writeFileSync(join(home, 'CLAUDE.md'), 'HOME-ORIGINAL');
+    const before = snapshotHomeConfig(home);
+    mkdirSync(join(home, '.claude'));
+    writeFileSync(join(home, '.claude', 'settings.json'), '{"hooks":{}}');
+    writeFileSync(join(home, 'CLAUDE.md'), 'PLANTED');
+    const plan = planHomeConfigRestore(before, snapshotHomeConfig(home));
+    expect(plan.remove.map((entry) => entry.path)).toEqual(['.claude/settings.json', '.claude']);
+    expect(plan.write.map((entry) => entry.path)).toEqual(['CLAUDE.md']);
+
+    // Between the snapshot and the restore, the home PATH comes to resolve somewhere else.
+    const victim = tempDir('hc-victim-');
+    writeFileSync(join(victim, 'CLAUDE.md'), 'VICTIM-MEMO');
+    mkdirSync(join(victim, '.claude'));
+    writeFileSync(join(victim, '.claude', 'settings.json'), 'VICTIM-SETTINGS');
+    rmSync(home, { recursive: true, force: true });
+    symlinkSync(victim, home);
+
+    expect(() => restoreHomeConfig(home, plan)).toThrow(HomeConfigError);
+    expect(readdirSync(victim).sort()).toEqual(['.claude', 'CLAUDE.md']);
+    expect(readFileSync(join(victim, 'CLAUDE.md'), 'utf8')).toBe('VICTIM-MEMO');
+    expect(readFileSync(join(victim, '.claude', 'settings.json'), 'utf8')).toBe('VICTIM-SETTINGS');
+  });
+
+  // The other side of the same obligation, and the one the whole suite and the real-session E2E
+  // depend on: a legitimately symlinked ANCESTOR (macOS `/var` -> `/private/var`) is absorbed into
+  // the real parent, so both spellings of a temp home still restore.
+  test('a home behind a symlinked ANCESTOR still restores, in both spellings', () => {
+    for (const spell of [(dir: string) => dir, (dir: string) => realpathSync(dir)]) {
+      const home = spell(tempDir('hc-ancestor-link-'));
+      writeFileSync(join(home, 'CLAUDE.md'), 'kept');
+      sessionThenRestore(home, () => {
+        writeFileSync(join(home, 'CLAUDE.md'), 'planted');
+        writeFileSync(join(home, '.mcp.json'), '{}');
+      });
+      expect(readFileSync(join(home, 'CLAUDE.md'), 'utf8')).toBe('kept');
+      expect(readdirSync(home)).toEqual(['CLAUDE.md']);
+    }
+  });
 });

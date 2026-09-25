@@ -1956,7 +1956,9 @@ files together).
 
 **The fourth E2E pair.** `core/supervisor/home-config.e2e.test.ts` gained a fifth planted file
 (`AGENTS.md`) and a fourth pair — `closing` plants with `Bash` -> the next `ruling` sees no
-`AGENTS.md` instruction (C1) — using the unchanged `expectNoCarryOver` helper. RED before the
+`AGENTS.md` instruction (C1) — using the unchanged `expectNoCarryOver` helper. (Fix round 2, finding
+m4: that pair's mechanism was identical to the second pair's, so it is now the **nested**
+`<home>/escalations/AGENTS.md` pair instead; see the evidence document's `## FIX ROUND 2`.) RED before the
 predicate change (codeword leaked); with the predicate still unwidened, the full file was
 **0 pass, 4 fail** (`AGENTS.md` alone defeated every pair, since the restore that closed the other
 three left it in place); with the predicate landed, **4 pass, 0 fail**.
@@ -2011,8 +2013,13 @@ db3bd53` over the grant/permission surfaces) — `FENCE_INTACT`.
 
 - [x] G1 — spec §4: 32 real sessions, commands and results recorded; Task 1 re-measures on base
   through the committed E2E.
-- [x] G2 — Task 9: `home-config.e2e.test.ts` **0/3 before → 3/3 after** (the ratchet, one committed
-  check, same tool); Tasks 2-8 unit tests pin both layers.
+- [x] G2 — Task 9 and fix rounds 1-2: `home-config.e2e.test.ts` **0/4 before → 4/4 after** (the
+  ratchet, one committed check, same tool) across four **distinct** load mechanisms — (1) `ruling`
+  plants with `Write` -> `ruling`, (2) `closing` plants with `Bash` -> `ruling`, (3) `closing` plants
+  with `Write` -> `closing`, and (4) `closing` plants the **nested** `<home>/escalations/AGENTS.md`
+  with `Bash` -> `ruling`, whose reader reads a file **in that directory** because a nested memory
+  file loads only on demand (spec §4.3 `m1b`). Pair (4) replaced fix round 1's fourth pair, which
+  repeated pair (2)'s mechanism (fix round 2, finding m4); Tasks 2-8 unit tests pin both layers.
 - [x] G3 — Task 10: `rule-session-cwd-config-restored`, authored with `c3x add rule`, cited from
   `c3-215-tribe` by Task 11's change-unit; no registry line hand-written.
 - [x] G4 — Task 9: `session.e2e.test.ts` 7/7 (assertions unchanged: `/c3` in all three kinds, the

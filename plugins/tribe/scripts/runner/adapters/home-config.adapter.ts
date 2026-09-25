@@ -18,7 +18,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { errorCode } from '../core/errno.ts';
 import { containPath } from '../core/supervisor/permit.ts';
 import {
@@ -73,17 +73,13 @@ export function snapshotHomeConfig(homeDir: string): HomeConfigSnapshot {
 }
 
 /** Applies `plan` inside `homeDir`: every removal, then every write. Before anything is removed
- * or written, obligation 4 (`fail-closed-edges.md`): the plan path is relative with no `..`, and the
- * real path of its deepest existing ancestor is the real home or inside it. A removal never
+ * or written, obligation 4 (`fail-closed-edges.md`) in two parts: `homeDir` still resolves to its
+ * own lexical location (`realHomeAtItsOwnLocation`), and each plan path is relative with no `..`
+ * whose deepest existing ancestor really sits in that home (`containedTarget`). A removal never
  * follows a symlink (`rmSync` unlinks the link itself); a write never goes THROUGH one (a link at
  * the target is unlinked first). Throws `HomeConfigError` on the first failure. */
 export function restoreHomeConfig(homeDir: string, plan: HomeConfigRestorePlan): void {
-  let realHome: string;
-  try {
-    realHome = realpathSync(homeDir);
-  } catch (err) {
-    throw new HomeConfigError('restore', homeDir, errorCode(err));
-  }
+  const realHome = realHomeAtItsOwnLocation(homeDir);
   for (const entry of plan.remove) {
     const target = containedTarget(realHome, entry.path);
     try {
@@ -113,6 +109,32 @@ function isSymlink(path: string): boolean {
     if (errorCode(err) === 'ENOENT') return false;
     throw err;
   }
+}
+
+/** Obligation 4, the half that ties the restore to the directory the snapshot described: the home
+ * must resolve to ITS OWN lexical location, i.e. the real path of `<parent>/<name>` is the real
+ * parent joined with `<name>`. `containedTarget` alone cannot see this: it proves every target sits
+ * inside whatever `homeDir` resolves to NOW, so if the home's own final component became a link
+ * elsewhere between the `before` snapshot and the restore, every removal and write lands in that
+ * other directory and containment still says yes (MEASURED, fix round 2 finding I-B1: the restore
+ * deleted a victim's `.claude/` and overwrote its `CLAUDE.md`).
+ *
+ * A legitimately symlinked ANCESTOR still passes, because it is absorbed into the real parent —
+ * which is what keeps a macOS temp home working in both spellings (`/var/folders/…/home` resolves
+ * to `/private/var/folders/…/home`, and the real parent is `/private/var/folders/…`). */
+function realHomeAtItsOwnLocation(homeDir: string): string {
+  let realHome: string;
+  let realParent: string;
+  try {
+    realHome = realpathSync(homeDir);
+    realParent = realpathSync(dirname(homeDir));
+  } catch (err) {
+    throw new HomeConfigError('restore', homeDir, errorCode(err));
+  }
+  if (realHome !== join(realParent, basename(homeDir))) {
+    throw new HomeConfigError('restore', homeDir, 'EHOME_NOT_AT_ITS_OWN_LOCATION');
+  }
+  return realHome;
 }
 
 /** Obligation 4: proves `relativePath` stays inside `realHome` BEFORE it is used. */

@@ -686,3 +686,279 @@ M1 **FIXED** (reproduced with the measured `No such file or directory` output, t
 M2 **FIXED** (missing-coverage finding: the absence was the reproduction; both new tests
 mutation-proven non-vacuous). I1 recorded as follow-up F3, not fixed here. No assertion was
 weakened, no gate is red or skipped, and the fence is byte-identical.
+
+---
+
+## FIX ROUND 2 — the restore's containment root, and four honest ratchet pairs
+
+A second adversarial Skinner audit of the fix-round-1 branch (`bd9bc08`) raised one Important
+finding and four actionable minors. Every one was reproduced before it was touched; the two that
+were already correct in code are recorded as such, with the citation or the mutation that proves it.
+
+### Finding I-B1 (Important) — the restore's containment root was not tied to the snapshot's root
+
+`restoreHomeConfig` resolved `realHome = realpathSync(homeDir)` at **restore** time and
+`containedTarget` proved every removal and write against that. Nothing tied it to the directory the
+`before` snapshot actually described, so if the home *path* came to resolve somewhere else between
+snapshot and restore, the restore deleted and overwrote in that other directory — while obligation 4
+still said "contained". The Skinner's measurement:
+
+```
+B plan.remove = [".claude/settings.json",".claude"] | plan.write = ["CLAUDE.md"]
+B restore SUCCEEDED (no refusal).
+B victim dir now = ["CLAUDE.md"] | victim CLAUDE.md = HOME-ORIGINAL | victim .claude = <DELETED>
+```
+
+**REPRODUCED, byte-identical**, on `bd9bc08` through the real adapter (a throwaway `mkdtemp` outer
+dir, `<outer>/home` snapshotted as a real directory, a session's plant, then `<outer>/home` replaced
+by a symlink to a victim holding its own `CLAUDE.md` and `.claude/settings.json`):
+
+```
+B plan.remove = [".claude/settings.json",".claude"] | plan.write = ["CLAUDE.md"]
+B restore SUCCEEDED (no refusal).
+B victim dir now = ["CLAUDE.md"] | victim CLAUDE.md = HOME-ORIGINAL | victim .claude = <DELETED>
+```
+
+The committed RED test is the same scenario (`adapters/home-config.adapter.test.ts:203`), and it
+failed first, for the stated reason:
+
+```
+224 |     expect(() => restoreHomeConfig(home, plan)).toThrow(HomeConfigError);
+                                                      ^
+error: expect(received).toThrow(expected)
+Expected constructor: HomeConfigError
+Received function did not throw
+Received value: undefined
+(fail) restoreHomeConfig > the home's final component swapped for a symlink after the snapshot: the restore refuses and the other directory is byte-unchanged [1.77ms]
+ 16 pass
+ 1 fail
+```
+
+**Marginal capability, for the record:** zero. Triggering it needs `closing`'s `Bash`, which already
+has `rm -rf`; `ruling`/`ratify` cannot reach it. It is fixed because spec §6.3, spec §9's risk row
+and `fail-closed-edges.md` obligation 4 make an **unconditional** containment claim, and it is our
+own restore doing the deleting.
+
+**The fix** (`adapters/home-config.adapter.ts:125`, `realHomeAtItsOwnLocation`): before anything is
+removed or written, the home must resolve to **its own lexical location** —
+
+```
+realpathSync(homeDir) === join(realpathSync(dirname(homeDir)), basename(homeDir))
+```
+
+— else a typed `HomeConfigError(..., 'EHOME_NOT_AT_ITS_OWN_LOCATION')`. Both `realpathSync` calls are
+inside the narrow `try` (obligation 1: a typed refusal, never a stack trace). No signature changed:
+`restoreHomeConfig`, `snapshotHomeConfig` and `OneShotSessionSeam` are untouched.
+
+**Two-sided verification of the property, measured before relying on it** (probe over the real file
+system; `equal` is what the guard requires):
+
+```
+LEGIT raw tmpdir  : homeDir=/var/folders/…/T/probe-legit-nqXk51
+                    left=/private/var/folders/…/T/probe-legit-nqXk51
+                    right=/private/var/folders/…/T/probe-legit-nqXk51            equal=true
+LEGIT realpath    : homeDir=/private/var/folders/…/T/probe-legit-nqXk51          equal=true
+ATTACK before swap: homeDir=/var/folders/…/probe-attack-qyOXRM/home              equal=true
+ATTACK after swap : left=/private/var/folders/…/probe-victim-gqEdCn
+                    right=/private/var/folders/…/probe-attack-qyOXRM/home        equal=false
+RELATIVE ('home', cwd=<outer>, final component still the victim link)            equal=false
+```
+
+So a legitimately symlinked **ancestor** (macOS `/var -> /private/var`) is absorbed into the real
+parent and still passes — the case the adapter tests and the real-session E2E both depend on — while
+the measured attack (the final component swapped) is refused. After the fix, the same damage probe:
+
+```
+B plan.remove = [".claude/settings.json",".claude"] | plan.write = ["CLAUDE.md"]
+B restore REFUSED: home configuration restore failed at /var/folders/…/T/ib1-outer-jNApXW/home: EHOME_NOT_AT_ITS_OWN_LOCATION
+B victim dir now = [".claude","CLAUDE.md"] | victim CLAUDE.md = VICTIM-MEMO | victim .claude = ["settings.json"]
+```
+
+The legitimate side is also pinned by a committed test, in **both** spellings of a temp home
+(`adapters/home-config.adapter.test.ts:233`, `fixtures-mirror-reality.md`).
+
+### Finding m5 — the untested half of the containment guard
+
+- **"a plan whose `remove` entry escapes the home"** — **NOT REPRODUCED**: fix round 1 already landed
+  it, at `adapters/home-config.adapter.test.ts:155` (`a plan REMOVE entry that escapes the home is
+  refused before anything is deleted`, asserting the victim file's bytes afterwards). No change.
+- **`containedTarget`'s "deepest existing ancestor's real path is outside the home" branch on the
+  `remove` half** — genuinely absent; only the `write` half had it. Added at
+  `adapters/home-config.adapter.test.ts:188`, and the outside directory is asserted byte-unchanged
+  as the sibling test does. Green on first run (the code was already right), so it was
+  **mutation-proven non-vacuous** (mutation reverted, never committed):
+
+```
+=== MUTATION: parent-real-path guard disabled (if (false && !isInsideHome) throw …) ===
+(fail) restoreHomeConfig > a write whose parent's real path is outside the home is refused; the outside directory is byte-unchanged
+(fail) restoreHomeConfig > a REMOVE whose parent's real path is outside the home is refused; the outside directory is byte-unchanged
+ 15 pass
+ 2 fail
+--- reverted ---
+ 17 pass
+ 0 fail
+```
+
+### Finding m4 — the fourth E2E pair was a duplicate, so the ratchet rose partly by repetition
+
+**REPRODUCED by inspection of the committed file**: fix round 1's fourth pair was
+`carryOverPair('closing', writerBashPrompt, 'Bash', 'ruling', 'c1-agentsmd')` — the second pair's
+call with a different label only. The count went 3 -> 4 without a new mechanism.
+
+**Replaced** (`core/supervisor/home-config.e2e.test.ts:348`) by the **nested** `AGENTS.md` pair, the
+other load path fix round 1 measured (spec §4.3 row `m1b`'s on-demand mechanism): `closing` plants
+`<home>/escalations/AGENTS.md` with one `Bash` heredoc, and the reader is pointed at
+`<home>/escalations/card-1.md` — a file **in that directory** — because that is what makes a nested
+memory file load; a reader of `<home>/answers.md` would never load it and the pair would prove
+nothing. The writer/reader targets are now a `PairShape` (`:116`), so the distinction is in the code,
+not in a label. `expectNoCarryOver` is unchanged.
+
+**Not vacuous — RED with the `agents*.md` clause removed** from `isHomeConfigSurface` (mutation
+`isAgentsMemoryFile` -> `false`; reverted, never committed), one real `closing` + `ruling` pair on
+`claude-haiku-4-5-20251001`:
+
+```
+=== RED DEMO: the nested pair with the agents*.md clause removed ===
+316 |   expect(pair.readerFinal).not.toContain(pair.codeword);
+error: expect(received).not.toContain(expected)
+Expected to not contain: "ZEBRA-c1-nested-agentsmd-1790309977892"
+Received: "READ=done\nCODEWORD=ZEBRA-c1-nested-agentsmd-1790309977892"
+(fail) … closing plants a NESTED AGENTS.md with Bash -> the next ruling sees no instruction (C1, m1b) [17107.21ms]
+ 0 pass
+ 1 fail
+```
+
+The reader's own reply carried the codeword planted in the nested file: the nested path is a real
+carry-over channel, and the fourth pair measures it. With the clause restored, the whole ratchet:
+
+```
+=== GREEN: the full ratchet, four pairs ===
+ 4 pass
+ 0 fail
+ 32 expect() calls
+Ran 4 tests across 1 file. [95.62s]
+```
+
+**Ratchet: holds at `0/4 -> 4/4`, now over four DISTINCT mechanisms** — `Write`-writer refusal,
+`Bash`-writer restore, `closing` -> `closing`, and the nested on-demand memory file. The fourth pair
+no longer duplicates the second.
+
+### Finding m2 — the Write-writer guard's comment did not match its code
+
+**REPRODUCED deterministically.** The branch read
+`String(input.file_path ?? '').startsWith(home)`, which is `true` for `<home>/notes.txt` — not a
+configuration surface, so not the write the pair exists to see refused. The committed test
+(`core/supervisor/home-config.e2e-guard.test.ts`) was RED against that pre-fix guard:
+
+```
+=== RED: the pre-fix m2 guard (home-prefix only) ===
+error: expect(received).toBe(expected)  Expected: false  Received: true
+(fail) isAttemptedWriteToSurface … does NOT count (an ordinary file in the home)
+(fail) isAttemptedWriteToSurface … does NOT count (the file every reader reads)
+(fail) isAttemptedWriteToSurface … does NOT count (the home itself)
+ 12 pass
+ 3 fail
+=== GREEN: the fixed guard ===
+ 15 pass
+ 4 skip
+ 0 fail
+```
+
+**Fix** (`core/supervisor/home-config.e2e.test.ts:252`): the attempted `Write` must be inside the
+home **and** `isHomeConfigSurface(relative(home, filePath))`. The predicate is imported from
+`core/supervisor/home-config.ts`, never restated (the plan's **One predicate** constraint), and it is
+given a home-relative path, which is the only shape it accepts.
+
+### Finding m3 — the M1 guard fix had no test
+
+**TRUE by absence** (a missing-thing finding: the absence is the reproduction — `isGenuineListing`
+was a non-exported local with no test anywhere). It is now a named export (`:79`) with its own unit
+tests in `core/supervisor/home-config.e2e-guard.test.ts`, which runs on every `bun test` and spends
+no tokens: a real four/five-line `ls -1` listing is genuine; **both** measured `ls` failure shapes
+(one `ls:` line naming every target, and one `ls:` line per target) are not — each test first pins
+the defect, `TARGETS.every((t) => failure.includes(t)) === true`, so the file records what M1's
+predecessor accepted; the echoed prompt is not; a listing missing one target is not.
+
+**Mutation-proven non-vacuous** (`isGenuineListing` reverted to the pre-fix substring guard;
+mutation reverted, never committed):
+
+```
+=== MUTATION M1: isGenuineListing back to the pre-fix substring guard ===
+(fail) isGenuineListing … the MEASURED `ls` failure text (one `ls:` line naming every target) is NOT genuine
+(fail) isGenuineListing … the MEASURED `ls` failure text (one `ls:` line per target) is NOT genuine
+(fail) isGenuineListing … the prompt echoed back is NOT genuine
+ 3 pass
+ 3 fail
+=== reverted ===
+ 6 pass
+ 0 fail
+```
+
+### Finding m1 (plan half) — the Definition-of-done number
+
+**TRUE.** The plan's `## Definition of done` G2 line still read `0/3 before → 3/3 after`. Corrected
+to `0/4 before → 4/4 after` and the four pairs are named individually, with pair (4) identified as
+fix round 2's nested replacement. Fix round 1's own narrative paragraph gained one sentence saying
+its fourth pair was superseded, so the plan does not describe a pair that no longer exists. The
+frozen-fact half of m1 (`.c3/`) is a separate task and was not touched here.
+
+### Gates (fix round 2)
+
+```
+$ bun test core/supervisor/ adapters/ cli/ structure.test.ts
+ 706 pass
+ 11 skip
+ 0 fail
+ 1819 expect() calls
+Ran 717 tests across 25 files. [12.52s]
+
+$ bunx tsc --noEmit && echo TSC_OK
+TSC_OK
+
+$ env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/home-config.e2e.test.ts
+ 4 pass
+ 0 fail
+ 32 expect() calls
+Ran 4 tests across 1 file. [95.62s]
+
+$ bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh
+ok - probe10: the verdict file carries a PASS verdict
+40 passed, 0 failed
+
+$ bun test
+ 1465 pass
+ 12 skip
+ 0 fail
+ 3449 expect() calls
+Ran 1477 tests across 58 files. [296.94s]
+
+$ git diff db3bd53 -- …/core/supervisor/session.ts | grep -E "ALLOWED_TOOLS|DISALLOWED_TOOLS|permissionMode|settingSources|cwd:"
+FENCE_INTACT
+
+$ git diff --numstat db3bd53 HEAD -- …/core/supervisor/session.e2e.test.ts
+3	0	plugins/tribe/scripts/runner/core/supervisor/session.e2e.test.ts
+```
+
+`session.e2e.test.ts` is unchanged by this round (`git diff --numstat` against the working tree is
+empty); the `3 0` is fix round 1's. `core/supervisor/session.ts`, `core/session.ts`, `core/state.ts`,
+`core/types.ts`, the spec and `.c3/` were not touched.
+
+### Follow-up still recorded, not fixed here
+
+**F3 — finding I1** (the timeout path's unawaited second snapshot/restore pass in
+`runOneShotSession`) remains a follow-up, and `runOneShotSession`'s timeout path is byte-identical.
+Note for whoever picks F3 up: Skinner B proposed a **third** fix shape — hand the pending restore
+back as a handle that the supervisor loop awaits before the next session starts. It was not
+implemented because it still changes the seam/result shape *and* needs `core/supervisor/loop.ts`,
+which is exactly the decision the plan defers ("D-2026-09-24-3 is another card").
+
+### Result
+
+I-B1 **FIXED** (reproduced byte-identically, RED test first, then fixed; both sides of the new
+obligation measured). m5 **one half FIXED** (the `remove` ancestor branch, mutation-proven), **one
+half NOT REPRODUCED** (already covered at `home-config.adapter.test.ts:155`). m4 **FIXED** (the
+duplicate pair replaced by the nested path, proven RED without the `agents*.md` clause and GREEN with
+it — the ratchet's 4 is now four distinct mechanisms). m2 **FIXED** (reproduced RED against the
+pre-fix guard). m3 **FIXED** (missing-test finding; the new tests are mutation-proven non-vacuous).
+m1 plan half **FIXED**. I1 stays follow-up F3. No assertion was weakened, no gate is red, no test
+skipped for a missing precondition, and the fence is byte-identical.
