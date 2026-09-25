@@ -501,6 +501,24 @@ alone defeated all four, since the restore that closed the other three left it i
 `agents*.md` clause landed: **4 of 4 pass.** Same tool, same file, one more measured pair; the
 count only rose.
 
+**Further reconciled by fix round 2a (2026-09-25), finding m4: the fourth pair itself changed, the
+count did not.** Fix round 1's fourth pair — `closing` plants `<home>/AGENTS.md` with `Bash` -> the
+next `ruling` reads it — was found to be the second pair's exact call
+(`carryOverPair('closing', writerBashPrompt, 'Bash', 'ruling', ...)`) with only a different label,
+so the count had risen from 3 to 4 partly by repetition rather than by a new mechanism. It was
+replaced (`core/supervisor/home-config.e2e.test.ts:348`) by the **nested**
+`<home>/escalations/AGENTS.md` pair — the other on-demand load path §4.3 row `m1b` measured —
+whose reader is pointed at `<home>/escalations/card-1.md`, a file **inside that directory**,
+because a nested memory file loads only on demand and a reader of `<home>/answers.md` would never
+load it. Proven non-vacuous: RED with the `agents*.md` clause removed from `isHomeConfigSurface`
+(mutation reverted, never committed), one real `closing` -> `ruling` pair on
+`claude-haiku-4-5-20251001` leaked the codeword; GREEN with the clause restored, the whole file
+**4 of 4 pass**. The ratchet number is unchanged at `0/4 -> 4/4`; what changed is that the four
+pairs are now four genuinely distinct mechanisms — (1) `ruling` plants with `Write` -> `ruling`,
+(2) `closing` plants with `Bash` -> `ruling`, (3) `closing` plants with `Write` -> `closing`, and
+(4) `closing` plants the nested `<home>/escalations/AGENTS.md` with `Bash` -> `ruling` — not three
+distinct mechanisms plus a repeat. See the evidence document's `## FIX ROUND 2`, finding m4.
+
 ---
 
 ## 9. Risks
