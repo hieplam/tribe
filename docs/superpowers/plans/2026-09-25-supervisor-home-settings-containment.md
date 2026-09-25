@@ -1407,9 +1407,9 @@ cd $RUNNER && bun test adapters/home-config.adapter.test.ts structure.test.ts 2>
 ```
 Expected: `0 fail` (12 adapter tests), then `TSC_OK`.
 
-- [ ] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
+- [x] **Step 4: Commit** — stage both files and commit with the Global Constraints trailers
   (`Tribe-Task: 7/11`), ticking this task's boxes in the SAME commit.
-- [ ] Task 7 complete
+- [x] Task 7 complete
 
 ---
 
