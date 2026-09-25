@@ -17,7 +17,8 @@ Closing pass ratified 2026-09-24 by the closing session under Shaman authority.
   design decision; dies with this campaign's decisions).
 - **R2 — `ruling`/`ratify` cannot run `Skill c3`** (spec §10 Q2). Ruled by **owner**: allow the
   `Skill` tool. `JUDGMENT_ALLOWED_TOOLS` gains `Skill` and only `Skill`; `Bash` stays in
-  `JUDGMENT_DISALLOWED_TOOLS`. **ratified-as: operational**.
+  `JUDGMENT_DISALLOWED_TOOLS`. **ratified-as: roadmap D-2026-09-24-6** (disposition given by the owner on
+  2026-09-24: "Record it in the Decision Log").
 
 ## Harness-gap rulings (registry `.tribe/harness-gaps.jsonl`, written only by `gap-rule.ts`)
 

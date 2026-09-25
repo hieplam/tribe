@@ -34,6 +34,11 @@ runs in an SDK session, then (2) close the exposure by separating the settings r
 root, or by refusing `<home>/.claude/**` and `<home>/CLAUDE.md` in the containment hook, then
 (3) author the rule from the measured result. Grants are out of scope — R1 and R2 stand.
 
+**Owner ruling (2026-09-24), which supersedes the timing above:** "Fix now as a follow-up card".
+This is a trust-surface question, so it belongs to the owner. The same three steps run as the
+next card of this campaign, `supervisor-home-settings-containment`, instead of waiting on the
+roadmap.
+
 `ratified-as: roadmap D-2026-09-24-1`
 
 #### D-2026-09-24-2 — `inferOneShotKind` re-derives a discriminator, non-totally
@@ -100,3 +105,16 @@ means either registering a `debt` canvas on 11.6.3 or pinning the C3 CLI to a ve
 ordering — it threw at step 4 and left the registry byte-unchanged and `git status` clean.
 
 `ratified-as: roadmap D-2026-09-24-5`
+
+#### D-2026-09-24-6 — `ruling`/`ratify` sessions may use the `Skill` tool (owner ruling R2)
+
+**Question (spec §10 Q2).** Once the user settings tier loads, `c3` is registered in `ruling`/
+`ratify`, but their grant refused the `Skill` tool, so `Skill c3` could not return C3 content.
+
+**Ruling (owner, verbatim):** "Allow the Skill tool". `JUDGMENT_ALLOWED_TOOLS` gains `Skill` and
+nothing else; `Bash` stays in `JUDGMENT_DISALLOWED_TOOLS`. Known and accepted limit: the C3
+command-line tool still cannot run in these sessions, because they have no `Bash`. Landed in
+PR #168; the architecture decision record is `adr-20260924-supervisor-session-settings`.
+Disposition given by the owner: "Record it in the Decision Log".
+
+`ratified-as: roadmap D-2026-09-24-6`
