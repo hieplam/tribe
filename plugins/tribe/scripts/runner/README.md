@@ -346,7 +346,8 @@ parses the plan and resolves every task ref against it (the plan format is in "T
 run"). The problems are **collected across every card before throwing** — never first-fail — so one
 error names every failing card, task, heading and reason (`dangling_heading`, `duplicate_heading`,
 `missing_done`, `ambiguous_done`, `missing_done_block`, `empty_done`,
-`continuation_not_supported`). The CLI prints `campaign runner: refused: <message>` on stderr and
+`continuation_not_supported`, `plan_outside_repo`). Plan paths are resolved through symlinks and
+must remain inside the real `--repo` root before existence checks or reads. The CLI prints `campaign runner: refused: <message>` on stderr and
 exits `4` (`EXIT_ERROR`) — the same path `UnsupportedStateVersionError` takes — before any session
 spawns and without writing `campaign-state.json` or an escalation. **`--dry-run` refuses the same
 way**, so Stage B's dry run catches a dangling ref before a launch
@@ -513,7 +514,8 @@ an ambiguous plan is by design.
 3. **Accepting `TASK_DONE <task-id> <branch>`** — the runner trusts the disk, not the words: the id
    must be the task the turn asked for (during delivery, the last task); the branch must exist as
    `refs/heads/<branch>` in `--repo`, equal `card.branch` once that is known, and its tip must
-   descend from `card.baseSha`. The first accepted line records `card.branch`.
+   descend from `card.baseSha`. The first accepted line records and persists `card.branch` before
+   its Done run, even if that run fails.
 4. **The Done run** at that tip for tasks 1..k (below). Pass → every task 1..k gets
    `passedSha = tip`, and if k is the last task, `doneSha = tip`; persisted immediately. Fail → a
    done-failed turn.
@@ -521,6 +523,10 @@ an ambiguous plan is by design.
    naming the tasks that remain. At the deliver step it runs the D3 done check ("The done check").
 6. **`NEEDS_DIRECTION: <q>`** at any step → the `needs_direction` escalation. A turn with no terminal
    line, or a timeout, stops the card the way a session error always has (bounded `stopped` retry).
+
+On a later invocation that starts with every task already passed, the runner re-runs the current
+cumulative Done commands at `doneSha` before the deliver turn. A failure clears `doneSha` and the
+last task's `passedSha`, then opens the last task's done-failed turn at attempt 1.
 
 ### The three terminal lines
 
@@ -545,8 +551,10 @@ for one `actOnCard` call; the loop's existing bounded retries of a `stopped` car
   (`git worktree add --detach --force`), removed afterwards (`git worktree remove --force`), with a
   crash leftover removed first; every add/remove is serialized with the runner's other worktree
   mutations (`serializeRepoGitMutation`). The path comes from `doneWorktreePathOf`
-  (`core/paths.ts`), which refuses a card id that would leave `<home>/done/`, and the adapter's
-  `removeTree` refuses any path without a `/done/` segment. Running from a clean checkout of the
+  (`core/paths.ts`), which refuses a card id that would leave `<home>/done/`. Before checkout or
+  deletion, the adapter requires a real `<home>/done` directory under the real campaign home and
+  a non-symlink card path; `removeTree` repeats that guard. A refusal stops the card as an
+  infrastructure failure. Running from a clean checkout of the
   commit — never the session's worktree — makes the check about committed work; a plan whose Done
   commands need a bootstrap (`bun install`) lists it as its first command.
 - **What:** the Done commands of tasks 1..k in plan order, **deduplicated by exact text** — the
@@ -1420,7 +1428,7 @@ ESLint, which is deferred until typescript-eslint supports TS >= 7.1 (plan Amend
   guard and the measurement can never disagree about what a scan is.
   **`TRIBE_RUNNER_SESSION_DOUBLE=<script>`** (test seam, spec §4.12,
   `adapters/executor-double.adapter.ts`) swaps only the SDK spawn for a scripted process: the
-  script receives `--home <home> --prompt-file <file>` and its stdout is the session's final text
+  script receives `--home <home> --card <id> --prompt-file <file>` and its stdout is the session's final text
   (its terminal line), bounded at two minutes. The hermetic Done E2Es
   (`tests/test-runner-done-negative.sh`, `tests/test-runner-done-empty.sh`) drive the real runner,
   git and Done commands with it. Unset or empty in every production run, where nothing changes.

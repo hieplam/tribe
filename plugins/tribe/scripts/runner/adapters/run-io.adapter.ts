@@ -2,14 +2,58 @@
 // (filesystem, child processes, clock, own pid) lives behind this one adapter leaf. Pure
 // modules receive it as the injected `io` parameter and never import these primitives
 // themselves (purity wall — enforced by structure.test.ts; ESLint layer deferred per Amendment A3).
-import { dirname, join, sep } from 'node:path';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import type { ExecResult, LockInfo, LoopIO, RunLoopConfig } from '../core/loop.ts';
 import type { ExecOptions, ShellRunResult } from '../ports/ports.ts';
 import type { SessionMessage, SpawnSessionParams } from '../core/session.ts';
 import { reportDirOf } from '../core/paths.ts';
 import { sdkSpawnSession } from './session.adapter.ts';
+
+/** Resolve an existing path, or its nearest existing parent plus the missing suffix. A broken
+ * symlink is an error rather than a missing path that could be treated as safely contained. */
+function canonicalPath(path: string): string {
+  const missing: string[] = [];
+  let parent = resolve(path);
+  for (;;) {
+    try {
+      return join(realpathSync(parent), ...missing);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      try {
+        lstatSync(parent); // a dangling symlink exists but cannot be safely resolved
+        throw new Error(`cannot resolve ${parent}`);
+      } catch (statErr) {
+        if ((statErr as NodeJS.ErrnoException).code !== 'ENOENT') throw statErr;
+      }
+      const next = dirname(parent);
+      if (next === parent) throw new Error(`cannot resolve ${path}`);
+      missing.unshift(parent.slice(next.length + (next === '/' ? 0 : 1)));
+      parent = next;
+    }
+  }
+}
+
+function assertDoneScratchPath(homeDir: string, scratchPath: string): void {
+  const done = resolve(homeDir, 'done');
+  if (dirname(resolve(scratchPath)) !== done || resolve(scratchPath) === done) {
+    throw new Error(`Done scratch path ${scratchPath} is outside ${done}`);
+  }
+  const homeReal = realpathSync(homeDir);
+  const doneStat = lstatSync(done);
+  if (!doneStat.isDirectory() || doneStat.isSymbolicLink() || realpathSync(done) !== join(homeReal, 'done')) {
+    throw new Error(`Done scratch directory ${done} is not a real directory under ${homeReal}`);
+  }
+  if (canonicalPath(dirname(scratchPath)) !== join(homeReal, 'done')) {
+    throw new Error(`Done scratch parent for ${scratchPath} leaves ${homeReal}/done`);
+  }
+  try {
+    if (lstatSync(scratchPath).isSymbolicLink()) throw new Error(`Done scratch path ${scratchPath} is a symlink`);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+}
 
 function realExec(cmd: string[], opts?: ExecOptions): Promise<ExecResult> {
   return new Promise((resolve) => {
@@ -120,6 +164,7 @@ export function buildRealIo(config: Pick<RunLoopConfig, 'homeDir'>): LoopIO {
     printLine: (line) => console.log(line),
 
     fileExists: (p) => existsSync(p),
+    canonicalPath,
     readFile: (p) => readFileSync(p, 'utf8'),
     writeFile: (p, content) => {
       mkdirSync(dirname(p), { recursive: true });
@@ -153,15 +198,14 @@ export function buildRealIo(config: Pick<RunLoopConfig, 'homeDir'>): LoopIO {
     ensureDir: (resolvedPath) => {
       mkdirSync(resolvedPath, { recursive: true });
     },
+    assertDoneScratchPath: (resolvedPath) => assertDoneScratchPath(config.homeDir, resolvedPath),
     writeFileAtomic: (resolvedPath, content) => {
       const tmp = `${resolvedPath}.tmp-${process.pid}`;
       writeFileSync(tmp, content);
       renameSync(tmp, resolvedPath);
     },
     removeTree: (resolvedPath) => {
-      if (!resolvedPath.includes(`${sep}done${sep}`)) {
-        throw new Error(`removeTree refuses ${resolvedPath}: not a runner Done scratch path`);
-      }
+      assertDoneScratchPath(config.homeDir, resolvedPath);
       rmSync(resolvedPath, { recursive: true, force: true });
     },
     runShell: runShellBounded,

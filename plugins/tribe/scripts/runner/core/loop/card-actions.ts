@@ -14,6 +14,7 @@ import type { CardPhase } from './phase.ts';
 import { buildStateDigest, findWorktreePathForBranch } from './phase.ts';
 import { persistLocalState } from './commit-guard.ts';
 import { answersPathOf, doneWorktreePathOf, escalationPathOf, supervisorLedgerPathOf } from '../paths.ts';
+import { dirname } from 'node:path';
 import { doneRecordPathOf } from '../run-record.ts';
 import { applyPass, doneRows, judgeDoneRun, tailOf, type DoneCommandResult, type DoneRunVerdict } from '../done.ts';
 import type { PlannedCommand } from '../plan-index.ts';
@@ -640,16 +641,25 @@ function turnDepsFor(ctx: CardCtx, phase: CardPhase): TurnDeps {
       let path: string;
       try {
         path = doneWorktreePathOf(resolved.homeDir, cardId);
+        io.ensureDir(dirname(path));
+        io.assertDoneScratchPath(path);
       } catch (err) {
         // The containment guard refused this card id: nothing is created or deleted.
         return { kind: 'infrastructure', reason: (err as Error).message };
       }
-      const added = await serializeRepoGitMutation(async () => {
-        await io.exec(['git', 'worktree', 'remove', '--force', path], inRepo); // absent is fine
-        if (io.fileExists(path)) io.removeTree(path);
-        await io.exec(['git', 'worktree', 'prune'], inRepo);
-        return io.exec(['git', 'worktree', 'add', '--detach', '--force', path, sha], { cwd: resolved.repoRoot, timeoutMs: REMOTE_OR_HOOK_GIT_TIMEOUT_MS });
-      });
+      let added;
+      try {
+        added = await serializeRepoGitMutation(async () => {
+          io.assertDoneScratchPath(path);
+          await io.exec(['git', 'worktree', 'remove', '--force', path], inRepo); // absent is fine
+          if (io.fileExists(path)) io.removeTree(path);
+          await io.exec(['git', 'worktree', 'prune'], inRepo);
+          io.assertDoneScratchPath(path);
+          return io.exec(['git', 'worktree', 'add', '--detach', '--force', path, sha], { cwd: resolved.repoRoot, timeoutMs: REMOTE_OR_HOOK_GIT_TIMEOUT_MS });
+        });
+      } catch (err) {
+        return { kind: 'infrastructure', reason: (err as Error).message };
+      }
       if (added.exitCode !== 0) {
         return { kind: 'infrastructure', reason: `git worktree add ${path} ${sha} failed: ${added.stderr.trim()}` };
       }
@@ -661,6 +671,7 @@ function turnDepsFor(ctx: CardCtx, phase: CardPhase): TurnDeps {
       };
       const results: DoneCommandResult[] = [];
       let verdict: DoneRunVerdict;
+      let cleanupFailure: string | null = null;
       try {
         for (const { command } of planned) {
           const run = await io.runShell(command, { cwd: path, env, timeoutMs: DONE_COMMAND_TIMEOUT_MS });
@@ -676,9 +687,25 @@ function turnDepsFor(ctx: CardCtx, phase: CardPhase): TurnDeps {
           io.appendLog(recordPath, JSON.stringify(row));
         }
       } finally {
-        await serializeRepoGitMutation(() => io.exec(['git', 'worktree', 'remove', '--force', path], inRepo));
+        try {
+          await serializeRepoGitMutation(() => {
+            io.assertDoneScratchPath(path);
+            return io.exec(['git', 'worktree', 'remove', '--force', path], inRepo);
+          });
+        } catch (err) {
+          cleanupFailure = (err as Error).message;
+        }
       }
+      if (cleanupFailure !== null) return { kind: 'infrastructure', reason: cleanupFailure };
       return { kind: 'verdict', verdict };
+    },
+
+    recordBranch(branch) {
+      const card = state.cards[cardId];
+      if (card.branch !== null) return;
+      card.branch = branch;
+      card.updatedAt = io.now();
+      persistLocalState(state, resolved, io);
     },
 
     recordPass(throughIndex, sha, branch) {
@@ -688,6 +715,14 @@ function turnDepsFor(ctx: CardCtx, phase: CardPhase): TurnDeps {
       if (passed.doneSha !== null) card.doneSha = passed.doneSha;
       else delete card.doneSha;
       card.branch ??= branch;
+      card.updatedAt = io.now();
+      persistLocalState(state, resolved, io);
+    },
+
+    clearFinalPass() {
+      const card = state.cards[cardId];
+      delete card.doneSha;
+      delete card.tasks[card.tasks.length - 1]?.passedSha;
       card.updatedAt = io.now();
       persistLocalState(state, resolved, io);
     },

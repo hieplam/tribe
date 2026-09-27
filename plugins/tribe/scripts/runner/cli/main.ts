@@ -919,7 +919,10 @@ export async function main(): Promise<void> {
   // Spec §4.12: TRIBE_RUNNER_SESSION_DOUBLE swaps only the LLM for a scripted process (hermetic
   // V3/G5 E2Es). Unset in every production run -> spawnSession stays the real SDK spawn.
   const executorDouble = executorDoubleScriptPath();
-  if (executorDouble !== null) io.spawnSession = (params) => spawnExecutorDouble(executorDouble, parsed.config.homeDir, params);
+  if (executorDouble !== null) io.spawnSession = (params) => {
+    if (!params.cardId) throw new Error('executor double spawn is missing its card id');
+    return spawnExecutorDouble(executorDouble, parsed.config.homeDir, params.cardId, params);
+  };
   const startedAt = new Date().toISOString();
 
   // P10: scrub a stray ANTHROPIC_API_KEY line out of the target repo's .env.local. Routed

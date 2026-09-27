@@ -557,6 +557,8 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
   const io: LoopIO = {
     exec,
     sleep: mock(async () => {}),
+    canonicalPath: (p) => p,
+    assertDoneScratchPath: mock(() => {}),
     fileExists: mock((p: string) => {
       if (p.includes('/escalations/')) {
         const cardMatch = /([^/]+)\.md$/.exec(p);
@@ -3108,6 +3110,13 @@ describe('runLoop — rulings gate (fires only on the would-be-done path)', () =
 });
 
 describe('runLoop — D1: the task index is validated at load', () => {
+  test('a plan outside the repo refuses before reading it or spawning a session', async () => {
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ plan: '../outside.md' }) } });
+    const { io, spawnBriefs } = buildMockLoopIo({ stateJson: JSON.stringify(state), answers: '', spawnQueue: [] });
+    await expect(runLoop(baseLoopConfig(), io)).rejects.toThrow(/plan_outside_repo/);
+    expect(spawnBriefs).toEqual([]);
+    expect((io.readFile as ReturnType<typeof mock>).mock.calls.some((call) => String(call[0]).endsWith('outside.md'))).toBe(false);
+  });
   test('a dangling heading refuses the run before any session spawns, naming card, task and heading', async () => {
     const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ tasks: [{ id: 'T1', heading: 'Task 9: nowhere' }] }) } });
     const { io, spawnBriefs } = buildMockLoopIo({ stateJson: JSON.stringify(state), answers: '', spawnQueue: [] });

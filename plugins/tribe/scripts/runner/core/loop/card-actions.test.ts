@@ -5,7 +5,11 @@
 // buildSessionIOForCard's onSessionStart, which prints the per-card session line the instant
 // the SDK assigns a session id.
 import { describe, expect, mock, test } from 'bun:test';
-import { buildEscalationMarkdown, buildSessionIOForCard, healSafeResidue, sessionConfigFor } from './card-actions.ts';
+import { buildEscalationMarkdown, buildSessionIOForCard, healSafeResidue, sessionConfigFor, actOnCard } from './card-actions.ts';
+import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buildRealIo } from '../../adapters/run-io.adapter.ts';
 import type { CardCtx } from './card-actions.ts';
 import type { CampaignState, Card, ResolvedConfig } from '../types.ts';
 import type { LoopIO } from '../../ports/ports.ts';
@@ -51,6 +55,8 @@ function fixtureIo(overrides: Partial<LoopIO> = {}): LoopIO {
   return {
     exec: mock(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
     sleep: mock(async () => {}),
+    canonicalPath: (p) => p,
+    assertDoneScratchPath: mock(() => {}),
     fileExists: mock(() => true),
     readFile: mock(() => ''),
     writeFile: mock(() => {}),
@@ -90,6 +96,34 @@ function fixtureCtx(overrides: { resolved?: Partial<ResolvedConfig>; io?: Partia
     io: fixtureIo(overrides.io),
   };
 }
+
+test('a Done run with a symlinked done directory stops as infrastructure before worktree add', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'rdo-card-done-link-'));
+  const home = join(root, 'home');
+  const outside = join(root, 'outside');
+  mkdirSync(home);
+  mkdirSync(outside);
+  symlinkSync(outside, join(home, 'done'));
+  const realIo = buildRealIo({ homeDir: home });
+  const exec = mock(async (cmd: string[]) =>
+    cmd[1] === 'rev-parse' ? { stdout: 'tip\n', stderr: '', exitCode: 0 } : { stdout: '', stderr: '', exitCode: 0 });
+  const ctx = fixtureCtx({
+    resolved: { homeDir: home, taskIndex: { C1: [{ id: 'T1', heading: 'Task 1', doneCommands: ['true'] }] } },
+    io: {
+      exec,
+      assertDoneScratchPath: realIo.assertDoneScratchPath,
+      spawnSession: mock(async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'sess' };
+        yield { type: 'result', subtype: 'success', session_id: 'sess', result: 'TASK_DONE T1 b' };
+      }),
+    },
+  });
+  ctx.state.cards.C1 = fixtureCard({ baseSha: 'base', branch: null, sessionId: 'sess', tasks: [{ id: 'T1', heading: 'Task 1' }] });
+  const outcome = await actOnCard(ctx, { kind: 'resume', sessionId: 'sess', reason: 'session_only' });
+  expect(outcome).toMatchObject({ kind: 'stopped', retryable: false });
+  expect(outcome.kind === 'stopped' ? outcome.reason : '').toMatch(/done|symlink/i);
+  expect(exec.mock.calls.some((call) => call[0][1] === 'worktree' && call[0][2] === 'add')).toBe(false);
+});
 
 describe('sessionConfigFor — ledgerPath (Task 9, spec §4.4)', () => {
   test('sets ledgerPath from resolved.homeDir via supervisorLedgerPathOf', () => {

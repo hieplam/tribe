@@ -24,7 +24,9 @@ function harness(turns: SessionResult[], verdicts: DoneRunVerdict[] = [], accept
     runTurn: async (prompt, first) => { prompts.push(prompt); events.push(first ? 'turn:first' : 'turn'); const next = turns.shift(); if (!next) throw new Error('unscripted turn'); return next; },
     acceptTaskDone: async (branch) => accept.shift() ?? { ok: true, tip: `tip-of-${branch}` },
     runDone: async (planned, sha, stepTaskId, attempt) => { events.push(`done:${stepTaskId}:${planned.map((p) => p.command).join('+')}:${sha}:${attempt}`); return { kind: 'verdict', verdict: verdicts.shift() ?? pass }; },
+    recordBranch: (branch) => { c.branch ??= branch; },
     recordPass: (i, sha, branch) => { events.push(`pass:${i}:${sha}`); c.tasks = c.tasks.map((t, j) => (j <= i ? { ...t, passedSha: sha } : t)); if (i === c.tasks.length - 1) c.doneSha = sha; c.branch ??= branch; },
+    clearFinalPass: () => { delete c.doneSha; delete c.tasks[c.tasks.length - 1]?.passedSha; },
     finishShipped: async (r) => { events.push(`shipped:${r.pr}`); return { kind: 'shipped', cardId: 'C1' }; },
     escalate: async (reason, detail) => { events.push(`escalate:${reason}`); return { kind: 'escalated', cardId: 'C1', escalationPath: '/e', reason: `${reason}|${detail}` }; },
   };
@@ -105,10 +107,48 @@ describe('driveCardTurns — spec §4.4', () => {
     expect(await driveCardTurns({ cardId: 'C1', card: to.c, tasks, planPath: 'p', delivery: { baseBranch: 'master', remote: 'origin', repoRoot: '/r' } }, to.deps)).toMatchObject({ kind: 'stopped', retryable: false });
   });
   test('a card resumed with every task passed goes straight to delivery', async () => {
-    const h = harness([shipped]);
+    const h = harness([shipped], [pass]);
     h.c.tasks = h.c.tasks.map((t) => ({ ...t, passedSha: 'x' }));
     h.c.doneSha = 'x';
     await driveCardTurns({ cardId: 'C1', card: h.c, tasks, planPath: 'p', delivery: { baseBranch: 'master', remote: 'origin', repoRoot: '/r' } }, h.deps);
     expect(h.prompts[0]?.split('\n')[0]).toBe('## This turn: deliver');
+  });
+  test('an accepted branch is recorded before a failing Done run and NEEDS_DIRECTION', async () => {
+    const h = harness([taskDone('T1'), { outcome: 'needs_direction', finalText: 'NEEDS_DIRECTION: help' }], [fail]);
+    const runDone = h.deps.runDone;
+    h.deps.runDone = (...args) => {
+      expect(h.c.branch).toBe('b');
+      return runDone(...args);
+    };
+    const out = await driveCardTurns({ cardId: 'C1', card: h.c, tasks, planPath: 'p', delivery: { baseBranch: 'master', remote: 'origin', repoRoot: '/r' } }, h.deps);
+    expect(out.kind).toBe('escalated');
+    expect(h.c.branch).toBe('b');
+  });
+  test('a deliver-ready card re-runs the full current Done set at doneSha before delivery', async () => {
+    const h = harness([shipped], [pass]);
+    h.c.tasks = h.c.tasks.map((t) => ({ ...t, passedSha: 'old-sha' }));
+    h.c.doneSha = 'old-sha';
+    await driveCardTurns({ cardId: 'C1', card: h.c, tasks, planPath: 'p', delivery: { baseBranch: 'master', remote: 'origin', repoRoot: '/r' } }, h.deps);
+    expect(h.events.filter((e) => e.startsWith('done:'))).toEqual(['done:T2:go build ./...+go test ./...:old-sha:1']);
+    expect(h.prompts[0]?.split('\n')[0]).toBe('## This turn: deliver');
+  });
+  test('a failing delivery-entry re-check clears final progress and opens a done-failed turn', async () => {
+    const h = harness([{ outcome: 'needs_direction', finalText: 'NEEDS_DIRECTION: help' }], [fail]);
+    h.c.branch = 'b';
+    h.c.tasks = h.c.tasks.map((t) => ({ ...t, passedSha: 'old-sha' }));
+    h.c.doneSha = 'old-sha';
+    await driveCardTurns({ cardId: 'C1', card: h.c, tasks, planPath: 'p', delivery: { baseBranch: 'master', remote: 'origin', repoRoot: '/r' } }, h.deps);
+    expect(h.c.doneSha).toBeUndefined();
+    expect(h.c.tasks[0]?.passedSha).toBe('old-sha');
+    expect(h.c.tasks[1]?.passedSha).toBeUndefined();
+    expect(h.prompts[0]?.split('\n')[0]).toBe('## This turn: task T2 again — its Done commands failed');
+    expect(h.prompts[0]).toContain('attempt 1 of 3');
+  });
+  test('passing the last task inside this call does not re-run Done on delivery entry', async () => {
+    const h = harness([taskDone('T2'), shipped], [pass]);
+    h.c.tasks[0]!.passedSha = 'prior';
+    await driveCardTurns({ cardId: 'C1', card: h.c, tasks, planPath: 'p', delivery: { baseBranch: 'master', remote: 'origin', repoRoot: '/r' } }, h.deps);
+    expect(h.events.filter((e) => e.startsWith('done:'))).toHaveLength(1);
+    expect(h.prompts[1]?.split('\n')[0]).toBe('## This turn: deliver');
   });
 });

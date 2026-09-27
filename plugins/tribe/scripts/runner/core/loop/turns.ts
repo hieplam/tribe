@@ -18,8 +18,12 @@ export interface TurnDeps {
    * failure of the runner's OWN checkout is `infrastructure` — never charged to the session. */
   runDone(planned: PlannedCommand[], sha: string, stepTaskId: string, attempt: number):
     Promise<{ kind: 'verdict'; verdict: DoneRunVerdict } | { kind: 'infrastructure'; reason: string }>;
+  /** Persist the first accepted branch before its Done run can fail. */
+  recordBranch(branch: string): void;
   /** Tasks 0..throughIndex passed at `sha` on `branch`: record and persist. */
   recordPass(throughIndex: number, sha: string, branch: string): void;
+  /** A stale deliver-entry Done run failed: clear and persist the last task's pass and doneSha. */
+  clearFinalPass(): void;
   /** SHIPPED at the deliver step: the existing D4 verify, then ship or escalate. */
   finishShipped(result: SessionResult): Promise<CardOutcome>;
   escalate(reason: string, detail: string): Promise<CardOutcome>;
@@ -50,6 +54,25 @@ export async function driveCardTurns(input: DriveInput, deps: TurnDeps): Promise
   let override: string | null = null;
   let lastProblem = '';
   let first = true;
+  if (nextStep(input.card).kind === 'deliver') {
+    const last = input.tasks[input.tasks.length - 1] as ResolvedTask;
+    const sha = input.card.doneSha as string;
+    const run = await deps.runDone(doneCommandsThrough(input.tasks, input.tasks.length - 1), sha, last.id, 1);
+    if (run.kind === 'infrastructure') {
+      return { kind: 'stopped', cardId: input.cardId, reason: `the runner could not run the Done commands: ${run.reason}`, retryable: false };
+    }
+    if (!run.verdict.passed) {
+      deps.clearFinalPass();
+      attempts = 1;
+      const failed = run.verdict.failed;
+      lastProblem = failed
+        ? `\`${failed.result.command}\` ${failed.result.timedOut ? 'timed out' : `exited ${failed.result.exitCode}`} at ${sha}\n${failed.result.stdoutTail}\n${failed.result.stderrTail}`
+        : `the Done run at ${sha} did not complete`;
+      override = failed
+        ? doneFailedTurnPrompt({ task: last, branch: input.card.branch ?? '(your card branch)', sha, failed: failed.result, notRun: run.verdict.notRun.map((n) => n.command), attempt: 1, max: MAX_STEP_ATTEMPTS })
+        : protocolErrorTurnPrompt({ reason: lastProblem, stepPrompt: taskTurnPrompt({ task: last, planPath: input.planPath }), attempt: 1, max: MAX_STEP_ATTEMPTS });
+    }
+  }
   for (;;) {
     const step = nextStep(input.card);
     const plain = stepPrompt(step, input);
@@ -102,6 +125,7 @@ export async function driveCardTurns(input: DriveInput, deps: TurnDeps): Promise
       if (refuse(accepted.reason)) return budgetSpent();
       continue;
     }
+    if (input.card.branch === null) deps.recordBranch(branch);
     const planned = doneCommandsThrough(input.tasks, expectedIndex);
     const run = await deps.runDone(planned, accepted.tip, expected.id, attempts + 1);
     if (run.kind === 'infrastructure') {

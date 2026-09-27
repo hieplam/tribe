@@ -5,7 +5,7 @@ import type { CampaignState, CardResult, NextCardResult, ResolvedConfig, Resolve
 import { EXIT_ESCALATED, EXIT_LOCKED, EXIT_OK, EXIT_RULINGS_UNRATIFIED, EXIT_SESSION_INCOMPLETE } from '../types.ts';
 import { loadState, nextCard } from '../state.ts';
 import { BRIEF_TEMPLATE_PATH } from '../brief.ts';
-import { campaignStatePathOf, answersPathOf } from '../paths.ts';
+import { campaignStatePathOf, answersPathOf, planPathWithinRepo } from '../paths.ts';
 import { buildRunRecord, reportsDirOf, runDirOf, runRecordPathOf, serializeRunRecord } from '../run-record.ts';
 import { unratifiedRulingIds } from '../rulings.ts';
 import { resolveTaskIndex, TaskIndexError, type TaskIndexIssue } from '../plan-index.ts';
@@ -169,8 +169,18 @@ async function resolveTaskIndexes(
   for (const cardId of requestedSequence(state, config)) {
     const card = state.cards[cardId];
     if (!card || card.status === 'shipped') continue;
-    const planPath = card.plan ? join(config.repoRoot, card.plan) : null;
-    if (planPath === null || !io.fileExists(planPath)) continue;
+    if (!card.plan) continue;
+    let planPath: string | null;
+    try {
+      planPath = planPathWithinRepo(config.repoRoot, card.plan, io.canonicalPath);
+    } catch {
+      planPath = null; // an unresolvable path cannot be proven inside the repo
+    }
+    if (planPath === null) {
+      for (const task of card.tasks) issues.push({ cardId, taskId: task.id, heading: task.heading, problem: 'plan_outside_repo' });
+      continue;
+    }
+    if (!io.fileExists(planPath)) continue;
     const resolution = resolveTaskIndex(cardId, card.tasks, String(await io.readFile(planPath)));
     taskIndex[cardId] = resolution.tasks;
     issues.push(...resolution.issues);

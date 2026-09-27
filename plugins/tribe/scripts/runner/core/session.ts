@@ -316,7 +316,7 @@ async function consumeSession(
 ): Promise<SessionResult> {
   let sessionMessages: AsyncIterable<SessionMessage>;
   try {
-    sessionMessages = io.spawnSession({ prompt: input.brief, options });
+    sessionMessages = io.spawnSession({ prompt: input.brief, options, cardId: config.card });
   } catch (err) {
     // A failed resume attempt (no transcript, SDK error) must surface as a typed error, not
     // a crash — §D4's resume matrix falls back to a fresh session on this result.

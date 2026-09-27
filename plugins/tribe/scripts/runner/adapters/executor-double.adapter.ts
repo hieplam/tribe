@@ -17,7 +17,7 @@ export function executorDoubleScriptPath(): string | null {
 }
 
 export async function* spawnExecutorDouble(
-  scriptPath: string, homeDir: string, params: SpawnSessionParams, timeoutMs: number = DOUBLE_TIMEOUT_MS,
+  scriptPath: string, homeDir: string, cardId: string, params: SpawnSessionParams, timeoutMs: number = DOUBLE_TIMEOUT_MS,
 ): AsyncGenerator<SessionMessage> {
   const sessionId = params.options.resume ?? `double-exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const dir = mkdtempSync(join(tmpdir(), 'rdo-double-'));
@@ -25,7 +25,7 @@ export async function* spawnExecutorDouble(
   writeFileSync(promptFile, params.prompt);
   try {
     const { code, stdout } = await new Promise<{ code: number; stdout: string }>((resolve, reject) => {
-      const child = spawn(scriptPath, ['--home', homeDir, '--prompt-file', promptFile], {
+      const child = spawn(scriptPath, ['--home', homeDir, '--card', cardId, '--prompt-file', promptFile], {
         stdio: ['ignore', 'pipe', 'inherit'], env: process.env, timeout: timeoutMs, killSignal: 'SIGKILL',
       });
       let out = '';

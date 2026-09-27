@@ -15,7 +15,8 @@ export type TaskIndexProblem =
   | 'ambiguous_done'
   | 'missing_done_block'
   | 'empty_done'
-  | 'continuation_not_supported';
+  | 'continuation_not_supported'
+  | 'plan_outside_repo';
 
 export interface TaskIndexIssue {
   cardId: string;

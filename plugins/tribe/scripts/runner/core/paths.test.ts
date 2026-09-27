@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   answersPathOf, campaignStatePathOf, escalationPathOf, escalationsDirOf, reportDirOf,
-  doneWorktreePathOf, supervisorLedgerPathOf,
+  doneWorktreePathOf, planPathWithinRepo, supervisorLedgerPathOf,
 } from './paths.ts';
 
 describe('campaign-home path helpers', () => {
@@ -32,4 +35,16 @@ describe('campaign-home path helpers', () => {
 test('doneWorktreePathOf stays under <home>/done and refuses a card id that would leave it', () => {
   expect(doneWorktreePathOf('/h', 'small-helpers')).toBe('/h/done/small-helpers');
   for (const bad of ['../x', 'a/../../b', '/abs', '', '.', '..']) expect(() => doneWorktreePathOf('/h', bad)).toThrow(/outside/);
+});
+
+test('planPathWithinRepo refuses traversal, absolute paths and a symlink escape', () => {
+  const root = mkdtempSync(join(tmpdir(), 'rdo-plan-path-'));
+  const repo = join(root, 'repo');
+  mkdirSync(repo);
+  writeFileSync(join(root, 'outside.md'), 'outside');
+  symlinkSync(root, join(repo, 'link'));
+  const canonical = (path: string) => realpathSync(path);
+  expect(planPathWithinRepo(repo, '../outside.md', canonical)).toBeNull();
+  expect(planPathWithinRepo(repo, join(root, 'outside.md'), canonical)).toBeNull();
+  expect(planPathWithinRepo(repo, 'link/outside.md', canonical)).toBeNull();
 });

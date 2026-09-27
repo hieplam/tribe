@@ -599,6 +599,8 @@ describe('writeReport — W-F5: last-tick blocked reconciliation reaches the rep
     written.set('/repo/docs/plans/c1.md', '### Task 1\n\n#### Done\n\n```bash\ntrue\n```\n');
 
     const loopIo: LoopIO = {
+      canonicalPath: (p) => p,
+      assertDoneScratchPath: () => {},
       exec: mock(async (cmd: string[]): Promise<ExecResult> => {
         if (cmd[0] === 'git' && cmd[1] === 'symbolic-ref') return { stdout: 'origin/master\n', stderr: '', exitCode: 0 };
         // C2: the planning_needed escalation asks where the main checkout is; on the base branch here.

@@ -23,6 +23,8 @@ export interface ClockPort {
 }
 export interface FsPort {
   fileExists(resolvedPath: string): boolean;
+  /** Resolve symlinks, including the longest existing parent of a missing path. */
+  canonicalPath(resolvedPath: string): string;
   readFile(resolvedPath: string): Promise<string> | string;
   writeFile(resolvedPath: string, content: string): void;
   /** P6 (fix-list): renames/moves a file already on disk — used to archive a resolved
@@ -54,9 +56,12 @@ export interface RunHomePort {
   ensureDir(resolvedPath: string): void;
   /** Crash-safe write: temp file in the same directory, then rename (spec §4). */
   writeFileAtomic(resolvedPath: string, content: string): void;
-  /** Recursive delete of a runner-built scratch path; the adapter refuses any path without a
-   * `/done/` segment. */
+  /** Recursive delete of a runner-built scratch path; the adapter repeats the real-path guard. */
   removeTree(resolvedPath: string): void;
+}
+export interface DoneScratchPort {
+  /** Require a real `<home>/done` directory and a non-symlink card path before git touches it. */
+  assertDoneScratchPath(resolvedPath: string): void;
 }
 /** One Done command's outcome, as the edge observed it. `timedOut` = killed at `timeoutMs`. */
 export interface ShellRunResult {
@@ -188,6 +193,7 @@ export interface SessionMessage {
 export interface SpawnSessionParams {
   prompt: string;
   options: PinnedSessionOptions;
+  cardId?: string;
 }
 
 /** The seam: production code funnels every session spawn through here so tests never hit
@@ -271,6 +277,7 @@ export interface LoopIO
     LockStorePort,
     SessionSpawnPort,
     RunHomePort,
+    DoneScratchPort,
     LinePort,
     DonePort {}
 

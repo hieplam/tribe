@@ -8,6 +8,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --prompt-file) prompt_file="$2"; shift 2 ;;
     --home) shift 2 ;;
+    --card) shift 2 ;;
     *) shift ;;
   esac
 done
