@@ -13,7 +13,8 @@
 //       scans every transcript of the run — each executor/supervisor session found under the campaign
 //       home, plus every `<session>/subagents/*.jsonl` beside it — and, when given, re-checks the
 //       sandbox tree and the target repo. Prints BYPASS_AUDIT=PASS|FAIL (exit 0|1); exit 2 on a usage
-//       or input error.
+//       or input error. `--json` also lists every transcript path it scanned (`transcripts`) — the
+//       list the D10 auditor subagent is given and the evidence index records.
 //
 // Direction of error (the card's oracle): under-matching is a bug; over-matching is by design. A Bash
 // command that merely LISTS an agents/ directory counts: a driver-only run has no reason to look.
@@ -250,8 +251,9 @@ function main(): void {
   const [repo] = args('--repo');
   const repoAgents = repo !== undefined ? repoAgentsDirs(repo) : [];
 
+  const scanned = [...new Set(transcripts)].sort();
   const result = {
-    claudeHome, transcriptsScanned: [...new Set(transcripts)].length, missingSessions,
+    claudeHome, transcriptsScanned: scanned.length, transcripts: scanned, missingSessions,
     tribeDispatches: count('tribe_dispatch'), mammothHuntSkillCalls: count('mammoth_hunt_skill'),
     agentFileTouches: count('agent_file_touch'), agentDefinitionReads: count('agent_definition_read'),
     orchestrateCampaignSkillCalls, sandboxAgentsEmpty, tree, repoAgentsDirs: repoAgents, hits,

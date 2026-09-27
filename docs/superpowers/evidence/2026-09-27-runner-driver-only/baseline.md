@@ -19,6 +19,7 @@ building. Tools: `plugins/tribe/scripts/tests/runner-driver-only/`. Fixture: `hi
 | V6 | A state whose task ref names a heading the plan does not have | **accepted**: `--dry-run` exit 0, phase `fresh` (master never reads task refs) | `v6-before-dry-run.txt`, `v6-before-state.json` |
 | V3 / G5 | Runner-run Done commands | **none exist** — the runner never reads the plan (`core/brief.ts:55-84`) | spec §2.4 |
 | D10 layer 1 | `bypass-audit.ts` on a transcript known to contain Tribe dispatches (fu-supervisor-settings executor `b3bf06c3…`) | **18** Tribe dispatches, 2 agent-file touches — nonzero, as required; on the real-home BEFORE run **6**; a planted `agents/hunter.md` in a sandbox copy is caught | `d10-scanner-selftest.md`, `d10-scanner-selftest-known-tribe.txt`, `d10-before-realhome-scan.txt` |
+| A1 gate | `no-live-campaign.sh` on this machine | **exit 1**: `sessions-in-repo`'s watchdog (pid 15716) and runner (pid 70499) are live, its card is `running`, and its v1 state holds a live `.runner.lock` — execution must not start yet | `d10-scanner-selftest.md` (gate self-tests) |
 | V7 | Runner suite and supervisor E2E on a clean clone | runner **1351 pass / 14 skip / 0 fail** (4:58 wall); supervisor E2E **40/40**; verify-shipped **26/26** | `v7-before-runner-check.txt`, `v7-before-supervisor-e2e.txt` |
 | V7 | Existing assertions the change touches | ~190 assertions across 30+ files, inventoried | `v7-changed-assertions.md` |
 

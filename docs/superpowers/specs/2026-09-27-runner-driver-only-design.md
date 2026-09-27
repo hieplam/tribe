@@ -13,7 +13,7 @@ binding and supersede round 1 where they differ — the card says which).
 and essentials gate), `transcript-prompts.ts` (prompts a real run sent), `run-metrics.ts` (dispatches,
 skills, tokens, wall clock, Done rows), `g3-verify-replay.ts` (the runner's own done check on a real PR),
 `fixture-reset.sh` (back to the starting tree without rewriting history), `bypass-audit.ts` (D10
-layer 1).
+layer 1), `no-live-campaign.sh` (the A1 gate: no live campaign process, no live v1 campaign lock).
 **Sandbox (D9):** `/Users/hiep/.claude-sandboxes/runner-driver-only` — not logged in during planning;
 the sandbox BEFORE run is PENDING-LOGIN (§6.7).
 **Dependency:** execution starts only after campaign `sessions-in-repo` (issue #173) has merged
@@ -277,6 +277,12 @@ The fixture plan (`hieplam/runner-e2e-go@9bb6b22`) is the worked example: `### T
 One executor session per card, as today; the runner now drives it in **turns**, each a fresh query
 with `resume: <sessionId>` (the resume path `core/loop/card-actions.ts:558-620` already uses).
 
+Why one session per card and not one per task (Shaman amendment A3): the owner's early sketch had the
+runner spawn a session per task, with each task leaving notes for the next. One resumed session meets
+the same need — the next task knows what the previous one did — because the session keeps its own
+context, with no notes mechanism the runner could not verify; the Done run still happens per task. A
+fresh session per task can become a plan-level option later; it is out of scope here.
+
 1. **Next step (pure).** `nextStep(card)` = the first task with no `passedSha`; when every task has
    one and `doneSha` is set → `deliver`.
 2. **First turn** = the full brief (§4.8) with its `## This turn` section set to the next step.
@@ -527,7 +533,7 @@ Paths: `$T` = `plugins/tribe/scripts/tests/runner-driver-only`, `$E` =
 | **V6** (D1) | A state whose task ref points at a missing heading is refused at load | `bash plugins/tribe/scripts/tests/test-runner-task-index-refusal.sh` (§6.4): the real CLI, `--dry-run` and a real run | stdout, `$E/v6-refusal*.txt` | `V6=PASS`: both exit `4` with `campaign runner: refused:` naming card, task, heading, `dangling_heading`; no session spawned; state byte-identical | **master accepts it**: `--dry-run` exit 0, phase `fresh` (`$E/v6-before-dry-run.txt`) | A runner that never validates refs dry-runs `fresh` → FAIL |
 | **V7** (regression) | Runner suite, supervisor E2E and session E2E green; every changed existing assertion is named | `cd plugins/tribe/scripts/runner && bun run check`; `bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh`; `cd plugins/tribe/scripts/runner && RUN_SESSION_E2E=1 bun test core/session.e2e.test.ts core/supervisor/session.e2e.test.ts`; plus the supervisor-kill, watchdog, docs, verify-shipped and viewer suites and the three new E2Es | `$E/v7-after-counts.txt` | all 0 fail; every count change maps to a named assertion change (§7) | master `3194976`, clean clone: runner **1351 pass / 14 skip / 0 fail** (`$E/v7-before-runner-check.txt`); supervisor E2E **40/40** (`$E/v7-before-supervisor-e2e.txt`); verify-shipped **26/26**; Task 1.1 re-measures on the post-#173 base | n/a (regression row) |
 | **G3'** (done check) | The done check requires nothing a Tribe agent produces | `bun $T/g3-verify-replay.ts` on the V2 card and on plain PR #2; `verify-shipped --skip-gap-gate` on PR #2; the rulings probe re-run | `$E/g3-after-*` | V2 replay `SHIPPED=true`; PR #2 replay lists no `gapGateStamped`/`ledgerCommitted` (only `doneAtHead`, the runner's own D2 point, can fail for a hand-made PR); verify-shipped `PASS`; rulings probe exit `0` | plain PR #2: `FAILED_POINTS=gapGateStamped,ledgerCommitted`; verify-shipped `FAIL (gap_gate_stamped)`; rulings probe **exit 5** (`$E/g3-before-*`) | Doing nothing: the two points and exit 5 remain → FAIL |
-| **D10** (no bypass; after every sandbox run) | No session used the Tribe way of working anyway, by name or by imitation, and the sandbox and repo are untouched | Layer 1: `bun $T/bypass-audit.ts scan --home <campaign home> --claude-home $S --sandbox $S --snapshot-before <snapshot> --repo $F` (snapshot taken before the run). Layer 2: the auditor subagent brief of §6.8 | `$E/d10-<run>-scan.txt`, `$E/d10-<run>-auditor.md` for BEFORE-sandbox, V2, V3b, V5 | `BYPASS_AUDIT=PASS` (0 Tribe dispatches, 0 `mammoth-hunt`, 0 agent-file touches or definition reads, `agents/` empty, install surface unchanged, no unknown new sandbox entry, no `.claude/agents` in the repo, every session's transcript found); auditor `VERDICT: CLEAN` | Scanner self-tests (`$E/d10-scanner-selftest.md`): the fu-supervisor-settings executor transcript → **18** Tribe dispatches (nonzero, as required); the real-home BEFORE run → 6; a planted `agents/hunter.md` → `SANDBOX_AGENTS_EMPTY=no`, `SANDBOX_SURFACE_CHANGED=1`. The sandbox BEFORE run is expected to FAIL layer 1 (today's runner loads the plugin — D8's proof) | A scanner that reads nothing would report 0 on the known transcript → its self-test fails first |
+| **D10** (no bypass; after every sandbox run) | No session used the Tribe way of working anyway, by name or by imitation, and the sandbox and repo are untouched | Layer 1: `bun $T/bypass-audit.ts scan --home <campaign home> --claude-home $S --sandbox $S --snapshot-before <snapshot> --repo $F` (snapshot taken before the run). Layer 2: the auditor subagent brief of §6.8 | `$E/d10-<run>-scan.txt`, `$E/d10-<run>-auditor.md` for BEFORE-sandbox, V2, V3b, V5 | `BYPASS_AUDIT=PASS` (0 Tribe dispatches, 0 `mammoth-hunt`, 0 agent-file touches or definition reads, `agents/` empty, install surface unchanged, no unknown new sandbox entry, no `.claude/agents` in the repo, every session's transcript found); the auditor file carries the exact line `VERDICT: CLEAN`, asserted with `grep -q '^VERDICT: CLEAN$'` (a file's mere existence proves nothing — A2) | Scanner self-tests (`$E/d10-scanner-selftest.md`): the fu-supervisor-settings executor transcript → **18** Tribe dispatches (nonzero, as required); the real-home BEFORE run → 6; a planted `agents/hunter.md` → `SANDBOX_AGENTS_EMPTY=no`, `SANDBOX_SURFACE_CHANGED=1`. The sandbox BEFORE run is expected to FAIL layer 1 (today's runner loads the plugin — D8's proof) | A scanner that reads nothing would report 0 on the known transcript → its self-test fails first |
 
 ### 6.1 The AFTER prompt inventory (V1's required kinds)
 
@@ -666,7 +672,9 @@ bun $T/run-metrics.ts --home $FH/go-before-sandbox --json > $E/v2-before-sandbox
 CLAUDE_CONFIG_DIR=$S bun $T/transcript-prompts.ts --home $FH/go-before-sandbox --out $E/before-sandbox-real-prompts
 bun $T/g2-prompts.ts --render-dir $E/before-sandbox-real-prompts --negative-only > $E/v1-before-sandbox-real-prompts.txt
 bun $T/bypass-audit.ts scan --home $FH/go-before-sandbox --claude-home $S --sandbox $S --snapshot-before $E/d10-before-sandbox-snapshot.json --repo $F > $E/d10-before-sandbox-scan.txt; echo "scan exit $?" >> $E/d10-before-sandbox-scan.txt
-# then the D10 auditor subagent (§6.8) over the transcript paths the scan lists -> $E/d10-before-sandbox-auditor.md
+bun $T/bypass-audit.ts scan --home $FH/go-before-sandbox --claude-home $S --json > $E/d10-before-sandbox-scan.json   # its `transcripts` list feeds the auditor
+# then the D10 auditor subagent (§6.8) over those transcript paths -> $E/d10-before-sandbox-auditor.md (its answer, verbatim)
+grep -E '^VERDICT: (CLEAN|BYPASS|UNSURE)$' $E/d10-before-sandbox-auditor.md   # must print exactly one verdict line (A2)
 bash $T/fixture-reset.sh $F 9bb6b2253a32453a8ffc2a7c473a0b97ea444498
 git -C /Users/hiep/repo/tribe worktree remove $B
 ```
@@ -676,6 +684,22 @@ real-home BEFORE run with `"campaign": "go-before-sandbox"`. Expected: the runne
 Tribe dispatches through its own plugin load (D8's proof) while `SANDBOX_AGENTS_EMPTY=yes` and
 `SANDBOX_SURFACE_CHANGED=0` — the agents came from the runner, not the sandbox; record whatever
 actually happens. The real-home BEFORE run (§2.3) stays as supplementary evidence.
+
+**The auditor's verdict here is a measurement, not a gate.** A2 asks every auditor Done to check the
+verdict rather than the file; on this BEFORE run the correct expected verdict is `VERDICT: BYPASS`
+(today's runner makes the executor act as the Warchief and loads the agents itself), so the check is
+that the file carries exactly one well-formed verdict line, and that line is recorded in the baseline
+table. Asserting `CLEAN` here would fail the baseline on the very effect this card removes. Every AFTER
+run (V2, V3b, V5) asserts `grep -q '^VERDICT: CLEAN$'`.
+
+### 6.7a Where the Shaman finds everything (A5)
+
+At owner acceptance the Shaman independently re-runs `go test`, the scanner and his own fresh auditor
+over the V2 and V5 transcripts; that is not a plan task. The plan's Task 4.7 makes it possible: the
+evidence index `$E/after.md` gains a `## Where everything is` section listing, for every real run
+(`go-before`, `go-before-sandbox`, `go-after`, `go-v3-real`, `go-v4-tribe`, the V5 home), its campaign
+home, the Claude home it ran in, and every transcript path (main sessions and `subagents/*.jsonl`) as
+produced by `bypass-audit.ts scan --json`; its Done proves every listed path exists.
 
 ### 6.8 D10 — the bypass audit, both layers
 
@@ -732,15 +756,19 @@ Read every transcript. Look at every Agent/Task call (its subagent_type and its 
 Skill call, every file written or read, every Bash command, and every prompt a session received.
 
 ## Output
-Your final message, in exactly this shape:
+Your final message, in exactly this shape. Its first line is exactly one of `VERDICT: CLEAN`,
+`VERDICT: BYPASS` or `VERDICT: UNSURE` — plain text, no markdown, nothing else on the line:
 VERDICT: CLEAN | BYPASS | UNSURE
 FINDINGS:
 - <file>:<line> — "<verbatim quote>" — why it is, or might be, the Tribe way of working
 (write "FINDINGS: none" when the verdict is CLEAN)
 ```
 
-Its full answer is saved verbatim to `$E/d10-<run>-auditor.md`. `BYPASS` or `UNSURE` is a finding for
-the owner; nobody argues it down.
+Its full answer is saved verbatim to `$E/d10-<run>-auditor.md`. On an AFTER run the task's Done asserts
+`grep -q '^VERDICT: CLEAN$' $E/d10-<run>-auditor.md` (Shaman amendment A2) — `BYPASS`, `UNSURE` or a
+malformed verdict line fails the task; it is a finding for the owner, never argued down and never
+re-rolled with a second auditor. The transcript paths come from `bypass-audit.ts scan --json`
+(`transcripts`), the same list the evidence index records.
 
 ---
 
@@ -777,9 +805,20 @@ and its branch diff at `b9d237a`): `runner/core/session.ts`, `runner/core/sessio
 `brief.test.ts`, `runner/cli/main.ts`, `runner/tsconfig.json`, `runner/README.md`,
 `plugins/tribe/scripts/tests/test-supervisor-e2e.sh`, `.c3/c3-2-plugins/c3-215-tribe.md`.
 
-**Rebase rule.** Execution branches from master **after** #173's PR has merged; Task 1.1 proves it
-by content (`supervisorLedgerPathOf` in `core/paths.ts`, `ledgerPath` in `core/session.ts`,
-`home-config.ts` gone, `rule-sessions-start-in-target-repo` in `.c3/rules/`) and refuses otherwise.
+**Rebase rule.** Execution branches from master **after** #173's campaign has shipped. #173 lands in
+parts (PR #175 already removed `home-config.ts`), so contents alone cannot prove it (Shaman amendment
+A1). Task 1.1's Done asserts all of: (a) the card `supervisor-sessions-in-repo` in
+`~/.tribe/-Users-hiep-repo-tribe/campaigns/sessions-in-repo/campaign-state.json` is `shipped`; (b) no
+live campaign runner, watchdog or supervisor process exists on the machine, and no campaign home under
+`~/.tribe/*/campaigns/` holds a v1 state with a live `.runner.lock` — both by
+`plugins/tribe/scripts/tests/runner-driver-only/no-live-campaign.sh` (committed with this spec; exits 1
+naming what is live, 2 when it cannot probe, never a false pass); (c) all four content probes
+(`supervisorLedgerPathOf` in `core/paths.ts`, `ledgerPath` in `core/session.ts`, `home-config.ts` gone,
+`rule-sessions-start-in-target-repo` in `.c3/rules/`). The same gate runs again as the first Done
+command of Task 2.18 and immediately before PR 2 merges: PR 2 makes the runner refuse v1 states, and a
+live watchdog relaunches `run.ts` from the master checkout, so a v1 campaign still running would refuse
+its own state. At planning time (2026-09-27) the gate exits 1: `sessions-in-repo`'s watchdog (pid
+15716) and runner (pid 70499) are live and its card is `running`.
 Every task locates code by symbol and test title, never by a master-`3194976` line number, so #173's
 edits move lines without invalidating the plan. Where #173 changed a function this card also changes
 (`buildOneShotOptions`, `consumeSession`, `sessionConfigFor`, the closing brief's G7 sentence), the
@@ -802,30 +841,32 @@ landed, V2 cross-checks dispatches against them; otherwise transcripts + `subage
 | The sandbox is not logged in when PR 4 runs | Task 4.1 checks it first and stops with `NEEDS_DIRECTION`; the BEFORE sandbox run is PENDING-LOGIN (§6.7) |
 | A real session asks instead of claiming a doomed task (V3b) | V3a is the deterministic, discriminating control; V3b's pass condition accepts either escalation reason |
 
+**The parked `fu-supervisor-settings` closing pass (Shaman amendment A4).** That campaign's supervisor
+has been parked since 2026-09-25 (`closing_failed`); its worktree `tribe-wt/fu-supervisor-settings-closing`
+holds an uncommitted `.tribe/harness-gaps.jsonl` change and two untracked C3 rules. After PR 3 the
+supervisor can no longer run a ratification pass, so that campaign's remaining gap ratification is done
+Tribe-style — by a session using the Tribe gap tools (`gap-rule.ts`, `rulings-check.ts`) — outside this
+card. No plan task covers it.
+
 Rollback: each PR group is a regular merge (`rule-no-squash-merge`); `git revert -m 1 <merge>` per
 group, newest first. PR 2 (v2 state) is the only one with a data-shape consequence: after reverting
 it, v2 homes are refused by the v1 runner; re-author as v1.
 
 ---
 
-## 10. Open questions (What/Why) — none blocks planning
+## 10. Open questions — all RULED (Shaman, 2026-09-27)
 
-- **Q1 — the `ratified-as:` rulings gate.** Removed from the runner, the watchdog and the supervisor as
-  Tribe governance, per the oracle ("the gap-gate and its stamp/trailers/**ratification**"; "when in
-  doubt, flag it") and D6's naming of `brief-ratify.md`; moved to `gaps/rulings-check.ts` + the Tribe
-  style's Stage D. Options: (a) remove and move (this spec); (b) keep the gate, make it plan-declared.
-  Recommendation (a). A contrary ruling drops plan Tasks 3.1, 3.4, 3.5 and 3.6 and the `ratified-as`
-  edits inside 3.2, 3.3, 3.7 and 3.8; nothing in PR 1 or PR 2 depends on it.
-- **Q2 — the supervisor's closing session still re-verifies with `verify-shipped`.** With
-  `--skip-gap-gate` its three remaining checks are exactly D4. Options: (a) keep the closing session
-  and the flag (this spec); (b) the supervisor script re-verifies with the runner's own replay and the
-  closing session only writes the report. Recommendation (a) now (smallest change, keeps an independent
-  re-check); (b) as a follow-up if the owner wants the closing LLM out of verification.
-- **Q3 — `general-purpose` named in the simple style.** D7 says "one subagent per task"; this spec
-  names the type so an installed Tribe agent cannot be picked by its description. Recommendation: accept.
-- **Q4 — V3 in the sandbox (D9) is two runs.** V3a is the committed hermetic E2E with a scripted
-  session (deterministic, and the only check that proves the runner itself ran the failing command);
-  it starts no Claude session, so the sandbox is set but has nothing to isolate. V3b is a real sandbox
-  session on a task whose Done can never pass; it may ask instead of claiming, so it cannot carry the
-  discriminating claim alone. Options: (a) both (this spec); (b) V3b only; (c) V3a only.
-  Recommendation (a).
+- **Q1 — the `ratified-as:` rulings gate. RULED: yes** — it leaves the runner, the watchdog and the
+  supervisor, as §4.10 and §4.11 design (moved to `gaps/rulings-check.ts` and the Tribe style's Stage D).
+- **Q2 — the closing session re-verifies with `verify-shipped --skip-gap-gate`. RULED: yes, for this
+  card.** Replacing that LLM closing check with a mechanical replay is a separate follow-up idea, not
+  this card.
+- **Q3 — the simple style names `general-purpose` explicitly. RULED: yes.**
+- **Q4 — V3 is two runs. RULED: yes, both** — V3a is the offline deterministic proof, V3b the real
+  sandbox session.
+
+Amendments recorded in this revision (Shaman review of `59db7ec`): A1 — the preflight gates on the
+campaign and on live processes, not only on file contents (§8; plan Tasks 1.1, 2.18); A2 — every
+auditor verdict is checked, not just its file (§6, §6.7, §6.8; plan Tasks 4.2, 4.3, 4.6); A3 — why one
+session per card, driven by turns (§4.4); A4 — the parked `fu-supervisor-settings` closing pass (§9);
+A5 — the evidence index lists every campaign home and transcript path (§6.7a; plan Task 4.7).

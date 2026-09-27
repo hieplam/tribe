@@ -8,7 +8,8 @@ first; every design decision below is made there, with its `file:line` grounding
 baselines are already there (`baseline.md`).
 **Measurement tools (already committed with this plan):** `plugins/tribe/scripts/tests/runner-driver-only/`
 (`$T` below): `tribe-lexicon.ts`, `render-prompts.ts`, `g2-prompts.ts`, `fixture-values.ts`,
-`transcript-prompts.ts`, `run-metrics.ts`, `g3-verify-replay.ts`, `fixture-reset.sh`, `bypass-audit.ts`.
+`transcript-prompts.ts`, `run-metrics.ts`, `g3-verify-replay.ts`, `fixture-reset.sh`, `bypass-audit.ts`,
+`no-live-campaign.sh`.
 **Sandbox (card D9):** `S` = `/Users/hiep/.claude-sandboxes/runner-driver-only`, a Claude home installed by
 `install.sh` with its `agents/` emptied; V2, V3 and V5 (and the BEFORE baseline, spec §6.7) run with
 `CLAUDE_CONFIG_DIR=$S`; V4 runs in the real home. Every sandbox run ends with the two D10 bypass-audit
@@ -36,7 +37,8 @@ This plan is written in the **simple style** it introduces (card D7):
 
 Open each PR with `gh pr create`, wait for CI to conclude green in the foreground, and land it with
 `gh pr merge --merge` (never squash — `rule-no-squash-merge`) before starting the next PR's first
-task on a fresh branch from the updated master.
+task on a fresh branch from the updated master. **PR 2 merges only right after
+`$T/no-live-campaign.sh` exits 0** (Task 2.18): it makes the runner refuse v1 campaign states.
 
 ## Global Constraints
 
@@ -91,26 +93,34 @@ such as `audit`, `lens`, `governance`) is by design — a driver-only prompt has
 
 ## PR 1 — Tribe out of the executor path
 
-### Task 1.1: Preflight — #173 has merged; baselines on the new base
+### Task 1.1: Preflight — the `sessions-in-repo` campaign has shipped and nothing is running; baselines
 
-**Why:** execution must not start before #173 ships (spec §8), and every ratchet needs its baseline
-on the exact tree this plan builds on.
+**Why:** execution must not start before #173's campaign ships (spec §8). #173 lands in parts (PR #175
+already removed `home-config.ts`), so file contents alone cannot prove the campaign is over — its card
+must be `shipped` and no campaign process may be alive. The hazard (Shaman amendment A1): once PR 2
+(state v2, v1 refused) is on master, a live watchdog that relaunches `run.ts` from the master checkout
+loads the new code and refuses its own v1 state. Every ratchet also needs its baseline on the exact
+tree this plan builds on.
 
 **Files:** create `$E/base-probe.txt`, `$E/v1-base-prompts.txt`, `$E/v7-base-counts.txt`; modify
 `$T/render-prompts.ts` only if an API it calls moved under #173 (keep every kind it renders).
 
-- [ ] **Step 1: Probe that #173 is on master**
+- [ ] **Step 1: Prove the campaign is over and #173 is on master** — run the gate and the probes;
+  record everything:
 
 ```bash
-{ grep -q 'export function supervisorLedgerPathOf' plugins/tribe/scripts/runner/core/paths.ts && echo 'paths=supervisorLedgerPathOf'
+{ python3 -c "import json,os; c=json.load(open(os.path.expanduser('~/.tribe/-Users-hiep-repo-tribe/campaigns/sessions-in-repo/campaign-state.json')))['cards']['supervisor-sessions-in-repo']; print('sessions_in_repo_card=' + c['status'])"
+  bash plugins/tribe/scripts/tests/runner-driver-only/no-live-campaign.sh
+  grep -q 'export function supervisorLedgerPathOf' plugins/tribe/scripts/runner/core/paths.ts && echo 'paths=supervisorLedgerPathOf'
   grep -q 'ledgerPath' plugins/tribe/scripts/runner/core/session.ts && echo 'session=ledgerPath'
   test ! -e plugins/tribe/scripts/runner/core/supervisor/home-config.ts && echo 'home_config=gone'
   test -e .c3/rules/rule-sessions-start-in-target-repo.md && echo 'rule=sessions-start-in-target-repo'
   git log -1 --format='base=%H %s'; } | tee docs/superpowers/evidence/2026-09-27-runner-driver-only/base-probe.txt
 ```
 
-Expected: four probe lines plus `base=…`. If any probe line is missing, stop: `NEEDS_DIRECTION`
-("#173 has not merged; this plan must not start").
+Expected: `sessions_in_repo_card=shipped`, `no-live-campaign: no live campaign process, no live v1
+campaign lock`, the four probe lines, and `base=…`. Anything else stops the task: `NEEDS_DIRECTION`
+("#173's campaign has not shipped, or a campaign process is still live; this plan must not start").
 
 - [ ] **Step 2: V1 on the base** — `bun install --cwd plugins/tribe/scripts/runner --frozen-lockfile`,
   then `bun $T/render-prompts.ts --out $E/base-prompts && bun $T/g2-prompts.ts --render-dir $E/base-prompts > $E/v1-base-prompts.txt`.
@@ -131,13 +141,18 @@ Expected: four probe lines plus `base=…`. If any probe line is missing, stop: 
 #### Done
 
 ```bash
-grep -q '^paths=supervisorLedgerPathOf$' docs/superpowers/evidence/2026-09-27-runner-driver-only/base-probe.txt
-grep -q '^home_config=gone$' docs/superpowers/evidence/2026-09-27-runner-driver-only/base-probe.txt
+python3 -c "import json,os; c=json.load(open(os.path.expanduser('~/.tribe/-Users-hiep-repo-tribe/campaigns/sessions-in-repo/campaign-state.json')))['cards']['supervisor-sessions-in-repo']; assert c['status']=='shipped', 'sessions-in-repo card is ' + c['status']"
+bash plugins/tribe/scripts/tests/runner-driver-only/no-live-campaign.sh
+grep -q 'export function supervisorLedgerPathOf' plugins/tribe/scripts/runner/core/paths.ts
+grep -q 'ledgerPath' plugins/tribe/scripts/runner/core/session.ts
+test ! -e plugins/tribe/scripts/runner/core/supervisor/home-config.ts
+test -e .c3/rules/rule-sessions-start-in-target-repo.md
 grep -q '^TRIBE_WAY_TOTAL=' docs/superpowers/evidence/2026-09-27-runner-driver-only/v1-base-prompts.txt
 grep -q ' 0 fail' docs/superpowers/evidence/2026-09-27-runner-driver-only/v7-base-counts.txt
 ```
 
-Expected: every command exits 0.
+Expected: every command exits 0. (`no-live-campaign.sh` exits 1 naming the live process or lock, and
+2 when it cannot probe — never a false pass; its self-tests are in `$E/d10-scanner-selftest.md`.)
 
 ### Task 1.2: `verify-shipped.sh --skip-gap-gate` — opt-in, default unchanged
 
@@ -2809,11 +2824,18 @@ Expected: every command exits 0.
   `bun $T/render-prompts.ts --out $E/pr2-prompts && bun $T/g2-prompts.ts --render-dir $E/pr2-prompts > $E/v1-pr2-prompts.txt`.
   Expected: 0 fail everywhere; `TRIBE_WAY_TOTAL` ≤ PR 1's; `MISSING_REQUIRED_KINDS=0`.
 
-- [ ] **Step 4: Commit** — `git add -A && git commit -m "docs(runner): PR 2 governance — v2 state, turns, runner-run Done"`, then open PR 2.
+- [ ] **Step 4: Commit** — `git add -A && git commit -m "docs(runner): PR 2 governance — v2 state, turns, runner-run Done"`.
+
+- [ ] **Step 5: Merge PR 2 behind the live-campaign gate** — open PR 2, wait for its checks to
+  conclude green in the foreground, then — **immediately before `gh pr merge --merge`** — run `bash plugins/tribe/scripts/tests/runner-driver-only/no-live-campaign.sh`
+  and merge only on exit 0 (Shaman amendment A1: this PR makes the runner refuse v1 states, and a
+  live watchdog relaunches `run.ts` from the master checkout). Exit 1 or 2 stops the merge:
+  `NEEDS_DIRECTION` naming what is live.
 
 #### Done
 
 ```bash
+bash plugins/tribe/scripts/tests/runner-driver-only/no-live-campaign.sh
 bun install --cwd plugins/tribe/scripts/runner --frozen-lockfile
 cd plugins/tribe/scripts/runner && bun run check
 bash plugins/tribe/scripts/tests/test-runner-done-negative.sh
@@ -3550,10 +3572,11 @@ git -C $F fetch -q && { echo "master=$(git -C $F rev-parse master) origin=$(git 
 - [ ] **Step 4: D10 — both layers** —
   `CLAUDE_CONFIG_DIR=$S bun $T/bypass-audit.ts scan --home $FH/go-after --claude-home $S --sandbox $S --snapshot-before $E/d10-v2-sandbox-before.json --repo $F | tee $E/d10-v2-scan.txt`
   → `BYPASS_AUDIT=PASS`. Then dispatch ONE fresh `general-purpose` subagent with exactly the auditor
-  brief of spec §6.8, filled with the transcript paths the scan listed (run the scan again with
-  `--json` to get them) — nothing else; save its full answer to `$E/d10-v2-auditor.md`. Expected
-  verdict `CLEAN`. A `BYPASS` or `UNSURE` verdict is a finding for the owner, not something this task
-  argues down.
+  brief of spec §6.8, filled with the transcript paths the scan listed (the scan's `--json` output
+  carries them as `transcripts`) — nothing else; save its full answer, verbatim, to
+  `$E/d10-v2-auditor.md`. The Done asserts the line `VERDICT: CLEAN`; a `BYPASS` or `UNSURE` verdict
+  (or a malformed verdict line) fails the task and is a finding for the owner — never argued down,
+  never re-rolled with a second auditor.
 
 - [ ] **Step 5: Before → after** — write `$E/v2-before-after.md`: one row each for Tribe dispatches
   (by type), Tribe skill calls, runner-run Done rows, executor wall clock, full-stack wall clock
@@ -3573,7 +3596,7 @@ grep -q '^SHIPPED=true' docs/superpowers/evidence/2026-09-27-runner-driver-only/
 grep -q '^go test exit 0$' docs/superpowers/evidence/2026-09-27-runner-driver-only/v2-after-master.txt
 grep -q '^BYPASS_AUDIT=PASS$' docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v2-scan.txt
 python3 -c "import json; r=[json.loads(l) for l in open('docs/superpowers/evidence/2026-09-27-runner-driver-only/v2-after-done.jsonl') if l.strip()]; ok={t for x in r if x['kind']=='done_run' and x['passed'] for t in [x['stepTask']]}; assert {'T1','T2','T3','T4'} <= ok, ok"
-test -s docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v2-auditor.md
+grep -q '^VERDICT: CLEAN$' docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v2-auditor.md
 ```
 
 Expected: every command exits 0.
@@ -3637,7 +3660,7 @@ test "$(uname -s)" = Plan9
 grep -q '^V3=PASS$' docs/superpowers/evidence/2026-09-27-runner-driver-only/v3a-e2e.txt
 grep -q '^exit 2$' docs/superpowers/evidence/2026-09-27-runner-driver-only/v3b-runner.txt
 grep -q '^BYPASS_AUDIT=PASS$' docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v3-scan.txt
-test -s docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v3-auditor.md
+grep -q '^VERDICT: CLEAN$' docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v3-auditor.md
 python3 -c "import json; c=json.load(open('/Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns/go-v3-real/campaign-state.json'))['cards']['v3-negative']; assert c['status']=='escalated' and 'doneSha' not in c and 'passedSha' not in c['tasks'][0], c"
 ```
 
@@ -3791,7 +3814,7 @@ bun $T/bypass-audit.ts scan --transcript "$T_MAIN" --claude-home $S --sandbox $S
 ```bash
 grep -q '^V5=PASS$' docs/superpowers/evidence/2026-09-27-runner-driver-only/v5-check.txt
 grep -q '^BYPASS_AUDIT=PASS$' docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v5-scan.txt
-test -s docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v5-auditor.md
+grep -q '^VERDICT: CLEAN$' docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v5-auditor.md
 bash -n plugins/tribe/scripts/tests/runner-driver-only/v5-stage-a.sh
 bash -n plugins/tribe/scripts/tests/runner-driver-only/v5-check.sh
 ```
@@ -3807,7 +3830,15 @@ sandbox runs and the V4 positive control, with their evidence paths), `.c3/` (a 
 - [ ] **Step 1: `after.md`** — one row per goal/V-row of spec §6 (V1–V7, G3', G5, G6, D10): the
   BEFORE value (from `baseline.md`; the sandbox BEFORE numbers from spec §6.7's run), the AFTER value,
   the evidence file, PASS/FAIL. Every AFTER value is copied from an evidence file, never retyped from
-  memory.
+  memory. Then a section `## Where everything is` (Shaman amendment A5 — the Shaman re-runs `go test`,
+  the scanner and his own auditor at acceptance): one row per real run — `go-before` (real home),
+  `go-before-sandbox`, `go-after` (V2), `go-v3-real` (V3b), `go-v4-tribe` (V4), the V5 home — giving its
+  campaign home (absolute path), the Claude home it ran in (`$S` or `~/.claude`), and EVERY transcript
+  path of the run (main sessions and `subagents/*.jsonl`), produced by
+  `bun $T/bypass-audit.ts scan --home <campaign home> --claude-home <claude home> --json` (field
+  `transcripts`; for V5, `--transcript <its main transcript>`) and pasted, not retyped — concrete
+  absolute paths only in this section, no globs. Also list the fixture's final master sha and the
+  three E2E scripts.
 
 - [ ] **Step 2: README + C3** — as listed; `c3x check` → `ok: true`.
 
@@ -3818,6 +3849,10 @@ sandbox runs and the V4 positive control, with their evidence paths), `.c3/` (a 
 ```bash
 test -s docs/superpowers/evidence/2026-09-27-runner-driver-only/after.md
 ! grep -n 'FAIL' docs/superpowers/evidence/2026-09-27-runner-driver-only/after.md
+grep -q '^## Where everything is' docs/superpowers/evidence/2026-09-27-runner-driver-only/after.md
+for h in go-before go-before-sandbox go-after go-v3-real go-v4-tribe; do grep -q "/Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns/$h" docs/superpowers/evidence/2026-09-27-runner-driver-only/after.md || exit 1; done
+python3 -c "import re,os; t=open('docs/superpowers/evidence/2026-09-27-runner-driver-only/after.md').read(); sec=t.split('## Where everything is',1)[1]; paths=re.findall(r'(/Users/[^\s\x60|*]+?\.jsonl)', sec); assert paths, 'no transcript path listed'; missing=[p for p in paths if not os.path.exists(p)]; assert not missing, missing"
+
 C3=$(ls -d ~/.claude/plugins/cache/c3-skill-marketplace/c3-skill/*/skills/c3 | tail -1) && C3X_MODE=agent bash "$C3/bin/c3x.sh" check | grep -q 'ok: true'
 ```
 
