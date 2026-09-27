@@ -1,0 +1,11 @@
+# V7 baseline — runner suite on a clean clone of master 3194976 (planning, 2026-09-27)
+
+$ bun install --cwd plugins/tribe/scripts/runner --frozen-lockfile && cd plugins/tribe/scripts/runner && bun run check
+
+ 1351 pass
+ 14 skip
+ 0 fail
+ 3266 expect() calls
+Ran 1365 tests across 56 files. [296.95s]
+
+wall clock: 4:57.71 (bun test 296.95 s)

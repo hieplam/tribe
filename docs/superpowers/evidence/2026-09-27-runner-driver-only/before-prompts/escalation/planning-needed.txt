@@ -1,0 +1,10 @@
+# Escalation: small-helpers
+
+**Reason:** planning_needed
+
+## Context
+Missing on disk: plan
+
+## Options
+- Append a ruling to `/Users/owner/.tribe/-Users-owner-repo-runner-e2e-go/campaigns/go-after/answers.md` and re-run with `--include-escalated`.
+- If the question is owner-only (see the campaign's ownerOnlyEscalations), park it for the owner instead.

@@ -1,0 +1,8 @@
+PASS merged: PR #1 is merged (merge_commit_sha=6ad5914d8afa382ca2daba1ae01735e408d0965c)
+PASS mergeShaAncestorOfMaster: 6ad5914d8afa382ca2daba1ae01735e408d0965c is an ancestor of origin/master
+PASS checksGreen: all 2 check(s) concluded success
+PASS worktreeAndBranchGone: worktree for card/small-helpers is gone and origin/card/small-helpers is deleted
+PASS schemaGuard: no schema-lock paths configured; guard is a no-op
+PASS gapGateStamped: PR #1 carries a gap-gate v1 stamp for small-helpers (matched card id small-helpers, minted=none)
+PASS ledgerCommitted: the stamp minted no ids; there is nothing to commit
+SHIPPED=true FAILED_POINTS=(none)

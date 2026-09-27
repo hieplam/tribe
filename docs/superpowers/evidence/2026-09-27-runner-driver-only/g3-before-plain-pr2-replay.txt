@@ -1,0 +1,8 @@
+PASS merged: PR #2 is merged (merge_commit_sha=b32859a8a3998295909ba080fc72f344fc58b87f)
+PASS mergeShaAncestorOfMaster: b32859a8a3998295909ba080fc72f344fc58b87f is an ancestor of origin/master
+PASS checksGreen: all 2 check(s) concluded success
+PASS worktreeAndBranchGone: worktree for plain/small-helpers is gone and origin/plain/small-helpers is deleted
+PASS schemaGuard: no schema-lock paths configured; guard is a no-op
+FAIL gapGateStamped: PR #2 body carries no `gap-gate v1` stamp — the harness-gap gate never ran for this PR
+FAIL ledgerCommitted: no gap-gate stamp available (point 6 did not report one)
+SHIPPED=false FAILED_POINTS=gapGateStamped,ledgerCommitted

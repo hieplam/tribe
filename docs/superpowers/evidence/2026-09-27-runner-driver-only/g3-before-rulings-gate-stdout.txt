@@ -1,0 +1,4 @@
+campaign viewer: skipped: --no-viewer
+1 ruling(s) in answers.md are not yet ratified: R1 — Max returns ErrEmpty on an empty slice. Add a `ratified-as:` line to each block (see the runner README), then re-run.
+runner exit 5
+{'startedAt': '2026-09-27T08:47:09.277Z', 'endedAt': '2026-09-27T08:47:09.290Z', 'exitCode': 5, 'reason': 'rulings_unratified', 'unratifiedRulings': ['R1 — Max returns ErrEmpty on an empty slice']}

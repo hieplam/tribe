@@ -1,0 +1,8 @@
+$ bun plugins/tribe/scripts/runner/run.ts --repo /Users/hiep/repo/runner-e2e-go --model sonnet --home ~/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns/v6-baseline --dry-run --no-viewer   # master 3194976, state carries tasks[0].heading "Task 9: nowhere" (no such heading in the plan)
+{
+  "cardId": "small-helpers",
+  "phase": {
+    "kind": "fresh"
+  }
+}
+exit 0
