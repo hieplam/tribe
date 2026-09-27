@@ -111,6 +111,14 @@ describe('buildEscalationMarkdown — P5 reason-specific Options', () => {
     expect(markdown).not.toContain('CANNOT clear');
   });
 
+  test('done_failed offers a clarifying ruling or a plan fix, never the verify-failure block', () => {
+    const markdown = buildEscalationMarkdown('C1', 'done_failed', 'task T1 did not pass', fixtureResolved({ homeDir: '/th' }));
+    expect(markdown).toContain('a ruling that clarifies the task helps the next attempt');
+    expect(markdown).toContain('/th/answers.md');
+    expect(markdown).toContain('A Done command in the plan is wrong');
+    expect(markdown).not.toContain('CANNOT clear');
+  });
+
   // Deliberately generic marker text (not the spec's own bullet wording) so these tests can
   // only pass by the implementation ADDING the reason-specific unblock bullet text — never by
   // the `## Context` section trivially echoing the raw `detail` string back.

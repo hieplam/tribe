@@ -36,7 +36,6 @@ import type { VerifyConfig, VerifyResult } from './verify.ts';
 // observable, which `CardOutcome`'s `shipped` variant deliberately does not carry.
 import {
   healSafeResidue,
-  CONTINUE_UNKNOWN_STATE_PROMPT,
   recordBaseSha,
   shipCard,
   escalateCard,
@@ -494,6 +493,10 @@ interface MockLoopIoOptions {
   /** The text served for every card's plan (any `.md` under `docs/plans/`); defaults to
    * `DEFAULT_PLAN`, whose one task resolves `fixtureCard`'s default task index (D1). */
   planContent?: string;
+  /** Default on: a spawned prompt whose `## This turn:` line is a task step is answered with
+   * `TASK_DONE <id> <branch>` without consuming `spawnQueue` (the fixture's Done commands always
+   * pass), so a test scripts only the sessions it is about. `false` turns it off. */
+  autoTaskTurns?: boolean;
 }
 
 /** A plan with exactly the one task `fixtureCard` points at, so the load-time D1 check passes. */
@@ -538,6 +541,8 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
     // C2: the main checkout's current ref — on the base branch unless a test scripts a
     // detached HEAD / other branch via `execHandlers`.
     if (cmd[0] === 'git' && cmd[1] === 'rev-parse' && cmd.includes('--abbrev-ref')) return ok('master\n');
+    if (cmd[0] === 'git' && cmd[1] === 'rev-parse' && cmd.includes('--verify') && cmd.some((a) => a.startsWith('refs/heads/'))) return ok('basesha0\n');
+    if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'add') return ok('');
     if (cmd[0] === 'git' && cmd[1] === 'rev-parse') return ok('basesha0\n');
     if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return fail('no pull requests found');
     if (cmd[0] === 'git' && cmd[1] === 'worktree') return ok('');
@@ -605,6 +610,8 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
     printLine: mock(() => {}),
     spawnSession: mock((params: SpawnSessionParams) => {
       spawnBriefs.push(params.prompt);
+      const taskStep = /^## This turn: task (\S+)/m.exec(params.prompt);
+      if (taskStep && opts.autoTaskTurns !== false) return autoTaskTurn(taskStep[1] as string);
       const next = spawnQueue.shift();
       if (!next) throw new Error('spawnSession called more times than scripted');
       return next(params);
@@ -617,8 +624,18 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
       atomicWrites.push({ path: p, content });
     }),
     removeTree: mock(() => {}),
-    runShell: mock(async () => ({ exitCode: 0, timedOut: false, durationMs: 0, stdout: '', stderr: '' })),
+    runShell: mock(async () => ({ exitCode: 0, timedOut: false, durationMs: 1, stdout: '', stderr: '' })),
   };
+
+  /** The branch the task turn reports: the running card's recorded branch (read after `init`,
+   * once `onSessionStart` has persisted it), else `feat/auto`. */
+  async function* autoTaskTurn(taskId: string): AsyncGenerator<SessionMessage> {
+    yield { type: 'system', subtype: 'init', session_id: `sess-auto-${taskId}` };
+    const current = JSON.parse(writtenFiles.get(campaignStatePathOf(homeDir)) as string) as CampaignState;
+    const running = Object.values(current.cards).find((c) => c.status === 'running');
+    const branch = running?.branch ?? 'feat/auto';
+    yield { type: 'result', subtype: 'success', result: `Task done.\nTASK_DONE ${taskId} ${branch}`, session_id: `sess-auto-${taskId}` };
+  }
 
   return { io, calls, writtenFiles, spawnBriefs, lockCalls, ensuredDirs, atomicWrites, renameCalls };
 }
@@ -2032,7 +2049,7 @@ describe('runLoop — bounded auto-retry (P1 fix-list, spec "wait-aware liveness
     // literal `session_only` resume prompt, with `resume: 'sess-c1-try1'` set on the SDK call
     // (verified indirectly: only the resume path ever sends this exact literal string; a fresh
     // spawn always renders through `executorBrief`'s template).
-    expect(spawnBriefs[1]).toBe(CONTINUE_UNKNOWN_STATE_PROMPT);
+    expect(spawnBriefs[1]?.split('\n')[0]).toBe('## This turn: deliver');
     expect(spawnBriefs[1]).not.toContain('{{CARD_ID}}');
 
     const finalState = JSON.parse(writtenFiles.get('/th/campaign-state.json') as string);
@@ -2045,7 +2062,7 @@ describe('runLoop — bounded auto-retry (P1 fix-list, spec "wait-aware liveness
     // card (branch: null) whose session recorded a sessionId before erroring takes the D4
     // RESUME path on retry (`phase.ts`'s `session_only` reason), each of the 2 bounded retries
     // costs UP TO TWO underlying SDK spawns — the resume attempt itself, and (only when THAT
-    // also surfaces `'error'`) `runCardSession`'s own pre-existing resume-failure fallback to
+    // also surfaces `'error'`) the first turn's resume-failure fallback (`turnDepsFor`'s `runTurn`) to
     // one fresh-with-digest spawn (card-actions.ts, unchanged by this fix-round). Worst case,
     // every one of those 5 spawns (1 initial fresh + 2 retries x [resume attempt + fresh
     // fallback]) errors — this is exactly that worst case, proving the run-loop's own retry
@@ -2071,8 +2088,8 @@ describe('runLoop — bounded auto-retry (P1 fix-list, spec "wait-aware liveness
     expect(spawnBriefs).toHaveLength(5);
     // Retries 1 and 2 both actually took the resume path (the literal prompt, not a rendered
     // executor-brief template) before falling back — the same proof point as test (a) above.
-    expect(spawnBriefs[1]).toBe(CONTINUE_UNKNOWN_STATE_PROMPT);
-    expect(spawnBriefs[3]).toBe(CONTINUE_UNKNOWN_STATE_PROMPT);
+    expect(spawnBriefs[1]?.split('\n')[0]).toBe('## This turn: deliver');
+    expect(spawnBriefs[3]?.split('\n')[0]).toBe('## This turn: deliver');
   });
 
   test('(c) session outcome "timeout": no retry, exactly 1 attempt', async () => {
@@ -3112,5 +3129,50 @@ describe('runLoop — D1: the task index is validated at load', () => {
     const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ status: 'shipped', tasks: [{ id: 'T1', heading: 'Task 9: nowhere' }] }) } });
     const { io } = buildMockLoopIo({ stateJson: JSON.stringify(state), answers: '', spawnQueue: [] });
     expect((await runLoop(baseLoopConfig(), io)).exitCode).toBe(EXIT_OK);
+  });
+});
+
+describe('runLoop — the turn loop drives a fresh card end to end (spec §4.4)', () => {
+  test('a fresh card: task turn, runner-run Done, deliver turn, shipped', async () => {
+    const card = fixtureCard({ branch: null, tasks: [{ id: 'T1', heading: 'Task 1: Widget' }] });
+    delete (card as { doneSha?: string }).doneSha;
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: card } });
+    const { io, spawnBriefs, calls } = buildMockLoopIo({
+      stateJson: JSON.stringify(state),
+      answers: '',
+      spawnQueue: [() => messages(shippedMessages(41, 'abc0041', 'sess-c1'))],
+      execHandlers: cleanCommitAndVerifyHandlers('abc0041'),
+    });
+    const result = await runLoop(baseLoopConfig(), io);
+    expect(result.processed.map((o) => o.kind)).toEqual(['shipped']);
+    expect(spawnBriefs[0]).toContain('## This turn: task T1 — Task 1: Widget');
+    expect(spawnBriefs[1]).toContain('## This turn: deliver');
+    expect((io.runShell as ReturnType<typeof mock>).mock.calls.map((c) => c[0])).toEqual(['true']);
+    expect(calls.some((c) => c[0] === 'git' && c[1] === 'worktree' && c[2] === 'add')).toBe(true);
+    const doneRowsWritten = (io.appendLog as ReturnType<typeof mock>).mock.calls
+      .filter((c) => c[0] === '/th/runs/fixture-run/done.jsonl')
+      .map((c) => JSON.parse(c[1] as string).kind);
+    expect(doneRowsWritten).toEqual(['command', 'done_run']);
+  });
+  test('revert_and_redo clears the recorded progress: the first turn is a task turn, not delivery', async () => {
+    let remoteBranch = true;
+    // fixtureCard is deliver-ready (T1 passed, doneSha set); revert_and_redo must throw that away.
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ branch: 'feat/c1-widget', sessionId: null }) } });
+    const { io, spawnBriefs } = buildMockLoopIo({
+      stateJson: JSON.stringify(state),
+      answers: '',
+      spawnQueue: [() => messages(shippedMessages(41, 'abc0041', 'sess-c1'))],
+      execHandlers: [
+        (cmd) => (cmd[0] === 'git' && cmd[1] === 'ls-remote' ? ok(remoteBranch ? 'abc\trefs/heads/feat/c1-widget\n' : '') : null),
+        (cmd) => {
+          if (cmd[0] === 'git' && cmd[1] === 'push' && cmd.includes('--delete')) { remoteBranch = false; return ok(''); }
+          return null;
+        },
+        ...cleanCommitAndVerifyHandlers('abc0041'),
+      ],
+    });
+    await runLoop(baseLoopConfig(), io);
+    expect(spawnBriefs[0]).toContain('## This turn: task T1');
+    expect(spawnBriefs[0]).not.toContain('## This turn: deliver');
   });
 });

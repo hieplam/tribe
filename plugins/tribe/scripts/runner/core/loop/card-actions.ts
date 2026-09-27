@@ -1,5 +1,5 @@
-// Per-card work: escalate/ship a card, run its executor session (with the D4 resume-with-
-// fallback matrix), and REVERT_AND_REDO. Every world-touching effect goes through the
+// Per-card work: escalate/ship a card, drive its plan through the turn loop (`turns.ts`, with
+// the D4 resume-with-fallback matrix on the first turn), and REVERT_AND_REDO. Every world-touching effect goes through the
 // injected `LoopIO`/`SessionIO` seams — this module never imports a world-touching module
 // itself.
 import type { Card, CampaignState, ResolvedConfig } from '../types.ts';
@@ -13,7 +13,11 @@ import type { BriefCard, BriefState } from '../brief.ts';
 import type { CardPhase } from './phase.ts';
 import { buildStateDigest, findWorktreePathForBranch } from './phase.ts';
 import { persistLocalState } from './commit-guard.ts';
-import { answersPathOf, escalationPathOf, supervisorLedgerPathOf } from '../paths.ts';
+import { answersPathOf, doneWorktreePathOf, escalationPathOf, supervisorLedgerPathOf } from '../paths.ts';
+import { doneRecordPathOf } from '../run-record.ts';
+import { applyPass, doneRows, judgeDoneRun, tailOf, type DoneCommandResult, type DoneRunVerdict } from '../done.ts';
+import type { PlannedCommand } from '../plan-index.ts';
+import { driveCardTurns, type TurnDeps } from './turns.ts';
 import { decideBaseSyncHeal, decideResidueHeal, type HealAction } from '../residue.ts';
 import { WORKTREE_STILL_PRESENT_DETAIL } from '../verify.ts';
 import { sessionUrlFor } from '../viewer-launch.ts';
@@ -413,6 +417,13 @@ function escalationOptionsSection(
       ...bullets,
     ];
   }
+  if (reason === 'done_failed') {
+    return [
+      '## Options',
+      `- The work is not done yet: a ruling that clarifies the task helps the next attempt — append it to \`${answersPathOf(resolved.homeDir)}\` and re-run with \`--include-escalated\`.`,
+      '- A Done command in the plan is wrong: fix the plan on the base branch through a PR, then re-run with `--include-escalated`.',
+    ];
+  }
   // needs_direction / planning_needed (and any other answerable reason): a human judgment is
   // the unblock, so the ruling path leads.
   return [
@@ -505,23 +516,6 @@ export function toBriefState(state: CampaignState): BriefState {
   };
 }
 
-export const CONTINUE_PR_OPEN_PROMPT =
-  "Resume this card: check the open PR's CI status and complete the merge sequence if green, " +
-  'then report the terminal SHIPPED/NEEDS_DIRECTION line.';
-export const CONTINUE_BRANCH_PROMPT =
-  'Resume this card from your existing branch/worktree: continue implementing the plan, then ' +
-  'report the terminal SHIPPED/NEEDS_DIRECTION line.';
-// P1 audit fix-round (blocker, skinnerB): the `session_only` resume reason — no branch or PR
-// was ever recorded locally, so (unlike CONTINUE_PR_OPEN_PROMPT/CONTINUE_BRANCH_PROMPT) this
-// prompt cannot assume either exists; it tells the resumed session to check for itself before
-// assuming a clean slate.
-export const CONTINUE_UNKNOWN_STATE_PROMPT =
-  'Resume this card: no branch or PR was ever recorded for it locally (the previous attempt ' +
-  'ended its turn before reporting one), so first check what you already did — `git status`, ' +
-  '`git branch`, `gh pr list --head <branch>` — before continuing; do not assume a clean ' +
-  'slate. Then continue implementing the plan and report the terminal SHIPPED/NEEDS_DIRECTION ' +
-  'line.';
-
 export function buildSessionIOForCard(ctx: CardCtx): SessionIO {
   const { cardId, state, resolved, io } = ctx;
   const card = state.cards[cardId];
@@ -592,66 +586,142 @@ async function performRevertAndRedoImpl(ctx: CardCtx): Promise<void> {
   }
 }
 
-/** Runs the executor session for one card's phase, implementing the D4 resume-with-fallback:
- * a `resume` phase attempts `runSession({resume: sessionId})` — with the prompt selected by
- * `phase.reason` (`pr_open` / `branch_no_pr` / the P1-fix-round `session_only`, for a card with
- * no recorded branch/PR but a recorded sessionId) — and if (and only if) that surfaces a typed
- * `error` outcome (a failed resume attempt: no transcript, SDK error — never on `timeout`,
- * which means the prior session may still be running), it falls back to a fresh session
- * carrying a state digest. `revert_and_redo` and a blind `fresh` (no digest) just spawn fresh
- * with the plain brief; a `fresh` phase carrying a digest (F8: open PR, no sessionId) spawns
- * fresh too, but with that digest prepended — never blind. */
-export async function runCardSession(ctx: CardCtx, phase: CardPhase): Promise<SessionResult> {
-  const { cardId, state, resolved } = ctx;
-  const card = state.cards[cardId];
+/** Every effect `driveCardTurns` needs, bound to this card. The first turn implements the D4
+ * resume-with-fallback: a `resume` phase resumes the recorded session with the turn prompt, and
+ * only a typed `error` (a failed resume: no transcript, SDK error — never `timeout`, which means
+ * the prior session may still be running) falls back to a fresh session carrying a state digest.
+ * A fresh or revert_and_redo first turn spawns fresh; a `fresh` phase carrying a digest (F8: an
+ * open PR, no sessionId) prepends that digest — never blind. Later turns resume the session. */
+function turnDepsFor(ctx: CardCtx, phase: CardPhase): TurnDeps {
+  const { cardId, state, resolved, io } = ctx;
   const sessionConfig = sessionConfigFor(cardId, resolved);
+  const freshBrief = (answersContent: string, prompt: string): string =>
+    `${executorBrief(toBriefCard(cardId, state.cards[cardId]), toBriefState(state), answersContent, resolved.briefTemplate, resolved.homeDir, state.campaign)}\n\n${prompt}`;
+  const inRepo = { cwd: resolved.repoRoot, timeoutMs: LOCAL_GIT_QUERY_TIMEOUT_MS };
 
-  if (phase.kind === 'resume') {
-    const prompt =
-      phase.reason === 'pr_open'
-        ? CONTINUE_PR_OPEN_PROMPT
-        : phase.reason === 'session_only'
-          ? CONTINUE_UNKNOWN_STATE_PROMPT
-          : CONTINUE_BRANCH_PROMPT;
-    const resumeIO = buildSessionIOForCard(ctx);
-    const resumeResult = await runSession(
-      { brief: prompt, resume: phase.sessionId },
-      sessionConfig,
-      resumeIO,
-    );
-    if (resumeResult.outcome !== 'error') {
-      return resumeResult;
-    }
+  return {
+    async runTurn(prompt, first) {
+      if (!first) {
+        return runSession({ brief: prompt, resume: state.cards[cardId].sessionId ?? undefined }, sessionConfig, buildSessionIOForCard(ctx));
+      }
+      if (phase.kind === 'resume') {
+        const resumed = await runSession({ brief: prompt, resume: phase.sessionId }, sessionConfig, buildSessionIOForCard(ctx));
+        if (resumed.outcome !== 'error') return resumed;
+        const digest = buildStateDigest(cardId, state.cards[cardId], resumed.finalText);
+        return runSession({ brief: freshBrief(`${digest}\n\n---\n\n${resolved.answersContent}`, prompt) }, sessionConfig, buildSessionIOForCard(ctx));
+      }
+      const answersContent =
+        phase.kind === 'fresh' && phase.digest ? `${phase.digest}\n\n---\n\n${resolved.answersContent}` : resolved.answersContent;
+      return runSession({ brief: freshBrief(answersContent, prompt) }, sessionConfig, buildSessionIOForCard(ctx));
+    },
 
-    const digest = buildStateDigest(cardId, card, resumeResult.finalText);
-    const brief = executorBrief(
-      toBriefCard(cardId, card),
-      toBriefState(state),
-      `${digest}\n\n---\n\n${resolved.answersContent}`,
-      resolved.briefTemplate,
-      resolved.homeDir,
-      ctx.state.campaign,
-    );
-    const freshIO = buildSessionIOForCard(ctx);
-    return runSession({ brief }, sessionConfig, freshIO);
-  }
+    async acceptTaskDone(branch) {
+      // The branch name reaches git argv: refuse anything git could read as an option or a second word.
+      if (branch === '' || /\s/.test(branch) || branch.startsWith('-')) {
+        return { ok: false, reason: `"${branch}" is not a branch name` };
+      }
+      const tipResult = await io.exec(['git', 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], inRepo);
+      const tip = tipResult.stdout.trim();
+      if (tipResult.exitCode !== 0 || tip.length === 0) return { ok: false, reason: `branch ${branch} does not exist in the repo` };
+      const card = state.cards[cardId];
+      if (card.branch !== null && card.branch !== branch) return { ok: false, reason: `the card's branch is ${card.branch}` };
+      if (card.baseSha === null) return { ok: false, reason: 'no base commit recorded' };
+      const descends = await io.exec(['git', 'merge-base', '--is-ancestor', card.baseSha, tip], inRepo);
+      if (descends.exitCode !== 0) return { ok: false, reason: `tip ${tip} does not descend from the card's base ${card.baseSha}` };
+      return { ok: true, tip };
+    },
 
-  // F8: a `fresh` phase carrying a digest (open PR, no sessionId — see `deriveCardPhase`) must
-  // not spawn blind either; compose it the same way the resume-failure fallback above does.
-  const answersContent =
-    phase.kind === 'fresh' && phase.digest
-      ? `${phase.digest}\n\n---\n\n${resolved.answersContent}`
-      : resolved.answersContent;
-  const brief = executorBrief(
-    toBriefCard(cardId, card),
-    toBriefState(state),
-    answersContent,
-    resolved.briefTemplate,
-    resolved.homeDir,
-    ctx.state.campaign,
-  );
-  const freshIO = buildSessionIOForCard(ctx);
-  return runSession({ brief }, sessionConfig, freshIO);
+    async runDone(planned, sha, stepTaskId, attempt) {
+      let path: string;
+      try {
+        path = doneWorktreePathOf(resolved.homeDir, cardId);
+      } catch (err) {
+        // The containment guard refused this card id: nothing is created or deleted.
+        return { kind: 'infrastructure', reason: (err as Error).message };
+      }
+      const added = await serializeRepoGitMutation(async () => {
+        await io.exec(['git', 'worktree', 'remove', '--force', path], inRepo); // absent is fine
+        if (io.fileExists(path)) io.removeTree(path);
+        await io.exec(['git', 'worktree', 'prune'], inRepo);
+        return io.exec(['git', 'worktree', 'add', '--detach', '--force', path, sha], { cwd: resolved.repoRoot, timeoutMs: REMOTE_OR_HOOK_GIT_TIMEOUT_MS });
+      });
+      if (added.exitCode !== 0) {
+        return { kind: 'infrastructure', reason: `git worktree add ${path} ${sha} failed: ${added.stderr.trim()}` };
+      }
+
+      const card = state.cards[cardId];
+      const env = {
+        RUNNER_CAMPAIGN_HOME: resolved.homeDir, RUNNER_CARD_ID: cardId, RUNNER_TASK_ID: stepTaskId,
+        RUNNER_BASE_SHA: card.baseSha ?? '', RUNNER_REPO: resolved.repoRoot,
+      };
+      const results: DoneCommandResult[] = [];
+      let verdict: DoneRunVerdict;
+      try {
+        for (const { command } of planned) {
+          const run = await io.runShell(command, { cwd: path, env, timeoutMs: DONE_COMMAND_TIMEOUT_MS });
+          results.push({
+            command, exitCode: run.exitCode, timedOut: run.timedOut, durationMs: run.durationMs,
+            stdoutTail: tailOf(run.stdout), stderrTail: tailOf(run.stderr),
+          });
+          if (run.exitCode !== 0 || run.timedOut) break;
+        }
+        verdict = judgeDoneRun(planned, results);
+        const recordPath = doneRecordPathOf(resolved.homeDir, resolved.runId);
+        for (const row of doneRows({ at: io.now(), cardId, stepTask: stepTaskId, attempt, sha, planned, results, verdict })) {
+          io.appendLog(recordPath, JSON.stringify(row));
+        }
+      } finally {
+        await serializeRepoGitMutation(() => io.exec(['git', 'worktree', 'remove', '--force', path], inRepo));
+      }
+      return { kind: 'verdict', verdict };
+    },
+
+    recordPass(throughIndex, sha, branch) {
+      const card = state.cards[cardId];
+      const passed = applyPass(card.tasks, throughIndex, sha);
+      card.tasks = passed.tasks;
+      if (passed.doneSha !== null) card.doneSha = passed.doneSha;
+      else delete card.doneSha;
+      card.branch ??= branch;
+      card.updatedAt = io.now();
+      persistLocalState(state, resolved, io);
+    },
+
+    async finishShipped(result) {
+      const card = state.cards[cardId];
+      card.pr = result.pr ?? card.pr;
+      await recordBranchFromPr(ctx);
+      const verified = await verifyThenHealIfNeeded(ctx, verifyConfigOf(ctx));
+      if (verified.shipped) return shipCard(ctx, verified);
+      return escalateCard(ctx, 'verify_failed_twice', formatVerifyFailure(verified), verified.failedPoints);
+    },
+
+    escalate: (reason, detail) => escalateCard(ctx, reason, detail),
+  };
+}
+
+/** One Done command's wall-clock bound (spec §4.5): a hung command costs the attempt, not the run. */
+const DONE_COMMAND_TIMEOUT_MS = 600_000;
+
+function verifyConfigOf(ctx: CardCtx): VerifyConfig {
+  const { state, resolved } = ctx;
+  return {
+    repoRoot: resolved.repoRoot,
+    remote: resolved.remote,
+    baseBranch: resolved.baseBranch,
+    schemaLockPaths: state.schemaLockPaths,
+    docsOnlyPaths: state.docsOnlyPaths,
+  };
+}
+
+/** REVERT_AND_REDO starts the card over, so the recorded Done progress goes with the branch. */
+function clearProgress(ctx: CardCtx): void {
+  const { cardId, state, resolved, io } = ctx;
+  const card = state.cards[cardId];
+  card.tasks = card.tasks.map(({ passedSha: _cleared, ...task }) => task);
+  delete card.doneSha;
+  card.updatedAt = io.now();
+  persistLocalState(state, resolved, io);
 }
 
 /** Records the commit the card's work is being cut from, BEFORE its session spawns — the
@@ -718,62 +788,40 @@ export async function recordBranchFromPr(ctx: CardCtx): Promise<void> {
 }
 
 export async function actOnCard(ctx: CardCtx, phase: CardPhase): Promise<CardOutcome> {
-  const { cardId, state, resolved, io } = ctx;
+  const { cardId, state, resolved } = ctx;
   const card = state.cards[cardId];
 
   if (phase.kind === 'verify_only') {
     card.pr = phase.pr;
     await recordBranchFromPr(ctx);
-    const verifyConfig: VerifyConfig = {
-      repoRoot: resolved.repoRoot,
-      remote: resolved.remote,
-      baseBranch: resolved.baseBranch,
-      schemaLockPaths: state.schemaLockPaths,
-      docsOnlyPaths: state.docsOnlyPaths,
-    };
-    const result = await verifyThenHealIfNeeded(ctx, verifyConfig);
+    const result = await verifyThenHealIfNeeded(ctx, verifyConfigOf(ctx));
     if (result.shipped) {
       return shipCard(ctx, result);
     }
     return escalateCard(ctx, 'verify_failed_twice', formatVerifyFailure(result), result.failedPoints);
+  }
+
+  // A card whose plan was missing at load has no task index and never gets here (`nextCard`
+  // escalates `planning_needed` first); defended anyway, before anything destructive runs.
+  const tasks = resolved.taskIndex[cardId] ?? [];
+  if (tasks.length === 0) {
+    return escalateCard(ctx, 'planning_needed', 'no resolved task index for this card');
   }
 
   if (phase.kind === 'revert_and_redo') {
     await performRevertAndRedo(ctx);
+    clearProgress(ctx);
   }
 
   await recordBaseSha(ctx, phase);
-  const sessionResult = await runCardSession(ctx, phase);
-
-  if (sessionResult.outcome === 'shipped') {
-    card.pr = sessionResult.pr ?? card.pr;
-    await recordBranchFromPr(ctx);
-    const verifyConfig: VerifyConfig = {
-      repoRoot: resolved.repoRoot,
-      remote: resolved.remote,
-      baseBranch: resolved.baseBranch,
-      schemaLockPaths: state.schemaLockPaths,
-      docsOnlyPaths: state.docsOnlyPaths,
-    };
-    const result = await verifyThenHealIfNeeded(ctx, verifyConfig);
-    if (result.shipped) {
-      return shipCard(ctx, result);
-    }
-    return escalateCard(ctx, 'verify_failed_twice', formatVerifyFailure(result), result.failedPoints);
-  }
-
-  if (sessionResult.outcome === 'needs_direction') {
-    return escalateCard(ctx, 'needs_direction', sessionResult.finalText);
-  }
-
-  // 'error' or 'timeout' with no further D4 fallback available (a fresh/revert_and_redo
-  // session, or a resume's own fresh-with-digest fallback, itself errored/timed out): not a
-  // human-decision escalation — the card's branch/sessionId are already recorded locally
-  // (write locality), so simply stop this run; the next start's D4 derivation resumes it.
-  return {
-    kind: 'stopped',
-    cardId,
-    reason: `session ended with outcome "${sessionResult.outcome}": ${sessionResult.finalText}`,
-    retryable: sessionResult.outcome === 'error',
-  };
+  return driveCardTurns(
+    {
+      cardId,
+      card,
+      tasks,
+      planPath: card.plan ?? '(missing)',
+      delivery: { baseBranch: resolved.baseBranch, remote: resolved.remote, repoRoot: resolved.repoRoot },
+    },
+    turnDepsFor(ctx, phase),
+  );
 }
