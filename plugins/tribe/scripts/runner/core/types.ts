@@ -16,6 +16,14 @@ export interface TaskRef {
   passedSha?: string;
 }
 
+/** A `TaskRef` resolved against its plan at load (D1): the heading exists once, and its Done
+ * section yields these commands. Produced by `plan-index.ts`'s `resolveTaskIndex`. */
+export interface ResolvedTask {
+  id: string;
+  heading: string;
+  doneCommands: string[];
+}
+
 /** D2 per-card record. Nullable fields are unset until the loop (Task 6) fills them in;
  * `baseSha` is REQUIRED (present, but nullable) because D3's schema guard diffs from it. */
 export interface Card {
@@ -174,6 +182,10 @@ export interface ResolvedConfig extends RunLoopConfig {
   baseBranch: string;
   answersContent: string;
   briefTemplate: string;
+  /** D1: every eligible card's task index, resolved against its plan at load (card id → tasks
+   * in order). Eligible = in the `--cards`-filtered sequence, not `shipped`, plan on disk; a card
+   * outside that set has no entry. */
+  taskIndex: Record<string, ResolvedTask[]>;
 }
 
 /** Process exit codes — the runner's shared vocabulary, homed in the kernel so leaf modules

@@ -595,6 +595,8 @@ describe('writeReport — W-F5: last-tick blocked reconciliation reaches the rep
     const written = new Map<string, string>();
     written.set('/th/campaign-state.json', JSON.stringify(state));
     written.set('/th/answers.md', '');
+    // B's plan, so the load-time task-index check (D1) resolves B's one task.
+    written.set('/repo/docs/plans/c1.md', '### Task 1\n\n#### Done\n\n```bash\ntrue\n```\n');
 
     const loopIo: LoopIO = {
       exec: mock(async (cmd: string[]): Promise<ExecResult> => {

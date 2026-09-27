@@ -15,7 +15,8 @@ import {
   type LoopResult,
   type RunLoopConfig,
 } from '../core/loop.ts';
-import { loadState, resetCard, serializeState } from '../core/state.ts';
+import { loadState, resetCard, serializeState, UnsupportedStateVersionError } from '../core/state.ts';
+import { TaskIndexError } from '../core/plan-index.ts';
 import { campaignStatePathOf, escalationPathOf, reportDirOf } from '../core/paths.ts';
 import { buildRealIo, unsetAnthropicApiKeyEnv } from '../adapters/run-io.adapter.ts';
 import { launchViewer } from '../adapters/viewer-launch.adapter.ts';
@@ -970,9 +971,10 @@ export async function main(): Promise<void> {
   }
 
   if (thrown) {
-    console.error(
-      `campaign runner: unexpected error: ${thrown instanceof Error ? thrown.message : String(thrown)}`,
-    );
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    // A state or task index the author must fix is a refusal with instructions, not a crash.
+    const isRefusal = thrown instanceof TaskIndexError || thrown instanceof UnsupportedStateVersionError;
+    console.error(isRefusal ? `campaign runner: refused: ${message}` : `campaign runner: unexpected error: ${message}`);
     process.exit(EXIT_ERROR);
     return;
   }

@@ -491,7 +491,13 @@ interface MockLoopIoOptions {
   /** When true, every card's spec/plan path is treated as MISSING on disk (drives the
    * PLANNING_NEEDED trigger) — off by default so unrelated tests aren't spuriously escalated. */
   missingSpecPlan?: boolean;
+  /** The text served for every card's plan (any `.md` under `docs/plans/`); defaults to
+   * `DEFAULT_PLAN`, whose one task resolves `fixtureCard`'s default task index (D1). */
+  planContent?: string;
 }
+
+/** A plan with exactly the one task `fixtureCard` points at, so the load-time D1 check passes. */
+const DEFAULT_PLAN = '### Task 1: Widget\n\n#### Done\n\n```bash\ntrue\n```\n';
 
 interface MockLoopIoResult {
   io: LoopIO;
@@ -562,8 +568,12 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
     readFile: mock((p: string) => {
       if (p === BRIEF_TEMPLATE_PATH) return '# Executor brief for {{CARD_ID}}\n{{ANSWERS_CONTENT}}';
       const content = writtenFiles.get(p);
-      if (content === undefined) throw new Error(`readFile: no fixture for ${p}`);
-      return content;
+      if (content !== undefined) return content;
+      // A plan is readable exactly while `fileExists` says it is on disk — a test that makes the
+      // plan vanish (T26's merge shape) gets the ENOENT the real fs would raise.
+      const isPlan = p.includes('/docs/plans/') && p.endsWith('.md');
+      if (isPlan && io.fileExists(p)) return opts.planContent ?? DEFAULT_PLAN;
+      throw new Error(`readFile: no fixture for ${p}`);
     }),
     writeFile: mock((p: string, content: string) => {
       writtenFiles.set(p, content);
@@ -683,8 +693,8 @@ describe('runLoop — C1: a card whose merge removed its own plan path finalises
       spawnQueue: [() => messages(shippedMessages(926, 'aaaaaaa', 'sess-c1'))],
     });
     // The plan exists at pre-flight and vanishes with the merge — exactly T26's shape. The
-    // mock's default `readFile` already throws for any un-fixtured path, so a post-merge read
-    // of the plan is the ENOENT the real fs would raise.
+    // mock's default `readFile` serves a plan only while `fileExists` reports it, so a
+    // post-merge read of the plan is the ENOENT the real fs would raise.
     const planPath = '/repo/docs/plans/c1.md';
     const baseFileExists = io.fileExists;
     io.fileExists = ((p: string) => (merged && p === planPath ? false : baseFileExists(p))) as LoopIO['fileExists'];
@@ -912,6 +922,7 @@ describe('recordBaseSha — learns the phase (P11, ruling R3)', () => {
       baseBranch: 'master',
       answersContent: '',
       briefTemplate: '',
+      taskIndex: {},
     };
     return { ctx: { cardId: 'C1', state, resolved, io }, calls };
   }
@@ -1465,6 +1476,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       baseBranch: 'master',
       answersContent: '',
       briefTemplate: '',
+      taskIndex: {},
     };
     const verifyConfig: VerifyConfig = {
       repoRoot: resolved.repoRoot,
@@ -1571,6 +1583,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       baseBranch: 'master',
       answersContent: '',
       briefTemplate: '',
+      taskIndex: {},
     };
     const verifyConfig: VerifyConfig = {
       repoRoot: resolved.repoRoot,
@@ -1633,6 +1646,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       baseBranch: 'master',
       answersContent: '',
       briefTemplate: '',
+      taskIndex: {},
     };
     const verifyConfig: VerifyConfig = {
       repoRoot: resolved.repoRoot,
@@ -1687,6 +1701,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       baseBranch: 'master',
       answersContent: '',
       briefTemplate: '',
+      taskIndex: {},
     };
     const verifyConfig: VerifyConfig = {
       repoRoot: resolved.repoRoot,
@@ -1725,7 +1740,7 @@ describe('shipCard — archives a leftover escalation file on ship (P6)', () => 
       answers: '',
       escalationFiles: new Set(['C1']),
     });
-    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '' };
+    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '', taskIndex: {} };
     const ctx: CardCtx = { cardId: 'C1', state, resolved, io };
     const escalationPath = escalationPathOf('/th', 'C1');
 
@@ -1745,7 +1760,7 @@ describe('shipCard — archives a leftover escalation file on ship (P6)', () => 
       answers: '',
       // No escalation file for C1 this time.
     });
-    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '' };
+    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '', taskIndex: {} };
     const ctx: CardCtx = { cardId: 'C1', state, resolved, io };
 
     await shipCard(ctx, { shipped: true, points: [], failedPoints: [] });
@@ -1763,7 +1778,7 @@ describe('shipCard — archives a leftover escalation file on ship (P6)', () => 
       answers: '',
       escalationFiles: new Set(['C1']),
     });
-    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '' };
+    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '', taskIndex: {} };
     const ctx: CardCtx = { cardId: 'C1', state, resolved, io };
 
     // `escalateCard` runs the OTHER outcome branch — it must never touch `renameFile`
@@ -2679,7 +2694,7 @@ describe('serializeRepoGitMutation (card-actions.ts) — runner-side git worktre
       return realExec(cmd, opts);
     }) as LoopIO['exec'];
 
-    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '' };
+    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '', taskIndex: {} };
     const ctxA: CardCtx = { cardId: 'A', state, resolved, io };
     const ctxB: CardCtx = { cardId: 'B', state, resolved, io };
 
@@ -2713,7 +2728,7 @@ describe('serializeRepoGitMutation (card-actions.ts) — runner-side git worktre
     // no extra await, no change to call order or count.
     const state = fixtureState({ sequence: ['A'], cards: { A: fixtureCard({ branch: 'feat/a-widget' }) } });
     const { io, calls } = buildMockLoopIo({ stateJson: JSON.stringify(state) });
-    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '' };
+    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '', taskIndex: {} };
 
     await performRevertAndRedo({ cardId: 'A', state, resolved, io });
 
@@ -3070,5 +3085,30 @@ describe('runLoop — rulings gate (fires only on the would-be-done path)', () =
     expect(result.processed[0]).toMatchObject({ kind: 'shipped', cardId: 'C1' });
     expect(result.exitCode).toBe(EXIT_OK);
     expect(result.unratifiedRulings).toBeUndefined();
+  });
+});
+
+describe('runLoop — D1: the task index is validated at load', () => {
+  test('a dangling heading refuses the run before any session spawns, naming card, task and heading', async () => {
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ tasks: [{ id: 'T1', heading: 'Task 9: nowhere' }] }) } });
+    const { io, spawnBriefs } = buildMockLoopIo({ stateJson: JSON.stringify(state), answers: '', spawnQueue: [] });
+    await expect(runLoop(baseLoopConfig(), io)).rejects.toThrow(/C1.*T1.*Task 9: nowhere.*dangling_heading/s);
+    expect(spawnBriefs).toEqual([]);
+  });
+  test('--dry-run refuses the same way', async () => {
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ tasks: [{ id: 'T1', heading: 'Task 9: nowhere' }] }) } });
+    const { io } = buildMockLoopIo({ stateJson: JSON.stringify(state), answers: '', spawnQueue: [] });
+    await expect(runLoop(baseLoopConfig({ dryRun: true }), io)).rejects.toThrow(/dangling_heading/);
+  });
+  test('a card whose plan is missing is not validated: it stays the planning_needed escalation', async () => {
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ tasks: [{ id: 'T1', heading: 'Task 9: nowhere' }] }) } });
+    const { io } = buildMockLoopIo({ stateJson: JSON.stringify(state), answers: '', spawnQueue: [], missingSpecPlan: true });
+    const result = await runLoop(baseLoopConfig(), io);
+    expect(result.processed.map((o) => o.kind)).toEqual(['escalated']);
+  });
+  test('a shipped card is not validated (its plan may be gone)', async () => {
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ status: 'shipped', tasks: [{ id: 'T1', heading: 'Task 9: nowhere' }] }) } });
+    const { io } = buildMockLoopIo({ stateJson: JSON.stringify(state), answers: '', spawnQueue: [] });
+    expect((await runLoop(baseLoopConfig(), io)).exitCode).toBe(EXIT_OK);
   });
 });

@@ -4,15 +4,9 @@
 // Oracle: spec §4.3 is the contract — CommonMark is NOT. Under-reading a Done command (missing one,
 // or attributing it to the wrong task) is a bug; refusing an ambiguous plan is by design.
 
-import type { TaskRef } from './types.ts';
+import type { ResolvedTask, TaskRef } from './types.ts';
 
-export type { TaskRef };
-
-export interface ResolvedTask {
-  id: string;
-  heading: string;
-  doneCommands: string[];
-}
+export type { ResolvedTask, TaskRef };
 
 export type TaskIndexProblem =
   | 'dangling_heading'
@@ -28,6 +22,17 @@ export interface TaskIndexIssue {
   taskId: string;
   heading: string;
   problem: TaskIndexProblem;
+}
+
+/** Thrown at load when any eligible card's task index does not resolve (D1). Carries every issue. */
+export class TaskIndexError extends Error {
+  readonly issues: TaskIndexIssue[];
+  constructor(issues: TaskIndexIssue[]) {
+    super(`the task index does not resolve against the plan(s): ${issues
+      .map((i) => `card ${i.cardId} task ${i.taskId} "${i.heading}": ${i.problem}`).join('; ')}`);
+    this.name = 'TaskIndexError';
+    this.issues = issues;
+  }
 }
 
 export interface PlannedCommand {

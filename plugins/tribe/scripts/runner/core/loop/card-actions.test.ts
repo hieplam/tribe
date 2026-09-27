@@ -26,6 +26,7 @@ function fixtureResolved(overrides: Partial<ResolvedConfig> = {}): ResolvedConfi
     baseBranch: 'main',
     answersContent: '',
     briefTemplate: '',
+    taskIndex: {},
     ...overrides,
   };
 }
