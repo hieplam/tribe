@@ -12,13 +12,16 @@ export type { HookDecision, PinnedSessionOptions, SessionIO, SessionMessage, Spa
 
 /** Terminal outcome of one executor session, derived only from the typed `result` message —
  * never by scraping stdout (spec §D3: done is script-verified, agent SHIPPED is a signal). */
-export type SessionOutcome = 'shipped' | 'needs_direction' | 'error' | 'timeout';
+export type SessionOutcome = 'shipped' | 'task_done' | 'needs_direction' | 'error' | 'timeout';
 
 export interface SessionResult {
   outcome: SessionOutcome;
   finalText: string;
   pr?: number;
   sha?: string;
+  /** Set only on `task_done`: the task the session claims and the branch it committed on. */
+  taskId?: string;
+  branch?: string;
 }
 
 export interface RunSessionInput {
@@ -233,8 +236,10 @@ export function buildSessionOptions(
   return options;
 }
 
-const SHIPPED_RE = /SHIPPED\s+#?(\d+)\s+([0-9a-f]{7,40})/i;
-const NEEDS_DIRECTION_RE = /NEEDS_DIRECTION:/;
+/** The three terminal lines (spec §4.4). A marker counts anywhere on a line, as the single-marker
+ * parser before it did, so `later: SHIPPED 12 abc1234` is still a SHIPPED line. */
+const TERMINAL_LINE_RE =
+  /(?:(SHIPPED)\s+#?(\d+)\s+([0-9a-f]{7,40})|(TASK_DONE)\s+([A-Za-z0-9][A-Za-z0-9._-]*)\s+(\S+)|(NEEDS_DIRECTION):)/i;
 
 /** Parses the typed `result` message into a `SessionResult` — the only place stdout-style
  * scraping happens, and even here it operates on the SDK's own structured `result` field,
@@ -249,16 +254,18 @@ function parseResultMessage(message: SessionMessage): SessionResult {
     };
   }
 
-  const shipped = finalText.match(SHIPPED_RE);
-  if (shipped) {
-    return { outcome: 'shipped', finalText, pr: Number(shipped[1]), sha: shipped[2] };
-  }
-  if (NEEDS_DIRECTION_RE.test(finalText)) {
+  // Spec §4.4: with three terminal lines, the LAST one the session wrote is its answer.
+  const lines = finalText.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = TERMINAL_LINE_RE.exec(lines[i] as string);
+    if (!m) continue;
+    if (m[1]) return { outcome: 'shipped', finalText, pr: Number(m[2]), sha: m[3] };
+    if (m[4]) return { outcome: 'task_done', finalText, taskId: m[5], branch: m[6] };
     return { outcome: 'needs_direction', finalText };
   }
   return {
     outcome: 'error',
-    finalText: finalText || 'result message carried neither a SHIPPED nor a NEEDS_DIRECTION terminal line',
+    finalText: finalText || 'result message carried no SHIPPED, TASK_DONE or NEEDS_DIRECTION terminal line',
   };
 }
 

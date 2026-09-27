@@ -20,6 +20,7 @@ import {
   type RunSessionConfig,
   type SessionIO,
   type SessionMessage,
+  type SessionResult,
 } from './session.ts';
 
 function fixtureConfig(overrides: Partial<RunSessionConfig> = {}): RunSessionConfig {
@@ -436,6 +437,29 @@ describe('runSession — typed result parsing', () => {
 
     const result = await runSession({ brief: 'x' }, fixtureConfig(), io);
     expect(result.outcome).toBe('error');
+  });
+});
+
+/** Feeds one `result/success` message carrying `finalText` through `runSession`. */
+async function runWithFinalText(finalText: string): Promise<SessionResult> {
+  const io = recordingIo();
+  io.spawnSession = () =>
+    messages([INIT_MESSAGE, { type: 'result', subtype: 'success', result: finalText, session_id: 'sess-123' }]);
+  return runSession({ brief: 'x' }, fixtureConfig(), io);
+}
+
+describe('parseResultMessage — TASK_DONE (spec §4.4)', () => {
+  test('TASK_DONE <task-id> <branch> -> task_done with both fields', async () => {
+    const r = await runWithFinalText('Committed.\nTASK_DONE T2 feat/small-helpers');
+    expect(r).toMatchObject({ outcome: 'task_done', taskId: 'T2', branch: 'feat/small-helpers' });
+  });
+  test('the LAST terminal line decides', async () => {
+    expect((await runWithFinalText('TASK_DONE T1 b\nlater: SHIPPED 12 abc1234')).outcome).toBe('shipped');
+    expect((await runWithFinalText('SHIPPED 12 abc1234 was wrong\nTASK_DONE T1 b')).outcome).toBe('task_done');
+    expect((await runWithFinalText('TASK_DONE T1 b\nNEEDS_DIRECTION: which?')).outcome).toBe('needs_direction');
+  });
+  test('a TASK_DONE missing its branch is not a terminal line', async () => {
+    expect((await runWithFinalText('TASK_DONE T1')).outcome).toBe('error');
   });
 });
 
