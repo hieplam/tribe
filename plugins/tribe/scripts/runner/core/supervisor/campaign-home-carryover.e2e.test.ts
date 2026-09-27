@@ -7,13 +7,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { sdkSpawnSession } from '../../adapters/session.adapter.ts';
-import { TRIBE_PLUGIN_DIR, type SpawnSessionParams } from '../session.ts';
+import type { SpawnSessionParams } from '../session.ts';
 import type { SessionKind } from './model.ts';
 import { buildOneShotOptions, runOneShotSession, type OneShotSessionResult } from './session.ts';
 
 const RUN_E2E = process.env.RUN_SESSION_E2E === '1';
 const MODEL = 'claude-haiku-4-5-20251001';
-const VERIFY_SHIPPED_DIR = join(TRIBE_PLUGIN_DIR, '..', 'verify-shipped');
+// This file lives at `plugins/tribe/scripts/runner/core/supervisor/` — five levels up is `plugins`.
+const PLUGINS_DIR = join(import.meta.dir, '..', '..', '..', '..', '..');
+const VERIFY_SHIPPED_DIR = join(PLUGINS_DIR, 'verify-shipped');
 const T = 480_000;
 const realpath = (p: string) => { try { return realpathSync(p); } catch { return p; } };
 

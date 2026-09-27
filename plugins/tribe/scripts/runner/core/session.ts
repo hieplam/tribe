@@ -3,22 +3,12 @@
 // PURE module: the SDK itself is imported only by `session.adapter.ts` (the zero-LLM wall).
 // This file owns the pinned option block and the message-parsing logic; every module reaches
 // a session through the `SessionIO` seam below, never the SDK package directly.
-import { join } from 'node:path';
 import type { HookDecision, PinnedSessionOptions, SessionIO, SessionMessage, SpawnSessionParams } from '../ports/ports.ts';
 import { emptySpawnTracker, observeSpawns, rootSpawnRow, type SpawnRow, type SpawnTracker } from './ledger.ts';
 import { isFilesystemWideScan } from './metrics/session-hygiene.ts';
 import { buildMergeGateDecision, parseMergeCommand } from './merge-gate.ts';
 
 export type { HookDecision, PinnedSessionOptions, SessionIO, SessionMessage, SpawnSessionParams };
-
-/** The tribe plugin's own directory (`plugins/tribe`), derived from this module's location
- * — NEVER a hardcoded absolute path (stateless-capability wall). This is what the SDK's
- * `plugins` option loads the tribe agents from, so a stale user-global `~/.claude/agents`
- * copy cannot shadow them inside an executor session (spec §D1, "Agent duplication" risk).
- * This module lives at `plugins/tribe/scripts/runner/core/session.ts` (ref-plugin-layout: the
- * runner is repo-invoked, not installed, so it sits under `scripts/`) — three directories up
- * from here is `plugins/tribe`. */
-export const TRIBE_PLUGIN_DIR = join(import.meta.dir, '..', '..', '..');
 
 /** Terminal outcome of one executor session, derived only from the typed `result` message —
  * never by scraping stdout (spec §D3: done is script-verified, agent SHIPPED is a signal). */
@@ -220,7 +210,6 @@ export function buildSessionOptions(
     // PROVEN by real sessions (spec §4.2): the SDK's own `model` and `permissionMode` above still
     // WIN over this tier's `model` / `permissions.defaultMode`.
     settingSources: ['user', 'project', 'local'],
-    plugins: [{ type: 'local', path: TRIBE_PLUGIN_DIR }], // tribe agents, never ~/.claude/agents
     permissionMode: 'bypassPermissions', // owner-ruled: headless, never hangs
     allowDangerouslySkipPermissions: true, // required by the SDK for the above
     abortController,

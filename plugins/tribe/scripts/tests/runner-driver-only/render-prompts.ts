@@ -10,7 +10,7 @@
 // Usage (from anywhere): bun render-prompts.ts --out <dir>
 // Writes <dir>/<kind>.txt per prompt and <dir>/manifest.json.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { BRIEF_TEMPLATE_PATH, executorBrief, reportPathFor } from '../../runner/core/brief.ts';
 import { buildStateDigest } from '../../runner/core/loop/phase.ts';
@@ -19,7 +19,7 @@ import {
   buildEscalationMarkdown, toBriefCard, toBriefState,
 } from '../../runner/core/loop/card-actions.ts';
 import {
-  BACKGROUNDING_DENIED_REASON, SCAN_DENIED_REASON, TRIBE_PLUGIN_DIR, WAIT_TOOL_DENIED_REASON,
+  BACKGROUNDING_DENIED_REASON, SCAN_DENIED_REASON, WAIT_TOOL_DENIED_REASON,
   buildSessionOptions,
 } from '../../runner/core/session.ts';
 import {
@@ -160,10 +160,10 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
     { repoRoot: '/repo', model: 'sonnet', logsDir: '/logs', card: CARD_ID } as never,
     new AbortController(), {});
   const injections: Array<{ kind: string; detail: string }> = [];
-  for (const plugin of (options as { plugins?: Array<{ path: string }> }).plugins ?? []) {
-    if (resolve(plugin.path) === resolve(TRIBE_PLUGIN_DIR)) {
-      injections.push({ kind: 'executor/session-options.plugins', detail: `loads the tribe plugin: ${plugin.path}` });
-    }
+  // The runner loads no plugin of its own (card D8): any `plugins` key reappearing is an injection.
+  if ('plugins' in options) {
+    injections.push({ kind: 'executor/session-options.plugins',
+      detail: `loads a plugin of its own: ${JSON.stringify((options as { plugins: unknown }).plugins)}` });
   }
   return { prompts, injections };
 }

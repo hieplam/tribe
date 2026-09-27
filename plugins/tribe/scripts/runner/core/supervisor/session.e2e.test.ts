@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sdkSpawnSession } from '../../adapters/session.adapter.ts';
 import { isFilesystemWideScan } from '../metrics/session-hygiene.ts';
-import { TRIBE_PLUGIN_DIR, type SpawnSessionParams } from '../session.ts';
+import type { SpawnSessionParams } from '../session.ts';
 import type { SessionKind } from './model.ts';
 import { runOneShotSession, type OneShotSessionResult, type OneShotSessionSeam } from './session.ts';
 
@@ -17,7 +17,9 @@ const RUN_E2E = process.env.RUN_SESSION_E2E === '1';
 /** Optional: where Task 8's ratchet reads the transcripts. Unset = keep them in memory only. */
 const LOG_DIR = process.env.SUPERVISOR_E2E_LOG_DIR;
 const MODEL = 'claude-haiku-4-5-20251001';
-const VERIFY_SHIPPED_DIR = join(TRIBE_PLUGIN_DIR, '..', 'verify-shipped');
+// This file lives at `plugins/tribe/scripts/runner/core/supervisor/` — five levels up is `plugins`.
+const PLUGINS_DIR = join(import.meta.dir, '..', '..', '..', '..', '..');
+const VERIFY_SHIPPED_DIR = join(PLUGINS_DIR, 'verify-shipped');
 const SESSION_TIMEOUT_MS = 180_000;
 const TEST_TIMEOUT_MS = 240_000;
 
