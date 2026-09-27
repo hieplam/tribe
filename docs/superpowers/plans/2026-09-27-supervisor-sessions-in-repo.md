@@ -719,8 +719,8 @@ cd $S/runner && bun test core/ledger.test.ts && bun test structure.test.ts && bu
 ```
 Expected: 6 pass; structure suite green (no world-touching import in `core/ledger.ts`); tsc exit 0.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 8/16`.
-- [ ] Task 8 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 8/16`.
+- [x] Task 8 complete
 
 ---
 
