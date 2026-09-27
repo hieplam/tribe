@@ -314,6 +314,9 @@ fresh session per task can become a plan-level option later; it is out of scope 
    `MAX_STEP_ATTEMPTS = 3`, a constant, not a flag). The fourth → escalate `done_failed` with the last
    failing command, its output tail and the attempt count. The budget lives in memory for one
    `actOnCard` call; the loop's existing 2 bounded retries of a `stopped` card cap the total.
+   During delivery the budget covers every turn that does not end in an accepted `SHIPPED`: a
+   `TASK_DONE` re-check spends one attempt whether its Done run passes or fails (a pass still records
+   `doneSha`), so a session that never delivers cannot loop forever (Shaman ruling R-2.14).
 7. **`SHIPPED` accepted only in the deliver step** (`doneSha` set). A `SHIPPED` before that is a
    protocol error ("SHIPPED arrived before every task passed its Done commands: T2, T3 remain").
 8. **`NEEDS_DIRECTION`** at any step → the existing `needs_direction` escalation.

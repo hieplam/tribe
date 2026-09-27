@@ -74,12 +74,15 @@ export async function driveCardTurns(input: DriveInput, deps: TurnDeps): Promise
       override = protocolErrorTurnPrompt({ reason, stepPrompt: plain, attempt: attempts, max: MAX_STEP_ATTEMPTS });
       return attempts >= MAX_STEP_ATTEMPTS;
     };
-    const stepName = step.kind === 'deliver' ? 'delivery' : `task ${step.taskId}`;
+    // During delivery every turn that does not end in an accepted SHIPPED spends one attempt — a
+    // passing TASK_DONE re-check included — so a session that never delivers cannot loop forever.
+    const delivering = step.kind === 'deliver';
+    const stepName = delivering ? 'delivery' : `task ${step.taskId}`;
     const budgetSpent = () => deps.escalate('done_failed',
       `${stepName}: ${MAX_STEP_ATTEMPTS} turns the runner could not accept. Last: ${lastProblem}`);
 
     if (result.outcome === 'shipped') {
-      if (step.kind === 'deliver') return deps.finishShipped(result);
+      if (delivering) return deps.finishShipped(result);
       const pending = input.card.tasks.filter((t) => t.passedSha === undefined).map((t) => t.id).join(', ');
       if (refuse(`SHIPPED arrived before every task passed its Done commands (${pending || 'the last Done run'} remaining)`)) return budgetSpent();
       continue;
@@ -106,8 +109,14 @@ export async function driveCardTurns(input: DriveInput, deps: TurnDeps): Promise
     }
     if (run.verdict.passed) {
       deps.recordPass(expectedIndex, accepted.tip, branch);
-      attempts = 0;
-      continue;
+      if (!delivering) {
+        attempts = 0;
+        continue;
+      }
+      attempts += 1;
+      lastProblem = `the Done re-check at ${accepted.tip} passed, but the turn ended with TASK_DONE instead of SHIPPED`;
+      if (attempts >= MAX_STEP_ATTEMPTS) return budgetSpent();
+      continue; // the next deliver prompt carries the new doneSha
     }
     attempts += 1;
     const failed = run.verdict.failed;
@@ -115,6 +124,7 @@ export async function driveCardTurns(input: DriveInput, deps: TurnDeps): Promise
       ? `\`${failed.result.command}\` ${failed.result.timedOut ? 'timed out' : `exited ${failed.result.exitCode}`} at ${accepted.tip}\n${failed.result.stdoutTail}\n${failed.result.stderrTail}`
       : `the Done run at ${accepted.tip} did not complete`;
     if (attempts >= MAX_STEP_ATTEMPTS) {
+      if (delivering) return budgetSpent();
       return deps.escalate('done_failed', `task ${expected.id} (${expected.heading}) did not pass its Done commands after ${MAX_STEP_ATTEMPTS} attempts. Last: ${lastProblem}`);
     }
     override = failed

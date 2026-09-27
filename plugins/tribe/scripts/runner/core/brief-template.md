@@ -34,6 +34,8 @@ The runner walks the plan's tasks in order, one turn per task:
   it, commit, and end your turn with `TASK_DONE` again.
   After {{MAX_STEP_ATTEMPTS}} unaccepted turns on one task the runner escalates the card.
 - When every task is done, the runner sends one more turn: deliver the card (Definition of Done).
+  Delivery has the same limit: every delivery turn that does not end with `SHIPPED` — a
+  `TASK_DONE` re-check included — counts toward it.
 
 ## Walls (non-negotiable)
 

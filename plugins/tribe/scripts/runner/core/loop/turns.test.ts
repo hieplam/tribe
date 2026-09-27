@@ -80,6 +80,22 @@ describe('driveCardTurns — spec §4.4', () => {
     expect(h.events.filter((e) => e.startsWith('done:T2'))).toHaveLength(2);
     expect(h.events.at(-1)).toBe('shipped:7');
   });
+  test('during delivery, a passing TASK_DONE re-check still spends the budget: 3 re-checks without SHIPPED escalate', async () => {
+    const h = harness([taskDone('T2'), taskDone('T2'), taskDone('T2')]);
+    h.c.tasks = h.c.tasks.map((t) => ({ ...t, passedSha: 'x' }));
+    h.c.doneSha = 'x';
+    h.c.branch = 'b';
+    const out = await driveCardTurns({ cardId: 'C1', card: h.c, tasks, planPath: 'p', delivery: { baseBranch: 'master', remote: 'origin', repoRoot: '/r' } }, h.deps);
+    expect(out.kind).toBe('escalated');
+    expect(h.events.filter((e) => e.startsWith('turn'))).toHaveLength(3);
+    expect(h.events.filter((e) => e.startsWith('pass:1:'))).toHaveLength(3);
+    expect(h.events.filter((e) => e.startsWith('escalate'))).toEqual(['escalate:done_failed']);
+    expect(h.events).not.toContain('shipped:7');
+    const reason = out.kind === 'escalated' ? out.reason : '';
+    expect(reason).toStartWith('done_failed|delivery: 3 turns the runner could not accept. Last: ');
+    expect(reason).toContain('tip-of-b passed');
+    expect(reason).toContain('TASK_DONE instead of SHIPPED');
+  });
   test('NEEDS_DIRECTION escalates; error and timeout stop (retryable only for error)', async () => {
     const nd = harness([{ outcome: 'needs_direction', finalText: 'NEEDS_DIRECTION: which?' }]);
     expect((await driveCardTurns({ cardId: 'C1', card: nd.c, tasks, planPath: 'p', delivery: { baseBranch: 'master', remote: 'origin', repoRoot: '/r' } }, nd.deps)).kind).toBe('escalated');
