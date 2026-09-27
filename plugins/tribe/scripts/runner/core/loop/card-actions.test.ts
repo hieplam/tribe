@@ -5,11 +5,12 @@
 // buildSessionIOForCard's onSessionStart, which prints the per-card session line the instant
 // the SDK assigns a session id.
 import { describe, expect, mock, test } from 'bun:test';
-import { buildEscalationMarkdown, buildSessionIOForCard, sessionConfigFor } from './card-actions.ts';
+import { buildEscalationMarkdown, buildSessionIOForCard, healSafeResidue, sessionConfigFor } from './card-actions.ts';
 import type { CardCtx } from './card-actions.ts';
 import type { CampaignState, Card, ResolvedConfig } from '../types.ts';
 import type { LoopIO } from '../../ports/ports.ts';
-import type { VerifyPointId } from '../verify.ts';
+import { verifyShipped } from '../verify.ts';
+import type { VerifyConfig, VerifyPointId } from '../verify.ts';
 
 function fixtureResolved(overrides: Partial<ResolvedConfig> = {}): ResolvedConfig {
   return {
@@ -218,5 +219,98 @@ describe('buildSessionIOForCard — onSessionStart printLine (Task 27, spec §10
     expect(ctx.state.cards.C1?.sessionId).toBe('some-session-id');
     expect(ctx.state.cards.C1?.status).toBe('running');
     expect(ctx.io.writeFile).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('healSafeResidue — D4 safe fast-forward of the local base (Task 1.6)', () => {
+  test('only localBaseSynced fails, checkout on base, clean, strictly behind -> ff-only merge, retry ships', async () => {
+    let fastForwarded = false;
+    const calls: string[][] = [];
+    const timedCalls: Array<{ cmd: string[]; options?: { cwd?: string; timeoutMs?: number } }> = [];
+    const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0 });
+    const exec = mock(async (cmd: string[], options?: { cwd?: string; timeoutMs?: number }) => {
+      calls.push(cmd);
+      timedCalls.push({ cmd, options });
+      const [bin, ...rest] = cmd;
+      if (bin === 'gh' && rest[0] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+      if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
+      if (bin === 'git' && rest[0] === 'merge-base' && rest[2] === 'deadbee' && rest[3] === 'master') {
+        // The local base lacks the merge until the heal fast-forwards it.
+        return { stdout: '', stderr: '', exitCode: fastForwarded ? 0 : 1 };
+      }
+      if (bin === 'git' && rest[0] === 'rev-parse' && rest[1] === '--abbrev-ref') return ok('master\n');
+      if (bin === 'git' && rest[0] === 'merge' && rest[1] === '--ff-only') {
+        fastForwarded = true;
+        return ok('');
+      }
+      // git fetch, worktree list, ls-remote, status --porcelain, the other merge-base probes:
+      // all succeed with empty output (nothing left over, checkout clean, local behind remote).
+      return ok('');
+    });
+    const ctx = fixtureCtx({ resolved: { baseBranch: 'master' }, io: { exec } });
+    ctx.state.cards.C1 = fixtureCard({ branch: 'feat/c1-widget', pr: 12 });
+    const verifyConfig: VerifyConfig = {
+      repoRoot: '/repo',
+      remote: 'origin',
+      baseBranch: 'master',
+      schemaLockPaths: [],
+      docsOnlyPaths: [],
+    };
+
+    const first = await verifyShipped(ctx.state.cards.C1, verifyConfig, ctx.io, 'C1');
+    expect(first.failedPoints).toEqual(['localBaseSynced']);
+
+    const healed = await healSafeResidue(ctx, first, verifyConfig);
+
+    expect(calls).toContainEqual(['git', 'merge', '--ff-only', 'origin/master']);
+    for (const cmd of [
+      ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+      ['git', 'status', '--porcelain'],
+      ['git', 'merge-base', '--is-ancestor', 'master', 'origin/master'],
+    ]) {
+      expect(timedCalls.find((call) => call.cmd.join(' ') === cmd.join(' '))).toEqual({
+        cmd,
+        options: { cwd: '/repo', timeoutMs: 60_000 },
+      });
+    }
+    expect(timedCalls.find((call) => call.cmd.join(' ') === 'git merge --ff-only origin/master')).toEqual({
+      cmd: ['git', 'merge', '--ff-only', 'origin/master'],
+      options: { cwd: '/repo', timeoutMs: 120_000 },
+    });
+    expect(healed.shipped).toBe(true);
+    expect(healed.points.find((p) => p.id === 'localBaseSynced')?.detail).toContain('(healed: fast_forward_base)');
+  });
+
+  test('checkout dirty -> no merge is attempted and the retry still fails', async () => {
+    const calls: string[][] = [];
+    const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0 });
+    const exec = mock(async (cmd: string[]) => {
+      calls.push(cmd);
+      const [bin, ...rest] = cmd;
+      if (bin === 'gh' && rest[0] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+      if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
+      if (bin === 'git' && rest[0] === 'merge-base' && rest[2] === 'deadbee' && rest[3] === 'master') {
+        return { stdout: '', stderr: '', exitCode: 1 };
+      }
+      if (bin === 'git' && rest[0] === 'rev-parse' && rest[1] === '--abbrev-ref') return ok('master\n');
+      if (bin === 'git' && rest[0] === 'status') return ok(' M owner-file.txt\n');
+      return ok('');
+    });
+    const ctx = fixtureCtx({ resolved: { baseBranch: 'master' }, io: { exec } });
+    ctx.state.cards.C1 = fixtureCard({ branch: 'feat/c1-widget', pr: 12 });
+    const verifyConfig: VerifyConfig = {
+      repoRoot: '/repo',
+      remote: 'origin',
+      baseBranch: 'master',
+      schemaLockPaths: [],
+      docsOnlyPaths: [],
+    };
+
+    const first = await verifyShipped(ctx.state.cards.C1, verifyConfig, ctx.io, 'C1');
+    const healed = await healSafeResidue(ctx, first, verifyConfig);
+
+    expect(calls.some((c) => c[0] === 'git' && c[1] === 'merge' && c[2] === '--ff-only')).toBe(false);
+    expect(healed.shipped).toBe(false);
+    expect(healed.points.find((p) => p.id === 'localBaseSynced')?.detail).not.toContain('healed:');
   });
 });

@@ -330,3 +330,45 @@ The fixture at 13-17, 291 and 324 still has `unratifiedRulings`, `ratifyRounds` 
 | test-watchdog-stall-relaunch.sh | 0 likely | — | 2 FIX |
 | test-supervisor-docs.sh | — | flags-parity loop | — |
 | test-verify-shipped.sh | 0 (default kept by (i)) | — | — |
+
+## Re-check on the post-#173 base
+
+Task 1.1 re-ran this sweep on `9393bb0` (master, after campaign `sessions-in-repo` / #173 merged),
+per the file's own instruction ("Task 1.1 re-checks it on the post-#173 base; any assertion a task
+changes that is not listed here is a finding"). Method: every file named by a `###` section header
+or a table's `File` column above still exists at the same path (checked with `test -f` — none
+deleted, none moved to a new path); every backtick-quoted test title, `describe(...)` block name,
+generated-test template, and fixture/shell-check string named in the tables above was located with
+a literal (or ellipsis-split, for titles abbreviated with `…`) substring search against that file's
+current contents on `9393bb0`. Sampled items that a first automated pass reported as "not found"
+were re-checked by hand with `grep -n`; every one was a false alarm from the checker's exact-string
+matching (a curly em dash, a `describe('...')` vs `describe("...")` quote style, a `test(\`...\`)`
+template literal built from the same `BOUNDED` flag table the doc already cites, or a `File` column
+value left blank on a continuation row of a merged Markdown cell) — not real drift. Confirmed by
+hand, still present verbatim on `9393bb0`, same file, same identifier:
+`parseGapGateStamp` (`core/verify.test.ts`, import + `describe('parseGapGateStamp', …)` + both its
+`test(...)`s), `fixtureState()` (`core/loop.test.ts:77`), `describe('renderBrief — ratify', …)`
+(`core/supervisor/brief.test.ts:177`), `extractRulingBlockVerbatim` import and
+`describe('extractRulingBlockVerbatim — the ratify brief's verbatim-block extractor', …)`
+(`core/supervisor/loop.test.ts:9,788`), `test('buildOneShotPrompt renders the closing brief with
+the CAMPAIGN-home report's open ids, …')` (`core/supervisor/loop.test.ts:871`), the
+`--max-ratify-rounds` row of the `BOUNDED` table and its four generated `test(\`${flag}: …\`)` titles
+(`core/supervisor/args.test.ts:102`), the `[5, …, 'exit:needs_human:rulings_unratified']` rows and
+`TABLE.length).toBe(48)` (`core/watchdog/decide.test.ts:104-116`), `[5, 10, 'rulings_unratified']`
+(`core/watchdog/watch-loop.test.ts:223`), `['5:none', 10, 'rulings_unratified']`
+(`plugins/tribe/scripts/runner/watchdog-integration.test.ts:123`), the Haiku 4.5 campaign-run test
+title (`plugins/tribe/scripts/viewer/e2e/campaign-badge.e2e.test.ts:379`), `TRIBE_PLUGIN_DIR` import
+and the `for (const kind of ['ruling', 'ratify'] as const)` loop
+(`core/supervisor/session.e2e.test.ts:12,179`), and every named shell check in
+`test-supervisor-kill.sh`, `test-watchdog-e2e.sh`, `test-supervisor-repro.sh`,
+`test-supervisor-park-truth.sh`, `test-supervisor-real-e2e.sh` and `test-supervisor-docs.sh` listed
+in the "Shell tests" table above.
+
+**Result: zero titles moved to a different file, and zero titles vanished.** Only ordinary
+line-number drift occurred (expected; Global Constraints already rule line numbers out as a
+locator — "#173 has moved lines since"), plus the volume changes `bun run check` itself reports
+(1357 pass / 14 skip / 0 fail on `9393bb0`, up from the 1351/14/0 baseline on `3194976` — #173 added
+tests, it did not touch any test this sweep names). No entry needs to be added to or removed from
+the tables above; the sweep's file:line pins for locating each assertion may be stale by a handful
+of lines, but every assertion, `describe` block and fixture string it names is still exactly where
+this document says it is, in the same file, on the post-#173 base.

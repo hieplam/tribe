@@ -1,13 +1,16 @@
-// D3 five-point SHIPPED verification, as code (Task 3).
+// D3 replay (six points): SHIPPED verification, as code.
+//
+// Every point is generic (D4): nothing here reads a PR body, a gap-gate stamp or a gap
+// ledger — a plain PR from any executor can pass it.
 //
 // verifyShipped() is the acceptance gate for a card the executor claims is `SHIPPED
 // <pr> <sha>` — that line is a signal only (design spec §D3); this module independently
-// replays all five checks against reality. Every world-touching operation (gh/git
+// replays all six checks against reality. Every world-touching operation (gh/git
 // invocations, reading the card's plan file) goes through the injected `io` seam below —
 // this module never imports `child_process`, `fs`, or performs network I/O itself.
 import { join } from 'node:path';
 import type { Card } from './types.ts';
-import type { ExecResult, VerifyIO } from '../ports/ports.ts';
+import type { ExecOptions, ExecResult, VerifyIO } from '../ports/ports.ts';
 
 export type { ExecResult, VerifyIO };
 
@@ -29,12 +32,9 @@ export interface VerifyConfig {
    * (stateless-capability wall). An EMPTY list fails closed: nothing counts as docs-only, so
    * a code diff never auto-waives (see `isDocsOnlyDiff`). */
   docsOnlyPaths: string[];
-  /** Where ledger policy A (spec §4) keeps the gap registry inside the target repo. Campaign
-   * config, carried by the caller; defaults to the capability's own constant. */
-  gapLedgerPath?: string;
 }
 
-/** The D3 five points, each independently reported (never short-circuited) so a failed
+/** The D3 points (five generic ones plus D4's localBaseSynced), each independently reported (never short-circuited) so a failed
  * `verifyShipped` names EVERY failing point, not just the first. */
 export type VerifyPointId =
   | 'merged'
@@ -42,8 +42,7 @@ export type VerifyPointId =
   | 'checksGreen'
   | 'worktreeAndBranchGone'
   | 'schemaGuard'
-  | 'gapGateStamped'
-  | 'ledgerCommitted';
+  | 'localBaseSynced';
 
 export interface VerifyPointResult {
   id: VerifyPointId;
@@ -73,9 +72,9 @@ interface PrCheck {
  * a synthetic non-zero result rather than propagating — every check function reports a
  * failed point instead of throwing (non-negotiable: a failed check is a reportable
  * outcome, never an exception). */
-async function run(io: VerifyIO, cwd: string, cmd: string[]): Promise<ExecResult> {
+async function run(io: VerifyIO, cwd: string, cmd: string[], options?: ExecOptions): Promise<ExecResult> {
   try {
-    return await io.exec(cmd, { cwd });
+    return await io.exec(cmd, { cwd, ...options });
   } catch (err) {
     return { stdout: '', stderr: err instanceof Error ? err.message : String(err), exitCode: 1 };
   }
@@ -455,177 +454,44 @@ async function checkSchemaGuard(
   };
 }
 
-/** The tribe's own artifact path under ledger policy A (spec §4) — NOT the target repo's
- * layout, which is what the stateless-capability wall forbids hardcoding. */
-export const GAP_LEDGER_PATH = '.tribe/harness-gaps.jsonl';
+export const LOCAL_GIT_QUERY_TIMEOUT_MS = 60_000;
+export const REMOTE_OR_HOOK_GIT_TIMEOUT_MS = 120_000;
 
-/** Third reader of the `gap-gate v1` wire format (writer: scripts/gaps/gap-stamp.ts; other
- * reader: verify-shipped.sh). Keep this regex byte-identical to those two. The lazy `\S+?` on
- * `ledger` is load-bearing: a greedy match swallows a `-->` written with no space before it. */
-const GAP_GATE_STAMP_RE =
-  /<!--\s*gap-gate v1\s+card=(\S+)\s+base=(\S+)\s+head=(\S+)\s+minted=(\S+)\s+matched=(\S+)\s+debt-delta=(-?\d+)\s+ledger=(\S+?)\s*-->/;
-
-export interface GapGateStamp {
-  card: string;
-  base: string;
-  head: string;
-  minted: string[];
-  matched: string[];
+/** D4 (card runner-driver-only): "the feature is merged and local master has the latest". Race-free
+ * form of "local == remote": the merge commit is IN the local base branch, and the local base has no
+ * commit the remote lacks. Strict equality would fail whenever a concurrent card merged after this
+ * card's own sync (`--max-concurrent > 1`) — spec §4.7. */
+async function checkLocalBaseSynced(mergeSha: string | null, config: VerifyConfig, io: VerifyIO): Promise<VerifyPointResult> {
+  const id = 'localBaseSynced' as const;
+  if (!mergeSha) return { id, passed: false, detail: 'no merge sha available (point 1 did not report one); cannot check the local base' };
+  const remoteBase = `${config.remote}/${config.baseBranch}`;
+  const fetched = await run(io, config.repoRoot, ['git', 'fetch', config.remote, config.baseBranch], { timeoutMs: REMOTE_OR_HOOK_GIT_TIMEOUT_MS });
+  if (fetched.exitCode !== 0) return { id, passed: false, detail: `git fetch ${config.remote} ${config.baseBranch} failed (exit ${fetched.exitCode}); cannot compare the local base` };
+  const contains = await run(io, config.repoRoot, ['git', 'merge-base', '--is-ancestor', mergeSha, config.baseBranch], { timeoutMs: LOCAL_GIT_QUERY_TIMEOUT_MS });
+  if (contains.exitCode !== 0) {
+    return { id, passed: false, detail: `local ${config.baseBranch} does not contain merge ${mergeSha}; fast-forward it to ${remoteBase}` };
+  }
+  const notAhead = await run(io, config.repoRoot, ['git', 'merge-base', '--is-ancestor', config.baseBranch, remoteBase], { timeoutMs: LOCAL_GIT_QUERY_TIMEOUT_MS });
+  if (notAhead.exitCode !== 0) {
+    return { id, passed: false, detail: `local ${config.baseBranch} has commits ${remoteBase} lacks (diverged); it is never healed automatically` };
+  }
+  return { id, passed: true, detail: `local ${config.baseBranch} contains ${mergeSha} and is not ahead of ${remoteBase}` };
 }
 
-export function parseGapGateStamp(text: string): GapGateStamp | null {
-  const m = GAP_GATE_STAMP_RE.exec(text);
-  if (!m) return null;
-  const list = (v: string): string[] => (v === 'none' ? [] : v.split(',').filter((s) => s.length > 0));
-  return { card: m[1]!, base: m[2]!, head: m[3]!, minted: list(m[4]!), matched: list(m[5]!) };
-}
-
-/** D3 point 6 (spec §3, amendment §3a): the merged PR's body carries a `gap-gate v1` stamp
- * whose `card=` names an identity of THIS card and whose base/head shas are commits of the
- * merged branch. A card has two names (spec §3a): the runner's campaign-local id (`cardId`)
- * and the Warchief's slug, which lands as a `Tribe-Card:` trailer on the merged branch's
- * commits — `stamp.card` matching EITHER is accepted; naming neither is still a failure. A PR
- * opened by a session that bypassed the Warchief (leak L4) has no stamp, so it cannot record
- * `shipped`. */
-async function checkGapGateStamped(
-  cardId: string,
-  card: Card,
-  config: VerifyConfig,
-  io: VerifyIO,
-  mergeSha: string | null,
-): Promise<{ point: VerifyPointResult; stamp: GapGateStamp | null }> {
-  const fail = (detail: string): { point: VerifyPointResult; stamp: null } => ({
-    point: { id: 'gapGateStamped', passed: false, detail },
-    stamp: null,
-  });
-  if (card.pr == null) return fail('card.pr is not set; cannot read the PR body');
-
-  const result = await run(io, config.repoRoot, ['gh', 'pr', 'view', String(card.pr), '--json', 'body']);
-  if (result.exitCode !== 0) {
-    return fail(`gh pr view ${card.pr} --json body failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
-  }
-  let body: string;
-  try {
-    body = String((JSON.parse(result.stdout) as { body?: unknown }).body ?? '');
-  } catch {
-    return fail(`gh pr view ${card.pr} --json body returned non-JSON output`);
-  }
-
-  const stamp = parseGapGateStamp(body);
-  if (!stamp) {
-    return fail(
-      `PR #${card.pr} body carries no \`gap-gate v1\` stamp — the harness-gap gate never ran for this PR`,
-    );
-  }
-  let matchedIdentity = stamp.card === cardId ? `card id ${cardId}` : null;
-  if (!matchedIdentity) {
-    if (!mergeSha) {
-      return fail(`PR #${card.pr} body carries a gap-gate stamp for card=${stamp.card}, not ${cardId}`);
-    }
-    const trailerResult = await run(io, config.repoRoot, [
-      'git',
-      'log',
-      '--format=%(trailers:key=Tribe-Card,valueonly)',
-      `${mergeSha}^1..${mergeSha}`,
-    ]);
-    if (trailerResult.exitCode !== 0) {
-      return fail(
-        `PR #${card.pr}: reading the merged commits' Tribe-Card trailers failed (git log exit ${trailerResult.exitCode}); cannot confirm card=${stamp.card}`,
-      );
-    }
-    const trailerValues = trailerResult.stdout
-      .split('\n')
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0);
-    const trailerSet = new Set(trailerValues);
-    if (trailerSet.has(stamp.card)) {
-      matchedIdentity = `Tribe-Card trailer ${stamp.card}`;
-    } else {
-      return fail(
-        `PR #${card.pr} body carries a gap-gate stamp for card=${stamp.card}, which is neither ${cardId} nor a Tribe-Card trailer of its merged commits (${
-          trailerValues.length > 0 ? [...new Set(trailerValues)].join(',') : 'none'
-        })`,
-      );
-    }
-  }
-
-  const target = `${config.remote}/${config.baseBranch}`;
-  for (const sha of [stamp.base, stamp.head]) {
-    const ancestry = await run(io, config.repoRoot, ['git', 'merge-base', '--is-ancestor', sha, target]);
-    if (ancestry.exitCode !== 0) {
-      return fail(`gap-gate stamp names ${sha}, which is not a commit of ${target} (exit ${ancestry.exitCode})`);
-    }
-  }
-
-  return {
-    point: {
-      id: 'gapGateStamped',
-      passed: true,
-      detail: `PR #${card.pr} carries a gap-gate v1 stamp for ${cardId} (matched ${matchedIdentity}, minted=${stamp.minted.join(',') || 'none'})`,
-    },
-    stamp,
-  };
-}
-
-/** D3 point 7 (spec §3, ledger policy A): every id the stamp says was minted is present in the
- * ledger as committed on the merged base branch — the check that the append actually rode the PR
- * instead of dying with the worktree (leak L5). */
-async function checkLedgerCommitted(
-  stamp: GapGateStamp | null,
-  config: VerifyConfig,
-  io: VerifyIO,
-): Promise<VerifyPointResult> {
-  if (!stamp) {
-    return { id: 'ledgerCommitted', passed: false, detail: 'no gap-gate stamp available (point 6 did not report one)' };
-  }
-  if (stamp.minted.length === 0) {
-    return { id: 'ledgerCommitted', passed: true, detail: 'the stamp minted no ids; there is nothing to commit' };
-  }
-
-  const path = config.gapLedgerPath ?? GAP_LEDGER_PATH;
-  const ref = `${config.remote}/${config.baseBranch}:${path}`;
-  const result = await run(io, config.repoRoot, ['git', 'show', ref]);
-  if (result.exitCode !== 0) {
-    return {
-      id: 'ledgerCommitted',
-      passed: false,
-      detail: `${ref} does not exist, but the stamp minted ${stamp.minted.join(',')} — the ledger append never landed`,
-    };
-  }
-  const missing = stamp.minted.filter((id) => !result.stdout.includes(`"id":"${id}"`));
-  if (missing.length > 0) {
-    return { id: 'ledgerCommitted', passed: false, detail: `${ref} is missing minted id(s): ${missing.join(', ')}` };
-  }
-  return { id: 'ledgerCommitted', passed: true, detail: `${ref} carries every minted id (${stamp.minted.join(',')})` };
-}
-
-/** The D3 five-point replay, as code. The executor's `SHIPPED <pr> <sha>` line is a signal
+/** The D3 six-point replay, as code. The executor's `SHIPPED <pr> <sha>` line is a signal
  * only (spec §D3) — this is the acceptance. Every point is checked and reported
  * independently; a failure at one point never short-circuits the rest, so a failed result
  * names EVERY failing point (it feeds the escalation file a human reads). Never throws on
  * a verification failure — a failed check is a normal, reportable outcome. */
-export async function verifyShipped(
-  card: Card,
-  config: VerifyConfig,
-  io: VerifyIO,
-  cardId: string,
-): Promise<VerifyResult> {
+export async function verifyShipped(card: Card, config: VerifyConfig, io: VerifyIO, cardId: string): Promise<VerifyResult> {
+  void cardId; // kept in the signature: Task 2.11's doneAtHead point and the replay tool pass it
   const merged = await checkMerged(card, config, io);
   const ancestor = await checkAncestor(merged.mergeSha, config, io);
   const checks = await checkChecksGreen(card, config, io);
   const worktree = await checkWorktreeAndBranchGone(card, config, io);
   const schema = await checkSchemaGuard(card, config, io, merged.mergeSha);
-  const gapGate = await checkGapGateStamped(cardId, card, config, io, merged.mergeSha);
-  const ledger = await checkLedgerCommitted(gapGate.stamp, config, io);
-  const points: VerifyPointResult[] = [
-    merged.point,
-    ancestor,
-    checks,
-    worktree,
-    schema,
-    gapGate.point,
-    ledger,
-  ];
+  const localBase = await checkLocalBaseSynced(merged.mergeSha, config, io);
+  const points: VerifyPointResult[] = [merged.point, ancestor, checks, worktree, schema, localBase];
   const failedPoints = points.filter((p) => !p.passed).map((p) => p.id);
   return { shipped: failedPoints.length === 0, points, failedPoints };
 }

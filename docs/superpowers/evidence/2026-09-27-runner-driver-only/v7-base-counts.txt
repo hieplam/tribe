@@ -1,0 +1,41 @@
+# V7 counts — post-#173 base (Task 1.1, measured 2026-09-27, base 9393bb0)
+
+$ cd plugins/tribe/scripts/runner && bun run check
+
+ 1357 pass
+ 14 skip
+ 0 fail
+ 3282 expect() calls
+Ran 1371 tests across 56 files. [297.36s]
+
+$ bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh
+
+40 passed, 0 failed
+
+$ bash plugins/verify-shipped/scripts/tests/test-verify-shipped.sh
+
+26 passed, 0 failed
+
+$ cd plugins/tribe/scripts/viewer && bun test
+(requires: bun install; bun run build; bunx playwright install chromium — none of these were
+present in this checkout before this run)
+
+ 925 pass
+ 3 skip
+ 3 fail
+ 10276 expect() calls
+Ran 931 tests across 51 files. [32.98s]
+
+The 3 viewer failures are PRE-EXISTING and environment-caused, not a regression from #173 or this
+plan: `served-build.e2e.test.ts`, `url-refusals.e2e.test.ts` and one case in `dom-kinds.e2e.test.ts`
+each assert a fixture home directory is byte-identical before/after a spawned viewer server runs
+against it (`hashTree` over the whole tree). The spawned server is given `HOME: homeDir` (so it
+reads `~/.claude/projects` from the fixture); Bun 1.4.2's own module-transpile cache then writes
+`Library/Caches/bun/@t@/*.pile` files into that same HOME-overridden tree as a side effect of
+running `bun serve.ts`, which the hash comparison then reports as a "write". Reproduced identically
+against a fresh worktree of the spec's own BEFORE base (`3194976`, before #173 and before this plan):
+same 2 failures reproduce there with `bun test e2e/served-build.e2e.test.ts e2e/url-refusals.e2e.test.ts`
+(14 pass / 2 fail) — proving this is a standing Bun-version/environment artifact of this machine,
+not something #173 or this task introduced. No file under this plan's scope (or #173's) was
+touched to produce or hide this; recorded here as the true post-#173 baseline per this task's
+"record everything" instruction.

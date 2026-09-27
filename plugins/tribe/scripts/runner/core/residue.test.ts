@@ -3,7 +3,7 @@
 // every input arrives as a plain argument (pure-core rule); the edge (`healSafeResidue` in
 // `core/loop/card-actions.ts`) is where the real `git`/`gh` calls live.
 import { describe, expect, test } from 'bun:test';
-import { decideResidueHeal } from './residue.ts';
+import { decideBaseSyncHeal, decideResidueHeal } from './residue.ts';
 import type { DecideResidueHealInput } from './residue.ts';
 
 function fixtureInput(overrides: Partial<DecideResidueHealInput> = {}): DecideResidueHealInput {
@@ -100,5 +100,21 @@ describe('decideResidueHeal', () => {
       { kind: 'delete_remote_branch', branch: 'feat/c1-widget' },
       { kind: 'remove_worktree', path: '/wt/c1', branch: 'feat/c1-widget' },
     ]);
+  });
+});
+
+describe('decideBaseSyncHeal (D4 safe heal)', () => {
+  const ok = { mergedPassed: true, localBaseFailed: true, checkoutOnBase: true, checkoutClean: true, localIsAncestorOfRemote: true };
+  test('merged, checkout on base, clean, strictly behind -> fast-forward', () => {
+    expect(decideBaseSyncHeal(ok)).toEqual([{ kind: 'fast_forward_base' }]);
+  });
+  test.each([
+    ['PR not merged', { mergedPassed: false }],
+    ['point already passes', { localBaseFailed: false }],
+    ['checkout parked on another ref', { checkoutOnBase: false }],
+    ['checkout dirty', { checkoutClean: false }],
+    ['local base diverged', { localIsAncestorOfRemote: false }],
+  ])('%s -> no heal', (_name, patch) => {
+    expect(decideBaseSyncHeal({ ...ok, ...patch })).toEqual([]);
   });
 });

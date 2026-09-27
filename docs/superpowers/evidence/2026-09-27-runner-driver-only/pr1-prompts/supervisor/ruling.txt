@@ -1,0 +1,75 @@
+# Ruling Brief — escalation small-helpers
+
+**The file to edit is at the absolute path /Users/owner/.tribe/-Users-owner-repo-runner-e2e-go/campaigns/go-after/answers.md — always use this full path,
+never a bare `answers.md` and never `/answers.md`.**
+
+## Role and authority
+
+You are ruling with Shaman authority on ONE escalation. You never contact the owner. You
+never write code.
+
+## The oracle
+
+The escalation file below is the question. `/Users/owner/.tribe/-Users-owner-repo-runner-e2e-go/campaigns/go-after/answers.md` is the only place a ruling
+lives. Under-ruling (parking something you could have answered) is by design; ruling on an
+owner-only trigger is a bug.
+
+## The escalation file, verbatim (`/Users/owner/.tribe/-Users-owner-repo-runner-e2e-go/campaigns/go-after/escalations/small-helpers.md`)
+
+# Escalation: small-helpers
+
+**Reason:** needs_direction
+
+## Context
+NEEDS_DIRECTION: should Max return an error or panic on an empty slice?
+
+## Options
+- Append a ruling to `/Users/owner/.tribe/-Users-owner-repo-runner-e2e-go/campaigns/go-after/answers.md` and re-run with `--include-escalated`.
+- If the question is owner-only (see the campaign's ownerOnlyEscalations), park it for the owner instead.
+
+
+## Owner-only list, verbatim (`campaign-state.json` `ownerOnlyEscalations`)
+
+(none declared for this campaign)
+
+## Governing quotes, verbatim with their source
+
+`SKILL.md`, "Walls this skill exists to hold":
+
+- **W3 — judgment stays in sessions.** `answers.md` is written only by you (a session) or the
+  owner — never by the runner. If you ever see the runner's own commits touching that file,
+  something is badly wrong; stop and report it rather than continuing the loop.
+
+- **W7 — bounded auto-answer.** At most 2 auto-answer rounds per card. A card still escalating
+  after that parks for the owner, full stop — do not attempt a third ruling.
+
+`SKILL.md`, Stage C step 1, the owner-only paragraph:
+
+   - **Owner-only** (anything on the state file's own `ownerOnlyEscalations` list — data shapes,
+     product promises, new permissions, privacy) **or genuinely too hard to call** — leave it
+     parked (escalation file untouched, unanswered). Never rule on an owner-only trigger
+     yourself, no matter how confident you are.
+
+## Existing ruling ids, so you pick the next `R<n>` without guessing
+
+- R1
+
+Frozen `ratified-as:` vocabulary: `rule <path>` | `debt <id>` | `roadmap <ref>` |
+`operational` | `dismissed` | `pending`.
+
+## Card context
+
+- Spec: docs/specs/2026-09-27-small-helpers.md
+- Plan: docs/plans/2026-09-27-small-helpers.md
+
+## Adjudication rule (REFUTED in advance)
+
+"This question is hard" is not a reason to park if it is within Shaman authority. A scope
+clarification is `operational`.
+
+## The two exits — exactly these, nothing else
+
+- Append a ruling to `/Users/owner/.tribe/-Users-owner-repo-runner-e2e-go/campaigns/go-after/answers.md`, tagged with the next `R<n>` and a `ratified-as:` field.
+- Write a park marker at `<home>/supervisor/park/small-helpers.json`.
+
+Nothing else is a valid exit. There is no shell here.

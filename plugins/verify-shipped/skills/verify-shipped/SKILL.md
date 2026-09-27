@@ -32,8 +32,10 @@ isn't available):
    `git worktree list`.
 4. **`gap_gate_stamped`** — the merged PR's body carries a `gap-gate v1` stamp whose `card=`
    matches `--card`. This is the attended-session backstop for a PR opened by a session that
-   bypassed the Warchief and so never ran the gap gate; it deliberately does not re-check sha
-   ancestry (that is the campaign runner's job, which has the merged repo in hand).
+   bypassed the Warchief and so never ran the gap gate; it deliberately does not re-check the
+   stamp's sha ancestry. The campaign runner's own done check never checks the stamp at all.
+   With `--skip-gap-gate` this check is reported `skipped` and the verdict is decided by checks
+   1-3 — for callers whose plan does not run the gap gate; without the flag it always runs.
 
 ## Usage
 
@@ -42,7 +44,7 @@ isn't available):
 
 ```sh
 script_path="$(bash "<skill-dir>/resolve-verify-shipped.sh")" || exit 1
-bash "$script_path" --pr <number|url> --worktree <path> --card <slug> [--base master] [--repo owner/repo] [--verdict-out <path>]
+bash "$script_path" --pr <number|url> --worktree <path> --card <slug> [--base master] [--repo owner/repo] [--verdict-out <path>] [--skip-gap-gate]
 ```
 
 A hand-written path under the user's home directory (`~/.claude/skills/...`) assumes a
@@ -59,8 +61,8 @@ substitute a guess or a bare relative path.
   or absolute — the script canonicalizes it against the caller's cwd (before changing directory
   internally) so a relative path is always checked against the right location.
 - `--card` — required. The card slug the `gap-gate v1` stamp in the PR body must carry. All
-  four checks run every time; there is no partial/optional mode, because a claimed-done state
-  with an unchecked corner is exactly the gap this skill exists to close.
+  four checks run every time unless the caller passes `--skip-gap-gate`, because a claimed-done
+  state with an unchecked corner is exactly the gap this skill exists to close.
 - `--base` — optional, defaults to `master`.
 - `--repo` — optional; passed to `gh` as `--repo` when not run from inside the target repo's
   checkout, or when `gh`'s own repo inference would pick the wrong remote.
@@ -68,13 +70,16 @@ substitute a guess or a bare relative path.
   stdout (byte-identical) to that path, atomically. This is the artifact the campaign
   supervisor's closing postcondition checks — the verdict must be a file the script produced,
   never prose a session wrote.
+- `--skip-gap-gate` — optional, opt-in. Reports check 4 as `skipped`; the verdict is decided by
+  checks 1-3. Only for callers whose plan does not run the harness-gap gate; the default still
+  requires the stamp.
 
 The script prints a JSON summary on stdout only (logs go to stderr) and exits `0` whether the
 verdict is `PASS` or `FAIL` — a failed check is a normal result, not a script error. It exits
 `2` only on setup problems: `gh`/`git`/`python3` missing, not a git repo, or the PR/repo
 couldn't be resolved (bad PR number, no `gh` auth, etc.).
 
-Read the top-level `verdict` field (`PASS` only when all four checks pass) and each check's
+Read the top-level `verdict` field (`PASS` only when all four checks pass, or checks 1-3 pass and check 4 is `skipped`) and each check's
 `detail` string — that's what explains *why* a check failed, not just that it did.
 
 ## Example

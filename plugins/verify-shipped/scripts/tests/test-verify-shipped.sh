@@ -189,5 +189,19 @@ fi
 check "SKILL.md no longer references ~/.claude/skills/verify-shipped" \
   "$(grep -c '~/\.claude/skills/verify-shipped' "$SKILL_MD" 2>/dev/null || true)" "0"
 
+# --- --skip-gap-gate: opt-in; check 4 reported skipped, verdict from checks 1-3 ---
+repo11="$TMP/r11"; make_repo "$repo11"; bin11="$TMP/bin11"
+stub_gh "$bin11" "## Why
+
+a plain plan, no stamp
+"
+out11="$(run_vs "$repo11" "$bin11" --card C1 --skip-gap-gate || true)"
+check "--skip-gap-gate reports check 4 as skipped" "$(printf '%s' "$out11" | jget - checks.gap_gate_stamped.status)" "skipped"
+check "--skip-gap-gate with no stamp -> verdict decided by checks 1-3" \
+  "$(printf '%s' "$out11" | jget - verdict)" \
+  "$(printf '%s' "$out11" | python3 -c 'import json,sys; c=json.load(sys.stdin)["checks"]; print("PASS" if all(c[k]["status"]=="pass" for k in ("pr_merged","master_in_sync","worktree_removed")) else "FAIL")')"
+out12="$(run_vs "$repo11" "$bin11" --card C1 || true)"
+check "without --skip-gap-gate the stamp is still required (default unchanged)" "$(printf '%s' "$out12" | jget - checks.gap_gate_stamped.status)" "fail"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 exit $((FAIL > 0))

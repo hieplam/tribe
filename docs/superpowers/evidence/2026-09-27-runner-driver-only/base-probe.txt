@@ -1,0 +1,7 @@
+sessions_in_repo_card=shipped
+no-live-campaign: no live campaign process, no live v1 campaign lock
+paths=supervisorLedgerPathOf
+session=ledgerPath
+home_config=gone
+rule=sessions-start-in-target-repo
+base=9393bb0d38b1fd6c123f69a4ab1705601b059c29 Merge pull request #182 from hieplam/docs/sessions-in-repo-g8-ruling

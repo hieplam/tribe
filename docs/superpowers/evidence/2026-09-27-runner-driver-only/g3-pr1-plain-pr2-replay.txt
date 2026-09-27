@@ -1,0 +1,7 @@
+PASS merged: PR #2 is merged (merge_commit_sha=b32859a8a3998295909ba080fc72f344fc58b87f)
+PASS mergeShaAncestorOfMaster: b32859a8a3998295909ba080fc72f344fc58b87f is an ancestor of origin/master
+PASS checksGreen: all 2 check(s) concluded success
+PASS worktreeAndBranchGone: worktree for plain/small-helpers is gone and origin/plain/small-helpers is deleted
+PASS schemaGuard: no schema-lock paths configured; guard is a no-op
+PASS localBaseSynced: local master contains b32859a8a3998295909ba080fc72f344fc58b87f and is not ahead of origin/master
+SHIPPED=true FAILED_POINTS=(none)

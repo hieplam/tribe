@@ -22,7 +22,10 @@
 #
 # Usage:
 #   verify-shipped.sh --pr <number|url> --worktree <path> --card <slug> [--base master]
-#                      [--repo owner/repo] [--verdict-out <path>]
+#                      [--repo owner/repo] [--verdict-out <path>] [--skip-gap-gate]
+#
+#   --skip-gap-gate  report check 4 as skipped; the verdict is decided by checks 1-3 — for
+#                    callers whose plan does not run the gap-gate
 #
 # Requires: gh (GitHub CLI, authenticated), git, python3.
 
@@ -37,6 +40,7 @@ BASE_BRANCH="master"
 REPO_ARG=""
 CARD_ARG=""
 VERDICT_OUT_ARG=""
+SKIP_GAP_GATE=0
 
 # A flag's value is "missing" when there is no next token, the next token is empty, OR the next
 # token is itself an option (`--…`): silently consuming an option token as a value is the
@@ -54,7 +58,8 @@ while [[ $# -gt 0 ]]; do
                    CARD_ARG="$2"; shift 2 ;;
     --verdict-out) [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || DIE "--verdict-out <path> requires a value"
                    VERDICT_OUT_ARG="$2"; shift 2 ;;
-    -h|--help)     sed -n '2,26p' "$0"; exit 0 ;;
+    --skip-gap-gate) SKIP_GAP_GATE=1; shift ;;
+    -h|--help)     sed -n '2,29p' "$0"; exit 0 ;;
     *)             DIE "unknown arg: $1" ;;
   esac
 done
@@ -144,7 +149,11 @@ fi
 # the attended-session backstop for a PR opened by any session that bypassed the Warchief and
 # so never ran the gap gate. Sha ancestry is deliberately NOT re-checked here — that is the
 # campaign runner's `gapGateStamped` point, which has the merged repo in hand.
-CHECK4_RAW=$(python3 - "$PR_BODY" "$CARD_ARG" <<'PY'
+if [[ "$SKIP_GAP_GATE" == "1" ]]; then
+  CHECK4_STATUS="skipped"
+  CHECK4_DETAIL="skipped by --skip-gap-gate (the caller's plan does not run the harness-gap gate)"
+else
+  CHECK4_RAW=$(python3 - "$PR_BODY" "$CARD_ARG" <<'PY'
 import re, sys
 body, card = sys.argv[1], sys.argv[2]
 m = re.search(
@@ -160,11 +169,12 @@ else:
     print("pass\tgap-gate v1 stamp present for card %s (minted=%s matched=%s)" % (card, m.group(4), m.group(5)))
 PY
 )
-CHECK4_STATUS="${CHECK4_RAW%%$'\t'*}"
-CHECK4_DETAIL="${CHECK4_RAW#*$'\t'}"
+  CHECK4_STATUS="${CHECK4_RAW%%$'\t'*}"
+  CHECK4_DETAIL="${CHECK4_RAW#*$'\t'}"
+fi
 
 # ---------- verdict ----------
-if [[ "$CHECK1_STATUS" == "pass" && "$CHECK2_STATUS" == "pass" && "$CHECK3_STATUS" == "pass" && "$CHECK4_STATUS" == "pass" ]]; then
+if [[ "$CHECK1_STATUS" == "pass" && "$CHECK2_STATUS" == "pass" && "$CHECK3_STATUS" == "pass" && ( "$CHECK4_STATUS" == "pass" || "$CHECK4_STATUS" == "skipped" ) ]]; then
   VERDICT="PASS"
 else
   VERDICT="FAIL"

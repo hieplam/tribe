@@ -10,16 +10,16 @@
 // Usage (from anywhere): bun render-prompts.ts --out <dir>
 // Writes <dir>/<kind>.txt per prompt and <dir>/manifest.json.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 
-import { BRIEF_TEMPLATE_PATH, executorBrief, reportPathFor } from '../../runner/core/brief.ts';
+import { BRIEF_TEMPLATE_PATH, executorBrief } from '../../runner/core/brief.ts';
 import { buildStateDigest } from '../../runner/core/loop/phase.ts';
 import {
   CONTINUE_BRANCH_PROMPT, CONTINUE_PR_OPEN_PROMPT, CONTINUE_UNKNOWN_STATE_PROMPT,
   buildEscalationMarkdown, toBriefCard, toBriefState,
 } from '../../runner/core/loop/card-actions.ts';
 import {
-  BACKGROUNDING_DENIED_REASON, SCAN_DENIED_REASON, TRIBE_PLUGIN_DIR, WAIT_TOOL_DENIED_REASON,
+  BACKGROUNDING_DENIED_REASON, SCAN_DENIED_REASON, WAIT_TOOL_DENIED_REASON,
   buildSessionOptions,
 } from '../../runner/core/session.ts';
 import {
@@ -76,10 +76,10 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
 
   // ---- executor: first prompt, digest prompt, resume prompts ----
   add('executor/brief-fresh', executorBrief(toBriefCard(CARD_ID, c), toBriefState(s), '', template,
-    reportPathFor(HOME, CARD_ID), CAMPAIGN));
+    HOME, CAMPAIGN));
   const digest = buildStateDigest(CARD_ID, c, 'no transcript found for the recorded session');
   add('executor/brief-with-digest', executorBrief(toBriefCard(CARD_ID, c), toBriefState(s),
-    `${digest}\n\n---\n\n`, template, reportPathFor(HOME, CARD_ID), CAMPAIGN));
+    `${digest}\n\n---\n\n`, template, HOME, CAMPAIGN));
   add('executor/resume-pr-open', CONTINUE_PR_OPEN_PROMPT);
   add('executor/resume-branch', CONTINUE_BRANCH_PROMPT);
   add('executor/resume-unknown', CONTINUE_UNKNOWN_STATE_PROMPT);
@@ -99,7 +99,7 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
   add('escalation/planning-needed', buildEscalationMarkdown(CARD_ID, 'planning_needed',
     'Missing on disk: plan', resolved));
   const allPoints: VerifyPointId[] = ['merged', 'mergeShaAncestorOfMaster', 'checksGreen',
-    'worktreeAndBranchGone', 'schemaGuard', 'gapGateStamped', 'ledgerCommitted'];
+    'worktreeAndBranchGone', 'schemaGuard'];
   add('escalation/verify-failed-merged', buildEscalationMarkdown(CARD_ID, 'verify_failed_twice',
     '- merged: PR #12 is not merged', resolved, allPoints));
   add('escalation/verify-failed-after-merge', buildEscalationMarkdown(CARD_ID, 'verify_failed_twice',
@@ -160,10 +160,10 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
     { repoRoot: '/repo', model: 'sonnet', logsDir: '/logs', card: CARD_ID } as never,
     new AbortController(), {});
   const injections: Array<{ kind: string; detail: string }> = [];
-  for (const plugin of (options as { plugins?: Array<{ path: string }> }).plugins ?? []) {
-    if (resolve(plugin.path) === resolve(TRIBE_PLUGIN_DIR)) {
-      injections.push({ kind: 'executor/session-options.plugins', detail: `loads the tribe plugin: ${plugin.path}` });
-    }
+  // The runner loads no plugin of its own (card D8): any `plugins` key reappearing is an injection.
+  if ('plugins' in options) {
+    injections.push({ kind: 'executor/session-options.plugins',
+      detail: `loads a plugin of its own: ${JSON.stringify((options as { plugins: unknown }).plugins)}` });
   }
   return { prompts, injections };
 }

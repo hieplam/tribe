@@ -5,13 +5,11 @@
 // `io.spawnSession` seam. Fixtures are neutral (no repo names, no campaign values, no
 // model names baked in) — the stateless-capability wall.
 import { describe, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
 import { MERGE_GATE_DENIED_CHECKS_ERROR_REASON } from './merge-gate.ts';
 import {
   BACKGROUNDING_DENIED_REASON,
-  TRIBE_PLUGIN_DIR,
   WAIT_TOOL_DENIED_REASON,
+  buildSessionOptions,
   decideBackgroundingHook,
   decideMergeGateHook,
   decideScanGuardHook,
@@ -88,7 +86,7 @@ describe('runSession — §D1 option set (regression guard against SDK drift)', 
     expect(options.model).toBe('fixture-model');
     expect(options.systemPrompt).toEqual({ type: 'preset', preset: 'claude_code' });
     expect(options.settingSources).toEqual(['user', 'project', 'local']);
-    expect(options.plugins).toEqual([{ type: 'local', path: TRIBE_PLUGIN_DIR }]);
+    expect('plugins' in options).toBe(false);
     expect(options.permissionMode).toBe('bypassPermissions');
     expect(options.allowDangerouslySkipPermissions).toBe(true);
     expect(options.abortController).toBeInstanceOf(AbortController);
@@ -168,17 +166,10 @@ describe('runSession — §D1 option set (regression guard against SDK drift)', 
     expect(decision.hookSpecificOutput?.permissionDecision).toBe('deny');
   });
 
-  test('TRIBE_PLUGIN_DIR is derived from the module location, never a hardcoded absolute path', () => {
-    expect(TRIBE_PLUGIN_DIR).not.toContain('ai-dict');
-    expect(TRIBE_PLUGIN_DIR.endsWith('runner')).toBe(false);
-  });
-
-  test('TRIBE_PLUGIN_DIR resolves on disk to the real plugins/tribe directory (not counted by eye)', () => {
-    // The runner lives at plugins/tribe/scripts/runner/core/ — three levels below plugins/tribe.
-    // Prove the resolved path is that exact directory by checking a file that only exists
-    // there, not by asserting a string suffix alone.
-    expect(TRIBE_PLUGIN_DIR.endsWith(join('plugins', 'tribe'))).toBe(true);
-    expect(existsSync(join(TRIBE_PLUGIN_DIR, '.claude-plugin', 'plugin.json'))).toBe(true);
+  test('D3: the executor session loads no plugin of its own — only the owner\'s settings tiers', () => {
+    const options = buildSessionOptions({ brief: 'b' }, fixtureConfig(), new AbortController(), {});
+    expect('plugins' in options).toBe(false);
+    expect(options.settingSources).toEqual(['user', 'project', 'local']);
   });
 
   test('passes options.resume when a resume input is given', async () => {

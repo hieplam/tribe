@@ -5,6 +5,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { BRIEF_TEMPLATE_PATH, executorBrief, reportPathFor } from './brief.ts';
 import type { BriefCard, BriefState } from './brief.ts';
+import { countTribeMentions } from '../../tests/runner-driver-only/tribe-lexicon.ts';
 
 const TEMPLATE = readFileSync(BRIEF_TEMPLATE_PATH, 'utf8');
 
@@ -32,22 +33,19 @@ const FIXTURE_ANSWERS = '## 2026-01-01 -- sample ruling\n\nUse the neutral fixtu
  * heading already renders via {{CAMPAIGN}}, just carried through its own explicit param. */
 const FIXTURE_CAMPAIGN_SLUG = 'sample-campaign';
 
-/** Spec §5.3: the report path is injected by the caller (composed from `resolved.homeDir` via
- * `reportPathFor`, Task 2/3) — never derived here from the campaign name, and never
- * `.claude/state/...`. */
-const FIXTURE_REPORT_PATH = '/th/campaigns/sample-campaign/reports/C7.md';
+/** Spec §5.3: the campaign home is injected by the caller (`resolved.homeDir`) — never derived
+ * here from the campaign name, and never `.claude/state/...`. */
+const FIXTURE_CAMPAIGN_HOME = '/th/campaigns/sample-campaign';
 
 const EXPECTED_BRIEF = `# Executor Brief — card C7 (sample-campaign)
 
-## Executor mode
+## Your job
 
-You are dispatched as the Warchief for exactly one campaign card, running headless inside a
-single fresh session with no memory of any other card. Read the spec below silently for
-context — you do not re-open design decisions recorded there. Drive the committed plan
-test-first, dispatch Hunters per task, audit with the Skinner, and land ONE green,
-regular-merged PR on the target repo's master. You never contact the campaign owner
-directly, never invent a design decision the plan doesn't already make, and never widen
-scope beyond this card.
+You run exactly one campaign card, headless, in a fresh session with no memory of any other card.
+The plan below is your instructions: follow the way of working it prescribes, task by task, and
+add no process it does not ask for. Read the spec silently for context — you do not re-open
+design decisions recorded there. You never contact the campaign owner directly, never invent a
+design decision the plan doesn't already make, and never widen scope beyond this card.
 
 ## Card
 
@@ -94,48 +92,6 @@ notification can reach you. A backgrounded job dies with you. Therefore:
 A tool call that tries to background is blocked at the permission layer and returns an
 error — that block is this wall enforcing itself, not a bug to work around.
 
-## Evidence policy
-
-Every task is test-first: a failing test before the code, gates (formatter/linter/
-type-checker/tests) green before commit, and a real commit carrying the code, its test, and
-the plan's ticked checkboxes together. Claims of done are worthless without the gate output
-that proves them — paste gate output verbatim into worker reports.
-
-## Harness gaps and governance (per-card duties)
-
-Your agent Method already carries these; they are walls here because campaigns
-starve them silently:
-
-- Dispatch the Tracker at every audit round (Method step 6.0b), and give every dispatch its
-  own report-file path under the CAMPAIGN home's \`reports/\` directory — the same directory
-  ${FIXTURE_REPORT_PATH} above lives in, and the one \`gap-gate.ts\` globs when it is run with \`--home\`
-  set to that campaign home (see Method step 7 below) — named
-  \`tracker-<your card slug>-<round>.md\` (\`<round>\` = \`task-3\`, \`wave-2\`, \`fix-1\`,
-  \`final\`). You never read those files yourself.
-  Your card slug is the value you put in every \`Tribe-Card:\` trailer (the runner accepts that
-  slug in the stamp, and also the id C7 above); use the same slug for the Tracker
-  report files, \`gap-gate.ts --card\`, and the trailers.
-- Before \`gh pr create\`, run \`gap-gate.ts\` from the plugin root (Method step 7). It reads
-  every one of those Tracker report files, reconciles \`.tribe/harness-gaps.jsonl\`, and runs
-  the debt burn-down. Its exit code is a gate: 0 green, 1 red (fix the listed hits and re-run),
-  2 setup error (most often: no Tracker report for this card). Paste
-  \`<your card slug>-gap-gate.md\` verbatim as the PR body's \`## Harness gaps\` section — including
-  its \`gap-gate v1\` stamp line, which is what verify-shipped and the runner's D3 replay
-  check — and commit the \`.tribe/harness-gaps.jsonl\` append with the trailer
-  \`Tribe-Milestone: gap-gate\` BEFORE the PR opens. A merged PR with no valid stamp for its
-  card is not shipped.
-- \`debt-backfill.ts\` runs on EVERY PR, unconditionally.
-- Scout's governance proposals ride THIS card's PR: rule/anti-rule drafts as reviewable
-  text, a debt proposal as its recorded check command + description only — the debt
-  entity itself is created later, by ratified \`gap-rule.ts\` execution, never here. Do
-  not park the card waiting for ratification, do not
-  self-ratify, and leave the registry's \`ruled\` events unwritten — the campaign's
-  closing pass rules on the whole batch. Record each proposal and its proposed
-  disposition in your worker report and under a \`## Harness gaps\` heading in the
-  PR body; that record is what the closing pass reads.
-- Only a gap needing an owner-only decision (see the owner-only list above)
-  escalates NEEDS_DIRECTION.
-
 ## Merge order
 
 Land the PR with \`gh pr merge --merge\`.
@@ -151,10 +107,11 @@ This is the only in-repo record of which commits belong to this campaign — the
 campaign's own state lives outside the repo. Recovery is
 \`git log --grep="Campaign: sample-campaign"\`. Do NOT add an agent co-author line.
 
-## Worker reports
+## Notes for your plan
 
-Every dispatched worker (Hunter, Skinner) writes its report to:
-${FIXTURE_REPORT_PATH}
+If your plan asks you to write report or note files, the campaign's machine-local home is
+${FIXTURE_CAMPAIGN_HOME}; its \`reports/\` directory is yours to use. The runner itself reads nothing you
+write there.
 
 ## Answers (committed rulings — read before escalating)
 
@@ -194,13 +151,22 @@ No other terminal line is a valid signal.
 `;
 
 describe('executorBrief', () => {
+  test('V1: the rendered executor brief carries no Tribe way of working', () => {
+    const rendered = executorBrief(fixtureCard(), fixtureState(), '', readFileSync(BRIEF_TEMPLATE_PATH, 'utf8'), '/home/c', 'camp');
+    expect(countTribeMentions(rendered)).toEqual([]);
+    for (const kept of ['## Session liveness', 'run_in_background', 'timeout: 600000', 'gh pr checks',
+      'Campaign: camp', 'SHIPPED <pr> <sha>', 'NEEDS_DIRECTION: <question>', '## Answers']) {
+      expect(rendered).toContain(kept);
+    }
+  });
+
   test('renders the committed template with card/state substitutions and the embedded answers content (snapshot)', () => {
     const rendered = executorBrief(
       fixtureCard(),
       fixtureState(),
       FIXTURE_ANSWERS,
       TEMPLATE,
-      FIXTURE_REPORT_PATH,
+      FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
     );
     expect(rendered).toBe(EXPECTED_BRIEF);
@@ -213,7 +179,7 @@ describe('executorBrief', () => {
       fixtureState(),
       distinctiveRuling,
       TEMPLATE,
-      FIXTURE_REPORT_PATH,
+      FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
     );
     expect(rendered).toContain(distinctiveRuling);
@@ -225,7 +191,7 @@ describe('executorBrief', () => {
       fixtureState(),
       FIXTURE_ANSWERS,
       TEMPLATE,
-      FIXTURE_REPORT_PATH,
+      FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
     );
     expect(rendered).toContain(
@@ -239,7 +205,7 @@ describe('executorBrief', () => {
       fixtureState(),
       FIXTURE_ANSWERS,
       TEMPLATE,
-      FIXTURE_REPORT_PATH,
+      FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
     );
     expect(rendered).toContain('gh pr merge --merge');
@@ -251,7 +217,7 @@ describe('executorBrief', () => {
       fixtureState(),
       FIXTURE_ANSWERS,
       TEMPLATE,
-      FIXTURE_REPORT_PATH,
+      FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
     );
     expect(rendered).toContain('Your session ends the instant you stop calling tools');
@@ -265,7 +231,7 @@ describe('executorBrief', () => {
       fixtureState(),
       FIXTURE_ANSWERS,
       TEMPLATE,
-      FIXTURE_REPORT_PATH,
+      FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
     );
     expect(rendered).toContain('## Definition of Done (preconditions for SHIPPED)');
@@ -285,24 +251,24 @@ describe('executorBrief', () => {
       fixtureState(),
       FIXTURE_ANSWERS,
       TEMPLATE,
-      FIXTURE_REPORT_PATH,
+      FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
     );
     expect(rendered).toContain('After creating a worktree, run the repo\'s dependency bootstrap');
   });
 
   test('renders a distinct brief per card id and per campaign (no hardcoded values)', () => {
-    const otherReportPath = '/th/campaigns/other-campaign/reports/X9.md';
+    const otherCampaignHome = '/th/campaigns/other-campaign';
     const rendered = executorBrief(
       fixtureCard({ id: 'X9', spec: 'docs/superpowers/specs/x9.md', plan: 'docs/superpowers/plans/x9.md' }),
       fixtureState({ campaign: 'other-campaign', ownerOnlyEscalations: [] }),
       FIXTURE_ANSWERS,
       TEMPLATE,
-      otherReportPath,
+      otherCampaignHome,
       'other-campaign',
     );
     expect(rendered).toContain('card X9 (other-campaign)');
-    expect(rendered).toContain(otherReportPath);
+    expect(rendered).toContain(otherCampaignHome);
     expect(rendered).toContain('(none declared for this campaign)');
   });
 
@@ -310,16 +276,16 @@ describe('executorBrief', () => {
     expect(reportPathFor('/th/campaigns/camp', 'C1')).toBe('/th/campaigns/camp/reports/C1.md');
   });
 
-  test('executorBrief substitutes the injected report path into {{REPORT_PATH}}', () => {
+  test('executorBrief substitutes the injected campaign home into {{CAMPAIGN_HOME}}', () => {
     const brief = executorBrief(
       fixtureCard(),
       fixtureState(),
       FIXTURE_ANSWERS,
       TEMPLATE,
-      FIXTURE_REPORT_PATH,
+      FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
     );
-    expect(brief).toContain(FIXTURE_REPORT_PATH);
+    expect(brief).toContain(FIXTURE_CAMPAIGN_HOME);
     expect(brief).not.toContain('.claude/state');
   });
 });
@@ -331,7 +297,7 @@ describe('executorBrief — campaign trailer', () => {
       fixtureState(),
       FIXTURE_ANSWERS,
       TEMPLATE,
-      FIXTURE_REPORT_PATH,
+      FIXTURE_CAMPAIGN_HOME,
       'kanna-session-import',
     );
     expect(brief).toContain('Campaign: kanna-session-import');
@@ -343,7 +309,7 @@ describe('executorBrief — campaign trailer', () => {
       fixtureState(),
       FIXTURE_ANSWERS,
       TEMPLATE,
-      FIXTURE_REPORT_PATH,
+      FIXTURE_CAMPAIGN_HOME,
       'widget-export',
     );
     expect(brief).not.toContain('CAMPAIGN_SLUG');

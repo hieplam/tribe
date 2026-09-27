@@ -37,10 +37,10 @@ session to end every commit it makes with:
 Recovery is `git log --grep="Campaign: <campaign-slug>"` — no `~/.tribe`, no GitHub API, just git.
 
 **This is instructional, not enforced.** The runner tells the executor session to add the
-trailer; nothing mechanically checks that it did. `core/verify.ts`'s D3 five-point SHIPPED
-replay does not check for it, and neither does the `verify-shipped` skill — a card can ship
+trailer; nothing mechanically checks that it did. `core/verify.ts`'s D3 SHIPPED replay (see
+"The done check (D3 replay)") does not check for it, and neither does the `verify-shipped` skill — a card can ship
 (and this runner will happily record it as `shipped`) without the trailer present on any of its
-commits. Enforcing it would mean adding a sixth point to the D3 verify replay — the runner's
+commits. Enforcing it would mean adding a seventh point to the D3 verify replay — the runner's
 highest-risk module — which is deliberate future work, not an oversight.
 
 ## Inputs
@@ -80,8 +80,9 @@ the runner *log* (D6).
 
 ```
 <home>/
-  reports/<cardId>.md            per-CARD worker reports (written by `brief.ts`'s `reportPathFor`;
-                                  survive across runs — never cleared by this runner)
+  reports/                       offered to the executor by the brief (`{{CAMPAIGN_HOME}}`) for any
+                                  report files its plan asks for; the runner reads nothing written
+                                  there and never clears it
   runs/<run-id>/
     run.json                     this invocation's run record (schema below)
     logs/…                       this invocation's session logs (default --logs-dir)
@@ -439,7 +440,7 @@ state file's own `status` field. The resume matrix, exactly as implemented in
 | --- | --- | --- |
 | Escalation file exists for the card (unless `--include-escalated`) | `escalation_pending` | **Park** — nothing new is attempted or written for this card this pass; the loop records it and moves straight to the next progressable card. The run only exits once no progressable card remains (D5′, below) — this is **not** an immediate abort (`loop.ts:957-965`). |
 | No `branch` recorded for the card | `fresh` | Spawn a fresh session (no digest — genuinely no trace). |
-| PR found for the branch, `state == "MERGED"` | `verify_only` | Run the D3 verify checks and record — no session spawned. |
+| PR found for the branch, `state == "MERGED"` | `verify_only` | Run the D3 verify checks (the six points in "The done check (D3 replay)") and record — no session spawned. |
 | PR found for the branch, `state == "OPEN"`, a `sessionId` is recorded | `resume` (`pr_open`) | Attempt `resume: sessionId` with a "check CI, complete the merge" prompt. |
 | PR found for the branch, `state == "OPEN"`, no `sessionId` recorded | `fresh` (carries a digest) | **F8 fix, verified against `loop.ts:170-184`:** spawn fresh, but carrying a state digest that names the open PR and instructs the session to inspect and continue it rather than open a second one. This is explicitly **NOT** "same as no trace" — the in-code comment at `loop.ts:170-174` rebuts that reading directly. |
 | No PR, but the branch/worktree still exists, a `sessionId` is recorded | `resume` (`branch_no_pr`) | Attempt `resume: sessionId` with a "continue implementing" prompt. |
@@ -647,41 +648,34 @@ resolve: add `ratified-as:` to each named block in `answers.md` (or ratify it vi
 governance path it names) and re-trigger; nothing else about the campaign's cards is touched by
 this gate.
 
-## Harness-gap gate and the `gap-gate v1` stamp (spec CU-4 §2, §3)
+## The done check (D3 replay)
 
-Before any card PR is opened, the executor runs the gap gate:
+The executor's `SHIPPED <pr> <sha>` line is a signal only; `verifyShipped` (`core/verify.ts`) is
+the acceptance. It replays **six** points, each reported independently (never short-circuited),
+so a failed verdict names every failing point:
 
-```bash
-bun plugins/tribe/scripts/gaps/gap-gate.ts --repo <target-repo> --home <tribe-home> \
-    --card <card-slug> --base <merge-base-sha> [--head HEAD] [--pr <n>]
-```
+| Point | Passes when |
+| --- | --- |
+| `merged` | The card's PR is merged; its merge sha is recorded. |
+| `mergeShaAncestorOfMaster` | The merge sha is an ancestor of `<remote>/<baseBranch>`. |
+| `checksGreen` | Every `gh pr checks` entry concluded success (D6 docs-only flake waiver aside). |
+| `worktreeAndBranchGone` | The card's worktree and local/remote branch are removed. |
+| `schemaGuard` | No diff on `schemaLockPaths` across the card branch's own commits, unless the plan waives it. |
+| `localBaseSynced` | D4: the runner's own `--repo` checkout of the base branch contains the merge sha and has no commit `<remote>/<baseBranch>` lacks. |
 
-It reads every `<home>/reports/tracker-<card>-*.md` (so a candidate found at task 3 and absent
-from the final round still reaches reconciliation), reconciles them against
-`.tribe/harness-gaps.jsonl` in the target repo, runs the debt burn-down diff, and writes
-`<home>/reports/<card>-gap-gate.md` — the complete `## Harness gaps` PR-body section, ending in
-one machine-checkable stamp line. Exit 0 = green, 1 = red (positive debt delta, or an unsafe
-fingerprint), 2 = setup error (no Tracker report, bad range, unreadable ledger). Zero Tracker
-report files is a RED gate, never an empty set.
+The `localBaseSynced` fetch and fast-forward merge have 120-second timeouts; its local Git
+queries and the heal's safety probes have 60-second timeouts. A timeout follows the existing
+failed-point or no-heal handling instead of holding verification indefinitely.
 
-Under ledger policy A the append is committed on the card branch with the trailer
-`Tribe-Milestone: gap-gate`, so the ledger rides the PR onto the base branch.
+**The fast-forward heal.** When the first verify fails only because a merged card's session did
+not update the runner's checkout, `healSafeResidue` (`core/loop/card-actions.ts`) fast-forwards it
+with `git merge --ff-only <remote>/<baseBranch>` before the retry — only when
+`decideBaseSyncHeal` (`core/residue.ts`) proves it can lose nothing: `merged` passed, the checkout
+is on the base branch, it is clean, and the local base is an ancestor of the remote one. A healed
+point's detail ends in `(healed: fast_forward_base)`. A diverged local base is never healed.
 
-`verifyShipped` therefore replays **seven** D3 points, not five. The two added by CU-4 §3 are:
-
-- `gapGateStamped` — the merged PR body carries a `gap-gate v1` stamp whose `base=`/`head=` shas
-  are commits of the merged branch, and whose `card=` names an identity of this card: either the
-  runner's campaign-local card id, OR a `Tribe-Card:` trailer value on the commits the merged PR
-  brought in (a card has two names — spec §3a — the runner id and the Warchief's slug used in
-  every `Tribe-Card:` trailer). The trailer check runs
-  `git log --format=%(trailers:key=Tribe-Card,valueonly) <mergeSha>^1..<mergeSha>` and accepts
-  `stamp.card` if it appears among those trailer values. A stamp naming neither still fails.
-- `ledgerCommitted` — every id the stamp says was minted is present in the ledger as committed
-  on the base branch.
-
-Both are reported like every other point (never short-circuited): a failure escalates the card
-instead of recording `shipped`, which is what makes a PR opened by a session that bypassed the
-Warchief a red verdict a human must act on.
+The runner never checks a gap-gate stamp; a plan that wants the harness-gap gate runs it as a
+task's Done command (the orchestrate-campaign skill's Tribe style).
 
 ## Report contract (spec §O5)
 
@@ -1226,9 +1220,11 @@ ESLint, which is deferred until typescript-eslint supports TS >= 7.1 (plan Amend
   should treat its absence, or a permanently-unfinalized record with a dead pid, as informative
   rather than assume every invocation always produces one.
 - **The verify retry (`verifyThenHealIfNeeded`/`healSafeResidue`, `core/loop/card-actions.ts`)
-  has zero delay.** The D3 verify-shipped check is attempted twice back-to-back with no sleep
-  between attempts (the second attempt heals whatever residue P4's `decideResidueHeal` proves
-  safe first, per spec `docs/tribe/fixlists/2026-08-08-outstanding-17/P4-self-heal-safe-residue.md`).
+  has zero delay.** The D3 done check (`verifyShipped`, six points) is attempted twice
+  back-to-back with no sleep between attempts (before the second attempt the runner heals
+  whatever residue P4's `decideResidueHeal` proves safe, per spec
+  `docs/tribe/fixlists/2026-08-08-outstanding-17/P4-self-heal-safe-residue.md`, and
+  fast-forwards its own base checkout when `decideBaseSyncHeal` proves that safe).
   This catches a transient `gh`/network blip on the *second* call, but it will **not** catch a
   check that is still settling (e.g. CI still running) — the two attempts happen too close
   together for that.
@@ -1253,7 +1249,10 @@ ESLint, which is deferred until typescript-eslint supports TS >= 7.1 (plan Amend
   `['project']` alone — so a spawned session picks up the owner's own `~/.claude/settings.json`
   (its `enabledPlugins`, `permissions.deny`, `disableClaudeAiConnectors`, MCP servers) the same
   way a person's own session does, while `project`/`local` still supply the target repo's
-  CLAUDE.md and any repo-local settings. `buildSessionOptions` also wires a **fourth**
+  CLAUDE.md and any repo-local settings. Those three tiers are ALL the executor loads: the
+  runner passes no `plugins` option of its own (card runner-driver-only, D8), so an executor
+  session sees exactly the plugins and agents the owner's own tiers enable — nothing the runner
+  injects. `buildSessionOptions` also wires a **fourth**
   `PreToolUse` hook, `decideScanGuardHook` (owner ruling R-a), after the anti-livelock, wait-tool,
   and merge-gate hooks: it denies any `find` rooted at `/`, `~`, `~/`, `$HOME`, `"$HOME"`, or
   `$HOME/` and redirects the session to the `c3` skill or a scoped directory instead

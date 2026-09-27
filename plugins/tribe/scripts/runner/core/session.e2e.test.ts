@@ -20,14 +20,15 @@ import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { sdkSpawnSession } from '../adapters/session.adapter.ts';
 import { isFilesystemWideScan } from './metrics/session-hygiene.ts';
-import { TRIBE_PLUGIN_DIR, runSession, type SessionIO, type SessionMessage } from './session.ts';
+import { runSession, type SessionIO, type SessionMessage } from './session.ts';
 
 const RUN_E2E = process.env.RUN_SESSION_E2E === '1';
 
-// TRIBE_PLUGIN_DIR resolves to `<repoRoot>/plugins/tribe` (session.ts) — two levels up is the
-// repo root this session's `cwd` should be, derived the same stateless-capability way
-// TRIBE_PLUGIN_DIR itself is (never a hardcoded absolute path).
-const REPO_ROOT = join(TRIBE_PLUGIN_DIR, '..', '..');
+// This file lives at `<repoRoot>/plugins/tribe/scripts/runner/core/` — four levels up is
+// `<repoRoot>/plugins`, one more is the repo root this session's `cwd` should be. Derived from
+// the module location, never a hardcoded absolute path.
+const PLUGINS_DIR = join(import.meta.dir, '..', '..', '..', '..');
+const REPO_ROOT = join(PLUGINS_DIR, '..');
 
 const BRIEF =
   'Invoke the Skill tool with the skill named "c3". Then reply with exactly one line: ' +

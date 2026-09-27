@@ -161,7 +161,7 @@ function renderClosing(facts: ClosingBriefFacts): string {
   const shippedVerdicts = bulletList(
     facts.shippedVerdicts.map(
       (v) => `${v.cardId}: mkdir -p "${dirname(v.verdictPath)}" && bash "$script_path" `
-        + `--pr <${v.cardId}'s PR> --worktree <${v.cardId}'s worktree> --card ${v.cardId} `
+        + `--pr <${v.cardId}'s PR> --worktree <${v.cardId}'s worktree> --card ${v.cardId} --skip-gap-gate `
         + `--verdict-out ${v.verdictPath}`,
     ),
     '(no shipped cards — no verdict files to write)',

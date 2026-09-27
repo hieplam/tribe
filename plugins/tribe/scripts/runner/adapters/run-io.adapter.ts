@@ -6,19 +6,37 @@ import { dirname, join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import type { ExecResult, LockInfo, LoopIO, RunLoopConfig } from '../core/loop.ts';
+import type { ExecOptions } from '../ports/ports.ts';
 import type { SessionMessage, SpawnSessionParams } from '../core/session.ts';
 import { reportDirOf } from '../core/paths.ts';
 import { sdkSpawnSession } from './session.adapter.ts';
 
-function realExec(cmd: string[], opts?: { cwd?: string }): Promise<ExecResult> {
+function realExec(cmd: string[], opts?: ExecOptions): Promise<ExecResult> {
   return new Promise((resolve) => {
     const child = spawn(cmd[0] as string, cmd.slice(1), { cwd: opts?.cwd });
     let stdout = '';
     let stderr = '';
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     child.stdout?.on('data', (chunk) => (stdout += chunk.toString()));
     child.stderr?.on('data', (chunk) => (stderr += chunk.toString()));
-    child.on('close', (code) => resolve({ stdout, stderr, exitCode: code ?? 1 }));
-    child.on('error', (err) => resolve({ stdout, stderr: err.message, exitCode: 1 }));
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      resolve({ stdout, stderr, exitCode: code ?? 1 });
+    });
+    child.on('error', (err) => {
+      clearTimeout(timeout);
+      resolve({ stdout, stderr: err.message, exitCode: 1 });
+    });
+    if (opts?.timeoutMs !== undefined) {
+      timeout = setTimeout(() => {
+        child.kill('SIGKILL');
+        resolve({
+          stdout,
+          stderr: `${stderr}${stderr && !stderr.endsWith('\n') ? '\n' : ''}timed out after ${opts.timeoutMs} ms`,
+          exitCode: 1,
+        });
+      }, opts.timeoutMs);
+    }
   });
 }
 
