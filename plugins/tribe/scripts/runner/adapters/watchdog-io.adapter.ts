@@ -61,6 +61,11 @@ export function buildWatchdogIo(): WatchdogIO {
       writeFileSync(tmp, content);
       renameSync(tmp, p);
     },
+    // The watchdog never runs a Done command and never deletes anything, so the Done scratch
+    // cleanup `RunHomePort` carries for the runner is refused outright here.
+    removeTree: (p) => {
+      throw new Error(`removeTree refuses ${p}: the watchdog deletes nothing`);
+    },
 
     listEntries: (dirPath) => {
       let names: string[];

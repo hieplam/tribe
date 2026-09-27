@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   answersPathOf, campaignStatePathOf, escalationPathOf, escalationsDirOf, reportDirOf,
-  supervisorLedgerPathOf,
+  doneWorktreePathOf, supervisorLedgerPathOf,
 } from './paths.ts';
 
 describe('campaign-home path helpers', () => {
@@ -27,4 +27,9 @@ describe('campaign-home path helpers', () => {
   test('supervisorLedgerPathOf: the campaign session tree (spec §4.4)', () => {
     expect(supervisorLedgerPathOf('/h')).toBe('/h/supervisor/ledger.jsonl');
   });
+});
+
+test('doneWorktreePathOf stays under <home>/done and refuses a card id that would leave it', () => {
+  expect(doneWorktreePathOf('/h', 'small-helpers')).toBe('/h/done/small-helpers');
+  for (const bad of ['../x', 'a/../../b', '/abs', '', '.', '..']) expect(() => doneWorktreePathOf('/h', bad)).toThrow(/outside/);
 });

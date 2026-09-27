@@ -54,6 +54,21 @@ export interface RunHomePort {
   ensureDir(resolvedPath: string): void;
   /** Crash-safe write: temp file in the same directory, then rename (spec §4). */
   writeFileAtomic(resolvedPath: string, content: string): void;
+  /** Recursive delete of a runner-built scratch path; the adapter refuses any path without a
+   * `/done/` segment. */
+  removeTree(resolvedPath: string): void;
+}
+/** One Done command's outcome, as the edge observed it. `timedOut` = killed at `timeoutMs`. */
+export interface ShellRunResult {
+  exitCode: number;
+  timedOut: boolean;
+  durationMs: number;
+  stdout: string;
+  stderr: string;
+}
+/** Card runner-driver-only (D2): the ONLY seam that runs a plan's Done command. */
+export interface DonePort {
+  runShell(command: string, opts: { cwd: string; env: Record<string, string>; timeoutMs: number }): Promise<ShellRunResult>;
 }
 
 /** Task 27 (spec §10.4): the adapter's `/healthz` probe result — a typed report of WHAT the
@@ -253,7 +268,8 @@ export interface LoopIO
     LockStorePort,
     SessionSpawnPort,
     RunHomePort,
-    LinePort {}
+    LinePort,
+    DonePort {}
 
 // ---------------------------------------------------------------------------------------
 // Campaign watchdog seams (card i74). Type declarations only, same as the rest of this file.

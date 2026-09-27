@@ -2,11 +2,11 @@
 // (filesystem, child processes, clock, own pid) lives behind this one adapter leaf. Pure
 // modules receive it as the injected `io` parameter and never import these primitives
 // themselves (purity wall — enforced by structure.test.ts; ESLint layer deferred per Amendment A3).
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import type { ExecResult, LockInfo, LoopIO, RunLoopConfig } from '../core/loop.ts';
-import type { ExecOptions } from '../ports/ports.ts';
+import type { ExecOptions, ShellRunResult } from '../ports/ports.ts';
 import type { SessionMessage, SpawnSessionParams } from '../core/session.ts';
 import { reportDirOf } from '../core/paths.ts';
 import { sdkSpawnSession } from './session.adapter.ts';
@@ -60,6 +60,45 @@ function isProcessAlive(pid: number): boolean {
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === 'EPERM';
   }
+}
+
+/** fail-closed-edges obligations 1 and 3: bounded, never throws, a spawn error is exit 127. Output
+ * kept to the last 256 KiB per stream so a chatty test suite cannot exhaust memory. */
+export function runShellBounded(
+  command: string,
+  opts: { cwd: string; env: Record<string, string>; timeoutMs: number },
+): Promise<ShellRunResult> {
+  const cap = 256 * 1024;
+  const keep = (acc: string, chunk: Buffer): string => {
+    const next = acc + chunk.toString();
+    return next.length > cap ? next.slice(next.length - cap) : next;
+  };
+  return new Promise((resolve) => {
+    const started = Date.now();
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    // `detached` makes the child a process-group leader, so the timeout can kill the whole group.
+    const child = spawn('bash', ['-c', command], { cwd: opts.cwd, env: { ...process.env, ...opts.env }, detached: true });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        process.kill(-(child.pid as number), 'SIGKILL'); // the whole group: a pipeline's children too
+      } catch {
+        child.kill('SIGKILL'); // no group to signal (already gone or never started): the child alone
+      }
+    }, opts.timeoutMs);
+    child.stdout?.on('data', (c: Buffer) => (stdout = keep(stdout, c)));
+    child.stderr?.on('data', (c: Buffer) => (stderr = keep(stderr, c)));
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      resolve({ exitCode: 127, timedOut, durationMs: Date.now() - started, stdout, stderr: `${stderr}${err.message}\n` });
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      resolve({ exitCode: code ?? (signal !== null ? 137 : 1), timedOut, durationMs: Date.now() - started, stdout, stderr });
+    });
+  });
 }
 
 /** P11 fix-list follow-up: takes only `{ homeDir }` (a structural `Pick`, not a nominal
@@ -119,5 +158,12 @@ export function buildRealIo(config: Pick<RunLoopConfig, 'homeDir'>): LoopIO {
       writeFileSync(tmp, content);
       renameSync(tmp, resolvedPath);
     },
+    removeTree: (resolvedPath) => {
+      if (!resolvedPath.includes(`${sep}done${sep}`)) {
+        throw new Error(`removeTree refuses ${resolvedPath}: not a runner Done scratch path`);
+      }
+      rmSync(resolvedPath, { recursive: true, force: true });
+    },
+    runShell: runShellBounded,
   };
 }

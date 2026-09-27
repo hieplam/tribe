@@ -644,6 +644,8 @@ describe('writeReport — W-F5: last-tick blocked reconciliation reaches the rep
       appendLog: () => {},
       ensureDir: () => {},
       writeFileAtomic: () => {},
+      removeTree: () => {},
+      runShell: async () => ({ exitCode: 0, timedOut: false, durationMs: 0, stdout: '', stderr: '' }),
     };
 
     const config: RunLoopConfig = {

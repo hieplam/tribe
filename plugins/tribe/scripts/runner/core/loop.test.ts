@@ -616,6 +616,8 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
     writeFileAtomic: mock((p: string, content: string) => {
       atomicWrites.push({ path: p, content });
     }),
+    removeTree: mock(() => {}),
+    runShell: mock(async () => ({ exitCode: 0, timedOut: false, durationMs: 0, stdout: '', stderr: '' })),
   };
 
   return { io, calls, writtenFiles, spawnBriefs, lockCalls, ensuredDirs, atomicWrites, renameCalls };

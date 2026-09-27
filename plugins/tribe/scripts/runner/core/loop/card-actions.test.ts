@@ -65,6 +65,8 @@ function fixtureIo(overrides: Partial<LoopIO> = {}): LoopIO {
     spawnSession: mock(async function* () {}),
     ensureDir: mock(() => {}),
     writeFileAtomic: mock(() => {}),
+    removeTree: mock(() => {}),
+    runShell: mock(async () => ({ exitCode: 0, timedOut: false, durationMs: 0, stdout: '', stderr: '' })),
     printLine: mock(() => {}),
     ...overrides,
   };

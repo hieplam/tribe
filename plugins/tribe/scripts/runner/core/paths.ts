@@ -3,7 +3,7 @@
  * `~/.tribe/<repo-key>/campaigns/<slug>/`). One campaign per home, so every artifact
  * has a fixed name and needs no CLI flag. No IO, no clock, no fs — string math only.
  */
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 export const CAMPAIGN_STATE_FILENAME = 'campaign-state.json';
 export const ANSWERS_FILENAME = 'answers.md';
@@ -39,4 +39,15 @@ export function reportDirOf(homeDir: string): string {
  * `supervisorPathsOf`) append rows to, so both writers derive the one path from this helper. */
 export function supervisorLedgerPathOf(homeDir: string): string {
   return join(homeDir, 'supervisor', 'ledger.jsonl');
+}
+
+/** `<home>/done/<cardId>` — the scratch worktree a Done run checks out (spec §4.5). Proven to stay
+ * under `<home>/done` before anything is created or deleted there (fail-closed-edges obligation 4). */
+export function doneWorktreePathOf(homeDir: string, cardId: string): string {
+  const root = resolve(homeDir, 'done');
+  const path = resolve(root, cardId);
+  if (cardId === '' || cardId === '.' || isAbsolute(cardId) || dirname(path) !== root) {
+    throw new Error(`doneWorktreePathOf: card id ${JSON.stringify(cardId)} resolves outside ${root}`);
+  }
+  return path;
 }
