@@ -663,6 +663,9 @@ so a failed verdict names every failing point:
 | `schemaGuard` | No diff on `schemaLockPaths` across the card branch's own commits, unless the plan waives it. |
 | `localBaseSynced` | D4: the runner's own `--repo` checkout of the base branch contains the merge sha and has no commit `<remote>/<baseBranch>` lacks. |
 
+The `localBaseSynced` fetch has a 120-second timeout. If it times out, the point fails with the
+existing fetch-failure detail instead of holding verification indefinitely.
+
 **The fast-forward heal.** When the first verify fails only because a merged card's session did
 not update the runner's checkout, `healSafeResidue` (`core/loop/card-actions.ts`) fast-forwards it
 with `git merge --ff-only <remote>/<baseBranch>` before the retry — only when

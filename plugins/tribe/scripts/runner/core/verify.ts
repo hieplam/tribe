@@ -10,7 +10,7 @@
 // this module never imports `child_process`, `fs`, or performs network I/O itself.
 import { join } from 'node:path';
 import type { Card } from './types.ts';
-import type { ExecResult, VerifyIO } from '../ports/ports.ts';
+import type { ExecOptions, ExecResult, VerifyIO } from '../ports/ports.ts';
 
 export type { ExecResult, VerifyIO };
 
@@ -72,9 +72,9 @@ interface PrCheck {
  * a synthetic non-zero result rather than propagating — every check function reports a
  * failed point instead of throwing (non-negotiable: a failed check is a reportable
  * outcome, never an exception). */
-async function run(io: VerifyIO, cwd: string, cmd: string[]): Promise<ExecResult> {
+async function run(io: VerifyIO, cwd: string, cmd: string[], options?: ExecOptions): Promise<ExecResult> {
   try {
-    return await io.exec(cmd, { cwd });
+    return await io.exec(cmd, { cwd, ...options });
   } catch (err) {
     return { stdout: '', stderr: err instanceof Error ? err.message : String(err), exitCode: 1 };
   }
@@ -462,7 +462,7 @@ async function checkLocalBaseSynced(mergeSha: string | null, config: VerifyConfi
   const id = 'localBaseSynced' as const;
   if (!mergeSha) return { id, passed: false, detail: 'no merge sha available (point 1 did not report one); cannot check the local base' };
   const remoteBase = `${config.remote}/${config.baseBranch}`;
-  const fetched = await run(io, config.repoRoot, ['git', 'fetch', config.remote, config.baseBranch]);
+  const fetched = await run(io, config.repoRoot, ['git', 'fetch', config.remote, config.baseBranch], { timeoutMs: 120_000 });
   if (fetched.exitCode !== 0) return { id, passed: false, detail: `git fetch ${config.remote} ${config.baseBranch} failed (exit ${fetched.exitCode}); cannot compare the local base` };
   const contains = await run(io, config.repoRoot, ['git', 'merge-base', '--is-ancestor', mergeSha, config.baseBranch]);
   if (contains.exitCode !== 0) {

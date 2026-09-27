@@ -179,6 +179,22 @@ describe('verifyShipped — happy path', () => {
 });
 
 describe('localBaseSynced (D4: local base has the latest)', () => {
+  test('bounds the remote fetch', async () => {
+    const base = buildIo();
+    const calls: Array<{ cmd: string[]; options?: { cwd?: string; timeoutMs?: number } }> = [];
+    const io: VerifyIO = {
+      ...base,
+      async exec(cmd, options) {
+        calls.push({ cmd, options });
+        return base.exec(cmd, options);
+      },
+    };
+    await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
+    expect(calls.find(({ cmd }) => cmd[0] === 'git' && cmd[1] === 'fetch')).toEqual({
+      cmd: ['git', 'fetch', 'origin', 'master'],
+      options: { cwd: '/repo', timeoutMs: 120_000 },
+    });
+  });
   test('merge in the local base, local not ahead of the remote -> passes', async () => {
     const r = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo(), 'C1');
     expect(r.points.find((p) => p.id === 'localBaseSynced')?.passed).toBe(true);

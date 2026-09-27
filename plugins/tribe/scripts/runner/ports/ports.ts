@@ -13,7 +13,7 @@
 // ---------------------------------------------------------------------------------------
 
 export interface ExecPort {
-  exec(cmd: string[], opts?: { cwd?: string }): Promise<ExecResult>;
+  exec(cmd: string[], opts?: ExecOptions): Promise<ExecResult>;
 }
 export interface TimerPort {
   sleep(ms: number): Promise<void>;
@@ -97,6 +97,11 @@ export interface ExecResult {
   exitCode: number;
 }
 
+export interface ExecOptions {
+  cwd?: string;
+  timeoutMs?: number;
+}
+
 // ---------------------------------------------------------------------------------------
 // verify.ts's seam.
 // ---------------------------------------------------------------------------------------
@@ -105,7 +110,7 @@ export interface ExecResult {
  * reading the card's plan file for the D3 point-6 front-matter guard — all injected so this
  * module stays pure TypeScript (test-first rule, global constraint). */
 export interface VerifyIO {
-  exec(cmd: string[], options?: { cwd?: string }): Promise<ExecResult>;
+  exec(cmd: string[], options?: ExecOptions): Promise<ExecResult>;
   /** C1 (HARDENING-BACKLOG): verify runs AFTER the merge, and a card may legitimately delete
    * its own planning docs as part of its work — so the plan's presence is checked first and a
    * missing plan is a reportable guard input, never a thrown ENOENT. `resolvedPath` is already
@@ -222,7 +227,7 @@ export interface HookDecision {
 // ---------------------------------------------------------------------------------------
 
 export interface DerivePhaseIO {
-  exec(cmd: string[], opts?: { cwd?: string }): Promise<ExecResult>;
+  exec(cmd: string[], opts?: ExecOptions): Promise<ExecResult>;
   fileExists(resolvedPath: string): boolean;
 }
 
