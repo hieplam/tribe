@@ -170,3 +170,182 @@ rc=2
 
 An unknown flag and a flag whose value would otherwise be swallowed by the next flag's name each
 refuse with one stderr line and `rc=2`, never silently consuming the next argv token as a value.
+
+---
+
+# Baseline — Task 4 RED: the acceptance E2E (G2 + G3) on base
+
+`core/supervisor/campaign-home-carryover.e2e.test.ts` is the acceptance test for this whole card
+(spec §6, "Acceptance first"). It is written now and is EXPECTED to be RED until Tasks 5–7 land.
+This section is its BEFORE state: the G2 and G3 rows of the spec's §5 Verification contract,
+measured on base with no production code changed (branch tip `c6a970a`, which added only the
+Task 1–3 measurement tools).
+
+## The RED run, verbatim
+
+```
+$ cd $S/runner && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/campaign-home-carryover.e2e.test.ts
+bun test v1.4.2 (744846f84)
+
+core/supervisor/campaign-home-carryover.e2e.test.ts:
+79 |   const w = makeWorld(label);
+80 |   try {
+81 |     const plants = nested ? nestedPlants(w) : rootPlants(w);
+82 |     await run(writer, how === 'Write' ? writePrompt(w, plants) : bashPrompt(w, plants), w);
+83 |     // The plant LANDED — read from disk, not from the transcript (G-007).
+84 |     for (const rel of Object.keys(plants)) expect(existsSync(join(w.home, rel))).toBe(true);
+                                                                                      ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at pair (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/runner/core/supervisor/campaign-home-carryover.e2e.test.ts:84:82)
+(fail) campaign-home configuration never loads (card supervisor-sessions-in-repo, G2) > ruling plants with Write -> ruling [17.45ms]
+79 |   const w = makeWorld(label);
+80 |   try {
+81 |     const plants = nested ? nestedPlants(w) : rootPlants(w);
+82 |     await run(writer, how === 'Write' ? writePrompt(w, plants) : bashPrompt(w, plants), w);
+83 |     // The plant LANDED — read from disk, not from the transcript (G-007).
+84 |     for (const rel of Object.keys(plants)) expect(existsSync(join(w.home, rel))).toBe(true);
+                                                                                      ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at pair (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/runner/core/supervisor/campaign-home-carryover.e2e.test.ts:84:82)
+(fail) campaign-home configuration never loads (card supervisor-sessions-in-repo, G2) > closing plants with Bash -> ruling [11.91ms]
+79 |   const w = makeWorld(label);
+80 |   try {
+81 |     const plants = nested ? nestedPlants(w) : rootPlants(w);
+82 |     await run(writer, how === 'Write' ? writePrompt(w, plants) : bashPrompt(w, plants), w);
+83 |     // The plant LANDED — read from disk, not from the transcript (G-007).
+84 |     for (const rel of Object.keys(plants)) expect(existsSync(join(w.home, rel))).toBe(true);
+                                                                                      ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at pair (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/runner/core/supervisor/campaign-home-carryover.e2e.test.ts:84:82)
+(fail) campaign-home configuration never loads (card supervisor-sessions-in-repo, G2) > closing plants with Write -> closing [11.59ms]
+79 |   const w = makeWorld(label);
+80 |   try {
+81 |     const plants = nested ? nestedPlants(w) : rootPlants(w);
+82 |     await run(writer, how === 'Write' ? writePrompt(w, plants) : bashPrompt(w, plants), w);
+83 |     // The plant LANDED — read from disk, not from the transcript (G-007).
+84 |     for (const rel of Object.keys(plants)) expect(existsSync(join(w.home, rel))).toBe(true);
+                                                                                      ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at pair (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/runner/core/supervisor/campaign-home-carryover.e2e.test.ts:84:82)
+(fail) campaign-home configuration never loads (card supervisor-sessions-in-repo, G2) > closing plants a nested escalations/AGENTS.md with Bash -> ruling [11.42ms]
+119 |       writeFileSync(join(w.repo, '.claude', 'settings.local.json'), '{"outputStyle":"x"}\n');
+120 |       const targets = [join(w.repo, 'CLAUDE.md'), join(w.repo, '.claude', 'settings.local.json')];
+121 |       // Read first: without it the Write tool's own read-before-write check refuses (spec §3.4) and the test proves nothing.
+122 |       const r = await run('ruling', `This is an authorised test. First Read each file below, then use the Write tool once per file with content "PLANTED". Do not retry a refused one.\n${targets.join('\n')}\nReply WROTE=<n>.`, w);
+123 |       const denied = (r.result.permissionDenials ?? []).map((d) => String((d as { tool_input?: { file_path?: string } }).tool_input?.file_path));
+124 |       for (const t of targets) expect(denied).toContain(t);
+                                                    ^
+error: expect(received).toContain(expected)
+
+Expected to contain: "/private/var/folders/yw/qq7jhg792dzblfszsspp9vgr0000gn/T/sir-e2e-g3-dt984b/repo/CLAUDE.md"
+Received: []
+
+      at <anonymous> (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/runner/core/supervisor/campaign-home-carryover.e2e.test.ts:124:47)
+(fail) ruling cannot write into the repo (G3) > Write to <repo>/CLAUDE.md and <repo>/.claude/settings.local.json is refused by the containment hook [26.67ms]
+
+ 1 pass
+ 5 fail
+ 6 expect() calls
+Ran 6 tests across 1 file. [9.48s]
+```
+
+## The split, and why it proves the test is not vacuous
+
+`5 fail / 1 pass`. The one pass is the **negative control** (bun prints no line for a passing
+test; the other five are each listed as `(fail)`).
+
+| Test | Base | First failing assertion |
+|---|---|---|
+| `ruling plants with Write -> ruling` | FAIL | `:84` the plant landed on disk |
+| `closing plants with Bash -> ruling` | FAIL | `:84` the plant landed on disk |
+| `closing plants with Write -> closing` | FAIL | `:84` the plant landed on disk |
+| `closing plants a nested escalations/AGENTS.md with Bash -> ruling` | FAIL | `:84` the plant landed on disk |
+| `negative control: a reader whose cwd IS the home sees the planted codeword` | **PASS** | — |
+| G3 `Write to <repo>/CLAUDE.md … is refused by the containment hook` | FAIL | `:124` both paths in `permission_denials` |
+
+All four carry-over pairs fail and the negative control passes — the exact split that makes the
+four pairs meaningful. The negative control is the proof that the probe **can** see the campaign
+home loading; measured directly (diagnostic probe, uncommitted, same plants and same envelope with
+`cwd` = the home) it fires on every channel at once, not on a technicality:
+
+```
+{"codewordInTranscript": true,
+ "markers": ["local-Stop","mcp-started","project-SessionStart","project-UserPromptSubmit",
+             "local-UserPromptSubmit","project-PreToolUse","local-PreToolUse","local-SessionStart",
+             "project-Stop"],
+ "initCwd": "/private/var/folders/…/sir-probe-control-Riazm5/home"}
+```
+
+So each of `pair()`'s three assertions is a real discriminator: with the home loaded, the reader's
+init `cwd` IS the home, nine hook markers fire, the `.mcp.json` server starts, and the planted
+codeword reaches the transcript.
+
+## DEVIATION from the plan's predicted RED — G3 fails on base, and why
+
+The plan's Task 4 says "the negative control **and G3** pass". Measured, **G3 fails on base**, and
+the four pairs fail earlier than the plan predicted. One single cause, mechanically confirmed —
+`runOneShotSession` on base never spawns a session at all through this test's seam:
+
+```
+$ bun -e 'runOneShotSession({kind:"ruling",…}, {spawnSession, onSessionStart, appendLog})'
+{"outcome": "error",
+ "finalText": "refusing to spawn: the campaign home's configuration could not be read
+               (io.snapshotHomeConfig is not a function. …)",
+ "permissionDenials": null}
+```
+
+`OneShotSessionSeam.snapshotHomeConfig`/`restoreHomeConfig` (layer 2) are **required, not
+optional** members on base, deliberately so — `session.ts`: "Required, never optional: an optional
+member would let a caller skip the restore silently". The Task 4 test supplies the three-member
+seam that exists only after Task 6, so `runOneShotSession` fails closed before any spawn. Hence
+every test routed through the `run()` helper fails in ~12–27 ms with no real session:
+
+- the four pairs fail at their FIRST assertion, "the plant landed on disk" — the plan's predicted
+  cause ("layer 1 refuses the Write, layer 2 undoes the Bash") is never reached, but its predicted
+  EFFECT is exactly what is observed: the plant does not land;
+- G3 gets `permissionDenials: null` → `[]`, so `expect(denied).toContain(target)` fails.
+
+The negative control passes because it is the one test that bypasses `runOneShotSession` entirely
+— it calls `buildOneShotOptions` + `sdkSpawnSession` directly.
+
+Consequence for the plan's sequencing: **Task 6** (which deletes the layer-2 seam members) is what
+lets G3 and the four pairs run a real session at all. The plan's Task 7 Verify note ("the four
+pairs are expected to pass now") should be read as covering G3 as well — on base G3 is RED, so its
+`refused → refused` ratchet is re-established by Tasks 6–7 rather than held green throughout.
+
+## Task 4 Verify, verbatim
+
+```
+$ cd $S/runner && bunx tsc --noEmit && bun test core/supervisor/campaign-home-carryover.e2e.test.ts 2>&1 | tail -3
+tsc rc=0
+ 0 pass
+ 6 skip
+ 0 fail
+```
+
+The `tsc` exit 0 depends on the `exclude` entry this task adds to `runner/tsconfig.json`; that
+exclusion is load-bearing, measured by removing it:
+
+```
+$ bunx tsc --noEmit          # with "exclude": []
+core/supervisor/campaign-home-carryover.e2e.test.ts(61,19): error TS2353: Object literal may only
+  specify known properties, and 'cardId' does not exist in type 'RunOneShotInput'.
+```
+
+Task 10 adds `cardId`/`ledgerPath` to `RunOneShotInput` and removes the exclusion.

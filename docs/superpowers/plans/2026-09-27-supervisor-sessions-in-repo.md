@@ -463,8 +463,8 @@ cd $S/runner && bunx tsc --noEmit && bun test core/supervisor/campaign-home-carr
 ```
 Expected: tsc exit 0; without `RUN_SESSION_E2E` all six tests `skip`.
 
-- [ ] **Step 1: Commit** — the test, the tsconfig exclusion, `baseline.md`; trailers `Tribe-Task: 4/16`.
-- [ ] Task 4 complete
+- [x] **Step 1: Commit** — the test, the tsconfig exclusion, `baseline.md`; trailers `Tribe-Task: 4/16`.
+- [x] Task 4 complete
 
 ---
 
