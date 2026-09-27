@@ -14,7 +14,7 @@ import type { CardPhase } from './phase.ts';
 import { buildStateDigest, findWorktreePathForBranch } from './phase.ts';
 import { persistLocalState } from './commit-guard.ts';
 import { answersPathOf, escalationPathOf, supervisorLedgerPathOf } from '../paths.ts';
-import { decideResidueHeal, type HealAction } from '../residue.ts';
+import { decideBaseSyncHeal, decideResidueHeal, type HealAction } from '../residue.ts';
 import { WORKTREE_STILL_PRESENT_DETAIL } from '../verify.ts';
 import { sessionUrlFor } from '../viewer-launch.ts';
 
@@ -75,7 +75,8 @@ export interface CardCtx {
 // transient race could misfire as a false residue-heal refusal or a spurious REVERT_AND_REDO
 // failure.
 //
-// `serializeRepoGitMutation` queues exactly these three functions relative to EACH OTHER,
+// `serializeRepoGitMutation` queues exactly these three functions (plus the D4 base
+// fast-forward, `fastForwardBaseIfSafe`, which moves `--repo`'s checked-out branch) relative to EACH OTHER,
 // across every card — nothing else in this module needs it: every other git call here is
 // either read-only against GitHub (`recordBranchFromPr`) or scoped to a path/branch no other
 // card can also be touching (`recordBaseSha`'s `rev-parse` reads a ref, it doesn't mutate
@@ -206,9 +207,53 @@ function appendHealedDetail(result: VerifyResult, actions: HealAction[]): Verify
   };
 }
 
+/** D4 safe heal (card runner-driver-only, spec §4.7): a session that merged but did not
+ * fast-forward the runner's own base checkout should not cost an escalation. Fast-forwards
+ * `--repo`'s base branch only when `decideBaseSyncHeal` proves it can lose nothing; returns
+ * whether the fast-forward actually succeeded. Probes and merge run as one serialized step so
+ * another card's git mutation cannot change the checkout between the proof and the merge. */
+function fastForwardBaseIfSafe(ctx: CardCtx, firstResult: VerifyResult): Promise<boolean> {
+  const mergedPassed = firstResult.points.find((p) => p.id === 'merged')?.passed === true;
+  const localBaseFailed = firstResult.points.find((p) => p.id === 'localBaseSynced')?.passed === false;
+  if (!mergedPassed || !localBaseFailed) return Promise.resolve(false);
+  return serializeRepoGitMutation(async () => {
+    const { resolved, io } = ctx;
+    const inRepo = { cwd: resolved.repoRoot };
+    const remoteBase = `${resolved.remote}/${resolved.baseBranch}`;
+    // Every fact requires exit 0: a failed probe presents as empty stdout and must never read
+    // as "on base" or "clean".
+    const head = await io.exec(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], inRepo);
+    const status = await io.exec(['git', 'status', '--porcelain'], inRepo);
+    const ancestor = await io.exec(['git', 'merge-base', '--is-ancestor', resolved.baseBranch, remoteBase], inRepo);
+    const actions = decideBaseSyncHeal({
+      mergedPassed,
+      localBaseFailed,
+      checkoutOnBase: head.exitCode === 0 && head.stdout.trim() === resolved.baseBranch,
+      checkoutClean: status.exitCode === 0 && status.stdout.trim().length === 0,
+      localIsAncestorOfRemote: ancestor.exitCode === 0,
+    });
+    if (actions.length === 0) return false;
+    const merged = await io.exec(['git', 'merge', '--ff-only', remoteBase], inRepo);
+    return merged.exitCode === 0;
+  });
+}
+
+/** Appends `(healed: fast_forward_base)` to the `localBaseSynced` point's detail — the
+ * `appendHealedDetail` idiom for the D4 point. A no-op when nothing was healed. */
+function appendBaseSyncHealedDetail(result: VerifyResult, healed: boolean): VerifyResult {
+  if (!healed) return result;
+  return {
+    ...result,
+    points: result.points.map((p) =>
+      p.id === 'localBaseSynced' ? { ...p, detail: `${p.detail} (healed: fast_forward_base)` } : p,
+    ),
+  };
+}
+
 /** The P4 fix-list wiring: between a first FAILED verify and the retry, heal whatever
  * residue `decideResidueHeal` proves safe (spec: only when the `merged` point PASSED and
- * `worktreeAndBranchGone` is the failing point), then re-verify. This is the ONE helper used
+ * `worktreeAndBranchGone` is the failing point) and the D4 base fast-forward
+ * `fastForwardBaseIfSafe` proves safe, then re-verify. This is the ONE helper used
  * at both of `actOnCard`'s verify call sites — never duplicated. Heal is skipped entirely
  * (falling through to a plain retry, exactly today's D3/D5 "one more attempt" behavior)
  * whenever the safety conditions don't hold: an unmerged PR, a dirty worktree, or a
@@ -236,9 +281,10 @@ export async function healSafeResidue(
     });
     healedActions = await executeHealActions(ctx, actions);
   }
+  const baseFastForwarded = await fastForwardBaseIfSafe(ctx, firstResult);
 
   const retry = await verifyShipped(card, verifyConfig, io, cardId);
-  return appendHealedDetail(retry, healedActions);
+  return appendBaseSyncHealedDetail(appendHealedDetail(retry, healedActions), baseFastForwarded);
 }
 
 /** `actOnCard`'s two verify call sites both need exactly this: verify once, and only on

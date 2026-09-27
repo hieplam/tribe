@@ -62,3 +62,24 @@ export function decideResidueHeal(input: DecideResidueHealInput): HealAction[] {
 
   return actions;
 }
+
+export type BaseSyncHealAction = { kind: 'fast_forward_base' };
+
+export interface DecideBaseSyncHealInput {
+  mergedPassed: boolean;
+  /** The `localBaseSynced` point failed on the first verify. */
+  localBaseFailed: boolean;
+  /** `git rev-parse --abbrev-ref HEAD` in `--repo` names the base branch. */
+  checkoutOnBase: boolean;
+  /** `git status --porcelain` in `--repo` is empty (exit 0) — nothing of the owner's is at risk. */
+  checkoutClean: boolean;
+  /** The local base is an ancestor of `<remote>/<base>`: a fast-forward is possible and loses nothing. */
+  localIsAncestorOfRemote: boolean;
+}
+
+/** D4 safe heal: fast-forward the runner's own base checkout only when that can lose nothing. */
+export function decideBaseSyncHeal(input: DecideBaseSyncHealInput): BaseSyncHealAction[] {
+  const safe = input.mergedPassed && input.localBaseFailed && input.checkoutOnBase
+    && input.checkoutClean && input.localIsAncestorOfRemote;
+  return safe ? [{ kind: 'fast_forward_base' }] : [];
+}
