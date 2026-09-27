@@ -13,10 +13,20 @@ IDS='isHomeConfigSurface|snapshotHomeConfig|restoreHomeConfig|planHomeConfigRest
 # This script names the identifiers it hunts (the IDS pattern above), so without excluding its own
 # path it would count itself and the ratchet's 0 floor would be unreachable no matter how
 # completely the guards are deleted.
-hits=$(git grep -h -c -E "$IDS" -- plugins .c3/c3-2-plugins .c3/rules .c3/eval \
-  ':!plugins/tribe/scripts/tests/sessions-in-repo/g4-guard-footprint.sh' 2>/dev/null | awk '{s+=$1} END {print s+0}')
+# `git grep` exits 1 when it finds ZERO matches — this measurement's own TARGET state (every guard
+# fully deleted) — so the `|| true` below is load-bearing: without it, reaching identifier_hits=0
+# would abort the script under `set -e`/`pipefail` instead of ever reporting it.
+hits=$({ git grep -h -c -E "$IDS" -- plugins .c3/c3-2-plugins .c3/rules .c3/eval \
+  ':!plugins/tribe/scripts/tests/sessions-in-repo/g4-guard-footprint.sh' 2>/dev/null || true; } \
+  | awk '{s+=$1} END {print s+0}')
 old=absent; [[ -f .c3/rules/rule-session-cwd-config-restored.md ]] && old=present
 new=absent; [[ -f .c3/rules/rule-sessions-start-in-target-repo.md ]] && new=present
-C3=$(ls -d ~/.claude/plugins/cache/c3-skill-marketplace/c3-skill/*/skills/c3 | tail -1)
-c3=fail; C3X_MODE=agent bash "$C3/bin/c3x.sh" check 2>/dev/null | command grep -q 'ok: true' && c3=ok
+C3="$(ls -d ~/.claude/plugins/cache/c3-skill-marketplace/c3-skill/*/skills/c3 2>/dev/null | tail -1 || true)"
+if [[ -z "$C3" ]]; then
+  echo "g4-guard-footprint: no c3 skill found under ~/.claude/plugins/cache/c3-skill-marketplace/c3-skill/*/skills/c3" >&2
+  c3=unresolved
+else
+  c3=fail
+  if C3X_MODE=agent bash "$C3/bin/c3x.sh" check 2>/dev/null | command grep -q 'ok: true'; then c3=ok; fi
+fi
 echo "guard_files_lines=$lines identifier_hits=$hits old_rule=$old new_rule=$new c3_check=$c3"

@@ -1040,8 +1040,8 @@ bash $S/tests/test-supervisor-docs.sh | tail -1
 ```
 Expected: `guard_files_lines=0 identifier_hits=0 old_rule=absent new_rule=present c3_check=ok`; the docs test passes.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 15/16`.
-- [ ] Task 15 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 15/16`.
+- [x] Task 15 complete
 
 ---
 
