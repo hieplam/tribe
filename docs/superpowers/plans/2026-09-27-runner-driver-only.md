@@ -2938,7 +2938,9 @@ test('any new ## block appended after the existing ones is a ruling — no ratif
   escalation on the owner's behalf, within the authority this campaign grants. You never contact
   the owner. You never write code."; delete the "Frozen `ratified-as:` vocabulary" paragraph; the
   first exit becomes "Append a ruling to `{{ANSWERS_PATH}}`, as a `## R<n> — <title>` block with the
-  next free `R<n>`." Keep the W3/W7/owner-only quotes and everything else verbatim. `verifyRuling`:
+  next free `R<n>`."; the "Adjudication rule (REFUTED in advance)" paragraph becomes "\"This question
+  is hard\" is not a reason to park if it is within the authority this campaign grants. A scope
+  clarification is a ruling, not a park." Keep the W3/W7/owner-only quotes and everything else verbatim. `verifyRuling`:
   a new block is `ruled` (repo-touched still fails) — drop the `isRulingRatified` branch and the
   `not_ratified` reason. `status.ts` `owner_only.unblock`: "Rule on {card}'s question yourself:
   append a ruling to {home}/answers.md as the next R<n> block, archive {home}/escalations/{card}.md
