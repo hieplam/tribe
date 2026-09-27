@@ -33,9 +33,13 @@ export function CampaignBadge({ badge, history }: CampaignBadgeProps) {
     <button type="button" className="campaign-badge" onClick={onClick}>
       <span className="campaign-badge__slug">{badge.slug}</span>
       <span className="campaign-badge__sep" aria-hidden="true">·</span>
-      <span className="campaign-badge__card">{badge.cardId}</span>
-      <span className="campaign-badge__sep" aria-hidden="true">·</span>
-      <span className="campaign-badge__status">{badge.cardStatus}</span>
+      {badge.cardId !== null && (
+        <>
+          <span className="campaign-badge__card">{badge.cardId}</span>
+          <span className="campaign-badge__sep" aria-hidden="true">·</span>
+        </>
+      )}
+      <span className="campaign-badge__status">{badge.sessionKind === 'card' ? badge.cardStatus : badge.sessionKind}</span>
       <span className="campaign-badge__sep" aria-hidden="true">·</span>
       <span
         className="campaign-badge__runner"

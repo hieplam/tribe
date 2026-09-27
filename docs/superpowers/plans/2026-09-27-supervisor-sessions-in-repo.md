@@ -904,8 +904,8 @@ cd $S/viewer && bun test core/ client/ && bun run build
 ```
 Expected: 0 fail in those directories; build succeeds.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 12/16`.
-- [ ] Task 12 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 12/16`.
+- [x] Task 12 complete
 
 ---
 

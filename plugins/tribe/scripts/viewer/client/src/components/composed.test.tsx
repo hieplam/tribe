@@ -389,7 +389,7 @@ describe('the "/" root list — allSettled union, newest-first sort, campaign pr
     const repoKey = '-Users-hip-repo-tribe';
     window.history.pushState(null, '', `/?campaign=${encodeURIComponent(repoKey)}/mycamp`);
     const pa = makeProject({ dir: '-proj-a', cwd: '/proj/a' });
-    const withBadge = makeSession({ id: 'matchmatch1111', projectDir: '-proj-a', title: 'has-badge', badges: [{ repoKey, slug: 'mycamp', cardId: 'c', cardStatus: 'x', runnerAlive: true, runId: null }] });
+    const withBadge = makeSession({ id: 'matchmatch1111', projectDir: '-proj-a', title: 'has-badge', badges: [{ repoKey, slug: 'mycamp', cardId: 'c', cardStatus: 'x', sessionKind: 'card', runnerAlive: true, runId: null }] });
     const without = makeSession({ id: 'otherother2222', projectDir: '-proj-a', title: 'no-badge', badges: [] });
     const fetched = installFetch((url) => {
       if (url.includes('/api/projects')) return new Response(JSON.stringify({ projects: [pa], olderCount: 0, skippedBadges: 0 }));

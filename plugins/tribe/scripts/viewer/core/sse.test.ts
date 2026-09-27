@@ -41,7 +41,7 @@ function agent(): Agent {
 }
 
 function badge(): Badge {
-  return { repoKey: 'r', slug: 's', cardId: 'c1', cardStatus: 'active', runnerAlive: true, runId: null };
+  return { repoKey: 'r', slug: 's', cardId: 'c1', cardStatus: 'active', sessionKind: 'card', runnerAlive: true, runId: null };
 }
 
 /** A minimal, valid `RenderNode` — kind `raw` — sized so its JSON-encoded length is
