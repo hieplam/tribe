@@ -1004,8 +1004,8 @@ git status --porcelain .tribe/; echo REGISTRY_UNTOUCHED
 ```
 Expected: `ok: true`; `old_rule=absent new_rule=present c3_check=ok`; nothing before `REGISTRY_UNTOUCHED`.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 14/16`.
-- [ ] Task 14 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 14/16`.
+- [x] Task 14 complete
 
 ---
 
