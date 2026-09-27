@@ -1,11 +1,11 @@
-// D3 five-point replay: SHIPPED verification, as code.
+// D3 replay (six points): SHIPPED verification, as code.
 //
 // Every point is generic (D4): nothing here reads a PR body, a gap-gate stamp or a gap
 // ledger — a plain PR from any executor can pass it.
 //
 // verifyShipped() is the acceptance gate for a card the executor claims is `SHIPPED
 // <pr> <sha>` — that line is a signal only (design spec §D3); this module independently
-// replays all five checks against reality. Every world-touching operation (gh/git
+// replays all six checks against reality. Every world-touching operation (gh/git
 // invocations, reading the card's plan file) goes through the injected `io` seam below —
 // this module never imports `child_process`, `fs`, or performs network I/O itself.
 import { join } from 'node:path';
@@ -34,14 +34,15 @@ export interface VerifyConfig {
   docsOnlyPaths: string[];
 }
 
-/** The D3 five points, each independently reported (never short-circuited) so a failed
+/** The D3 points (five generic ones plus D4's localBaseSynced), each independently reported (never short-circuited) so a failed
  * `verifyShipped` names EVERY failing point, not just the first. */
 export type VerifyPointId =
   | 'merged'
   | 'mergeShaAncestorOfMaster'
   | 'checksGreen'
   | 'worktreeAndBranchGone'
-  | 'schemaGuard';
+  | 'schemaGuard'
+  | 'localBaseSynced';
 
 export interface VerifyPointResult {
   id: VerifyPointId;
@@ -453,7 +454,28 @@ async function checkSchemaGuard(
   };
 }
 
-/** The D3 five-point replay, as code. The executor's `SHIPPED <pr> <sha>` line is a signal
+/** D4 (card runner-driver-only): "the feature is merged and local master has the latest". Race-free
+ * form of "local == remote": the merge commit is IN the local base branch, and the local base has no
+ * commit the remote lacks. Strict equality would fail whenever a concurrent card merged after this
+ * card's own sync (`--max-concurrent > 1`) — spec §4.7. */
+async function checkLocalBaseSynced(mergeSha: string | null, config: VerifyConfig, io: VerifyIO): Promise<VerifyPointResult> {
+  const id = 'localBaseSynced' as const;
+  if (!mergeSha) return { id, passed: false, detail: 'no merge sha available (point 1 did not report one); cannot check the local base' };
+  const remoteBase = `${config.remote}/${config.baseBranch}`;
+  const fetched = await run(io, config.repoRoot, ['git', 'fetch', config.remote, config.baseBranch]);
+  if (fetched.exitCode !== 0) return { id, passed: false, detail: `git fetch ${config.remote} ${config.baseBranch} failed (exit ${fetched.exitCode}); cannot compare the local base` };
+  const contains = await run(io, config.repoRoot, ['git', 'merge-base', '--is-ancestor', mergeSha, config.baseBranch]);
+  if (contains.exitCode !== 0) {
+    return { id, passed: false, detail: `local ${config.baseBranch} does not contain merge ${mergeSha}; fast-forward it to ${remoteBase}` };
+  }
+  const notAhead = await run(io, config.repoRoot, ['git', 'merge-base', '--is-ancestor', config.baseBranch, remoteBase]);
+  if (notAhead.exitCode !== 0) {
+    return { id, passed: false, detail: `local ${config.baseBranch} has commits ${remoteBase} lacks (diverged); it is never healed automatically` };
+  }
+  return { id, passed: true, detail: `local ${config.baseBranch} contains ${mergeSha} and is not ahead of ${remoteBase}` };
+}
+
+/** The D3 six-point replay, as code. The executor's `SHIPPED <pr> <sha>` line is a signal
  * only (spec §D3) — this is the acceptance. Every point is checked and reported
  * independently; a failure at one point never short-circuits the rest, so a failed result
  * names EVERY failing point (it feeds the escalation file a human reads). Never throws on
@@ -465,7 +487,8 @@ export async function verifyShipped(card: Card, config: VerifyConfig, io: Verify
   const checks = await checkChecksGreen(card, config, io);
   const worktree = await checkWorktreeAndBranchGone(card, config, io);
   const schema = await checkSchemaGuard(card, config, io, merged.mergeSha);
-  const points: VerifyPointResult[] = [merged.point, ancestor, checks, worktree, schema];
+  const localBase = await checkLocalBaseSynced(merged.mergeSha, config, io);
+  const points: VerifyPointResult[] = [merged.point, ancestor, checks, worktree, schema, localBase];
   const failedPoints = points.filter((p) => !p.passed).map((p) => p.id);
   return { shipped: failedPoints.length === 0, points, failedPoints };
 }

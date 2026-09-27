@@ -534,6 +534,9 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
     if (cmd[0] === 'git' && cmd[1] === 'worktree') return ok('');
     if (cmd[0] === 'git' && cmd[1] === 'ls-remote') return ok('');
     if (cmd[0] === 'git' && (cmd[1] === 'branch' || cmd[1] === 'push')) return ok('');
+    // localBaseSynced (D4): the local base is fetched and in sync unless a test scripts otherwise.
+    if (cmd[0] === 'git' && cmd[1] === 'fetch') return ok('');
+    if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
     throw new Error(`unscripted exec call: ${cmd.join(' ')}`);
   });
 

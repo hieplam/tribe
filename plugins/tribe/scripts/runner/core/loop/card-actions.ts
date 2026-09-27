@@ -313,6 +313,10 @@ const VERIFY_FAILURE_BULLETS: Record<Exclude<VerifyPointId, 'worktreeAndBranchGo
     '- schemaGuard: the plan file lacks `allowsSchemaChange: true` front-matter, or the ' +
     "card's baseSha is stale. Designed change → land a PR adding the front-matter to the " +
     'plan. Stale base → correct `baseSha` in the campaign state (see P11).',
+  localBaseSynced:
+    "- localBaseSynced: the local base branch in the runner's checkout does not have this merge yet " +
+    '(or has diverged). Fast-forward it (git merge --ff-only <remote>/<base>) with a clean checkout, ' +
+    'then re-run.',
 };
 
 /** P5 audit fix-round (blocker, skinnerB): `worktreeAndBranchGone`'s bullet used to fire from

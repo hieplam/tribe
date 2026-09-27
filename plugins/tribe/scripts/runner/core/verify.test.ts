@@ -62,6 +62,10 @@ interface MockOptions {
   /** A PR body the double serves on `gh pr view`; the done check never reads one, which is
    * exactly what the happy-path test proves by passing a body with no gap-gate stamp. */
   prBody?: string;
+  /** localBaseSynced: the merge commit is in the LOCAL base branch. Defaults to true. */
+  localBaseContainsMerge?: boolean;
+  /** localBaseSynced: the local base has commits the remote lacks (diverged). Defaults to false. */
+  localBaseAheadOfRemote?: boolean;
 }
 
 function ok(stdout: string): ExecResult {
@@ -90,6 +94,15 @@ function buildIo(opts: MockOptions = {}): VerifyIO {
       const [bin, ...rest] = cmd;
       if (bin === 'gh' && rest[0] === 'api') {
         return ok(JSON.stringify({ merged, merge_commit_sha: mergeSha }));
+      }
+      if (bin === 'git' && rest[0] === 'fetch') return ok('');
+      if (bin === 'git' && rest[0] === 'merge-base' && rest[1] === '--is-ancestor' && rest[3] === 'master') {
+        // localBaseSynced: <mergeSha> must be in the LOCAL base branch …
+        return { stdout: '', stderr: '', exitCode: (opts.localBaseContainsMerge ?? true) ? 0 : 1 };
+      }
+      if (bin === 'git' && rest[0] === 'merge-base' && rest[1] === '--is-ancestor' && rest[2] === 'master') {
+        // … and the local base must have no commits the remote lacks.
+        return { stdout: '', stderr: '', exitCode: (opts.localBaseAheadOfRemote ?? false) ? 1 : 0 };
       }
       if (bin === 'git' && rest[0] === 'merge-base') {
         // rest = ['merge-base', '--is-ancestor', <sha>, <target>]; only the MERGE sha is governed
@@ -160,7 +173,30 @@ describe('verifyShipped — happy path', () => {
     expect(result.shipped).toBe(true);
     expect(result.points.map((p) => p.id)).toEqual([
       'merged', 'mergeShaAncestorOfMaster', 'checksGreen', 'worktreeAndBranchGone', 'schemaGuard',
+      'localBaseSynced',
     ]);
+  });
+});
+
+describe('localBaseSynced (D4: local base has the latest)', () => {
+  test('merge in the local base, local not ahead of the remote -> passes', async () => {
+    const r = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo(), 'C1');
+    expect(r.points.find((p) => p.id === 'localBaseSynced')?.passed).toBe(true);
+  });
+  test('local base does not contain the merge -> fails and names the fast-forward', async () => {
+    const r = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo({ localBaseContainsMerge: false }), 'C1');
+    const p = r.points.find((x) => x.id === 'localBaseSynced');
+    expect(p?.passed).toBe(false);
+    expect(p?.detail).toContain('does not contain');
+    expect(r.shipped).toBe(false);
+  });
+  test('local base has commits the remote lacks -> fails (diverged, never healed)', async () => {
+    const r = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo({ localBaseAheadOfRemote: true }), 'C1');
+    expect(r.points.find((x) => x.id === 'localBaseSynced')?.passed).toBe(false);
+  });
+  test('no merge sha -> fails closed', async () => {
+    const r = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo({ mergeSha: null }), 'C1');
+    expect(r.points.find((x) => x.id === 'localBaseSynced')?.passed).toBe(false);
   });
 });
 
