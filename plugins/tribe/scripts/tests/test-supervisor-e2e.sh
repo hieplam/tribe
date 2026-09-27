@@ -129,8 +129,12 @@ out1="$(bun "$RUNNER/run.ts" supervise --repo "$REPO" --model e2e-model --home "
 rc1=$?
 set -e
 check "probe1: absolute --home exits 0" "$rc1" "0"
+# Card supervisor-sessions-in-repo (plan Task 10, spec §4.4): a ruling session now writes TWO
+# ledger lines — its own SPAWN row at init, and this loop's END row once it returns — so "one
+# ruling attempt" is proven by the END row's own marker (`"verdict"`, a field only that row
+# carries), never a bare `"kind":"ruling"` count (which now also matches the spawn row).
 check "probe1: ledger has exactly one ruling line" \
-  "$(grep -c '"kind":"ruling"' "$H1/supervisor/ledger.jsonl" 2>/dev/null || echo 0)" "1"
+  "$(grep '"kind":"ruling"' "$H1/supervisor/ledger.jsonl" 2>/dev/null | grep -c '"verdict"' || echo 0)" "1"
 if [[ -f "$H1/escalations/c1.md.resolved-R1" ]]; then
   ok "probe1: the escalation file is archived to .resolved-R1"
 else
@@ -151,8 +155,9 @@ rc2=$?
 set -e
 check "probe2: --campaign exits 0, same as --home" "$rc2" "0"
 contains "probe2: resolved to the SAME home tribe-home.sh derives" "$out2" "$H2/supervisor/status.json"
+# Same reasoning as probe1: the END row's "verdict" marker, never a bare kind count.
 check "probe2: ledger has exactly one ruling line" \
-  "$(grep -c '"kind":"ruling"' "$H2/supervisor/ledger.jsonl" 2>/dev/null || echo 0)" "1"
+  "$(grep '"kind":"ruling"' "$H2/supervisor/ledger.jsonl" 2>/dev/null | grep -c '"verdict"' || echo 0)" "1"
 if [[ -f "$H2/escalations/c1.md.resolved-R1" ]]; then
   ok "probe2: the escalation file is archived, same as probe 1"
 else

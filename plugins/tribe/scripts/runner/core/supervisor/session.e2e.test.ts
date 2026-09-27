@@ -94,6 +94,11 @@ async function runKind(kind: SessionKind, prompt: string, label: string, opts: R
       {
         kind,
         prompt,
+        // Card supervisor-sessions-in-repo (plan Task 10): this test is not scoped to a real
+        // card, so cardId is null; the ledger lands alongside the session logs, in the same
+        // temp homeDir this run already tears down in `finally`.
+        cardId: null,
+        ledgerPath: join(homeDir, 'supervisor', 'ledger.jsonl'),
         config: {
           homeDir,
           model: MODEL,

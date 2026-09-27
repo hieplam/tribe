@@ -5,7 +5,7 @@
 // buildSessionIOForCard's onSessionStart, which prints the per-card session line the instant
 // the SDK assigns a session id.
 import { describe, expect, mock, test } from 'bun:test';
-import { buildEscalationMarkdown, buildSessionIOForCard } from './card-actions.ts';
+import { buildEscalationMarkdown, buildSessionIOForCard, sessionConfigFor } from './card-actions.ts';
 import type { CardCtx } from './card-actions.ts';
 import type { CampaignState, Card, ResolvedConfig } from '../types.ts';
 import type { LoopIO } from '../../ports/ports.ts';
@@ -85,6 +85,13 @@ function fixtureCtx(overrides: { resolved?: Partial<ResolvedConfig>; io?: Partia
     io: fixtureIo(overrides.io),
   };
 }
+
+describe('sessionConfigFor — ledgerPath (Task 9, spec §4.4)', () => {
+  test('sets ledgerPath from resolved.homeDir via supervisorLedgerPathOf', () => {
+    const config = sessionConfigFor('C1', fixtureResolved({ homeDir: '/th' }));
+    expect(config.ledgerPath).toBe('/th/supervisor/ledger.jsonl');
+  });
+});
 
 describe('buildEscalationMarkdown — P5 reason-specific Options', () => {
   test('needs_direction leads with the ruling path, not the verify-failure block', () => {

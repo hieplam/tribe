@@ -14,6 +14,7 @@
  * uses — every effect (spawn, log, clock via `setTimeout`) arrives through the injected seam.
  */
 import { decideScanGuardHook, type HookDecision, type SessionMessage } from '../session.ts';
+import { rootSpawnRow, type SpawnRow } from '../ledger.ts';
 import type { SessionKind } from './model.ts';
 import type { LedgerEntryUsage } from './model.ts';
 import { buildContainmentHook, decideClosingGrantHook } from './permit.ts';
@@ -218,6 +219,13 @@ export interface RunOneShotInput {
   kind: SessionKind;
   /** The rendered brief (spec §5.2/§5.3/§5.4) — the session's initial prompt. */
   prompt: string;
+  /** The card this session's spawn row is attributed to (spec §4.4); `null` for a `closing`
+   * session, which is not scoped to one card. */
+  cardId: string | null;
+  /** Card supervisor-sessions-in-repo (plan Task 10, spec §4.4): where this session's own spawn
+   * row is appended, the moment its id is known — `<home>/supervisor/ledger.jsonl`, the SAME
+   * file `loop.ts` appends the end row to. */
+  ledgerPath: string;
   config: OneShotSessionConfig;
   /** Wall-clock abort, ms (`fail-closed-edges.md` obligation 3). Never defaulted here — always
    * caller-supplied, same contract as `core/session.ts`'s `RunSessionConfig.sessionTimeoutMs`. */
@@ -225,6 +233,25 @@ export interface RunOneShotInput {
 }
 
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/** Appends one ledger row through the `appendLog` seam — the SAME never-fail wrapping
+ * `core/session.ts`'s own `appendLedgerRow` uses (plan Task 9): a failing ledger append must
+ * never fail the session (observability never kills a run). The failure is swallowed only AFTER
+ * a `{"type":"tribe","subtype":"ledger_write_failed"}` line is appended to the session's own
+ * log, so the loss is still visible somewhere; that second append is itself wrapped, so even a
+ * session log that has stopped accepting writes cannot throw out of this function. */
+function appendLedgerRow(io: OneShotSessionSeam, ledgerPath: string, sessionLogPath: string, row: SpawnRow): void {
+  try {
+    io.appendLog(ledgerPath, JSON.stringify(row));
+  } catch {
+    try {
+      io.appendLog(sessionLogPath, JSON.stringify({ type: 'tribe', subtype: 'ledger_write_failed' }));
+    } catch {
+      // The session log itself is also failing to write — nothing left to report to;
+      // still never let a ledger-append failure crash the session (fail-closed-edges).
+    }
+  }
+}
 
 function errorResult(err: unknown): OneShotSessionResult {
   const message = messageOf(err);
@@ -273,6 +300,17 @@ async function consumeOneShot(
         // processed — mirrors `core/session.ts`'s crash-safety ordering exactly.
         io.onSessionStart(sessionId);
         logPath = `${input.config.homeDir}/supervisor/sessions/${sessionId}.log`;
+        // This session's own spawn row (plan Task 10, spec §4.4), appended right after
+        // `onSessionStart` and before the init message's own session-log line — the same
+        // ordering `core/session.ts`'s executor row uses. Written even when the session then
+        // times out: closes today's `sessionId: null` attribution gap (spec §2, MEASURED). The
+        // clock value is read HERE, at the edge, and passed into the pure `rootSpawnRow`.
+        appendLedgerRow(
+          io,
+          input.ledgerPath,
+          logPath,
+          rootSpawnRow({ kind: input.kind, sessionId, cardId: input.cardId, at: new Date().toISOString() }),
+        );
       }
 
       if (logPath !== null) {

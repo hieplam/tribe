@@ -5,6 +5,7 @@
 // a session through the `SessionIO` seam below, never the SDK package directly.
 import { join } from 'node:path';
 import type { HookDecision, PinnedSessionOptions, SessionIO, SessionMessage, SpawnSessionParams } from '../ports/ports.ts';
+import { emptySpawnTracker, observeSpawns, rootSpawnRow, type SpawnRow, type SpawnTracker } from './ledger.ts';
 import { isFilesystemWideScan } from './metrics/session-hygiene.ts';
 import { buildMergeGateDecision, parseMergeCommand } from './merge-gate.ts';
 
@@ -49,6 +50,9 @@ export interface RunSessionConfig {
   logsDir: string;
   /** The card id this session is executing, for log file naming. */
   card: string;
+  /** `<home>/supervisor/ledger.jsonl` (`core/paths.ts` `supervisorLedgerPathOf`) — the
+   * campaign's session tree (spec §4.4). Written whether or not a supervisor ever runs. */
+  ledgerPath: string;
 }
 
 /** The reason text a denied backgrounding attempt reports back to the executor. Phrased as
@@ -274,6 +278,25 @@ function errorResult(err: unknown): SessionResult {
   return { outcome: 'error', finalText: message };
 }
 
+/** Appends one ledger row through the `appendLog` seam. A failing ledger append must never
+ * fail the session (observability never kills a run — the `run-loop.ts` writer-record
+ * precedent): the failure is swallowed only AFTER a `{"type":"tribe","subtype":
+ * "ledger_write_failed"}` line is appended to the session's own log, so the loss is still
+ * visible somewhere. That second append is itself wrapped, so even a session log that has
+ * stopped accepting writes cannot throw out of this function. */
+function appendLedgerRow(io: SessionIO, ledgerPath: string, sessionLogPath: string, row: SpawnRow): void {
+  try {
+    io.appendLog(ledgerPath, JSON.stringify(row));
+  } catch {
+    try {
+      io.appendLog(sessionLogPath, JSON.stringify({ type: 'tribe', subtype: 'ledger_write_failed' }));
+    } catch {
+      // The session log itself is also failing to write — nothing left to report to;
+      // still never let a ledger-append failure crash the session (fail-closed-edges).
+    }
+  }
+}
+
 async function consumeSession(
   input: RunSessionInput,
   config: RunSessionConfig,
@@ -290,6 +313,7 @@ async function consumeSession(
   }
 
   let logPath: string | null = null;
+  let tracker: SpawnTracker | null = null;
 
   try {
     for await (const message of sessionMessages) {
@@ -299,10 +323,35 @@ async function consumeSession(
         // otherwise processed — the crash window this closes is milliseconds wide.
         io.onSessionStart(sessionId);
         logPath = `${config.logsDir}/${config.card}-${sessionId}.log`;
+        // The executor's own row, appended right after onSessionStart and BEFORE this init
+        // message's own session-log line (plan Task 9, spec §4.4). The clock value is read
+        // HERE, at the edge, and passed into the pure `rootSpawnRow` — never read inside
+        // `core/ledger.ts`.
+        appendLedgerRow(
+          io,
+          config.ledgerPath,
+          logPath,
+          rootSpawnRow({
+            kind: 'executor',
+            sessionId,
+            cardId: config.card,
+            at: new Date().toISOString(),
+            resumed: input.resume !== undefined,
+          }),
+        );
+        tracker = emptySpawnTracker(sessionId, config.card);
       }
 
       if (logPath !== null) {
         io.appendLog(logPath, JSON.stringify(message));
+
+        if (tracker !== null) {
+          const observed = observeSpawns(tracker, message, new Date().toISOString());
+          tracker = observed.tracker;
+          for (const row of observed.rows) {
+            appendLedgerRow(io, config.ledgerPath, logPath, row);
+          }
+        }
       }
 
       if (message.type === 'result') {

@@ -80,7 +80,13 @@ describe('runSession — real spawned session, Skill c3 resolves under the user 
 
       const result = await runSession(
         { brief: BRIEF },
-        { repoRoot: REPO_ROOT, model: 'haiku', logsDir: '/tmp', card: 'e2e-session-user-settings' },
+        {
+          repoRoot: REPO_ROOT,
+          model: 'haiku',
+          logsDir: '/tmp',
+          card: 'e2e-session-user-settings',
+          ledgerPath: '/tmp/e2e-session-user-settings-ledger.jsonl',
+        },
         io,
       );
 

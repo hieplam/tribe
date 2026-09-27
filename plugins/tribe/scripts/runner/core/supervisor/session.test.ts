@@ -83,8 +83,40 @@ test('runOneShotSession needs only spawnSession/onSessionStart/appendLog — not
     onSessionStart: () => {},
     appendLog: () => {},
   };
-  const result = await runOneShotSession({ kind: 'ratify', prompt: 'p', config: fixtureConfig() }, io as never);
+  const result = await runOneShotSession(
+    { kind: 'ratify', prompt: 'p', cardId: null, ledgerPath: '/h/supervisor/ledger.jsonl', config: fixtureConfig() },
+    io as never,
+  );
   expect(result.outcome).toBe('success');
+});
+
+// Card supervisor-sessions-in-repo (plan Task 10, spec §4.4): the spawn row must land the MOMENT
+// the session's id is known — even when the session then hangs and the wall clock kills it. A
+// session whose supervisor dies mid-run, or that times out, is otherwise unattributable from the
+// ledger at all (spec §2, MEASURED: 2 of 5 real supervisor sessions of the previous campaign).
+test('the spawn row lands at init, carrying kind and card — even when the session then times out', async () => {
+  const io = recordingIo();
+  io.spawnSession = () => (async function* () {
+    yield { type: 'system', subtype: 'init', session_id: 's-9' };
+    await new Promise(() => {}); // hang forever — only the timeout should resolve first
+  })();
+  const result = await runOneShotSession(
+    {
+      kind: 'ruling', prompt: 'p', cardId: 'c2', ledgerPath: '/h/supervisor/ledger.jsonl',
+      config: fixtureConfig(), sessionTimeoutMs: 50,
+    },
+    io,
+  );
+  expect(result.outcome).toBe('timeout');
+  // `io.calls` interleaves `onSessionStart:*` entries with `appendLog:*` ones; `io.logLines` only
+  // ever grows on an `appendLog` call. So the line for the Nth `appendLog:<path>` call in
+  // `io.calls` is the Nth entry among `appendLog:*` calls only, in `io.logLines` — never
+  // `io.calls`'s own (offset) index.
+  const appendLogCalls = io.calls.filter((c) => c.startsWith('appendLog:'));
+  const row = JSON.parse(io.logLines[appendLogCalls.indexOf('appendLog:/h/supervisor/ledger.jsonl')] as string);
+  expect(row).toMatchObject({
+    event: 'spawn', kind: 'ruling', sessionId: 's-9', parentSessionId: null, rootSessionId: 's-9', cardId: 'c2',
+  });
 });
 
 describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () => {
@@ -230,7 +262,7 @@ describe('runOneShotSession — the message stream, log path, and typed result (
     io.spawnSession = () => messages([INIT_MESSAGE, RESULT_MESSAGE]);
 
     const result = await runOneShotSession(
-      { kind: 'ruling', prompt: 'rule on this', config: fixtureConfig() },
+      { kind: 'ruling', prompt: 'rule on this', cardId: 'c1', ledgerPath: '/h/supervisor/ledger.jsonl', config: fixtureConfig() },
       io,
     );
 
@@ -238,6 +270,9 @@ describe('runOneShotSession — the message stream, log path, and typed result (
     expect(result.sessionId).toBe('sess-abc');
     expect(io.calls).toEqual([
       'onSessionStart:sess-abc',
+      // The session's own spawn row (plan Task 10), appended right after onSessionStart and
+      // before the init message's own session-log line.
+      'appendLog:/h/supervisor/ledger.jsonl',
       'appendLog:/abs/home/.tribe/key/campaigns/slug/supervisor/sessions/sess-abc.log',
       'appendLog:/abs/home/.tribe/key/campaigns/slug/supervisor/sessions/sess-abc.log',
     ]);
@@ -248,7 +283,7 @@ describe('runOneShotSession — the message stream, log path, and typed result (
     io.spawnSession = () => messages([INIT_MESSAGE, RESULT_MESSAGE]);
 
     const result = await runOneShotSession(
-      { kind: 'ratify', prompt: 'ratify these ids', config: fixtureConfig() },
+      { kind: 'ratify', prompt: 'ratify these ids', cardId: null, ledgerPath: '/h/supervisor/ledger.jsonl', config: fixtureConfig() },
       io,
     );
 
@@ -271,7 +306,7 @@ describe('runOneShotSession — the message stream, log path, and typed result (
     };
 
     const result = await runOneShotSession(
-      { kind: 'closing', prompt: 'close the campaign', config: fixtureConfig() },
+      { kind: 'closing', prompt: 'close the campaign', cardId: null, ledgerPath: '/h/supervisor/ledger.jsonl', config: fixtureConfig() },
       io,
     );
 
@@ -289,7 +324,7 @@ describe('runOneShotSession — the message stream, log path, and typed result (
       })();
 
     const result = await runOneShotSession(
-      { kind: 'ruling', prompt: 'rule on this', config: fixtureConfig() },
+      { kind: 'ruling', prompt: 'rule on this', cardId: 'c1', ledgerPath: '/h/supervisor/ledger.jsonl', config: fixtureConfig() },
       io,
     );
 
@@ -309,7 +344,10 @@ describe('runOneShotSession — the message stream, log path, and typed result (
     };
 
     const result = await runOneShotSession(
-      { kind: 'ruling', prompt: 'rule on this', config: fixtureConfig(), sessionTimeoutMs: 20 },
+      {
+        kind: 'ruling', prompt: 'rule on this', cardId: 'c1', ledgerPath: '/h/supervisor/ledger.jsonl',
+        config: fixtureConfig(), sessionTimeoutMs: 20,
+      },
       io,
     );
 
@@ -323,7 +361,7 @@ describe('runOneShotSession — the message stream, log path, and typed result (
       messages([INIT_MESSAGE, { type: 'result', subtype: 'error_max_turns', session_id: 'sess-abc' }]);
 
     const result = await runOneShotSession(
-      { kind: 'ratify', prompt: 'ratify these ids', config: fixtureConfig() },
+      { kind: 'ratify', prompt: 'ratify these ids', cardId: null, ledgerPath: '/h/supervisor/ledger.jsonl', config: fixtureConfig() },
       io,
     );
 

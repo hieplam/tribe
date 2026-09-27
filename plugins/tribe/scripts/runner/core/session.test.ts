@@ -30,6 +30,7 @@ function fixtureConfig(overrides: Partial<RunSessionConfig> = {}): RunSessionCon
     model: 'fixture-model',
     logsDir: '/fixture/logs',
     card: 'C7',
+    ledgerPath: '/fixture/supervisor/ledger.jsonl',
     ...overrides,
   };
 }
@@ -305,13 +306,80 @@ describe('runSession — init-message capture ordering (crash-safety guarantee)'
     const result = await runSession({ brief: 'do the thing' }, fixtureConfig(), io);
 
     expect(result.outcome).toBe('shipped');
+    // The ledger append (the executor's own row) lands right after onSessionStart and BEFORE
+    // the init message's own session-log line (plan Task 9 GREEN block, spec §4.4).
     expect(io.calls).toEqual([
       'onSessionStart:sess-123',
+      'appendLog:/fixture/supervisor/ledger.jsonl',
       'appendLog:/fixture/logs/C7-sess-123.log',
       'appendLog:/fixture/logs/C7-sess-123.log',
     ]);
-    expect(io.logLines[0]).toContain('"subtype":"init"');
-    expect(io.logLines[1]).toContain('"type":"result"');
+    expect(io.logLines[0]).toContain('"kind":"executor"');
+    expect(io.logLines[1]).toContain('"subtype":"init"');
+    expect(io.logLines[2]).toContain('"type":"result"');
+  });
+});
+
+describe('runSession — the executor writes its own row and one row per subagent (Task 9, spec §4.4)', () => {
+  test('writes the executor row on init and one subagent row per local_agent task to config.ledgerPath', async () => {
+    const appended: Array<[string, string]> = [];
+    const io = {
+      ...recordingIo(),
+      appendLog: (p: string, l: string) => {
+        appended.push([p, l]);
+      },
+      spawnSession: () =>
+        messages([
+          { type: 'system', subtype: 'init', session_id: 'e-1' },
+          {
+            type: 'assistant',
+            parent_tool_use_id: null,
+            message: { content: [{ type: 'tool_use', id: 'tu-1', name: 'Agent', input: {} }] },
+          },
+          {
+            type: 'system',
+            subtype: 'task_started',
+            task_id: 'aaaaaaaaaaaaaaaaa',
+            tool_use_id: 'tu-1',
+            subagent_type: 'hunter',
+            spawn_depth: 1,
+            task_type: 'local_agent',
+          },
+          { type: 'result', subtype: 'success', result: 'SHIPPED #1 abcdef1' },
+        ]),
+    };
+
+    await runSession({ brief: 'b' }, { ...fixtureConfig(), ledgerPath: '/h/supervisor/ledger.jsonl', card: 'c1' }, io);
+
+    const rows = appended.filter(([p]) => p === '/h/supervisor/ledger.jsonl').map(([, l]) => JSON.parse(l));
+    expect(rows.map((r) => [r.kind, r.sessionId, r.parentSessionId, r.agentType])).toEqual([
+      ['executor', 'e-1', null, null],
+      ['subagent', 'aaaaaaaaaaaaaaaaa', 'e-1', 'hunter'],
+    ]);
+    expect(rows[0].resumed).toBe(false);
+  });
+
+  test('a failing ledger append never fails the session, and logs a ledger_write_failed line', async () => {
+    const io = recordingIo();
+    io.appendLog = (path: string, line: string) => {
+      if (path === '/fixture/supervisor/ledger.jsonl') {
+        throw new Error('disk full');
+      }
+      io.calls.push(`appendLog:${path}`);
+      io.logLines.push(line);
+    };
+    io.spawnSession = () =>
+      messages([
+        INIT_MESSAGE,
+        { type: 'result', subtype: 'success', result: 'SHIPPED 42 abc1234', session_id: 'sess-123' },
+      ]);
+
+    const result = await runSession({ brief: 'x' }, fixtureConfig(), io);
+
+    expect(result.outcome).toBe('shipped');
+    const failureLines = io.logLines.filter((l) => l.includes('ledger_write_failed'));
+    expect(failureLines.length).toBeGreaterThan(0);
+    expect(JSON.parse(failureLines[0])).toEqual({ type: 'tribe', subtype: 'ledger_write_failed' });
   });
 });
 

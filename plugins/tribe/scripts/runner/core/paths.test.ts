@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   answersPathOf, campaignStatePathOf, escalationPathOf, escalationsDirOf, reportDirOf,
+  supervisorLedgerPathOf,
 } from './paths.ts';
 
 describe('campaign-home path helpers', () => {
@@ -21,5 +22,9 @@ describe('campaign-home path helpers', () => {
 
   test('a relative home is normalised, not concatenated blindly', () => {
     expect(campaignStatePathOf('a/b')).toBe('a/b/campaign-state.json');
+  });
+
+  test('supervisorLedgerPathOf: the campaign session tree (spec §4.4)', () => {
+    expect(supervisorLedgerPathOf('/h')).toBe('/h/supervisor/ledger.jsonl');
   });
 });

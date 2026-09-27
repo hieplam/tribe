@@ -76,7 +76,9 @@ import {
 } from './brief.ts';
 import { parseRulings, unratifiedRulingIds } from '../rulings.ts';
 import { extractReasonLine, parseEscalationQuestion } from '../escalation.ts';
-import { answersPathOf, campaignStatePathOf, escalationPathOf, escalationsDirOf } from '../paths.ts';
+import {
+  answersPathOf, campaignStatePathOf, escalationPathOf, escalationsDirOf, supervisorLedgerPathOf,
+} from '../paths.ts';
 import { REPORT_JSON_FILENAME } from '../report.ts';
 import { runRecordPathOf } from '../run-record.ts';
 import { watchdogPathsOf } from '../watchdog/select.ts';
@@ -172,7 +174,7 @@ export function supervisorPathsOf(homeDir: string): SupervisorPaths {
     dir,
     status: join(dir, 'status.json'),
     events: join(dir, 'events.jsonl'),
-    ledger: join(dir, 'ledger.jsonl'),
+    ledger: supervisorLedgerPathOf(homeDir),
     state: join(dir, 'state.json'),
     lock: join(dir, '.supervisor.lock'),
     parkDir: join(dir, 'park'),
@@ -1056,6 +1058,11 @@ export async function runSupervisor(
           {
             kind: action.session,
             prompt,
+            // Card supervisor-sessions-in-repo (plan Task 10, spec §4.4): the session appends
+            // its own spawn row on init, attributed to this card and to the same ledger file
+            // the end row below lands in.
+            cardId: action.cardId,
+            ledgerPath: paths.ledger,
             config: oneShotConfig,
             sessionTimeoutMs: config.sessionTimeoutSeconds * 1000,
           },
@@ -1102,6 +1109,10 @@ export async function runSupervisor(
           : outcome;
         appendLedgerEntry(io, paths.ledger, {
           at: endedAtIso,
+          // Card supervisor-sessions-in-repo (plan Task 10, spec §4.4): this row's own event
+          // tag, distinguishing it from the spawn row `runOneShotSession` already appended for
+          // the same session at init.
+          event: 'end',
           kind: action.session,
           cardId: action.cardId,
           sessionId: result.sessionId,
