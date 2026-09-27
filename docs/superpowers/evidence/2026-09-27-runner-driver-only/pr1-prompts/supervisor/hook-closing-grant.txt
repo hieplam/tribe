@@ -1,1 +1,0 @@
-This closing session is not granted this tool; only Read are permitted, and a settings-file allow rule cannot extend that grant.

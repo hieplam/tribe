@@ -1,1 +1,0 @@
-Resume this card: check the open PR's CI status and complete the merge sequence if green, then report the terminal SHIPPED/NEEDS_DIRECTION line.

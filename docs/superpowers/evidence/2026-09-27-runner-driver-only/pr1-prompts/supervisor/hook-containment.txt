@@ -1,1 +1,0 @@
-Writes are confined to the campaign home for this session (least-privilege judgment session, decision 4): the target either falls outside the campaign home or could not be verified. Only Write/Edit under the campaign home are permitted; Read is unrestricted.

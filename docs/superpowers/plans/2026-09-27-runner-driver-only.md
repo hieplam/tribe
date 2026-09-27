@@ -5,7 +5,8 @@ first; every design decision below is made there, with its `file:line` grounding
 **Card:** `~/.tribe/-Users-hiep-repo-tribe/cards/runner-driver-only.md`.
 **Base:** master **after** campaign `sessions-in-repo` (#173) has merged — Task 1.1 proves it.
 **Evidence dir:** `docs/superpowers/evidence/2026-09-27-runner-driver-only/` (`$E` below); the BEFORE
-baselines are already there (`baseline.md`).
+baselines are already there (`baseline.md`). It keeps summaries only; raw output goes to the
+machine-local archive `/Users/hiep/.tribe/-Users-hiep-repo-tribe/evidence/runner-driver-only/` (`$X` below, never committed).
 **Measurement tools (already committed with this plan):** `plugins/tribe/scripts/tests/runner-driver-only/`
 (`$T` below): `tribe-lexicon.ts`, `render-prompts.ts`, `g2-prompts.ts`, `fixture-values.ts`,
 `transcript-prompts.ts`, `run-metrics.ts`, `g3-verify-replay.ts`, `fixture-reset.sh`, `bypass-audit.ts`,
@@ -50,7 +51,17 @@ task on a fresh branch from the updated master. **PR 2 merges only right after
   injected from the edge — never constructed inside core logic (see `~/.claude/rules/pure-core.md`).
 - **Paths:** `R` = `plugins/tribe/scripts/runner`, `T` = `plugins/tribe/scripts/tests/runner-driver-only`,
   `E` = `docs/superpowers/evidence/2026-09-27-runner-driver-only`, `F` = `/Users/hiep/repo/runner-e2e-go`,
-  `FH` = `/Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns`, `S` = `/Users/hiep/.claude-sandboxes/runner-driver-only`.
+  `FH` = `/Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns`, `S` = `/Users/hiep/.claude-sandboxes/runner-driver-only`,
+  `X` = `/Users/hiep/.tribe/-Users-hiep-repo-tribe/evidence/runner-driver-only`.
+- **Evidence — summaries in the repo, raw output machine-local:** `$E` keeps only summaries — small
+  human-readable files carrying the numbers or verdicts a reader or a Done command needs
+  (`baseline.md`, `after.md`, `v2-before-after.md`, the `v1-*-prompts.txt` count tables, the `g3-*`
+  replay lines, `*-run-metrics.txt`, `d10-*-scan.txt`, `d10-*-auditor.md`, `*-dry-run.txt`, the `v7-*`
+  files, one-line result files). Everything else is raw output and goes to `$X` (machine-local, never
+  committed; `mkdir -p $X` before the first write): rendered prompt folders, any `.json`/`.jsonl`,
+  copies of runner or supervise stdout, copies of campaign state or report files, sandbox snapshots,
+  start/end timestamps, subagent metadata, copies of authored state or plan files. A rendered prompt
+  folder used only inside one Done block goes to `/tmp/…`. `git add` adds only summaries.
 - **Locate code by symbol and test title, never by line number.** The spec's `file:line`
   references are master `3194976`; #173 has moved lines since.
 - **Where #173 changed a function this plan also changes** (`consumeSession`, `sessionConfigFor`,
@@ -123,7 +134,7 @@ campaign lock`, the four probe lines, and `base=…`. Anything else stops the ta
 ("#173's campaign has not shipped, or a campaign process is still live; this plan must not start").
 
 - [ ] **Step 2: V1 on the base** — `bun install --cwd plugins/tribe/scripts/runner --frozen-lockfile`,
-  then `bun $T/render-prompts.ts --out $E/base-prompts && bun $T/g2-prompts.ts --render-dir $E/base-prompts > $E/v1-base-prompts.txt`.
+  then `bun $T/render-prompts.ts --out $X/base-prompts && bun $T/g2-prompts.ts --render-dir $X/base-prompts > $E/v1-base-prompts.txt`.
   If `render-prompts.ts` fails to import a symbol #173 removed or renamed (e.g. a `permit.ts`
   reason), adapt only that call and keep the kind name. Expected: `TRIBE_WAY_TOTAL=` near 203
   (#173 does not touch the executor brief).
@@ -643,7 +654,7 @@ Expected: every command exits 0.
 
 **Files:** create `$E/v1-pr1-prompts.txt`, `$E/g3-pr1-plain-pr2-replay.txt`.
 
-- [ ] **Step 1: V1** — `bun $T/render-prompts.ts --out $E/pr1-prompts && bun $T/g2-prompts.ts --render-dir $E/pr1-prompts > $E/v1-pr1-prompts.txt`.
+- [ ] **Step 1: V1** — `bun $T/render-prompts.ts --out $X/pr1-prompts && bun $T/g2-prompts.ts --render-dir $X/pr1-prompts > $E/v1-pr1-prompts.txt`.
   Expected: `TRIBE_WAY_TOTAL` strictly below `$E/v1-base-prompts.txt`'s value; `executor/*` and
   `escalation/*` rows 0; the remaining mentions are all `supervisor/*` and `report/*` (PR 3's work).
 
@@ -2821,7 +2832,7 @@ Expected: every command exits 0.
 - [ ] **Step 3: Suites and V1** — `cd $R && bun run check`; the three new E2Es;
   `bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh`; `bash plugins/tribe/scripts/tests/test-watchdog-e2e.sh`;
   `bash plugins/tribe/scripts/tests/test-supervisor-kill.sh`; `bash plugins/tribe/scripts/tests/test-supervisor-docs.sh`;
-  `bun $T/render-prompts.ts --out $E/pr2-prompts && bun $T/g2-prompts.ts --render-dir $E/pr2-prompts > $E/v1-pr2-prompts.txt`.
+  `bun $T/render-prompts.ts --out $X/pr2-prompts && bun $T/g2-prompts.ts --render-dir $X/pr2-prompts > $E/v1-pr2-prompts.txt`.
   Expected: 0 fail everywhere; `TRIBE_WAY_TOTAL` ≤ PR 1's; `MISSING_REQUIRED_KINDS=0`.
 
 - [ ] **Step 4: Commit** — `git add -A && git commit -m "docs(runner): PR 2 governance — v2 state, turns, runner-run Done"`.
@@ -3060,7 +3071,7 @@ Expected: every command exits 0.
 ### Task 3.4: The runner loses the rulings gate (exit 5)
 
 **Why:** D3 — the runner may not require anything only the Tribe governance produces. MEASURED: one
-ordinary ruling turns a finished campaign into exit 5 (`$E/g3-before-rulings-gate-stdout.txt`).
+ordinary ruling turns a finished campaign into exit 5 (`$X/g3-before-rulings-gate-stdout.txt`).
 
 **Files:** modify `$R/core/loop/run-loop.ts` (delete `applyRulingsGate`, `LoopResult.unratifiedRulings`,
 the `reachedDone` plumbing that only the gate used), `$R/core/types.ts` (`EXIT_RULINGS_UNRATIFIED`),
@@ -3393,9 +3404,9 @@ Expected: every command exits 0 (the third proves every "move here" was filled).
 
 **Why:** the Shaman's V1, the card's G2'. This is the ratchet's end value: 203 → 0.
 
-**Files:** create `$E/after-prompts/`, `$E/v1-after-prompts.txt`, `$E/v1-after-prompts.json`.
+**Files:** create `$E/v1-after-prompts.txt`; raw: `$X/after-prompts/`, `$X/v1-after-prompts.json`.
 
-- [ ] **Step 1: Measure** — `bun $T/render-prompts.ts --out $E/after-prompts && bun $T/g2-prompts.ts --render-dir $E/after-prompts --gate | tee $E/v1-after-prompts.txt && bun $T/g2-prompts.ts --render-dir $E/after-prompts --json > $E/v1-after-prompts.json`.
+- [ ] **Step 1: Measure** — `bun $T/render-prompts.ts --out $X/after-prompts && bun $T/g2-prompts.ts --render-dir $X/after-prompts --gate | tee $E/v1-after-prompts.txt && bun $T/g2-prompts.ts --render-dir $X/after-prompts --json > $X/v1-after-prompts.json`.
   Expected: `TRIBE_WAY_TOTAL=0`, `MISSING_REQUIRED_KINDS=0`, no `ESSENTIALS_MISSING`, `G2_GATE=PASS`.
   A remaining hit is a finding: remove the Tribe text from the prompt it names (if it is a generic
   word the lexicon over-matches, rephrase the prompt — the lexicon is not edited to pass the gate).
@@ -3502,8 +3513,10 @@ Expected: every command exits 0.
 **Why:** the Shaman's V2 (G1, G2, G4, G6): "Same Go plan, same starting tree as the BEFORE run, driven
 through the full stack (`supervise` → runner), not the runner alone."
 
-**Files:** create `$E/v2-after-campaign-state.authored.json`, `$E/v2-after-*.txt|json|md`,
-`$E/d10-v2-*`, `$E/v2-before-after.md`.
+**Files:** create `$E/v2-after-{dry-run,run-metrics,master}.txt`, `$E/v1-after-real-prompts.txt`,
+`$E/g3-after-v2-replay.txt`, `$E/d10-v2-{scan.txt,auditor.md}`, `$E/v2-before-after.md`; raw:
+`$X/v2-after-*` (authored state, supervise stdout, start/end, metrics JSON, `done.jsonl`, report,
+verdict and ledger copies), `$X/after-real-prompts/`, `$X/d10-v2-sandbox-before.json`.
 
 - [ ] **Step 1: Start from S0 and author the campaign** —
 
@@ -3511,9 +3524,10 @@ through the full stack (`supervise` → runner), not the runner alone."
 S=/Users/hiep/.claude-sandboxes/runner-driver-only; F=/Users/hiep/repo/runner-e2e-go
 FH=/Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns; T=plugins/tribe/scripts/tests/runner-driver-only
 E=docs/superpowers/evidence/2026-09-27-runner-driver-only
+X=/Users/hiep/.tribe/-Users-hiep-repo-tribe/evidence/runner-driver-only; mkdir -p $X
 bash $T/fixture-reset.sh $F 9bb6b2253a32453a8ffc2a7c473a0b97ea444498
 mkdir -p $FH/go-after && : > $FH/go-after/answers.md
-cat > $E/v2-after-campaign-state.authored.json <<'EOF'
+cat > $X/v2-after-campaign-state.authored.json <<'EOF'
 {
   "v": 2,
   "campaign": "go-after",
@@ -3539,28 +3553,28 @@ cat > $E/v2-after-campaign-state.authored.json <<'EOF'
   }
 }
 EOF
-cp $E/v2-after-campaign-state.authored.json $FH/go-after/campaign-state.json
-bun $T/bypass-audit.ts snapshot --sandbox $S --out $E/d10-v2-sandbox-before.json
+cp $X/v2-after-campaign-state.authored.json $FH/go-after/campaign-state.json
+bun $T/bypass-audit.ts snapshot --sandbox $S --out $X/d10-v2-sandbox-before.json
 CLAUDE_CONFIG_DIR=$S bun plugins/tribe/scripts/runner/run.ts --repo $F --model sonnet --home $FH/go-after --dry-run --no-viewer | tee $E/v2-after-dry-run.txt
 ```
 
   Expected: `RESET_OK … tree=86031f3c…`; the dry run prints card `small-helpers`, phase `fresh`.
 
-- [ ] **Step 2: Run the full stack** — `date -u +%FT%TZ > $E/v2-after-start.txt; CLAUDE_CONFIG_DIR=$S perl -e 'alarm 10800; exec @ARGV' bun plugins/tribe/scripts/runner/run.ts supervise --repo $F --model sonnet --home $FH/go-after > $E/v2-after-supervise.txt 2>&1; echo "exit $?" >> $E/v2-after-supervise.txt; date -u +%FT%TZ > $E/v2-after-end.txt`.
-  Expected: `exit 0` (campaign closed). A park (`exit 20`) is a finding: record `NEEDS_OWNER.md` in `$E`
+- [ ] **Step 2: Run the full stack** — `date -u +%FT%TZ > $X/v2-after-start.txt; CLAUDE_CONFIG_DIR=$S perl -e 'alarm 10800; exec @ARGV' bun plugins/tribe/scripts/runner/run.ts supervise --repo $F --model sonnet --home $FH/go-after > $X/v2-after-supervise.txt 2>&1; echo "exit $?" >> $X/v2-after-supervise.txt; date -u +%FT%TZ > $X/v2-after-end.txt`.
+  Expected: `exit 0` (campaign closed). A park (`exit 20`) is a finding: record `NEEDS_OWNER.md` in `$X`
   and stop with `NEEDS_DIRECTION`.
 
 - [ ] **Step 3: Measure** —
 
 ```bash
 bun $T/run-metrics.ts --home $FH/go-after | tee $E/v2-after-run-metrics.txt
-bun $T/run-metrics.ts --home $FH/go-after --json > $E/v2-after-run-metrics.json
-CLAUDE_CONFIG_DIR=$S bun $T/transcript-prompts.ts --home $FH/go-after --out $E/after-real-prompts
-bun $T/g2-prompts.ts --render-dir $E/after-real-prompts --negative-only | tee $E/v1-after-real-prompts.txt
+bun $T/run-metrics.ts --home $FH/go-after --json > $X/v2-after-run-metrics.json
+CLAUDE_CONFIG_DIR=$S bun $T/transcript-prompts.ts --home $FH/go-after --out $X/after-real-prompts
+bun $T/g2-prompts.ts --render-dir $X/after-real-prompts --negative-only | tee $E/v1-after-real-prompts.txt
 bun $T/g3-verify-replay.ts --repo $F --home $FH/go-after --card small-helpers | tee $E/g3-after-v2-replay.txt
-cat $FH/go-after/runs/*/done.jsonl > $E/v2-after-done.jsonl
-cp $FH/go-after/campaign-report.md $FH/go-after/supervisor/final-report.md $E/ 2>/dev/null; cp $FH/go-after/supervisor/verdicts/small-helpers.json $E/v2-after-verdict.json
-test -f $FH/go-after/supervisor/ledger.jsonl && cp $FH/go-after/supervisor/ledger.jsonl $E/v2-after-ledger.jsonl
+cat $FH/go-after/runs/*/done.jsonl > $X/v2-after-done.jsonl
+cp $FH/go-after/campaign-report.md $FH/go-after/supervisor/final-report.md $X/ 2>/dev/null; cp $FH/go-after/supervisor/verdicts/small-helpers.json $X/v2-after-verdict.json
+test -f $FH/go-after/supervisor/ledger.jsonl && cp $FH/go-after/supervisor/ledger.jsonl $X/v2-after-ledger.jsonl
 git -C $F fetch -q && { echo "master=$(git -C $F rev-parse master) origin=$(git -C $F rev-parse origin/master)"; (cd $F && go test ./...); echo "go test exit $?"; } | tee $E/v2-after-master.txt
 ```
 
@@ -3570,7 +3584,7 @@ git -C $F fetch -q && { echo "master=$(git -C $F rev-parse master) origin=$(git 
   (#173's executor rows), no row has an `agentType` among the six agents.
 
 - [ ] **Step 4: D10 — both layers** —
-  `CLAUDE_CONFIG_DIR=$S bun $T/bypass-audit.ts scan --home $FH/go-after --claude-home $S --sandbox $S --snapshot-before $E/d10-v2-sandbox-before.json --repo $F | tee $E/d10-v2-scan.txt`
+  `CLAUDE_CONFIG_DIR=$S bun $T/bypass-audit.ts scan --home $FH/go-after --claude-home $S --sandbox $S --snapshot-before $X/d10-v2-sandbox-before.json --repo $F | tee $E/d10-v2-scan.txt`
   → `BYPASS_AUDIT=PASS`. Then dispatch ONE fresh `general-purpose` subagent with exactly the auditor
   brief of spec §6.8, filled with the transcript paths the scan listed (the scan's `--json` output
   carries them as `transcripts`) — nothing else; save its full answer, verbatim, to
@@ -3580,8 +3594,9 @@ git -C $F fetch -q && { echo "master=$(git -C $F rev-parse master) origin=$(git 
 
 - [ ] **Step 5: Before → after** — write `$E/v2-before-after.md`: one row each for Tribe dispatches
   (by type), Tribe skill calls, runner-run Done rows, executor wall clock, full-stack wall clock
-  (`v2-after-start/end`), executor tokens, full-stack tokens, cost — BEFORE from the **sandbox** BEFORE
-  run (`$E/v2-before-sandbox-*`, spec §6.7) with the real-home BEFORE run (`$E/v2-before-*`) as a
+  (`$X/v2-after-start/end`), executor tokens, full-stack tokens, cost — BEFORE from the **sandbox** BEFORE
+  run (`$E/v2-before-sandbox-run-metrics.txt`, `$X/v2-before-sandbox-*`, spec §6.7) with the real-home
+  BEFORE run (`$E/v2-before-run-metrics.txt`, `$X/v2-before-*`) as a
   supplementary column. Reported, not asserted (G6). Then `bash $T/fixture-reset.sh $F 9bb6b2253a32453a8ffc2a7c473a0b97ea444498`.
 
 - [ ] **Step 6: Commit** — `git add docs/superpowers/evidence/2026-09-27-runner-driver-only && git commit -m "chore(evidence): V2 — the Go plan ships through supervise in the sandbox, 0 Tribe dispatches"`
@@ -3595,7 +3610,7 @@ grep -q '^TRIBE_WAY_TOTAL=0$' docs/superpowers/evidence/2026-09-27-runner-driver
 grep -q '^SHIPPED=true' docs/superpowers/evidence/2026-09-27-runner-driver-only/g3-after-v2-replay.txt
 grep -q '^go test exit 0$' docs/superpowers/evidence/2026-09-27-runner-driver-only/v2-after-master.txt
 grep -q '^BYPASS_AUDIT=PASS$' docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v2-scan.txt
-python3 -c "import json; r=[json.loads(l) for l in open('docs/superpowers/evidence/2026-09-27-runner-driver-only/v2-after-done.jsonl') if l.strip()]; ok={t for x in r if x['kind']=='done_run' and x['passed'] for t in [x['stepTask']]}; assert {'T1','T2','T3','T4'} <= ok, ok"
+python3 -c "import json; r=[json.loads(l) for l in open('/Users/hiep/.tribe/-Users-hiep-repo-tribe/evidence/runner-driver-only/v2-after-done.jsonl') if l.strip()]; ok={t for x in r if x['kind']=='done_run' and x['passed'] for t in [x['stepTask']]}; assert {'T1','T2','T3','T4'} <= ok, ok"
 grep -q '^VERDICT: CLEAN$' docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v2-auditor.md
 ```
 
@@ -3607,9 +3622,10 @@ Expected: every command exits 0.
 runner that skips the Done run fails it. V3b shows a real sandbox session facing a Done command that
 cannot pass: the runner never marks the task done.
 
-**Files:** create `$E/v3-*`, `$E/d10-v3-*`.
+**Files:** create `$E/v3a-e2e.txt`, `$E/v3b-checks.txt`, `$E/d10-v3-{scan.txt,auditor.md}`; raw: `$X/v3-*`,
+`$X/v3b-runner.txt`, `$X/d10-v3-sandbox-before.json`.
 
-- [ ] **Step 1: V3a** — `CLAUDE_CONFIG_DIR=$S RDO_EVIDENCE_DIR=$E bash plugins/tribe/scripts/tests/test-runner-done-negative.sh | tee $E/v3a-e2e.txt`.
+- [ ] **Step 1: V3a** — `CLAUDE_CONFIG_DIR=$S RDO_EVIDENCE_DIR=$X bash plugins/tribe/scripts/tests/test-runner-done-negative.sh | tee $E/v3a-e2e.txt`.
   Expected: `V3=PASS`.
 
 - [ ] **Step 2: V3b fixture** — reset `$F` to S0, then commit on `$F` master (and push) this plan as
@@ -3639,16 +3655,16 @@ test "$(uname -s)" = Plan9
   and author `$FH/go-v3-real/campaign-state.json` (v2, card `v3-negative`, spec
   `docs/specs/2026-09-27-small-helpers.md`, plan `docs/plans/2026-09-27-v3-negative.md`, one task
   `{"id":"T1","heading":"Task 1: \`mathx.Double\`"}`) plus an empty `answers.md`; snapshot the sandbox to
-  `$E/d10-v3-sandbox-before.json`.
+  `$X/d10-v3-sandbox-before.json`.
 
-- [ ] **Step 3: V3b run** — `CLAUDE_CONFIG_DIR=$S perl -e 'alarm 5400; exec @ARGV' bun plugins/tribe/scripts/runner/run.ts --repo $F --model sonnet --home $FH/go-v3-real --no-viewer > $E/v3b-runner.txt 2>&1; echo "exit $?" >> $E/v3b-runner.txt`.
+- [ ] **Step 3: V3b run** — `CLAUDE_CONFIG_DIR=$S perl -e 'alarm 5400; exec @ARGV' bun plugins/tribe/scripts/runner/run.ts --repo $F --model sonnet --home $FH/go-v3-real --no-viewer > $X/v3b-runner.txt 2>&1; echo "exit $?" >> $X/v3b-runner.txt`.
   Expected: `exit 2`. Then: the card's `status` is `escalated`, T1 has no `passedSha`, the card has no
   `doneSha`, `escalations/v3-negative.md` exists (reason `done_failed`, or `needs_direction` if the
   session asked instead of claiming the task); if any executor turn ended with `TASK_DONE`
   (`grep -h 'TASK_DONE' $FH/go-v3-real/runs/*/logs/*.log`), `done.jsonl` shows the `uname` command
   with a non-zero exit. Record all of it in `$E/v3b-checks.txt`.
 
-- [ ] **Step 4: D10** — `bypass-audit.ts scan --home $FH/go-v3-real --claude-home $S --sandbox $S --snapshot-before $E/d10-v3-sandbox-before.json --repo $F`
+- [ ] **Step 4: D10** — `bypass-audit.ts scan --home $FH/go-v3-real --claude-home $S --sandbox $S --snapshot-before $X/d10-v3-sandbox-before.json --repo $F`
   → `$E/d10-v3-scan.txt` (`BYPASS_AUDIT=PASS`); the auditor subagent (spec §6.8) → `$E/d10-v3-auditor.md`.
   Then `fixture-reset.sh $F 9bb6b2253a32453a8ffc2a7c473a0b97ea444498`.
 
@@ -3658,7 +3674,7 @@ test "$(uname -s)" = Plan9
 
 ```bash
 grep -q '^V3=PASS$' docs/superpowers/evidence/2026-09-27-runner-driver-only/v3a-e2e.txt
-grep -q '^exit 2$' docs/superpowers/evidence/2026-09-27-runner-driver-only/v3b-runner.txt
+grep -q '^exit 2$' /Users/hiep/.tribe/-Users-hiep-repo-tribe/evidence/runner-driver-only/v3b-runner.txt
 grep -q '^BYPASS_AUDIT=PASS$' docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v3-scan.txt
 grep -q '^VERDICT: CLEAN$' docs/superpowers/evidence/2026-09-27-runner-driver-only/d10-v3-auditor.md
 python3 -c "import json; c=json.load(open('/Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns/go-v3-real/campaign-state.json'))['cards']['v3-negative']; assert c['status']=='escalated' and 'doneSha' not in c and 'passedSha' not in c['tasks'][0], c"
@@ -3668,7 +3684,8 @@ Expected: every command exits 0.
 
 ### Task 4.4: G3' after — the done check requires nothing a Tribe agent produces
 
-**Files:** create `$E/g3-after-*.txt`.
+**Files:** create `$E/g3-after-plain-pr2-replay.txt`; raw: `$X/g3-after-plain-pr2-verify-shipped.json`,
+`$X/g3-after-rulings-probe.txt`.
 
 - [ ] **Step 1: Replays** — `bun $T/g3-verify-replay.ts --repo $F --home $FH/g3-plain-baseline --card small-helpers | tee $E/g3-after-plain-pr2-replay.txt`
   (convert that home's state to v2 first, exactly as Task 3.4 converted the rulings home: `v: 2` and
@@ -3676,8 +3693,8 @@ Expected: every command exits 0.
   possible failures are `doneAtHead` (PR #2 was made by hand — no runner Done run exists for it, which
   is the runner's own D2 requirement, not a Tribe product) and `localBaseSynced` if the fixture master
   moved past it. `bash plugins/verify-shipped/skills/verify-shipped/scripts/verify-shipped.sh --pr 2 --worktree /Users/hiep/repo/runner-e2e-go-plain --card small-helpers --skip-gap-gate`
-  run inside `$F` → `$E/g3-after-plain-pr2-verify-shipped.json`, verdict `PASS`. The rulings probe
-  (`$FH/g3-rulings-baseline`, Task 3.4) → `$E/g3-after-rulings-probe.txt`, `exit 0`.
+  run inside `$F` → `$X/g3-after-plain-pr2-verify-shipped.json`, verdict `PASS`. The rulings probe
+  (`$FH/g3-rulings-baseline`, Task 3.4) → `$X/g3-after-rulings-probe.txt`, `exit 0`.
 
 - [ ] **Step 2: Commit** — `git add docs/superpowers/evidence/2026-09-27-runner-driver-only && git commit -m "chore(evidence): G3' after — no Tribe point, stamp or ratification required"`
 
@@ -3685,8 +3702,8 @@ Expected: every command exits 0.
 
 ```bash
 ! grep -E 'gapGateStamped|ledgerCommitted' docs/superpowers/evidence/2026-09-27-runner-driver-only/g3-after-plain-pr2-replay.txt
-python3 -c "import json; assert json.load(open('docs/superpowers/evidence/2026-09-27-runner-driver-only/g3-after-plain-pr2-verify-shipped.json'))['verdict']=='PASS'"
-grep -q 'exit 0' docs/superpowers/evidence/2026-09-27-runner-driver-only/g3-after-rulings-probe.txt
+python3 -c "import json; assert json.load(open('/Users/hiep/.tribe/-Users-hiep-repo-tribe/evidence/runner-driver-only/g3-after-plain-pr2-verify-shipped.json'))['verdict']=='PASS'"
+grep -q 'exit 0' /Users/hiep/.tribe/-Users-hiep-repo-tribe/evidence/runner-driver-only/g3-after-rulings-probe.txt
 ```
 
 Expected: every command exits 0.
@@ -3696,7 +3713,7 @@ Expected: every command exits 0.
 **Why:** the Shaman's V4: "V2 + V4 together prove the plan, not the runner, decides." D9: V4 runs in
 the owner's real home, where the agents exist.
 
-**Files:** create `$E/v4-*`.
+**Files:** create `$E/v4-run-metrics.txt`, `$E/v4-tribe-scan.txt`; raw: `$X/v4-runner.txt`.
 
 - [ ] **Step 1: Fixture** — reset `$F` to S0; commit on `$F` master (and push)
   `docs/plans/2026-09-27-tribe-style.md`: the SKILL.md "Tribe style — plan section" How-to-work block
@@ -3705,7 +3722,7 @@ the owner's real home, where the agents exist.
   Author `$FH/go-v4-tribe/campaign-state.json` (v2, card `v4-tribe`, that plan, one task) + empty
   `answers.md`.
 
-- [ ] **Step 2: Run (real home — no `CLAUDE_CONFIG_DIR`)** — `env -u CLAUDE_CONFIG_DIR perl -e 'alarm 7200; exec @ARGV' bun plugins/tribe/scripts/runner/run.ts --repo $F --model sonnet --home $FH/go-v4-tribe --no-viewer > $E/v4-runner.txt 2>&1; echo "exit $?" >> $E/v4-runner.txt`;
+- [ ] **Step 2: Run (real home — no `CLAUDE_CONFIG_DIR`)** — `env -u CLAUDE_CONFIG_DIR perl -e 'alarm 7200; exec @ARGV' bun plugins/tribe/scripts/runner/run.ts --repo $F --model sonnet --home $FH/go-v4-tribe --no-viewer > $X/v4-runner.txt 2>&1; echo "exit $?" >> $X/v4-runner.txt`;
   `bun $T/run-metrics.ts --home $FH/go-v4-tribe | tee $E/v4-run-metrics.txt`;
   `bun $T/bypass-audit.ts scan --home $FH/go-v4-tribe > $E/v4-tribe-scan.txt || true` (here the scanner
   is the positive oracle: it must see the dispatches). Then reset `$F` to S0.
@@ -3727,7 +3744,8 @@ Expected: every command exits 0.
 **Why:** the Shaman's V5 (D7). The skill must author a Tribe-free, Done-complete plan and a state the
 runner accepts.
 
-**Files:** create `$T/v5-stage-a.sh`, `$T/v5-check.sh`, `$E/v5-*`, `$E/d10-v5-*`.
+**Files:** create `$T/v5-stage-a.sh`, `$T/v5-check.sh`, `$E/v5-{stage-a,check}.txt`, `$E/d10-v5-{scan.txt,auditor.md}`;
+raw: `$X/v5-session.json`, `$X/v5-authored-{state.json,plan.md}`, `$X/d10-v5-sandbox-before.json`.
 
 - [ ] **Step 1: Write the two scripts** — `$T/v5-stage-a.sh`:
 
@@ -3737,8 +3755,8 @@ runner accepts.
 # orchestrate-campaign skill through Stage A only, on the Go fixture, naming NO plan style, inside the
 # D9 sandbox. The caller sets CLAUDE_CONFIG_DIR. Prints V5_HOME=<new campaign home> and V5_SESSION=<id>.
 set -euo pipefail
-[[ $# -eq 3 ]] || { echo 'usage: v5-stage-a.sh <fixture-clone> <start-sha> <evidence-dir>' >&2; exit 2; }
-F="$1"; START="$2"; E="$3"
+[[ $# -eq 3 ]] || { echo 'usage: v5-stage-a.sh <fixture-clone> <start-sha> <raw-evidence-dir>' >&2; exit 2; }
+F="$1"; START="$2"; X="$3"
 [[ -n "${CLAUDE_CONFIG_DIR:-}" ]] || { echo 'v5-stage-a: CLAUDE_CONFIG_DIR (the D9 sandbox) is not set' >&2; exit 2; }
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bash "$HERE/fixture-reset.sh" "$F" "$START"
@@ -3746,8 +3764,8 @@ HOMES="$(bash "$HERE/../../tribe-home.sh" "$F")/campaigns"
 mkdir -p "$HOMES"
 before="$(ls "$HOMES" | sort)"
 PROMPT='Use the orchestrate-campaign skill (invoke it with the Skill tool). Orchestrate this one card on this repo, Stage A only: author the spec, the plan, campaign-state.json and answers.md, and land the spec and plan the way the skill says. Do NOT launch the runner, the watchdog or the supervisor. The card: add `mathx.Clamp(x, lo, hi int) int` (lo when x < lo, hi when x > hi, else x) with a table-driven test. Campaign slug: go-v5-stage-a.'
-( cd "$F" && perl -e 'alarm shift; exec @ARGV' 3600 claude -p "$PROMPT" --model sonnet --permission-mode bypassPermissions --output-format json ) > "$E/v5-session.json"
-session="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["session_id"])' "$E/v5-session.json")"
+( cd "$F" && perl -e 'alarm shift; exec @ARGV' 3600 claude -p "$PROMPT" --model sonnet --permission-mode bypassPermissions --output-format json ) > "$X/v5-session.json"
+session="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["session_id"])' "$X/v5-session.json")"
 new="$(comm -13 <(printf '%s\n' "$before") <(ls "$HOMES" | sort))"
 [[ "$(printf '%s\n' "$new" | grep -c .)" == "1" ]] || { echo "v5-stage-a: expected exactly one new campaign home, got: $new" >&2; exit 1; }
 echo "V5_HOME=$HOMES/$new"
@@ -3793,14 +3811,14 @@ if [[ "$FAIL" == "0" ]]; then echo 'V5=PASS'; else echo 'V5=FAIL'; exit 1; fi
 - [ ] **Step 2: Run** —
 
 ```bash
-bun $T/bypass-audit.ts snapshot --sandbox $S --out $E/d10-v5-sandbox-before.json
-CLAUDE_CONFIG_DIR=$S bash $T/v5-stage-a.sh $F 9bb6b2253a32453a8ffc2a7c473a0b97ea444498 $E | tee $E/v5-stage-a.txt
+bun $T/bypass-audit.ts snapshot --sandbox $S --out $X/d10-v5-sandbox-before.json
+CLAUDE_CONFIG_DIR=$S bash $T/v5-stage-a.sh $F 9bb6b2253a32453a8ffc2a7c473a0b97ea444498 $X | tee $E/v5-stage-a.txt
 H=$(sed -n 's/^V5_HOME=//p' $E/v5-stage-a.txt); SID=$(sed -n 's/^V5_SESSION=//p' $E/v5-stage-a.txt)
 bash $T/v5-check.sh "$H" $F | tee $E/v5-check.txt
-cp "$H/campaign-state.json" $E/v5-authored-state.json
-PLAN=$(python3 -c "import json,sys; s=json.load(open(sys.argv[1])); print(s['cards'][s['sequence'][0]]['plan'])" "$H/campaign-state.json"); cp "$F/$PLAN" $E/v5-authored-plan.md
+cp "$H/campaign-state.json" $X/v5-authored-state.json
+PLAN=$(python3 -c "import json,sys; s=json.load(open(sys.argv[1])); print(s['cards'][s['sequence'][0]]['plan'])" "$H/campaign-state.json"); cp "$F/$PLAN" $X/v5-authored-plan.md
 T_MAIN=$(ls $S/projects/*/"$SID".jsonl)
-bun $T/bypass-audit.ts scan --transcript "$T_MAIN" --claude-home $S --sandbox $S --snapshot-before $E/d10-v5-sandbox-before.json --repo $F | tee $E/d10-v5-scan.txt
+bun $T/bypass-audit.ts scan --transcript "$T_MAIN" --claude-home $S --sandbox $S --snapshot-before $X/d10-v5-sandbox-before.json --repo $F | tee $E/d10-v5-scan.txt
 ```
 
   Expected: `V5=PASS`; `BYPASS_AUDIT=PASS` (the scan's `INFO_ORCHESTRATE_CAMPAIGN_SKILL_CALLS` ≥ 1 is
@@ -3829,7 +3847,8 @@ sandbox runs and the V4 positive control, with their evidence paths), `.c3/` (a 
 
 - [ ] **Step 1: `after.md`** — one row per goal/V-row of spec §6 (V1–V7, G3', G5, G6, D10): the
   BEFORE value (from `baseline.md`; the sandbox BEFORE numbers from spec §6.7's run), the AFTER value,
-  the evidence file, PASS/FAIL. Every AFTER value is copied from an evidence file, never retyped from
+  the evidence file (a summary in `$E`, or the absolute `$X` path for raw data), PASS/FAIL. Every
+  AFTER value is copied from an evidence file, never retyped from
   memory. Then a section `## Where everything is` (Shaman amendment A5 — the Shaman re-runs `go test`,
   the scanner and his own auditor at acceptance): one row per real run — `go-before` (real home),
   `go-before-sandbox`, `go-after` (V2), `go-v3-real` (V3b), `go-v4-tribe` (V4), the V5 home — giving its
@@ -3837,7 +3856,8 @@ sandbox runs and the V4 positive control, with their evidence paths), `.c3/` (a 
   path of the run (main sessions and `subagents/*.jsonl`), produced by
   `bun $T/bypass-audit.ts scan --home <campaign home> --claude-home <claude home> --json` (field
   `transcripts`; for V5, `--transcript <its main transcript>`) and pasted, not retyped — concrete
-  absolute paths only in this section, no globs. Also list the fixture's final master sha and the
+  absolute paths only in this section, no globs. Also list every raw evidence file this plan wrote to
+  `$X` (absolute paths; `$X` is machine-local, not committed), the fixture's final master sha and the
   three E2E scripts.
 
 - [ ] **Step 2: README + C3** — as listed; `c3x check` → `ok: true`.
@@ -3873,10 +3893,10 @@ lands, the pass condition, the MEASURED baseline, and the empty-implementation t
 | G1 — a plain plan runs to DONE through the runner | `$E/g3-after-v2-replay.txt` `SHIPPED=true`; `$E/v2-after-master.txt` master == origin, `go test` exit 0 | 4.2 |
 | G2 — no Tribe agent, no Tribe workflow | `$E/v2-after-run-metrics.txt` 0/0; `$E/d10-v2-scan.txt` PASS; `$E/d10-v2-auditor.md` CLEAN | 4.2 |
 | G2' / V1 — prompts carry no Tribe way of working | `$E/v1-after-prompts.txt` `G2_GATE=PASS`; `$E/v1-after-real-prompts.txt` 0 | 3.9, 4.2 |
-| G3' — the done check requires nothing Tribe | `$E/g3-after-*` | 1.9, 4.4 |
-| G4 — the runner runs each task's Done commands | `$E/v2-after-done.jsonl` | 4.2 |
+| G3' — the done check requires nothing Tribe | `$E/g3-after-*`, `$X/g3-after-*` | 1.9, 4.4 |
+| G4 — the runner runs each task's Done commands | `$X/v2-after-done.jsonl` | 4.2 |
 | G5 — empty implementation never ships | `test-runner-done-empty.sh` `G5=PASS` | 2.15 |
 | G6 — before/after dispatches, time, tokens | `$E/v2-before-after.md` | 4.2 |
-| V3 / V4 / V5 / V6 / V7 | `$E/v3*`, `$E/v4*`, `$E/v5*`, `test-runner-task-index-refusal.sh`, `$E/v7-after-counts.txt` | 4.3, 4.5, 4.6, 2.16, 4.1 |
+| V3 / V4 / V5 / V6 / V7 | `$E/v3*`, `$E/v4*`, `$E/v5*` (raw: `$X/v3*`, `$X/v4*`, `$X/v5*`), `test-runner-task-index-refusal.sh`, `$E/v7-after-counts.txt` | 4.3, 4.5, 4.6, 2.16, 4.1 |
 | D10 — no bypass | `$E/d10-{v2,v3,v5}-scan.txt` PASS + auditor files | 4.2, 4.3, 4.6 |
 | Done = merged + latest | every PR merged regular; local master fast-forwarded; worktree removed | each PR |
