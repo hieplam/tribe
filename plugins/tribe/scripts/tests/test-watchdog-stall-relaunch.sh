@@ -55,10 +55,10 @@ seed_home() {
   local home="$1"
   mkdir -p "$home"
   cat > "$home/campaign-state.json" <<'JSON'
-{"v":1,"campaign":"stall-relaunch","mergePolicy":"regular-merge-only","sequence":["E1"],
+{"v":2,"campaign":"stall-relaunch","mergePolicy":"regular-merge-only","sequence":["E1"],
  "schemaLockPaths":[],"docsOnlyPaths":[],"ownerOnlyEscalations":[],
  "cards":{"E1":{"status":"staged","spec":"docs/never-authored.md","plan":"docs/never-authored.md",
-  "branch":null,"baseSha":null,"pr":null,"mergeSha":null,"sessionId":null,"updatedAt":null}}}
+  "branch":null,"baseSha":null,"pr":null,"mergeSha":null,"sessionId":null,"updatedAt":null,"tasks":[{"id":"T1","heading":"Task 1"}]}}}
 JSON
   : > "$home/answers.md"
 
@@ -87,10 +87,10 @@ seed_crashed_home() {
   local home="$1"
   mkdir -p "$home"
   cat > "$home/campaign-state.json" <<'JSON'
-{"v":1,"campaign":"stall-relaunch","mergePolicy":"regular-merge-only","sequence":["E1"],
+{"v":2,"campaign":"stall-relaunch","mergePolicy":"regular-merge-only","sequence":["E1"],
  "schemaLockPaths":[],"docsOnlyPaths":[],"ownerOnlyEscalations":[],
  "cards":{"E1":{"status":"staged","spec":"docs/never-authored.md","plan":"docs/never-authored.md",
-  "branch":null,"baseSha":null,"pr":null,"mergeSha":null,"sessionId":null,"updatedAt":null}}}
+  "branch":null,"baseSha":null,"pr":null,"mergeSha":null,"sessionId":null,"updatedAt":null,"tasks":[{"id":"T1","heading":"Task 1"}]}}}
 JSON
   : > "$home/answers.md"
 

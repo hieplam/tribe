@@ -67,7 +67,7 @@ new_campaign() {
   mkdir -p "$home/escalations" "$home/watchdog"
   cat > "$home/campaign-state.json" <<JSON
 {
-  "v": 1,
+  "v": 2,
   "campaign": "$slug",
   "mergePolicy": "regular-merge-only",
   "sequence": ["c1"],
@@ -84,7 +84,8 @@ new_campaign() {
       "pr": 1,
       "mergeSha": "deadbeef",
       "sessionId": null,
-      "updatedAt": null
+      "updatedAt": null,
+      "tasks":[{"id":"T1","heading":"Task 1"}]
     }
   }
 }

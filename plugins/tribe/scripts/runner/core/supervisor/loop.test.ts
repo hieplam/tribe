@@ -258,7 +258,7 @@ function escalationFile(reason: string): string {
  * schema-checked one. */
 function campaignStateFixture(ownerOnlyEscalations: string[] = [], cards: Record<string, unknown> = {}): string {
   return JSON.stringify({
-    v: 1, campaign: 'c', mergePolicy: 'merge', sequence: [], schemaLockPaths: [], docsOnlyPaths: [],
+    v: 2, campaign: 'c', mergePolicy: 'merge', sequence: [], schemaLockPaths: [], docsOnlyPaths: [],
     ownerOnlyEscalations, cards,
   });
 }
@@ -268,7 +268,8 @@ function campaignStateFixture(ownerOnlyEscalations: string[] = [], cards: Record
 function cardFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     status: 'escalated', spec: null, plan: null, branch: null, baseSha: null,
-    pr: null, mergeSha: null, sessionId: null, updatedAt: null, ...overrides,
+    pr: null, mergeSha: null, sessionId: null, updatedAt: null, tasks: [{ id: 'T1', heading: 'Task 1' }],
+    ...overrides,
   };
 }
 
@@ -497,7 +498,7 @@ describe('runSupervisor — Task 16 (spec §5(c)): campaign-state.json is read t
       initialFiles: {
         [join(HOME, 'escalations', 'c1.md')]: escalationFile('data_shape_change'),
         [join(HOME, 'campaign-state.json')]: JSON.stringify({
-          v: 1, campaign: 'c', mergePolicy: 'merge', sequence: [], schemaLockPaths: [], docsOnlyPaths: [],
+          v: 2, campaign: 'c', mergePolicy: 'merge', sequence: [], schemaLockPaths: [], docsOnlyPaths: [],
           // A per-field reader would `.filter(isString)` this down to ['data_shape_change'] and
           // still park owner-only. A whole-document schema read must refuse the array — and
           // therefore the whole document — instead.
@@ -540,7 +541,7 @@ describe('runSupervisor — Task 16 (spec §5(c)): campaign-state.json is read t
       initialFiles: {
         [join(HOME, 'escalations', 'c1.md')]: escalationFile('data_shape_change'),
         [join(HOME, 'campaign-state.json')]: JSON.stringify({
-          v: 1, campaign: 'c', mergePolicy: 'merge', sequence: [], schemaLockPaths: [], docsOnlyPaths: [],
+          v: 2, campaign: 'c', mergePolicy: 'merge', sequence: [], schemaLockPaths: [], docsOnlyPaths: [],
           // This field alone is perfectly schema-valid and WOULD match the escalation's reason.
           ownerOnlyEscalations: ['data_shape_change'],
           // ...but this sibling field is not (`spec` must be `string | null`) — a per-field

@@ -394,7 +394,7 @@ describe('parseResetCardArgs — the reset-card subcommand\'s own tiny flag set'
  * values, matching this file's own stateless-capability wall. */
 function stateFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    v: 1,
+    v: 2,
     campaign: 'sample-campaign',
     mergePolicy: 'merge',
     sequence: ['C1'],
@@ -412,6 +412,7 @@ function stateFixture(overrides: Record<string, unknown> = {}): Record<string, u
         mergeSha: null,
         sessionId: 'sess-c1',
         updatedAt: '2026-01-02T00:00:00Z',
+        tasks: [{ id: 'T1', heading: 'Task 1' }],
       },
     },
     ...overrides,

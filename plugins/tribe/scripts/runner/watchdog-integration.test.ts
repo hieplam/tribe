@@ -36,7 +36,7 @@ function harness(plan: string, extraEnv: Record<string, string> = {}): Harness {
   // present), even though only `fileExists` is consulted on this path: a fixture that could
   // not survive the real loader is a fixture that lies (fixtures-mirror-reality).
   writeFileSync(join(home, 'campaign-state.json'), JSON.stringify({
-    v: 1, campaign: 'watchdog-int', mergePolicy: 'regular-merge-only', sequence: [],
+    v: 2, campaign: 'watchdog-int', mergePolicy: 'regular-merge-only', sequence: [],
     schemaLockPaths: [], docsOnlyPaths: [], ownerOnlyEscalations: [], cards: {},
   }));
   writeFileSync(join(home, 'answers.md'), '');

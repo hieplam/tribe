@@ -4,14 +4,9 @@
 // Oracle: spec §4.3 is the contract — CommonMark is NOT. Under-reading a Done command (missing one,
 // or attributing it to the wrong task) is a bug; refusing an ambiguous plan is by design.
 
-/** One task of `campaign-state.json`'s `cards.<id>.tasks` (D1): a pointer into the plan, never a copy. */
-export interface TaskRef {
-  id: string;
-  /** The exact text of one heading line in the plan, `#`s and surrounding whitespace stripped. */
-  heading: string;
-  /** Runner-written: the commit at which this task's Done commands last passed. */
-  passedSha?: string;
-}
+import type { TaskRef } from './types.ts';
+
+export type { TaskRef };
 
 export interface ResolvedTask {
   id: string;

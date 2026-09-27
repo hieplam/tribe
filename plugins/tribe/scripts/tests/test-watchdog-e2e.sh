@@ -35,7 +35,7 @@ new_home() { # new_home <slug> [--with-answers]
   local home="$CAMPAIGNS/$1"; mkdir -p "$home"
   cat > "$home/campaign-state.json" <<'JSON'
 {
-  "v": 1,
+  "v": 2,
   "campaign": "watchdog-e2e",
   "mergePolicy": "regular-merge-only",
   "sequence": ["E1"],
@@ -52,7 +52,8 @@ new_home() { # new_home <slug> [--with-answers]
       "pr": null,
       "mergeSha": null,
       "sessionId": null,
-      "updatedAt": null
+      "updatedAt": null,
+      "tasks":[{"id":"T1","heading":"Task 1"}]
     }
   }
 }

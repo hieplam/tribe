@@ -27,6 +27,7 @@ function fixtureCard(overrides: Partial<Card> = {}): Card {
     mergeSha: null,
     sessionId: 'sess-c1',
     updatedAt: null,
+    tasks: [{ id: 'T1', heading: 'Task 1' }],
     ...overrides,
   };
 }

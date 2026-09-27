@@ -43,13 +43,14 @@ function fixtureCard(overrides: Partial<Card> = {}): Card {
     mergeSha: null,
     sessionId: null,
     updatedAt: null,
+    tasks: [{ id: 'T1', heading: 'Task 1' }],
     ...overrides,
   };
 }
 
 function fixtureState(overrides: Partial<CampaignState> = {}): CampaignState {
   return {
-    v: 1,
+    v: 2,
     campaign: 'sample-campaign',
     mergePolicy: 'merge',
     sequence: ['A1'],

@@ -49,12 +49,13 @@ function card(): Card {
   return {
     status: 'running', spec: SPEC, plan: PLAN, branch: 'feat/small-helpers', baseSha: '9bb6b22',
     pr: 12, mergeSha: null, sessionId: 'sess-1', updatedAt: null,
+    tasks: [{ id: 'T1', heading: 'Task 1' }],
   };
 }
 
 function state(): CampaignState {
   return {
-    v: 1, campaign: CAMPAIGN, mergePolicy: 'regular', sequence: [CARD_ID],
+    v: 2, campaign: CAMPAIGN, mergePolicy: 'regular', sequence: [CARD_ID],
     schemaLockPaths: [], docsOnlyPaths: [], ownerOnlyEscalations: [], cards: { [CARD_ID]: card() },
   };
 }

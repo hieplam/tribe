@@ -70,13 +70,16 @@ function fixtureCard(overrides: Partial<Card> = {}): Card {
     mergeSha: null,
     sessionId: null,
     updatedAt: null,
+    // Deliver-ready: the one task already passed, so each test models "one session ships the card".
+    tasks: [{ id: 'T1', heading: 'Task 1: Widget', passedSha: 'basesha0' }],
+    doneSha: 'basesha0',
     ...overrides,
   };
 }
 
 function fixtureState(overrides: Partial<CampaignState> = {}): CampaignState {
   return {
-    v: 1,
+    v: 2,
     campaign: 'sample-campaign',
     mergePolicy: 'merge',
     sequence: ['C1', 'C2'],

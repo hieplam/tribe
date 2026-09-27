@@ -41,6 +41,7 @@ function fixtureCard(overrides: Partial<Card> = {}): Card {
     mergeSha: null,
     sessionId: null,
     updatedAt: null,
+    tasks: [{ id: 'T1', heading: 'Task 1' }],
     ...overrides,
   };
 }
@@ -70,7 +71,7 @@ function fixtureIo(overrides: Partial<LoopIO> = {}): LoopIO {
 
 function fixtureCtx(overrides: { resolved?: Partial<ResolvedConfig>; io?: Partial<LoopIO> } = {}): CardCtx {
   const state: CampaignState = {
-    v: 1,
+    v: 2,
     campaign: 'test',
     mergePolicy: 'merge',
     sequence: ['C1'],
