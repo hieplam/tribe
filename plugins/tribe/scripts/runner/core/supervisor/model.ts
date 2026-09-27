@@ -270,6 +270,12 @@ export interface LedgerEntryUsage {
 
 export interface LedgerEntry {
   at: string;
+  /** Card supervisor-sessions-in-repo (plan Task 10, spec §4.4): this row's own event tag,
+   * distinguishing it from `core/ledger.ts`'s `SpawnRow` (`event: 'spawn'`) sharing the same
+   * file. A LEGACY end row written before this task carries no `event` key at all — the reader
+   * (viewer, `g8-ledger-tree.ts`) treats an absent `event` as an end row too; every row this
+   * module writes from here on states it explicitly. */
+  event: 'end';
   kind: SessionKind | 'owner';
   cardId: string | null;
   sessionId: string | null;

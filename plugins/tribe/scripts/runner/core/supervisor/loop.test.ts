@@ -612,6 +612,14 @@ describe('runSupervisor — a failed ruling retries exactly once, then parks (ex
     expect(spawnCount).toBe(2);
     const needsOwner = seam.files.get(join(HOME, 'NEEDS_OWNER.md')) as string;
     expect(needsOwner).toContain('ruling_failed');
+    // Card supervisor-sessions-in-repo (plan Task 10, spec §4.4): the end row THIS LOOP appends
+    // carries `event: 'end'` — distinguishing it from the session's own spawn row, appended by
+    // `runOneShotSession` into the same ledger file for the same session.
+    const ledgerRows = (seam.files.get(join(HOME, 'supervisor', 'ledger.jsonl')) ?? '')
+      .trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
+    const endRows = ledgerRows.filter((r) => r.verdict !== undefined); // the loop's own rows, never a SpawnRow field
+    expect(endRows.length).toBe(2);
+    expect(endRows.every((r) => r.event === 'end')).toBe(true);
   });
 });
 

@@ -281,6 +281,14 @@ describe('replay: the viewer-consolidation escalation history bounds spawns at 5
     expect(spawnLog.length).toBeLessThanOrEqual(5);
     expect(spawnLog.map((s) => s.kind)).toEqual(['ruling', 'ruling', 'ruling', 'ratify', 'closing']);
     expect(spawnLog.every((s) => s.resume === undefined)).toBe(true);
-    expect(ledger.every((l) => typeof l.usage.input_tokens === 'number')).toBe(true);
+    // Card supervisor-sessions-in-repo (plan Task 10, spec §4.4): the ledger now also carries one
+    // SPAWN row per session (`event: 'spawn'`), appended at init and carrying no `usage` at
+    // all — usage is only known once a session's terminal `result` message arrives, which is
+    // this loop's own END row (`event: 'end'`). The oracle's "every line is usage-typed" claim
+    // is therefore scoped to end rows; spawn rows are asserted present instead.
+    const endRows = ledger.filter((l) => l.event !== 'spawn');
+    const spawnRows = ledger.filter((l) => l.event === 'spawn');
+    expect(spawnRows.length).toBe(spawnLog.length);
+    expect(endRows.every((l) => typeof l.usage.input_tokens === 'number')).toBe(true);
   });
 });

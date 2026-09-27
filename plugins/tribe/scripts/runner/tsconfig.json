@@ -14,11 +14,5 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["**/*.ts"],
-  // Card supervisor-sessions-in-repo, plan Task 4: the acceptance E2E is written BEFORE the
-  // signatures it calls exist. Its `run` helper passes `cardId`/`ledgerPath` to
-  // `runOneShotSession` and gives a seam with no `snapshotHomeConfig`/`restoreHomeConfig` — the
-  // shape Tasks 6 and 10 produce. Bun runs the file regardless of tsc; Task 10 removes this
-  // exclusion once the signatures match.
-  "exclude": ["core/supervisor/campaign-home-carryover.e2e.test.ts"]
+  "include": ["**/*.ts"]
 }
