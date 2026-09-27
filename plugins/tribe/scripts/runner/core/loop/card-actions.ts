@@ -368,6 +368,8 @@ const VERIFY_FAILURE_BULLETS: Record<Exclude<VerifyPointId, 'worktreeAndBranchGo
     "- localBaseSynced: the local base branch in the runner's checkout does not have this merge yet " +
     '(or has diverged). Fast-forward it (git merge --ff-only <remote>/<base>) with a clean checkout, ' +
     'then re-run.',
+  doneAtHead:
+    '- doneAtHead: the PR merged a commit the runner never ran the Done commands on. Revert or verify by hand, re-run the Done commands, and record a ruling before re-running.',
 };
 
 /** P5 audit fix-round (blocker, skinnerB): `worktreeAndBranchGone`'s bullet used to fire from

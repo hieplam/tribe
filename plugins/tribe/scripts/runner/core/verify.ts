@@ -34,7 +34,7 @@ export interface VerifyConfig {
   docsOnlyPaths: string[];
 }
 
-/** The D3 points (five generic ones plus D4's localBaseSynced), each independently reported (never short-circuited) so a failed
+/** The D3 points (five generic ones, D4's localBaseSynced and spec §4.7's doneAtHead), each independently reported (never short-circuited) so a failed
  * `verifyShipped` names EVERY failing point, not just the first. */
 export type VerifyPointId =
   | 'merged'
@@ -42,7 +42,8 @@ export type VerifyPointId =
   | 'checksGreen'
   | 'worktreeAndBranchGone'
   | 'schemaGuard'
-  | 'localBaseSynced';
+  | 'localBaseSynced'
+  | 'doneAtHead';
 
 export interface VerifyPointResult {
   id: VerifyPointId;
@@ -84,7 +85,7 @@ async function checkMerged(
   card: Card,
   config: VerifyConfig,
   io: VerifyIO,
-): Promise<{ point: VerifyPointResult; mergeSha: string | null }> {
+): Promise<{ point: VerifyPointResult; mergeSha: string | null; headSha: string | null }> {
   if (card.pr == null) {
     return {
       point: {
@@ -93,6 +94,7 @@ async function checkMerged(
         detail: 'card.pr is not set; cannot query gh api repos/{owner}/{repo}/pulls/<pr>',
       },
       mergeSha: null,
+      headSha: null,
     };
   }
 
@@ -110,10 +112,11 @@ async function checkMerged(
         detail: `gh api ${apiPath} failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`,
       },
       mergeSha: null,
+      headSha: null,
     };
   }
 
-  let parsed: { merged?: unknown; merge_commit_sha?: unknown };
+  let parsed: { merged?: unknown; merge_commit_sha?: unknown; head?: { sha?: unknown } | null };
   try {
     parsed = JSON.parse(result.stdout);
   } catch {
@@ -124,11 +127,13 @@ async function checkMerged(
         detail: `gh api ${apiPath} returned non-JSON output`,
       },
       mergeSha: null,
+      headSha: null,
     };
   }
 
   const merged = parsed.merged === true;
   const mergeSha = typeof parsed.merge_commit_sha === 'string' ? parsed.merge_commit_sha : null;
+  const headSha = typeof parsed.head?.sha === 'string' ? parsed.head.sha : null;
   return {
     point: {
       id: 'merged',
@@ -138,6 +143,7 @@ async function checkMerged(
         : `PR #${card.pr} is not merged (gh api ${apiPath} reported merged=${String(parsed.merged)})`,
     },
     mergeSha,
+    headSha,
   };
 }
 
@@ -478,20 +484,32 @@ async function checkLocalBaseSynced(mergeSha: string | null, config: VerifyConfi
   return { id, passed: true, detail: `local ${config.baseBranch} contains ${mergeSha} and is not ahead of ${remoteBase}` };
 }
 
+/** Spec §4.7: the merged PR's head must be the commit at which the runner last passed every task's
+ * Done commands — whatever route the merge took. No doneSha means no Done run ever passed. */
+function checkDoneAtHead(card: Card, headSha: string | null): VerifyPointResult {
+  const id = 'doneAtHead' as const;
+  if (!card.doneSha) return { id, passed: false, detail: 'no passing Done run is recorded for this card (doneSha is unset)' };
+  if (!headSha) return { id, passed: false, detail: `the merged PR's head commit could not be read; cannot compare it with ${card.doneSha}` };
+  return headSha === card.doneSha
+    ? { id, passed: true, detail: `the merged head ${headSha} is the commit the Done commands passed on` }
+    : { id, passed: false, detail: `the merged head ${headSha} is not the commit the Done commands passed on (${card.doneSha})` };
+}
+
 /** The D3 six-point replay, as code. The executor's `SHIPPED <pr> <sha>` line is a signal
  * only (spec §D3) — this is the acceptance. Every point is checked and reported
  * independently; a failure at one point never short-circuits the rest, so a failed result
  * names EVERY failing point (it feeds the escalation file a human reads). Never throws on
  * a verification failure — a failed check is a normal, reportable outcome. */
 export async function verifyShipped(card: Card, config: VerifyConfig, io: VerifyIO, cardId: string): Promise<VerifyResult> {
-  void cardId; // kept in the signature: Task 2.11's doneAtHead point and the replay tool pass it
+  void cardId; // kept in the signature: the replay tool passes it
   const merged = await checkMerged(card, config, io);
   const ancestor = await checkAncestor(merged.mergeSha, config, io);
   const checks = await checkChecksGreen(card, config, io);
   const worktree = await checkWorktreeAndBranchGone(card, config, io);
   const schema = await checkSchemaGuard(card, config, io, merged.mergeSha);
   const localBase = await checkLocalBaseSynced(merged.mergeSha, config, io);
-  const points: VerifyPointResult[] = [merged.point, ancestor, checks, worktree, schema, localBase];
+  const doneAtHead = checkDoneAtHead(card, merged.headSha);
+  const points: VerifyPointResult[] = [merged.point, ancestor, checks, worktree, schema, localBase, doneAtHead];
   const failedPoints = points.filter((p) => !p.passed).map((p) => p.id);
   return { shipped: failedPoints.length === 0, points, failedPoints };
 }

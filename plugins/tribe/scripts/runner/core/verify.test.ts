@@ -27,7 +27,8 @@ function fixtureCard(overrides: Partial<Card> = {}): Card {
     mergeSha: null,
     sessionId: 'sess-c1',
     updatedAt: null,
-    tasks: [{ id: 'T1', heading: 'Task 1' }],
+    tasks: [{ id: 'T1', heading: 'Task 1', passedSha: 'donesha1' }],
+    doneSha: 'donesha1',
     ...overrides,
   };
 }
@@ -67,6 +68,9 @@ interface MockOptions {
   localBaseContainsMerge?: boolean;
   /** localBaseSynced: the local base has commits the remote lacks (diverged). Defaults to false. */
   localBaseAheadOfRemote?: boolean;
+  /** doneAtHead: the merged PR's head commit (`head.sha` in `gh api …/pulls/<pr>`). Defaults to
+   * the fixture card's doneSha. */
+  headSha?: string;
 }
 
 function ok(stdout: string): ExecResult {
@@ -94,7 +98,7 @@ function buildIo(opts: MockOptions = {}): VerifyIO {
     async exec(cmd: string[]): Promise<ExecResult> {
       const [bin, ...rest] = cmd;
       if (bin === 'gh' && rest[0] === 'api') {
-        return ok(JSON.stringify({ merged, merge_commit_sha: mergeSha }));
+        return ok(JSON.stringify({ merged, merge_commit_sha: mergeSha, head: { sha: opts.headSha ?? 'donesha1' } }));
       }
       if (bin === 'git' && rest[0] === 'fetch') return ok('');
       if (bin === 'git' && rest[0] === 'merge-base' && rest[1] === '--is-ancestor' && rest[3] === 'master') {
@@ -174,8 +178,27 @@ describe('verifyShipped — happy path', () => {
     expect(result.shipped).toBe(true);
     expect(result.points.map((p) => p.id)).toEqual([
       'merged', 'mergeShaAncestorOfMaster', 'checksGreen', 'worktreeAndBranchGone', 'schemaGuard',
-      'localBaseSynced',
+      'localBaseSynced', 'doneAtHead',
     ]);
+  });
+});
+
+describe('doneAtHead (spec §4.7)', () => {
+  test('merged head == card.doneSha -> passes', async () => {
+    const r = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo(), 'C1');
+    expect(r.points.find((p) => p.id === 'doneAtHead')?.passed).toBe(true);
+  });
+  test('merged head differs -> fails and names both commits', async () => {
+    const r = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo({ headSha: 'other' }), 'C1');
+    const p = r.points.find((x) => x.id === 'doneAtHead');
+    expect(p?.passed).toBe(false);
+    expect(p?.detail).toContain('other');
+    expect(p?.detail).toContain('donesha1');
+  });
+  test('a card with no passing Done run can never verify', async () => {
+    const r = await verifyShipped(fixtureCard({ doneSha: undefined }), fixtureConfig(), buildIo(), 'C1');
+    expect(r.points.find((x) => x.id === 'doneAtHead')?.passed).toBe(false);
+    expect(r.shipped).toBe(false);
   });
 });
 

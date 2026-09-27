@@ -692,7 +692,7 @@ describe('runLoop — C1: a card whose merge removed its own plan path finalises
         (cmd) => {
           if (cmd[0] === 'gh' && cmd[1] === 'api') {
             merged = true;
-            return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+            return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           }
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('deadbee parent1 parent2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
@@ -804,7 +804,7 @@ describe('runLoop — full happy path over two cards', () => {
       answers: '# answers\n(none yet)\n',
       execHandlers: [
         (cmd) => {
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('deadbee parent1 parent2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -861,7 +861,7 @@ describe('runLoop — records branch + baseSha (handoff Fix 5)', () => {
         (cmd) => {
           if (cmd[0] === 'git' && cmd[1] === 'rev-parse') return ok('base15ha\n');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return ok(JSON.stringify({ headRefName: 'feature/RecordedBranch' }));
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('deadbee parent1 parent2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -895,7 +895,7 @@ describe('runLoop — recordBaseSha rev-parses the resolved <remote>/<baseBranch
           if (cmd[0] === 'git' && cmd[1] === 'symbolic-ref') return ok('upstream/main\n');
           if (cmd[0] === 'git' && cmd[1] === 'rev-parse') return ok('base15ha\n');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return ok(JSON.stringify({ headRefName: 'feature/RecordedBranch' }));
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('deadbee parent1 parent2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -1031,7 +1031,7 @@ describe('runLoop — crash-resume: verify_only phase (PR merged, not yet shippe
       execHandlers: [
         (cmd) => {
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return ok(JSON.stringify({ number: 55, state: 'MERGED' }));
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'cafefee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'cafefee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('cafefee p1 p2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -1074,7 +1074,7 @@ describe('runLoop — resume-probe failure -> fresh-with-digest', () => {
       execHandlers: [
         (cmd) => {
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return ok(JSON.stringify({ number: 8, state: 'OPEN' }));
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'f00dfee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'f00dfee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('f00dfee p1 p2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -1123,7 +1123,7 @@ describe('runLoop — F8: open PR with no sessionId spawns fresh WITH a digest, 
       execHandlers: [
         (cmd) => {
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return ok(JSON.stringify({ number: 9, state: 'OPEN' }));
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'ab00001' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'ab00001', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('ab00001 p1 p2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -1393,7 +1393,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view' && cmd[3] === 'feat/c1-widget') {
             return ok(JSON.stringify({ number: 12, state: 'MERGED' }));
           }
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok('');
@@ -1436,7 +1436,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view' && cmd[3] === 'feat/c1-widget') {
             return ok(JSON.stringify({ number: 12, state: 'MERGED' }));
           }
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok(worktreePorcelain);
@@ -1474,7 +1474,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       answers: '',
       execHandlers: [
         (cmd) => {
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok('');
@@ -1535,7 +1535,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view' && cmd[3] === 'feat/c1-widget') {
             return ok(JSON.stringify({ number: 12, state: 'MERGED' }));
           }
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok('');
@@ -1583,7 +1583,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       answers: '',
       execHandlers: [
         (cmd) => {
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok('');
@@ -1644,7 +1644,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       answers: '',
       execHandlers: [
         (cmd) => {
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok(worktreePorcelain);
           if (cmd[0] === 'git' && cmd[1] === 'ls-remote') return ok('');
@@ -1703,7 +1703,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       answers: '',
       execHandlers: [
         (cmd) => {
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok(worktreePorcelain);
           if (cmd[0] === 'git' && cmd[1] === 'ls-remote') return ok('');
@@ -2126,7 +2126,7 @@ describe('runLoop — bounded auto-retry (P1 fix-list, spec "wait-aware liveness
 function cleanCommitAndVerifyHandlers(mergeSha: string): Array<(cmd: string[]) => ExecResult | null> {
   return [
     (cmd) => {
-      if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: mergeSha }));
+      if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: mergeSha, head: { sha: 'basesha0' } }));
       if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok(`${mergeSha} p1 p2`);
       if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
       if (cmd[0] === 'git' && cmd[1] === 'diff') return ok('');

@@ -244,7 +244,7 @@ describe('healSafeResidue — D4 safe fast-forward of the local base (Task 1.6)'
       calls.push(cmd);
       timedCalls.push({ cmd, options });
       const [bin, ...rest] = cmd;
-      if (bin === 'gh' && rest[0] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+      if (bin === 'gh' && rest[0] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'donesha1' } }));
       if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
       if (bin === 'git' && rest[0] === 'merge-base' && rest[2] === 'deadbee' && rest[3] === 'master') {
         // The local base lacks the merge until the heal fast-forwards it.
@@ -260,7 +260,7 @@ describe('healSafeResidue — D4 safe fast-forward of the local base (Task 1.6)'
       return ok('');
     });
     const ctx = fixtureCtx({ resolved: { baseBranch: 'master' }, io: { exec } });
-    ctx.state.cards.C1 = fixtureCard({ branch: 'feat/c1-widget', pr: 12 });
+    ctx.state.cards.C1 = fixtureCard({ branch: 'feat/c1-widget', pr: 12, doneSha: 'donesha1' });
     const verifyConfig: VerifyConfig = {
       repoRoot: '/repo',
       remote: 'origin',
@@ -299,7 +299,7 @@ describe('healSafeResidue — D4 safe fast-forward of the local base (Task 1.6)'
     const exec = mock(async (cmd: string[]) => {
       calls.push(cmd);
       const [bin, ...rest] = cmd;
-      if (bin === 'gh' && rest[0] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+      if (bin === 'gh' && rest[0] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'donesha1' } }));
       if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
       if (bin === 'git' && rest[0] === 'merge-base' && rest[2] === 'deadbee' && rest[3] === 'master') {
         return { stdout: '', stderr: '', exitCode: 1 };
@@ -309,7 +309,7 @@ describe('healSafeResidue — D4 safe fast-forward of the local base (Task 1.6)'
       return ok('');
     });
     const ctx = fixtureCtx({ resolved: { baseBranch: 'master' }, io: { exec } });
-    ctx.state.cards.C1 = fixtureCard({ branch: 'feat/c1-widget', pr: 12 });
+    ctx.state.cards.C1 = fixtureCard({ branch: 'feat/c1-widget', pr: 12, doneSha: 'donesha1' });
     const verifyConfig: VerifyConfig = {
       repoRoot: '/repo',
       remote: 'origin',
