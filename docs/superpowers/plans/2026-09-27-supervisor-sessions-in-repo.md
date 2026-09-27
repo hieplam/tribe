@@ -295,8 +295,8 @@ pkill -f 'serve.ts --port 4411'
 ```
 Expected: `G5 0/5`. Append to `$EV/baseline.md`.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 3/16`.
-- [ ] Task 3 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 3/16`.
+- [x] Task 3 complete
 
 ---
 

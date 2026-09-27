@@ -103,3 +103,70 @@ $ cd ~/.tribe/-Users-hiep-repo-tribe/campaigns && bun <abs path>/g8-ledger-tree.
 
 A missing `--home`, a flag whose value was swallowed by the next flag, and a home with no ledger
 each refuse with one stderr line and `rc=2` — a missing ledger is a refusal, never a score of zero.
+
+---
+
+# Baseline — Task 3 (the G5 badge probe, run on the base build)
+
+## Chromium resolution
+
+Playwright's own bundled Chromium is NOT installed on this host (spec §5.1), confirmed directly:
+
+```
+$ bun -e "import { resolveChromiumExecutable } from './e2e/browser.ts'; resolveChromiumExecutable();"
+playwright failed: no Chromium executable found in Playwright's registry (expected at
+/Users/hiep/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for
+Testing.app/Contents/MacOS/Google Chrome for Testing) — run: bunx playwright install chromium
+```
+
+So `badge-probe.ts` fell through to the system Google Chrome fallback,
+`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, which exists on this host.
+
+## G5 — badge probe against the base build (`bun run build`, `serve.ts --port 4411`)
+
+```
+$ cd $S/viewer && bun run build
+✓ built in 287ms
+$ (bun serve.ts --port 4411 &)
+tribe viewer: http://127.0.0.1:4411 (projects root: /Users/hiep/.claude/projects) — read-only, refresh to update
+$ bun tools/badge-probe.ts --base http://127.0.0.1:4411 --slug fu-supervisor-settings --shots /tmp/g5-base \
+  3d0f1f07-1d79-4c44-8e9c-cc84c303d1a1 789e9dea-ca0b-4274-8860-0c5eb400208f 755daa23-83b4-4031-8210-4f59975fc435 \
+  148705ea-963b-4717-bb90-ee69a24079b1 1bf2bdf3-c96d-499b-826f-0932f09bd3e3 | tail -1
+G5 0/5
+$ pkill -f 'serve.ts --port 4411'
+```
+
+Full per-session output (before `tail -1`):
+
+```
+{"id":"3d0f1f07-1d79-4c44-8e9c-cc84c303d1a1","badges":[],"pass":false}
+{"id":"789e9dea-ca0b-4274-8860-0c5eb400208f","badges":[],"pass":false}
+{"id":"755daa23-83b4-4031-8210-4f59975fc435","badges":[],"pass":false}
+{"id":"148705ea-963b-4717-bb90-ee69a24079b1","badges":[],"pass":false}
+{"id":"1bf2bdf3-c96d-499b-826f-0932f09bd3e3","badges":[],"pass":false}
+G5 0/5
+```
+
+Matches the plan's stated expectation exactly (`G5 0/5`): none of the five prior supervisor
+sessions render a `.campaign-badge` at all on base, so `badges` is `[]` for every one and `pass`
+is `false` for every one — the honest BEFORE number.
+
+## G5 — fail-closed argument handling (not a plan Verify row; recorded because the probe is an edge)
+
+```
+$ bun tools/badge-probe.ts --help
+badge-probe: unknown flag --help
+rc=2
+$ bun tools/badge-probe.ts --base http://x --slug s --unknownflag
+badge-probe: unknown flag --unknownflag
+rc=2
+$ bun tools/badge-probe.ts --base --slug s abc
+badge-probe: --base expects a value
+rc=2
+$ bun tools/badge-probe.ts --base http://x abc
+badge-probe: --slug is required
+rc=2
+```
+
+An unknown flag and a flag whose value would otherwise be swallowed by the next flag's name each
+refuse with one stderr line and `rc=2`, never silently consuming the next argv token as a value.
