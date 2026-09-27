@@ -1,1 +1,0 @@
-Resume this card from your existing branch/worktree: continue implementing the plan, then report the terminal SHIPPED/NEEDS_DIRECTION line.

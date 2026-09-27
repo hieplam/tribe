@@ -520,19 +520,24 @@ Paths: `$T` = `plugins/tribe/scripts/tests/runner-driver-only`, `$E` =
 `docs/superpowers/evidence/2026-09-27-runner-driver-only`, `$F` = `/Users/hiep/repo/runner-e2e-go`,
 `$FH` = `/Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns`, `$S` =
 `/Users/hiep/.claude-sandboxes/runner-driver-only` (the D9 sandbox), `S0` =
-`9bb6b2253a32453a8ffc2a7c473a0b97ea444498` (fixture starting tree `86031f3c`).
+`9bb6b2253a32453a8ffc2a7c473a0b97ea444498` (fixture starting tree `86031f3c`), `$X` =
+`/Users/hiep/.tribe/-Users-hiep-repo-tribe/evidence/runner-driver-only` (machine-local, never committed).
+`$E` keeps only summaries (the numbers and verdicts a reader or a Done command needs); raw output —
+rendered prompt folders, `.json`/`.jsonl`, runner or supervise stdout, copies of campaign state or
+report files, sandbox snapshots, start/end timestamps, subagent metadata, copies of authored state or
+plan files — lives in `$X`.
 
 | Row | Claim | Oracle | Output | Pass | Baseline (MEASURED unless marked) | Empty-implementation test |
 | --- | --- | --- | --- | --- | --- | --- |
-| **V1** (G2', D3, D8) | No prompt the runner, watchdog or supervisor sends carries the Tribe way of working, no Tribe plugin is injected, and every driver essential is still there | `bun $T/render-prompts.ts --out $E/after-prompts && bun $T/g2-prompts.ts --render-dir $E/after-prompts --gate`; cross-check on the real V2 transcripts: `CLAUDE_CONFIG_DIR=$S bun $T/transcript-prompts.ts --home $FH/go-after --out $E/after-real-prompts && bun $T/g2-prompts.ts --render-dir $E/after-real-prompts --negative-only` | `$E/v1-after-prompts.txt`, `$E/v1-after-real-prompts.txt` | `G2_GATE=PASS` (`TRIBE_WAY_TOTAL=0`, `MISSING_REQUIRED_KINDS=0`, no `ESSENTIALS_MISSING`); real-transcript `TRIBE_WAY_TOTAL=0` | **203** = 202 mentions in 12 of 44 kinds + 1 plugin injection (`$E/v1-before-prompts.txt`); real-home BEFORE transcript 45 (`$E/v1-before-real-prompts.txt`); watchdog 0 (sends no prompt) | Doing nothing: 203 → FAIL. Deleting the briefs zeroes the count but loses the 21 required kinds and their essentials (card id, plan path, the task and its Done commands, `TASK_DONE`/`SHIPPED`/`NEEDS_DIRECTION`, `run_in_background`, `timeout: 600000`, `gh pr checks`, `Campaign:`) → FAIL |
-| **V2** (G1, G2, G4, G6; D9 sandbox) | The same Go plan, same starting tree, through `supervise` → watchdog → runner in the sandbox, reaches D4 DONE; the runner ran every Done command; no Tribe agent or skill | §6.3; `bun $T/run-metrics.ts`, `g3-verify-replay.ts`, D10 (§6.8); the Shaman re-runs `go test ./...` on `$F` master himself | `$E/v2-after-*`, `$E/d10-v2-*`, `$E/v2-before-after.md` | supervise exit `0`; replay `SHIPPED=true`; local master == origin/master; `go test ./...` exit 0; `TRIBE_AGENT_DISPATCHES=0`; `TRIBE_SKILL_CALLS=0`; for each of T1..T4 a `passed:true` `done_run` row and an exit-0 row per command in `done.jsonl`; D10 both layers clean | **Ratchet baseline: sandbox BEFORE run — PENDING-LOGIN (§6.7).** Supplementary, real home (`$E/v2-before-*`): shipped PR #1; **6** Tribe dispatches (4 hunter, 1 skinner, 1 tracker); 0 Tribe skill calls; **0** runner-run Done rows; **607 s**; **2,527,210 tokens**; **$2.15** | Doing nothing: 6 dispatches and 0 Done rows → FAIL. A session that does nothing never gets a passing Done run, so it is never delivered (V3a/G5) |
-| **V3** (D2 negative control; D9) | A task whose Done command fails is never marked done, and the card escalates | V3a: `CLAUDE_CONFIG_DIR=$S bash plugins/tribe/scripts/tests/test-runner-done-negative.sh` (§6.4; hermetic, deterministic, the discriminating check). V3b: a real sandbox session on a fixture task whose Done can never pass (§6.4) + D10 | `$E/v3a-e2e.txt`, `$E/v3-*`, `$E/v3b-*`, `$E/d10-v3-*` | V3a `V3=PASS` (runner exit 2; `done_failed`; no `passedSha`/`doneSha`; 3 failed `done_run` rows; the failing command ran with exit ≠ 0). V3b: exit 2; card `escalated`; no `passedSha`/`doneSha`; if any turn reported `TASK_DONE`, `done.jsonl` shows the impossible command failing; D10 clean | n/a (master has no Done runner; the runner never reads the plan — spec §2.4) | A runner that never runs Done marks T1 passed and moves to delivery: no `done_failed`, no rows → V3a FAIL |
+| **V1** (G2', D3, D8) | No prompt the runner, watchdog or supervisor sends carries the Tribe way of working, no Tribe plugin is injected, and every driver essential is still there | `bun $T/render-prompts.ts --out $X/after-prompts && bun $T/g2-prompts.ts --render-dir $X/after-prompts --gate`; cross-check on the real V2 transcripts: `CLAUDE_CONFIG_DIR=$S bun $T/transcript-prompts.ts --home $FH/go-after --out $X/after-real-prompts && bun $T/g2-prompts.ts --render-dir $X/after-real-prompts --negative-only` | `$E/v1-after-prompts.txt`, `$E/v1-after-real-prompts.txt` | `G2_GATE=PASS` (`TRIBE_WAY_TOTAL=0`, `MISSING_REQUIRED_KINDS=0`, no `ESSENTIALS_MISSING`); real-transcript `TRIBE_WAY_TOTAL=0` | **203** = 202 mentions in 12 of 44 kinds + 1 plugin injection (`$E/v1-before-prompts.txt`); real-home BEFORE transcript 45 (`$E/v1-before-real-prompts.txt`); watchdog 0 (sends no prompt) | Doing nothing: 203 → FAIL. Deleting the briefs zeroes the count but loses the 21 required kinds and their essentials (card id, plan path, the task and its Done commands, `TASK_DONE`/`SHIPPED`/`NEEDS_DIRECTION`, `run_in_background`, `timeout: 600000`, `gh pr checks`, `Campaign:`) → FAIL |
+| **V2** (G1, G2, G4, G6; D9 sandbox) | The same Go plan, same starting tree, through `supervise` → watchdog → runner in the sandbox, reaches D4 DONE; the runner ran every Done command; no Tribe agent or skill | §6.3; `bun $T/run-metrics.ts`, `g3-verify-replay.ts`, D10 (§6.8); the Shaman re-runs `go test ./...` on `$F` master himself | `$E/v2-after-*.txt`, `$E/d10-v2-{scan.txt,auditor.md}`, `$E/v2-before-after.md`; raw: `$X/v2-after-*`, `$X/d10-v2-sandbox-before.json` | supervise exit `0`; replay `SHIPPED=true`; local master == origin/master; `go test ./...` exit 0; `TRIBE_AGENT_DISPATCHES=0`; `TRIBE_SKILL_CALLS=0`; for each of T1..T4 a `passed:true` `done_run` row and an exit-0 row per command in `done.jsonl`; D10 both layers clean | **Ratchet baseline: sandbox BEFORE run — PENDING-LOGIN (§6.7).** Supplementary, real home (`$E/v2-before-run-metrics.txt`; raw `$X/v2-before-*`): shipped PR #1; **6** Tribe dispatches (4 hunter, 1 skinner, 1 tracker); 0 Tribe skill calls; **0** runner-run Done rows; **607 s**; **2,527,210 tokens**; **$2.15** | Doing nothing: 6 dispatches and 0 Done rows → FAIL. A session that does nothing never gets a passing Done run, so it is never delivered (V3a/G5) |
+| **V3** (D2 negative control; D9) | A task whose Done command fails is never marked done, and the card escalates | V3a: `CLAUDE_CONFIG_DIR=$S bash plugins/tribe/scripts/tests/test-runner-done-negative.sh` (§6.4; hermetic, deterministic, the discriminating check). V3b: a real sandbox session on a fixture task whose Done can never pass (§6.4) + D10 | `$E/v3a-e2e.txt`, `$E/v3b-checks.txt`, `$E/d10-v3-{scan.txt,auditor.md}`; raw: `$X/v3-*`, `$X/v3b-runner.txt`, `$X/d10-v3-sandbox-before.json` | V3a `V3=PASS` (runner exit 2; `done_failed`; no `passedSha`/`doneSha`; 3 failed `done_run` rows; the failing command ran with exit ≠ 0). V3b: exit 2; card `escalated`; no `passedSha`/`doneSha`; if any turn reported `TASK_DONE`, `done.jsonl` shows the impossible command failing; D10 clean | n/a (master has no Done runner; the runner never reads the plan — spec §2.4) | A runner that never runs Done marks T1 passed and moves to delivery: no `done_failed`, no rows → V3a FAIL |
 | **G5** (empty implementation) | A session that does nothing, or claims `SHIPPED` early, never ships | `bash plugins/tribe/scripts/tests/test-runner-done-empty.sh` (§6.4; doubles `do-nothing`, `premature-shipped`) | stdout | `G5=PASS`: both exit 2, `done_failed`, never `shipped`, no `doneSha`; do-nothing: 3 failed Done runs; premature: 0 Done runs, escalation names the early `SHIPPED` | n/a | This row IS G1's empty-implementation test |
-| **V4** (the plan decides; D9 real home) | A 1-task Tribe-style plan on the same runner shows Tribe agents | §6.5; `bun $T/run-metrics.ts --home $FH/go-v4-tribe`; `bypass-audit.ts scan` as the positive oracle | `$E/v4-*` | `TRIBE_AGENT_DISPATCHES ≥ 1` with `hunter` among them; `BYPASS_TRIBE_DISPATCHES ≥ 1` | n/a | A runner that stripped agents from the session (a deny list) shows 0 → FAIL; a runner that still injected them fails V1/V2 instead |
-| **V5** (D7; D9 sandbox) | A fresh `/orchestrate-campaign` Stage A with no style named authors a Tribe-free, Done-complete plan and a state `--dry-run` accepts | §6.6: `CLAUDE_CONFIG_DIR=$S bash $T/v5-stage-a.sh $F S0 $E`, `bash $T/v5-check.sh <home> $F`, D10 over the V5 session | `$E/v5-*`, `$E/d10-v5-*` | `V5=PASS` (v2 state; lexicon 0 over plan + state; every `Task N` heading indexed, resolving, ≥ 1 Done command; `--dry-run` exit 0 naming the card); D10 clean | n/a | Doing nothing authors nothing → FAIL. The unchanged skill authors a v1 state (refused) and, following its old Stage A text, plans that route cards through the Warchief/Hunter chain → FAIL |
-| **V6** (D1) | A state whose task ref points at a missing heading is refused at load | `bash plugins/tribe/scripts/tests/test-runner-task-index-refusal.sh` (§6.4): the real CLI, `--dry-run` and a real run | stdout, `$E/v6-refusal*.txt` | `V6=PASS`: both exit `4` with `campaign runner: refused:` naming card, task, heading, `dangling_heading`; no session spawned; state byte-identical | **master accepts it**: `--dry-run` exit 0, phase `fresh` (`$E/v6-before-dry-run.txt`) | A runner that never validates refs dry-runs `fresh` → FAIL |
+| **V4** (the plan decides; D9 real home) | A 1-task Tribe-style plan on the same runner shows Tribe agents | §6.5; `bun $T/run-metrics.ts --home $FH/go-v4-tribe`; `bypass-audit.ts scan` as the positive oracle | `$E/v4-{run-metrics,tribe-scan}.txt`; raw: `$X/v4-runner.txt` | `TRIBE_AGENT_DISPATCHES ≥ 1` with `hunter` among them; `BYPASS_TRIBE_DISPATCHES ≥ 1` | n/a | A runner that stripped agents from the session (a deny list) shows 0 → FAIL; a runner that still injected them fails V1/V2 instead |
+| **V5** (D7; D9 sandbox) | A fresh `/orchestrate-campaign` Stage A with no style named authors a Tribe-free, Done-complete plan and a state `--dry-run` accepts | §6.6: `CLAUDE_CONFIG_DIR=$S bash $T/v5-stage-a.sh $F S0 $X`, `bash $T/v5-check.sh <home> $F`, D10 over the V5 session | `$E/v5-{stage-a,check}.txt`, `$E/d10-v5-{scan.txt,auditor.md}`; raw: `$X/v5-*`, `$X/d10-v5-sandbox-before.json` | `V5=PASS` (v2 state; lexicon 0 over plan + state; every `Task N` heading indexed, resolving, ≥ 1 Done command; `--dry-run` exit 0 naming the card); D10 clean | n/a | Doing nothing authors nothing → FAIL. The unchanged skill authors a v1 state (refused) and, following its old Stage A text, plans that route cards through the Warchief/Hunter chain → FAIL |
+| **V6** (D1) | A state whose task ref points at a missing heading is refused at load | `bash plugins/tribe/scripts/tests/test-runner-task-index-refusal.sh` (§6.4): the real CLI, `--dry-run` and a real run | stdout, `$X/v6-refusal*.txt` | `V6=PASS`: both exit `4` with `campaign runner: refused:` naming card, task, heading, `dangling_heading`; no session spawned; state byte-identical | **master accepts it**: `--dry-run` exit 0, phase `fresh` (`$E/v6-before-dry-run.txt`) | A runner that never validates refs dry-runs `fresh` → FAIL |
 | **V7** (regression) | Runner suite, supervisor E2E and session E2E green; every changed existing assertion is named | `cd plugins/tribe/scripts/runner && bun run check`; `bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh`; `cd plugins/tribe/scripts/runner && RUN_SESSION_E2E=1 bun test core/session.e2e.test.ts core/supervisor/session.e2e.test.ts`; plus the supervisor-kill, watchdog, docs, verify-shipped and viewer suites and the three new E2Es | `$E/v7-after-counts.txt` | all 0 fail; every count change maps to a named assertion change (§7) | master `3194976`, clean clone: runner **1351 pass / 14 skip / 0 fail** (`$E/v7-before-runner-check.txt`); supervisor E2E **40/40** (`$E/v7-before-supervisor-e2e.txt`); verify-shipped **26/26**; Task 1.1 re-measures on the post-#173 base | n/a (regression row) |
-| **G3'** (done check) | The done check requires nothing a Tribe agent produces | `bun $T/g3-verify-replay.ts` on the V2 card and on plain PR #2; `verify-shipped --skip-gap-gate` on PR #2; the rulings probe re-run | `$E/g3-after-*` | V2 replay `SHIPPED=true`; PR #2 replay lists no `gapGateStamped`/`ledgerCommitted` (only `doneAtHead`, the runner's own D2 point, can fail for a hand-made PR); verify-shipped `PASS`; rulings probe exit `0` | plain PR #2: `FAILED_POINTS=gapGateStamped,ledgerCommitted`; verify-shipped `FAIL (gap_gate_stamped)`; rulings probe **exit 5** (`$E/g3-before-*`) | Doing nothing: the two points and exit 5 remain → FAIL |
+| **G3'** (done check) | The done check requires nothing a Tribe agent produces | `bun $T/g3-verify-replay.ts` on the V2 card and on plain PR #2; `verify-shipped --skip-gap-gate` on PR #2; the rulings probe re-run | `$E/g3-after-*-replay.txt`; raw: `$X/g3-after-plain-pr2-verify-shipped.json`, `$X/g3-after-rulings-probe.txt` | V2 replay `SHIPPED=true`; PR #2 replay lists no `gapGateStamped`/`ledgerCommitted` (only `doneAtHead`, the runner's own D2 point, can fail for a hand-made PR); verify-shipped `PASS`; rulings probe exit `0` | plain PR #2: `FAILED_POINTS=gapGateStamped,ledgerCommitted`; verify-shipped `FAIL (gap_gate_stamped)`; rulings probe **exit 5** (`$E/g3-before-*-replay.txt`; raw `$X/g3-before-*`) | Doing nothing: the two points and exit 5 remain → FAIL |
 | **D10** (no bypass; after every sandbox run) | No session used the Tribe way of working anyway, by name or by imitation, and the sandbox and repo are untouched | Layer 1: `bun $T/bypass-audit.ts scan --home <campaign home> --claude-home $S --sandbox $S --snapshot-before <snapshot> --repo $F` (snapshot taken before the run). Layer 2: the auditor subagent brief of §6.8 | `$E/d10-<run>-scan.txt`, `$E/d10-<run>-auditor.md` for BEFORE-sandbox, V2, V3b, V5 | `BYPASS_AUDIT=PASS` (0 Tribe dispatches, 0 `mammoth-hunt`, 0 agent-file touches or definition reads, `agents/` empty, install surface unchanged, no unknown new sandbox entry, no `.claude/agents` in the repo, every session's transcript found); the auditor file carries the exact line `VERDICT: CLEAN`, asserted with `grep -q '^VERDICT: CLEAN$'` (a file's mere existence proves nothing — A2) | Scanner self-tests (`$E/d10-scanner-selftest.md`): the fu-supervisor-settings executor transcript → **18** Tribe dispatches (nonzero, as required); the real-home BEFORE run → 6; a planted `agents/hunter.md` → `SANDBOX_AGENTS_EMPTY=no`, `SANDBOX_SURFACE_CHANGED=1`. The sandbox BEFORE run is expected to FAIL layer 1 (today's runner loads the plugin — D8's proof) | A scanner that reads nothing would report 0 on the known transcript → its self-test fails first |
 
 ### 6.1 The AFTER prompt inventory (V1's required kinds)
@@ -572,15 +577,15 @@ same commit as any rendering API it calls.
 1. `$E/d9-sandbox-ready.txt`: `ls -A $S/agents` is empty and
    `cd $F && CLAUDE_CONFIG_DIR=$S claude -p "Reply with exactly: OK" --model haiku` prints `OK`.
 2. `bash $T/fixture-reset.sh $F S0` → `RESET_OK`.
-3. `$FH/go-after/campaign-state.json` = `$E/v2-after-campaign-state.authored.json` (v2; card
+3. `$FH/go-after/campaign-state.json` = `$X/v2-after-campaign-state.authored.json` (v2; card
    `small-helpers`; tasks T1..T4 = the fixture's four headings verbatim); empty `answers.md`.
-4. `bun $T/bypass-audit.ts snapshot --sandbox $S --out $E/d10-v2-sandbox-before.json`.
+4. `bun $T/bypass-audit.ts snapshot --sandbox $S --out $X/d10-v2-sandbox-before.json`.
 5. `CLAUDE_CONFIG_DIR=$S bun plugins/tribe/scripts/runner/run.ts --repo $F --model sonnet --home $FH/go-after --dry-run --no-viewer`
    → exit 0, card `small-helpers`, phase `fresh`.
 6. `CLAUDE_CONFIG_DIR=$S bun plugins/tribe/scripts/runner/run.ts supervise --repo $F --model sonnet --home $FH/go-after`
    (foreground, bounded at 3 h) → exit `0`.
 7. Measure: `run-metrics.ts`, `transcript-prompts.ts` + `g2-prompts.ts --negative-only`,
-   `g3-verify-replay.ts`; copy `done.jsonl`, `campaign-report.*`, `supervisor/final-report.md`,
+   `g3-verify-replay.ts`; copy into `$X`: `done.jsonl`, `campaign-report.*`, `supervisor/final-report.md`,
    `supervisor/verdicts/small-helpers.json`, and `supervisor/ledger.jsonl` (if #173's executor rows
    landed, cross-check: no `agentType` among the six agents).
 8. D10 both layers (§6.8). 9. Local master == origin/master; `go test ./...` on `$F` master.
@@ -630,7 +635,7 @@ every run bounded (300 s). Done commands are shell-only (`test -f`, `grep -q`), 
 
 ### 6.6 V5 procedure (execution time, sandbox)
 
-`$T/v5-stage-a.sh $F S0 $E` (the plan's Task 4.6 writes it) resets `$F` to S0, then runs one fresh
+`$T/v5-stage-a.sh $F S0 $X` (the plan's Task 4.6 writes it) resets `$F` to S0, then runs one fresh
 headless session in `$F` with `CLAUDE_CONFIG_DIR=$S`: `claude -p --model sonnet --permission-mode bypassPermissions --output-format json`
 and the prompt *"Use the orchestrate-campaign skill (invoke it with the Skill tool). Orchestrate this one
 card on this repo, Stage A only: author the spec, the plan, campaign-state.json and answers.md, and land
@@ -655,6 +660,7 @@ S=/Users/hiep/.claude-sandboxes/runner-driver-only; F=/Users/hiep/repo/runner-e2
 FH=/Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns
 P=/Users/hiep/repo/tribe-wt/plan-runner-driver-only   # this plan's branch: the tools and evidence dir
 T=$P/plugins/tribe/scripts/tests/runner-driver-only; E=$P/docs/superpowers/evidence/2026-09-27-runner-driver-only
+X=/Users/hiep/.tribe/-Users-hiep-repo-tribe/evidence/runner-driver-only; mkdir -p $X
 B=/tmp/tribe-before-3194976
 git -C /Users/hiep/repo/tribe worktree add --detach $B 3194976
 bun install --cwd $B/plugins/tribe/scripts/runner --frozen-lockfile
@@ -662,24 +668,24 @@ ls -A $S/agents                                                            # exp
 (cd $F && CLAUDE_CONFIG_DIR=$S claude -p "Reply with exactly: OK" --model haiku)   # expect: OK
 bash $T/fixture-reset.sh $F 9bb6b2253a32453a8ffc2a7c473a0b97ea444498      # expect: RESET_OK … tree=86031f3c…
 mkdir -p $FH/go-before-sandbox && : > $FH/go-before-sandbox/answers.md
-cp $E/v2-before-sandbox-campaign-state.authored.json $FH/go-before-sandbox/campaign-state.json
-bun $T/bypass-audit.ts snapshot --sandbox $S --out $E/d10-before-sandbox-snapshot.json
-date -u +%FT%TZ > $E/v2-before-sandbox-start.txt
-CLAUDE_CONFIG_DIR=$S bun $B/plugins/tribe/scripts/runner/run.ts --repo $F --model sonnet --home $FH/go-before-sandbox --no-viewer > $E/v2-before-sandbox-runner.txt 2>&1; echo "exit $?" >> $E/v2-before-sandbox-runner.txt
-date -u +%FT%TZ > $E/v2-before-sandbox-end.txt
+cp $X/v2-before-sandbox-campaign-state.authored.json $FH/go-before-sandbox/campaign-state.json
+bun $T/bypass-audit.ts snapshot --sandbox $S --out $X/d10-before-sandbox-snapshot.json
+date -u +%FT%TZ > $X/v2-before-sandbox-start.txt
+CLAUDE_CONFIG_DIR=$S bun $B/plugins/tribe/scripts/runner/run.ts --repo $F --model sonnet --home $FH/go-before-sandbox --no-viewer > $X/v2-before-sandbox-runner.txt 2>&1; echo "exit $?" >> $X/v2-before-sandbox-runner.txt
+date -u +%FT%TZ > $X/v2-before-sandbox-end.txt
 bun $T/run-metrics.ts --home $FH/go-before-sandbox | tee $E/v2-before-sandbox-run-metrics.txt
-bun $T/run-metrics.ts --home $FH/go-before-sandbox --json > $E/v2-before-sandbox-run-metrics.json
-CLAUDE_CONFIG_DIR=$S bun $T/transcript-prompts.ts --home $FH/go-before-sandbox --out $E/before-sandbox-real-prompts
-bun $T/g2-prompts.ts --render-dir $E/before-sandbox-real-prompts --negative-only > $E/v1-before-sandbox-real-prompts.txt
-bun $T/bypass-audit.ts scan --home $FH/go-before-sandbox --claude-home $S --sandbox $S --snapshot-before $E/d10-before-sandbox-snapshot.json --repo $F > $E/d10-before-sandbox-scan.txt; echo "scan exit $?" >> $E/d10-before-sandbox-scan.txt
-bun $T/bypass-audit.ts scan --home $FH/go-before-sandbox --claude-home $S --json > $E/d10-before-sandbox-scan.json   # its `transcripts` list feeds the auditor
+bun $T/run-metrics.ts --home $FH/go-before-sandbox --json > $X/v2-before-sandbox-run-metrics.json
+CLAUDE_CONFIG_DIR=$S bun $T/transcript-prompts.ts --home $FH/go-before-sandbox --out $X/before-sandbox-real-prompts
+bun $T/g2-prompts.ts --render-dir $X/before-sandbox-real-prompts --negative-only > $E/v1-before-sandbox-real-prompts.txt
+bun $T/bypass-audit.ts scan --home $FH/go-before-sandbox --claude-home $S --sandbox $S --snapshot-before $X/d10-before-sandbox-snapshot.json --repo $F > $E/d10-before-sandbox-scan.txt; echo "scan exit $?" >> $E/d10-before-sandbox-scan.txt
+bun $T/bypass-audit.ts scan --home $FH/go-before-sandbox --claude-home $S --json > $X/d10-before-sandbox-scan.json   # its `transcripts` list feeds the auditor
 # then the D10 auditor subagent (§6.8) over those transcript paths -> $E/d10-before-sandbox-auditor.md (its answer, verbatim)
 grep -E '^VERDICT: (CLEAN|BYPASS|UNSURE)$' $E/d10-before-sandbox-auditor.md   # must print exactly one verdict line (A2)
 bash $T/fixture-reset.sh $F 9bb6b2253a32453a8ffc2a7c473a0b97ea444498
 git -C /Users/hiep/repo/tribe worktree remove $B
 ```
 
-`$E/v2-before-sandbox-campaign-state.authored.json` (committed with this spec) is the v1 state of the
+`$X/v2-before-sandbox-campaign-state.authored.json` (machine-local, not committed) is the v1 state of the
 real-home BEFORE run with `"campaign": "go-before-sandbox"`. Expected: the runner exits and records
 Tribe dispatches through its own plugin load (D8's proof) while `SANDBOX_AGENTS_EMPTY=yes` and
 `SANDBOX_SURFACE_CHANGED=0` — the agents came from the runner, not the sandbox; record whatever
@@ -699,7 +705,8 @@ over the V2 and V5 transcripts; that is not a plan task. The plan's Task 4.7 mak
 evidence index `$E/after.md` gains a `## Where everything is` section listing, for every real run
 (`go-before`, `go-before-sandbox`, `go-after`, `go-v3-real`, `go-v4-tribe`, the V5 home), its campaign
 home, the Claude home it ran in, and every transcript path (main sessions and `subagents/*.jsonl`) as
-produced by `bypass-audit.ts scan --json`; its Done proves every listed path exists.
+produced by `bypass-audit.ts scan --json`; its Done proves every listed path exists. The section also
+lists every raw evidence file in `$X` (absolute paths).
 
 ### 6.8 D10 — the bypass audit, both layers
 

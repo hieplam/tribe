@@ -1,1 +1,0 @@
-Backgrounding is disabled for campaign executor sessions: this session ends the moment it stops calling tools, and a backgrounded job dies with it. Re-run this call in the foreground with timeout: 600000 (Bash) or run_in_background: false (Agent/Task). If the work cannot fit in 600s, split it by exact file name and run each part in the foreground.

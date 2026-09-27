@@ -1,1 +1,0 @@
-Merge denied: not all checks have concluded green (go: PENDING) — pending is not green. Wait in the foreground with `gh pr checks 12 --watch` (timeout: 600000), then retry the merge once every check is SUCCESS. If a check is red for reasons outside this card's diff, escalate NEEDS_DIRECTION instead of merging.

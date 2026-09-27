@@ -1,1 +1,0 @@
-Wait-tools are disabled for campaign executor sessions: this session ends the moment it stops calling tools, so an armed Monitor/ScheduleWakeup notification can never reach you — ending your turn to wait kills the session. To wait on CI, run `gh pr checks <pr> --watch` in the FOREGROUND (Bash, timeout: 600000) and proceed when it concludes.

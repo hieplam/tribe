@@ -1,6 +1,0 @@
-agent-a00c47a74127d444f.meta.json {"agentType":"hunter","description":"Implement task 3 textx.Reverse","toolUseId":"toolu_01CbUMH5wjyT4i8ifGtj9LjJ","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":true}
-agent-a1aa9b77071c2d78a.meta.json {"agentType":"hunter","description":"Implement task 4 textx.IsPalindrome","toolUseId":"toolu_01F1iKUJWKZnv9BMx4Ac3usu","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":true}
-agent-a306fbe5eeb1cdfcc.meta.json {"agentType":"hunter","description":"Implement task 1 mathx.Sum","toolUseId":"toolu_01BxxnwqtYQyvjFHKa5xHdRz","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":true}
-agent-aba45d812325475d9.meta.json {"agentType":"skinner","description":"Skinner audit of small-helpers card","toolUseId":"toolu_01Dw6a1NnZv77cUDWFUFKgdS","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":true}
-agent-abdaa0886a78c71c3.meta.json {"agentType":"tracker","description":"Tracker audit of small-helpers diff","toolUseId":"toolu_01UNq4Kg8SRHn1aTh9fE7wHi","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":true}
-agent-abfadc933cf8f8fe5.meta.json {"agentType":"hunter","description":"Implement task 2 mathx.Max","toolUseId":"toolu_01BMCuuECUKLcd7GhD5dtiFr","spawnDepth":1,"requestShape":"foreground","requestNonInteractive":true}
