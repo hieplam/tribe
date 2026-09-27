@@ -1,6 +1,6 @@
 ---
 id: c3-217
-c3-seal: ae208eb7b18d8e390e56370d2373239efea31846a5c0476f7b99bdd210a8f3ba
+c3-seal: bc09b508436575d14aac6f0738f7a7b3cac6d10ed841a5a4a7d7396f2cf70e65
 title: verify-shipped
 type: component
 category: feature
@@ -60,7 +60,7 @@ Owns the executable form of "PR squash-merged and ready to work on new feature w
 | Surface | Direction | Contract | Boundary | Evidence |
 | --- | --- | --- | --- | --- |
 | Skill trigger | IN | Fires on "is this actually shipped? / verify SHIPPED / confirm done" | Claude Code skill system | SKILL.md frontmatter |
-| scripts/verify-shipped.sh | IN/OUT | Read-only against git/GitHub; prints 4 pass/fail lines + verdict — pr_merged, master_in_sync, worktree_removed, and gap_gate_stamped (the merged PR body carries a gap-gate v1 stamp whose card= matches --card, spec CU-4 §3). --pr, --worktree and --card are all required: a claimed-done state with an unchecked corner is the gap this skill exists to close. Sha ancestry is deliberately not re-checked here — that is the campaign runner's gapGateStamped point, which has the merged repo in hand | shell CLI | plugins/verify-shipped/scripts/tests/test-verify-shipped.sh |
+| scripts/verify-shipped.sh | IN/OUT | Read-only against git/GitHub; prints 4 pass/fail lines + verdict — pr_merged, master_in_sync, worktree_removed, and gap_gate_stamped (the merged PR body carries a gap-gate v1 stamp whose card= matches --card, spec CU-4 §3). --pr, --worktree and --card are all required: a claimed-done state with an unchecked corner is the gap this skill exists to close. --skip-gap-gate is opt-in: it reports gap_gate_stamped as skipped and the verdict is decided by the other three checks — used by the campaign supervisor's closing re-verification, whose plans need not run the gap gate; without the flag the stamp is always required. The stamp's sha ancestry is deliberately not re-checked here, and the campaign runner's own done check never checks the stamp at all | shell CLI | plugins/verify-shipped/scripts/tests/test-verify-shipped.sh |
 
 ## Change Safety
 

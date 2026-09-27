@@ -32,8 +32,8 @@ isn't available):
    `git worktree list`.
 4. **`gap_gate_stamped`** — the merged PR's body carries a `gap-gate v1` stamp whose `card=`
    matches `--card`. This is the attended-session backstop for a PR opened by a session that
-   bypassed the Warchief and so never ran the gap gate; it deliberately does not re-check sha
-   ancestry (that is the campaign runner's job, which has the merged repo in hand).
+   bypassed the Warchief and so never ran the gap gate; it deliberately does not re-check the
+   stamp's sha ancestry. The campaign runner's own done check never checks the stamp at all.
    With `--skip-gap-gate` this check is reported `skipped` and the verdict is decided by checks
    1-3 — for callers whose plan does not run the gap gate; without the flag it always runs.
 
