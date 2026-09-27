@@ -1,0 +1,19 @@
+claude home: /Users/hiep/.claude-sandboxes/runner-driver-only; transcripts scanned: 8; sessions without a transcript: 0
+BYPASS_TRIBE_DISPATCHES=7
+BYPASS_MAMMOTH_SKILL=0
+BYPASS_AGENT_FILE_TOUCHES=0
+BYPASS_AGENT_DEFINITION_READS=0
+INFO_ORCHESTRATE_CAMPAIGN_SKILL_CALLS=0
+SANDBOX_AGENTS_EMPTY=yes
+SANDBOX_SURFACE_CHANGED=0 
+SANDBOX_UNKNOWN_NEW_ENTRIES=0 
+REPO_CLAUDE_AGENTS=absent
+HIT tribe_dispatch /Users/hiep/.claude-sandboxes/runner-driver-only/projects/-Users-hiep-repo-runner-e2e-go/d42d3d64-fba0-48c6-84cc-81923c5756b2.jsonl:93 Agent subagent_type=tribe:hunter — Hunter task 1: mathx.Sum
+HIT tribe_dispatch /Users/hiep/.claude-sandboxes/runner-driver-only/projects/-Users-hiep-repo-runner-e2e-go/d42d3d64-fba0-48c6-84cc-81923c5756b2.jsonl:97 Agent subagent_type=tribe:hunter — Hunter task 2: mathx.Max
+HIT tribe_dispatch /Users/hiep/.claude-sandboxes/runner-driver-only/projects/-Users-hiep-repo-runner-e2e-go/d42d3d64-fba0-48c6-84cc-81923c5756b2.jsonl:109 Agent subagent_type=tribe:hunter — Hunter task 3: textx.Reverse
+HIT tribe_dispatch /Users/hiep/.claude-sandboxes/runner-driver-only/projects/-Users-hiep-repo-runner-e2e-go/d42d3d64-fba0-48c6-84cc-81923c5756b2.jsonl:113 Agent subagent_type=tribe:hunter — Hunter task 4: textx.IsPalindrome
+HIT tribe_dispatch /Users/hiep/.claude-sandboxes/runner-driver-only/projects/-Users-hiep-repo-runner-e2e-go/d42d3d64-fba0-48c6-84cc-81923c5756b2.jsonl:124 Agent subagent_type=tribe:tracker — Tracker audit of small-helpers diff
+HIT tribe_dispatch /Users/hiep/.claude-sandboxes/runner-driver-only/projects/-Users-hiep-repo-runner-e2e-go/d42d3d64-fba0-48c6-84cc-81923c5756b2.jsonl:136 Agent subagent_type=tribe:skinner — Skinner audit A: small-helpers
+HIT tribe_dispatch /Users/hiep/.claude-sandboxes/runner-driver-only/projects/-Users-hiep-repo-runner-e2e-go/d42d3d64-fba0-48c6-84cc-81923c5756b2.jsonl:137 Agent subagent_type=tribe:skinner — Skinner audit B: small-helpers
+BYPASS_AUDIT=FAIL
+scan exit 1

@@ -1,0 +1,36 @@
+{
+  "surface": {
+    "agents/": "dir",
+    "skills/": "dir",
+    "skills/orchestrate-campaign": "symlink",
+    "skills/verify-shipped": "symlink",
+    "skills/mammoth-hunt": "symlink",
+    "rules/": "dir",
+    "rules/fixtures-mirror-reality.md": "symlink",
+    "rules/pure-core.md": "symlink",
+    "rules/brief-contracts.md": "symlink",
+    "rules/readable-code.md": "symlink",
+    "rules/html-illustration.md": "symlink",
+    "rules/fail-closed-edges.md": "symlink",
+    "canvases/": "dir",
+    "canvases/debt.md": "symlink",
+    "CLAUDE.md": "efa940887c7e558bd561236d0d5d53df1f7f94b7e9e0fdb853483aa6478110fe",
+    "settings.json": "f2d6e502292879ca17f5961821c632b510dcf25c1d9273639c1535cca23ac040"
+  },
+  "topLevel": [
+    ".claude.json",
+    ".last-cleanup",
+    "CLAUDE.md",
+    "agents",
+    "backups",
+    "canvases",
+    "policy-limits.json",
+    "policy-limits.json.stamp.json",
+    "projects",
+    "remote-settings.json",
+    "rules",
+    "sessions",
+    "settings.json",
+    "skills"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "renderer": "transcript-prompts.ts over /Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns/go-before-sandbox",
+  "transcriptsMissing": [],
+  "files": [
+    {
+      "kind": "real/d42d3d64-fba0-48c6-84cc-81923c5756b2/0",
+      "file": "real/d42d3d64-fba0-48c6-84cc-81923c5756b2/0.txt",
+      "bytes": 7908
+    }
+  ],
+  "injections": []
+}
