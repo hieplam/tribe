@@ -1,0 +1,10 @@
+home: /Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns/go-before
+runner invocations: 1; session logs: 1
+  run 2026-09-27T08-34-05-529Z-504c: exit=0 reason=done wall=606961ms doneRows=0
+TRIBE_AGENT_DISPATCHES=6
+TRIBE_SKILL_CALLS=0
+dispatches by type: {"hunter":4,"skinner":1,"tracker":1}
+skill calls: {}
+tokens: {"input":66,"cacheWrite":70566,"cacheRead":2444093,"output":12485} total=2527210
+cost_usd=2.1518 session_ms=597250 wall_clock_span_ms=606961
+DONE_ROWS=0

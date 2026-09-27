@@ -1,0 +1,8 @@
+renderer: transcript-prompts.ts over /Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns/go-before
+prompt kinds rendered: 1
+Tribe-way mentions: 45 in 1 kind(s); injections: 0
+TRIBE_WAY_TOTAL=45
+| kind | bytes | mentions | terms |
+| --- | --- | --- | --- |
+| real/ee176c4c-44d7-4dde-b1d7-e7e561c9525f/0 | 7868 | 45 | warchief×1, hunter×2, skinner×2, tracker×5, scout×1, gap-gate×6, harness-gap×5, gap-rule×1, debt×4, tribe-trailer×2, ratify×3, audit×2, worker-report×3, test-first×2, agent-method×4, governance×2 |
+MISSING_REQUIRED_KINDS=0 
