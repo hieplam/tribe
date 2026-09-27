@@ -138,12 +138,12 @@ The watchdog hands a session nothing (it never spawns an LLM session — runner 
    `SHIPPED=false FAILED_POINTS=gapGateStamped,ledgerCommitted`; the Tribe-run PR #1 replays 7/7.
 2. **The runner's rulings gate** (`core/loop/run-loop.ts:477-497`, `core/rulings.ts:92-106`) turns a
    finished campaign into exit `5` when any `answers.md` ruling lacks a `ratified-as:` value from the
-   Tribe governance vocabulary. **MEASURED** (`evidence/g3-before-rulings-gate-stdout.txt`): one
+   Tribe governance vocabulary. **MEASURED** (`$X/g3-before-rulings-gate-stdout.txt`): one
    ordinary owner ruling → `runner exit 5`, `reason: rulings_unratified`.
 3. **The supervisor's closing postcondition** (`core/supervisor/verify.ts:243-267`) requires a
    `verify-shipped` PASS per shipped card, and `verify-shipped.sh:142-160` (check 4) requires the
    gap-gate stamp; it also requires every ruling ratified (`:259-261`). **MEASURED**
-   (`evidence/g3-before-plain-pr2-verify-shipped.json`): PR #2 → `FAIL`, `gap_gate_stamped: fail`.
+   (`$X/g3-before-plain-pr2-verify-shipped.json`): PR #2 → `FAIL`, `gap_gate_stamped: fail`.
 4. **The supervisor's ruling postcondition** (`core/supervisor/verify.ts:113-122`) fails a ruling
    whose block has no ratified `ratified-as:` (`not_ratified`).
 5. **Watchdog/supervisor vocabulary** keyed on the rulings gate: `core/watchdog/decide.ts:66`
@@ -158,7 +158,7 @@ Done section. Today's runner (`run.ts`, `--model sonnet`, `--no-viewer`, campaig
 **shipped it** — PR #1, merge `6ad5914`, in **607 s wall clock** — but the executor ran as the
 Warchief: **6 Tribe dispatches** (4 `hunter`, 1 `skinner`, 1 `tracker`; 0 `general-purpose`),
 **2,527,210 tokens** (66 input, 70,566 cache-write, 2,444,093 cache-read, 12,485 output),
-**$2.15**, and it ran `gap-gate.ts` so the PR carries a stamp (`evidence/v2-before-*`). The Tracker
+**$2.15**, and it ran `gap-gate.ts` so the PR carries a stamp (`evidence/v2-before-run-metrics.txt`; raw: `$X/v2-before-*`). The Tracker
 is dispatched once, for the stamp — exactly the live proof the card cites for campaign
 `sessions-in-repo` (card, Grounding round 2, item 3). The Shaman's expectation that it "cannot
 reach `shipped` without a gap-gate stamp" is **refuted**: it reaches `shipped` because the brief
