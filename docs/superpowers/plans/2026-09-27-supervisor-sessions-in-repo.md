@@ -554,8 +554,8 @@ cd /Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo && git grep -n -E 'snap
 ```
 Expected: 0 fail, tsc exit 0; no `git grep` output.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 6/16`.
-- [ ] Task 6 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 6/16`.
+- [x] Task 6 complete
 
 ---
 

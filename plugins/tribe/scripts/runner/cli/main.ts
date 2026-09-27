@@ -40,7 +40,6 @@ import type { TranscriptIO } from '../ports/ports.ts';
 // that already exist (see `runSupervisor`'s own module doc comment).
 import { parseSupervisorArgs, supervisorHomeFromCampaign, type SupervisorConfig } from '../core/supervisor/args.ts';
 import { runSupervisor, type SupervisorLoopConfig, type SupervisorLoopSeam } from '../core/supervisor/loop.ts';
-import { restoreHomeConfig, snapshotHomeConfig } from '../adapters/home-config.adapter.ts';
 import { SUPERVISOR_EXIT_NEEDS_OWNER, SUPERVISOR_EXIT_USAGE } from '../core/supervisor/model.ts';
 import { buildSupervisorIo } from '../adapters/supervisor-io.adapter.ts';
 import { sdkSpawnSession } from '../adapters/session.adapter.ts';
@@ -838,10 +837,6 @@ export async function main(): Promise<void> {
       // the newline `appendFile`'s own callers are expected to supply (mirrors
       // `adapters/run-io.adapter.ts`'s own `appendLog` contract).
       appendLog: (logPath, line) => supervisorIo.appendFile(logPath, `${line}\n`),
-      // Card supervisor-home-settings-containment (spec §6.3): the one-shot runner restores the
-      // campaign home's configuration surface after every session through these two edges.
-      snapshotHomeConfig,
-      restoreHomeConfig,
       // `SupervisorLoopSeam`'s own contract ("returns its input unchanged when the path does
       // not exist") is `watchdogIo.realpath`'s contract verbatim (mirrored from
       // `adapters/watchdog-io.adapter.ts`) — reused rather than reimplemented.
