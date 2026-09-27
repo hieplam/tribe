@@ -507,7 +507,7 @@ export async function shipCard(ctx: CardCtx, verifyResult: VerifyResult): Promis
 }
 
 export function toBriefCard(cardId: string, card: Card): BriefCard {
-  return { id: cardId, spec: card.spec, plan: card.plan };
+  return { id: cardId, spec: card.spec, plan: card.plan, tasks: card.tasks };
 }
 
 export function toBriefState(state: CampaignState): BriefState {
@@ -600,7 +600,8 @@ function turnDepsFor(ctx: CardCtx, phase: CardPhase): TurnDeps {
   const { cardId, state, resolved, io } = ctx;
   const sessionConfig = sessionConfigFor(cardId, resolved);
   const freshBrief = (answersContent: string, prompt: string): string =>
-    `${executorBrief(toBriefCard(cardId, state.cards[cardId]), toBriefState(state), answersContent, resolved.briefTemplate, resolved.homeDir, state.campaign)}\n\n${prompt}`;
+    `${executorBrief(toBriefCard(cardId, state.cards[cardId]), toBriefState(state), answersContent, resolved.briefTemplate, resolved.homeDir, state.campaign,
+      { repoRoot: resolved.repoRoot, baseBranch: resolved.baseBranch, remote: resolved.remote })}\n\n${prompt}`;
   const inRepo = { cwd: resolved.repoRoot, timeoutMs: LOCAL_GIT_QUERY_TIMEOUT_MS };
 
   return {

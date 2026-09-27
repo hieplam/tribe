@@ -4,7 +4,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { BRIEF_TEMPLATE_PATH, executorBrief, reportPathFor } from './brief.ts';
-import type { BriefCard, BriefState } from './brief.ts';
+import type { BriefCard, BriefDriver, BriefState } from './brief.ts';
 import { countTribeMentions } from '../../tests/runner-driver-only/tribe-lexicon.ts';
 
 const TEMPLATE = readFileSync(BRIEF_TEMPLATE_PATH, 'utf8');
@@ -14,6 +14,7 @@ function fixtureCard(overrides: Partial<BriefCard> = {}): BriefCard {
     id: 'C7',
     spec: 'docs/superpowers/specs/2026-01-01-c7-spec.md',
     plan: 'docs/superpowers/plans/2026-01-01-c7-plan.md',
+    tasks: [{ id: 'T1', heading: 'Task 1: first' }, { id: 'T2', heading: 'Task 2: second' }],
     ...overrides,
   };
 }
@@ -26,6 +27,9 @@ function fixtureState(overrides: Partial<BriefState> = {}): BriefState {
     ...overrides,
   };
 }
+
+/** Where the runner reads the plan and what the card lands on (spec §4.8). */
+const FIXTURE_DRIVER: BriefDriver = { repoRoot: '/repo', baseBranch: 'master', remote: 'origin' };
 
 const FIXTURE_ANSWERS = '## 2026-01-01 -- sample ruling\n\nUse the neutral fixture path for all future sessions.\n';
 
@@ -57,6 +61,24 @@ design decision the plan doesn't already make, and never widen scope beyond this
 
 Ship C7 end-to-end: implement the plan at docs/superpowers/plans/2026-01-01-c7-plan.md against the spec at docs/superpowers/specs/2026-01-01-c7-spec.md, gates green, one regular-merged PR on the target repo's master.
 
+## How the runner drives you
+
+The runner walks the plan's tasks in order, one turn per task:
+
+- T1 — Task 1: first
+- T2 — Task 2: second
+
+- Each turn names ONE task (see \`## This turn\` at the end). Do that task the way the plan says,
+  commit it on your card branch, and end your turn with exactly \`TASK_DONE <task-id> <branch>\`.
+- The runner then runs that task's **Done** commands itself — together with the Done commands of
+  every task before it — from a clean checkout of your branch tip. A task is done only when every
+  one of those commands exits 0. You may run them yourself first; the runner's run is the one
+  that counts.
+- If a Done command fails, the next turn shows you the command, its exit code and its output. Fix
+  it, commit, and end your turn with \`TASK_DONE\` again.
+  After 3 unaccepted turns on one task the runner escalates the card.
+- When every task is done, the runner sends one more turn: deliver the card (Definition of Done).
+
 ## Walls (non-negotiable)
 
 - Merge policy for this campaign is \`merge\`; land with \`gh pr merge --merge\`.
@@ -66,9 +88,11 @@ Ship C7 end-to-end: implement the plan at docs/superpowers/plans/2026-01-01-c7-p
 - Stay inside this card's plan. No scope creep, no adjacent refactors, no speculative
   generality.
 - Merge gate: every PR check must have CONCLUDED green BEFORE \`gh pr merge\` — pending is
-  not green. A merge attempt with checks not green is blocked at the permission layer; if
-  a check is red for reasons outside this card's diff, escalate NEEDS_DIRECTION instead of
-  merging.
+  not green — and the PR head must be the commit whose Done commands the runner last passed;
+  a merge attempt otherwise is blocked at the permission layer. If a check is red for reasons
+  outside this card's diff, escalate NEEDS_DIRECTION instead of merging.
+- Work on your own card branch in a separate git worktree;
+  never switch the branch of, stage in, or commit in /repo itself — the runner reads the plan there.
 - After creating a worktree, run the repo's dependency bootstrap (e.g. \`bun install\`)
   before the first commit — repo hooks typically run repo-wide and fail spuriously in a
   worktree without dependencies.
@@ -125,25 +149,33 @@ started.
 
 ${FIXTURE_ANSWERS}
 
-## Definition of Done (preconditions for SHIPPED)
+## Definition of Done (the deliver turn)
 
-"Merged" is not "done". You may print the \`SHIPPED\` line only after ALL of:
+"Merged" is not "done". On the deliver turn, you may print the \`SHIPPED\` line only after ALL of:
 
-1. The PR is merged (behind the pre-merge check gate).
-2. The remote feature branch is deleted (\`git push origin --delete <branch>\`).
-3. The card's worktree is removed (\`git worktree remove <path>\`).
-4. Local master is fast-forwarded to origin/master.
+1. Your card branch is pushed and its PR is open against master.
+2. Every PR check has concluded green — wait in the foreground with \`gh pr checks <pr> --watch\`
+   (timeout: 600000).
+3. The PR is merged with \`gh pr merge --merge\` (behind the pre-merge check gate).
+4. The remote feature branch is deleted (\`git push origin --delete <branch>\`) and the card's
+   worktree is removed (\`git worktree remove <path>\`).
+5. Local master in /repo is fast-forwarded to origin/master.
 
 Verify each step with a command, not from memory — the runner independently re-verifies
-all four and a missing one costs a full escalation round-trip.
+them and a missing one costs a full escalation round-trip.
+
+If you change any code during delivery, commit and push it, and end the turn with
+\`TASK_DONE <last-task-id> <branch>\` so the runner re-runs the Done commands.
 
 *done = the next card starts clean on the latest changes.*
 
 ## Terminal contract
 
-End your final message with EXACTLY one of:
+End every turn with EXACTLY one of:
 
-- \`SHIPPED <pr> <sha>\` — the PR number and the merge commit sha, once verified merged.
+- \`TASK_DONE <task-id> <branch>\` — the named task is committed on \`<branch>\`.
+- \`SHIPPED <pr> <sha>\` — the deliver turn only, after the merge: the PR number and the merge
+  commit sha, once verified merged.
 - \`NEEDS_DIRECTION: <question>\` — a specific, answerable question, when you cannot proceed
   without a human ruling. Do not guess an answer to unblock yourself.
 
@@ -152,7 +184,7 @@ No other terminal line is a valid signal.
 
 describe('executorBrief', () => {
   test('V1: the rendered executor brief carries no Tribe way of working', () => {
-    const rendered = executorBrief(fixtureCard(), fixtureState(), '', readFileSync(BRIEF_TEMPLATE_PATH, 'utf8'), '/home/c', 'camp');
+    const rendered = executorBrief(fixtureCard(), fixtureState(), '', readFileSync(BRIEF_TEMPLATE_PATH, 'utf8'), '/home/c', 'camp', FIXTURE_DRIVER);
     expect(countTribeMentions(rendered)).toEqual([]);
     for (const kept of ['## Session liveness', 'run_in_background', 'timeout: 600000', 'gh pr checks',
       'Campaign: camp', 'SHIPPED <pr> <sha>', 'NEEDS_DIRECTION: <question>', '## Answers']) {
@@ -168,6 +200,7 @@ describe('executorBrief', () => {
       TEMPLATE,
       FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
+      FIXTURE_DRIVER,
     );
     expect(rendered).toBe(EXPECTED_BRIEF);
   });
@@ -181,6 +214,7 @@ describe('executorBrief', () => {
       TEMPLATE,
       FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
+      FIXTURE_DRIVER,
     );
     expect(rendered).toContain(distinctiveRuling);
   });
@@ -193,6 +227,7 @@ describe('executorBrief', () => {
       TEMPLATE,
       FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
+      FIXTURE_DRIVER,
     );
     expect(rendered).toContain(
       'These rulings are a snapshot taken when this session started.',
@@ -207,6 +242,7 @@ describe('executorBrief', () => {
       TEMPLATE,
       FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
+      FIXTURE_DRIVER,
     );
     expect(rendered).toContain('gh pr merge --merge');
   });
@@ -219,6 +255,7 @@ describe('executorBrief', () => {
       TEMPLATE,
       FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
+      FIXTURE_DRIVER,
     );
     expect(rendered).toContain('Your session ends the instant you stop calling tools');
     expect(rendered).toContain('timeout: 600000');
@@ -233,16 +270,23 @@ describe('executorBrief', () => {
       TEMPLATE,
       FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
+      FIXTURE_DRIVER,
     );
-    expect(rendered).toContain('## Definition of Done (preconditions for SHIPPED)');
+    // The DoD section is the deliver turn (spec §4.8); the four preconditions still land before
+    // the terminal contract, not after it.
+    expect(rendered).toContain('## Definition of Done (the deliver turn)');
     expect(rendered).toContain('"Merged" is not "done"');
-    expect(rendered).toContain('The PR is merged (behind the pre-merge check gate).');
-    expect(rendered).toContain('The remote feature branch is deleted (`git push origin --delete <branch>`).');
-    expect(rendered).toContain("The card's worktree is removed (`git worktree remove <path>`).");
-    expect(rendered).toContain('Local master is fast-forwarded to origin/master.');
+    const terminal = rendered.indexOf('## Terminal contract');
+    for (const precondition of [
+      'The PR is merged with `gh pr merge --merge` (behind the pre-merge check gate).',
+      'The remote feature branch is deleted (`git push origin --delete <branch>`)',
+      "the card's\n   worktree is removed (`git worktree remove <path>`).",
+      'Local master in /repo is fast-forwarded to origin/master.',
+    ]) {
+      expect(rendered).toContain(precondition);
+      expect(rendered.indexOf(precondition)).toBeLessThan(terminal);
+    }
     expect(rendered).toContain('done = the next card starts clean on the latest changes.');
-    // The DoD section must land before the terminal contract, not after it.
-    expect(rendered.indexOf('## Definition of Done')).toBeLessThan(rendered.indexOf('## Terminal contract'));
   });
 
   test('states the worktree dependency bootstrap wall (P15 remainder)', () => {
@@ -253,6 +297,7 @@ describe('executorBrief', () => {
       TEMPLATE,
       FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
+      FIXTURE_DRIVER,
     );
     expect(rendered).toContain('After creating a worktree, run the repo\'s dependency bootstrap');
   });
@@ -266,10 +311,26 @@ describe('executorBrief', () => {
       TEMPLATE,
       otherCampaignHome,
       'other-campaign',
+      FIXTURE_DRIVER,
     );
     expect(rendered).toContain('card X9 (other-campaign)');
     expect(rendered).toContain(otherCampaignHome);
     expect(rendered).toContain('(none declared for this campaign)');
+  });
+
+  test('spec §4.8: the brief lists the tasks and states the turn rule, the runner-run Done, and three terminal lines', () => {
+    const rendered = executorBrief(
+      { id: 'C1', spec: 's.md', plan: 'p.md', tasks: [{ id: 'T1', heading: 'Task 1: a' }, { id: 'T2', heading: 'Task 2: b' }] },
+      fixtureState(), '', readFileSync(BRIEF_TEMPLATE_PATH, 'utf8'), '/home/c', 'camp',
+      { repoRoot: '/repo', baseBranch: 'master', remote: 'origin' },
+    );
+    for (const s of ['## How the runner drives you', '- T1 — Task 1: a', '- T2 — Task 2: b',
+      'from a clean checkout of your branch tip', 'After 3 unaccepted turns on one task',
+      '`TASK_DONE <task-id> <branch>`', '`SHIPPED <pr> <sha>`', '`NEEDS_DIRECTION: <question>`',
+      'never switch the branch of, stage in, or commit in /repo', 'the commit whose Done commands the runner last passed']) {
+      expect(rendered).toContain(s);
+    }
+    expect(countTribeMentions(rendered)).toEqual([]);
   });
 
   test('reportPathFor composes <home>/reports/<cardId>.md — no .claude/state anywhere (spec §5.3)', () => {
@@ -284,6 +345,7 @@ describe('executorBrief', () => {
       TEMPLATE,
       FIXTURE_CAMPAIGN_HOME,
       FIXTURE_CAMPAIGN_SLUG,
+      FIXTURE_DRIVER,
     );
     expect(brief).toContain(FIXTURE_CAMPAIGN_HOME);
     expect(brief).not.toContain('.claude/state');
@@ -299,6 +361,7 @@ describe('executorBrief — campaign trailer', () => {
       TEMPLATE,
       FIXTURE_CAMPAIGN_HOME,
       'kanna-session-import',
+      FIXTURE_DRIVER,
     );
     expect(brief).toContain('Campaign: kanna-session-import');
   });
@@ -311,6 +374,7 @@ describe('executorBrief — campaign trailer', () => {
       TEMPLATE,
       FIXTURE_CAMPAIGN_HOME,
       'widget-export',
+      FIXTURE_DRIVER,
     );
     expect(brief).not.toContain('CAMPAIGN_SLUG');
     expect(brief).toContain('Campaign: widget-export');
