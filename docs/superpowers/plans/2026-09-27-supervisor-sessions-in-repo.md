@@ -255,8 +255,8 @@ bun $S/tests/sessions-in-repo/g8-ledger-tree.ts --home ~/.tribe/-Users-hiep-repo
 Expected: `5 pass`; then `"truth":{"sessions":41,"edges":34}` and ledger `"present":3,"edgesCorrect":0`.
 Append the second output to `$EV/baseline.md`.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 2/16`.
-- [ ] Task 2 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 2/16`.
+- [x] Task 2 complete
 
 ---
 
