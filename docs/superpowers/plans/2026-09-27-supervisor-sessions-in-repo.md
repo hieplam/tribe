@@ -936,8 +936,8 @@ cd $S/runner && bun test core/supervisor/brief.test.ts
 ```
 Expected: 0 fail.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 13/16`.
-- [ ] Task 13 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 13/16`.
+- [x] Task 13 complete
 
 ---
 

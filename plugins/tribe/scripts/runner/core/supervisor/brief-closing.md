@@ -6,6 +6,8 @@ You are the closing session for this campaign. Unlike a `ruling` or `ratify` ses
 have the full Claude Code tool set including `Bash` and write access to the target repo:
 you run `verify-shipped` per card and land the closing governance PR.
 
+Your working directory is the owner's own checkout of the target repo: never switch its branch, stage, commit or edit files in it — land any repo change from a separate `git worktree`.
+
 ## The oracle
 
 `SKILL.md` Stage D below is the question. The final `campaign-report.json` and the per-card
