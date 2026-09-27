@@ -3,7 +3,7 @@
 // a `Write`/`Edit` whose resolved target is not inside the campaign home is DENIED for a
 // `ruling`/`ratify` session); one escaped write is the defect.
 import { expect, test, describe } from 'bun:test';
-import { buildContainmentHook, buildHomeConfigWriteHook, containPath, decideContainmentHook, HOME_CONFIG_DENIED_REASON } from './permit.ts';
+import { buildContainmentHook, containPath, decideContainmentHook } from './permit.ts';
 import { decideClosingGrantHook } from './permit.ts';
 
 const HOME = '/abs/home/.tribe/key/campaigns/slug';
@@ -30,6 +30,18 @@ for (const [tool, input, wantDeny] of ROWS) {
     expect(denied(decideContainmentHook(HOME, ev(tool, input)))).toBe(wantDeny);
   });
 }
+
+// Task 7 (card supervisor-sessions-in-repo): layer 1's `isHomeConfigSurface` clause is deleted —
+// nothing in the campaign home is loaded as configuration any more (Task 5 moved every one-shot
+// session's `cwd` to the target repo), so a home-root write is judged by containment alone.
+test.each(['CLAUDE.md', '.claude/settings.json', 'AGENTS.md', '.mcp.json', 'escalations/AGENTS.md'])(
+  'ruling/ratify may write %s inside the campaign home: nothing there is loaded as configuration any more', (rel) => {
+    expect(decideContainmentHook(HOME, { tool_name: 'Write', tool_input: { file_path: `${HOME}/${rel}` } })).toEqual({});
+  });
+test.each(['/abs/repo/CLAUDE.md', '/abs/repo/.claude/settings.local.json'])('a write into the repo is still denied (G3): %s', (p) => {
+  expect(decideContainmentHook(HOME, { tool_name: 'Write', tool_input: { file_path: p } }).hookSpecificOutput?.permissionDecisionReason)
+    .toContain('Writes are confined to the campaign home');
+});
 
 test('a malformed event denies rather than throwing', () => {
   expect(denied(decideContainmentHook(HOME, null))).toBe(true);
@@ -231,100 +243,3 @@ describe('Skill is granted to ruling/ratify, and nothing else opened (R2)', () =
   });
 });
 
-// Card supervisor-home-settings-containment (spec §6.2): the campaign home is the next session's
-// settings root, so a Write/Edit to a configuration surface inside it is refused with its OWN
-// reason — never the out-of-home containment message, which would misstate the fact.
-describe('decideContainmentHook refuses configuration surfaces inside the home', () => {
-  const reasonOf = (d: ReturnType<typeof decideContainmentHook>) => d.hookSpecificOutput?.permissionDecisionReason;
-  const SURFACES = [
-    '.claude/settings.json',
-    '.claude/settings.local.json',
-    '.claude/CLAUDE.md',
-    '.claude/skills/probe/SKILL.md',
-    'CLAUDE.md',
-    'CLAUDE.local.md',
-    'claude.md',
-    'escalations/CLAUDE.md',
-    'AGENTS.md',
-    '.mcp.json',
-  ];
-  for (const tool of ['Write', 'Edit']) {
-    for (const rel of SURFACES) {
-      test(`${tool} ${rel} -> deny with HOME_CONFIG_DENIED_REASON`, () => {
-        const decision = decideContainmentHook(HOME, ev(tool, { file_path: `${HOME}/${rel}` }));
-        expect(denied(decision)).toBe(true);
-        expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
-      });
-    }
-  }
-
-  for (const rel of ['answers.md', 'escalations/card-1.md', 'supervisor/park/c1.json', 'final-report.md', 'CLAUDE.md.bak']) {
-    test(`Write ${rel} is still allowed`, () => {
-      expect(decideContainmentHook(HOME, ev('Write', { file_path: `${HOME}/${rel}` }))).toEqual({});
-    });
-  }
-
-  test('an out-of-home CLAUDE.md is denied with the containment reason, not the configuration one', () => {
-    const decision = decideContainmentHook(HOME, ev('Write', { file_path: '/abs/repo/CLAUDE.md' }));
-    expect(denied(decision)).toBe(true);
-    expect(reasonOf(decision)).not.toBe(HOME_CONFIG_DENIED_REASON);
-  });
-
-  test('buildContainmentHook judges the symlink-resolved target: a write through a link into .claude is refused', async () => {
-    const realpath = (p: string) => (p === `${HOME}/notes` ? `${HOME}/.claude` : p);
-    const hook = buildContainmentHook(HOME, { realpath });
-    const decision = await hook(ev('Write', { file_path: `${HOME}/notes/settings.json` }));
-    expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
-  });
-});
-
-describe('buildHomeConfigWriteHook — closing may not write configuration into the home (spec §6.2)', () => {
-  const identity = { realpath: (p: string) => p };
-  const reasonOf = (d: Awaited<ReturnType<ReturnType<typeof buildHomeConfigWriteHook>>>) =>
-    d.hookSpecificOutput?.permissionDecisionReason;
-
-  for (const rel of ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.claude/settings.json', '.claude/settings.local.json', '.mcp.json', 'escalations/CLAUDE.md']) {
-    test(`Write ${rel} inside the home -> deny`, async () => {
-      const decision = await buildHomeConfigWriteHook(HOME, identity)(ev('Write', { file_path: `${HOME}/${rel}` }));
-      expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
-    });
-  }
-
-  test('a RELATIVE file_path resolves against the home (the session cwd) -> deny', async () => {
-    const decision = await buildHomeConfigWriteHook(HOME, identity)(ev('Edit', { file_path: 'CLAUDE.md' }));
-    expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
-  });
-
-  test('the realpath spelling of the home is inside the home too (/var vs /private/var) -> deny', async () => {
-    const home = '/var/folders/x/T/home';
-    const realpath = (p: string) => (p.startsWith('/var/') ? `/private${p}` : p);
-    const decision = await buildHomeConfigWriteHook(home, { realpath })(ev('Write', { file_path: `/private${home}/CLAUDE.md` }));
-    expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
-  });
-
-  test('a write through a symlink that resolves into <home>/.claude -> deny', async () => {
-    const realpath = (p: string) => (p === `${HOME}/notes` ? `${HOME}/.claude` : p);
-    const decision = await buildHomeConfigWriteHook(HOME, { realpath })(ev('Write', { file_path: `${HOME}/notes/settings.json` }));
-    expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
-  });
-
-  test('a realpath that throws denies (fail closed)', async () => {
-    const realpath = () => {
-      throw new Error('ELOOP');
-    };
-    const decision = await buildHomeConfigWriteHook(HOME, { realpath })(ev('Write', { file_path: `${HOME}/answers.md` }));
-    expect(reasonOf(decision)).toBe(HOME_CONFIG_DENIED_REASON);
-  });
-
-  for (const [tool, input] of [
-    ['Write', { file_path: '/abs/repo/CLAUDE.md' }],
-    ['Edit', { file_path: '/abs/repo/.claude/rules/x.md' }],
-    ['Write', { file_path: `${HOME}/final-report.md` }],
-    ['Bash', { command: 'git status' }],
-    ['Read', { file_path: `${HOME}/CLAUDE.md` }],
-  ] as Array<[string, Record<string, unknown>]>) {
-    test(`${tool} ${JSON.stringify(input)} -> allowed by this hook`, async () => {
-      expect(await buildHomeConfigWriteHook(HOME, identity)(ev(tool, input))).toEqual({});
-    });
-  }
-});

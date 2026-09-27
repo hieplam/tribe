@@ -172,8 +172,8 @@ Expected: `guard_files_lines=1070 identifier_hits=149 old_rule=present new_rule=
 `G1 0/5 kinds=?,closing,ratify` (the two sessions with no ledger id read `?`); then one stderr
 line and `rc=2`.
 
-- [ ] **Step 1: Commit** — the two tools and `baseline.md`, trailers `Tribe-Task: 1/16`.
-- [ ] Task 1 complete
+- [x] **Step 1: Commit** — the two tools and `baseline.md`, trailers `Tribe-Task: 1/16`.
+- [x] Task 1 complete
 
 ---
 
@@ -255,8 +255,8 @@ bun $S/tests/sessions-in-repo/g8-ledger-tree.ts --home ~/.tribe/-Users-hiep-repo
 Expected: `5 pass`; then `"truth":{"sessions":41,"edges":34}` and ledger `"present":3,"edgesCorrect":0`.
 Append the second output to `$EV/baseline.md`.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 2/16`.
-- [ ] Task 2 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 2/16`.
+- [x] Task 2 complete
 
 ---
 
@@ -295,8 +295,8 @@ pkill -f 'serve.ts --port 4411'
 ```
 Expected: `G5 0/5`. Append to `$EV/baseline.md`.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 3/16`.
-- [ ] Task 3 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 3/16`.
+- [x] Task 3 complete
 
 ---
 
@@ -463,8 +463,8 @@ cd $S/runner && bunx tsc --noEmit && bun test core/supervisor/campaign-home-carr
 ```
 Expected: tsc exit 0; without `RUN_SESSION_E2E` all six tests `skip`.
 
-- [ ] **Step 1: Commit** — the test, the tsconfig exclusion, `baseline.md`; trailers `Tribe-Task: 4/16`.
-- [ ] Task 4 complete
+- [x] **Step 1: Commit** — the test, the tsconfig exclusion, `baseline.md`; trailers `Tribe-Task: 4/16`.
+- [x] Task 4 complete
 
 ---
 
@@ -509,8 +509,8 @@ cd $S/runner && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervi
 ```
 Expected: 0 fail, tsc exit 0; `7 pass 0 fail`.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 5/16`.
-- [ ] Task 5 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 5/16`.
+- [x] Task 5 complete
 
 ---
 
@@ -554,8 +554,8 @@ cd /Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo && git grep -n -E 'snap
 ```
 Expected: 0 fail, tsc exit 0; no `git grep` output.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 6/16`.
-- [ ] Task 6 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 6/16`.
+- [x] Task 6 complete
 
 ---
 
@@ -604,8 +604,8 @@ the runner README, cleared by Tasks 14–15). The acceptance E2E is informative 
 record its tail in `$EV/baseline.md` under "after Task 7" (the four pairs are expected to pass now;
 its binding run is the Verification contract).
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 7/16`.
-- [ ] Task 7 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 7/16`.
+- [x] Task 7 complete
 
 ---
 
@@ -719,8 +719,8 @@ cd $S/runner && bun test core/ledger.test.ts && bun test structure.test.ts && bu
 ```
 Expected: 6 pass; structure suite green (no world-touching import in `core/ledger.ts`); tsc exit 0.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 8/16`.
-- [ ] Task 8 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 8/16`.
+- [x] Task 8 complete
 
 ---
 

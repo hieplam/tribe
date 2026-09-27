@@ -40,9 +40,7 @@ import type { TranscriptIO } from '../ports/ports.ts';
 // that already exist (see `runSupervisor`'s own module doc comment).
 import { parseSupervisorArgs, supervisorHomeFromCampaign, type SupervisorConfig } from '../core/supervisor/args.ts';
 import { runSupervisor, type SupervisorLoopConfig, type SupervisorLoopSeam } from '../core/supervisor/loop.ts';
-import { restoreHomeConfig, snapshotHomeConfig } from '../adapters/home-config.adapter.ts';
-import { SUPERVISOR_EXIT_NEEDS_OWNER, SUPERVISOR_EXIT_USAGE, type SessionKind } from '../core/supervisor/model.ts';
-import type { OneShotSessionOptions } from '../core/supervisor/session.ts';
+import { SUPERVISOR_EXIT_NEEDS_OWNER, SUPERVISOR_EXIT_USAGE } from '../core/supervisor/model.ts';
 import { buildSupervisorIo } from '../adapters/supervisor-io.adapter.ts';
 import { sdkSpawnSession } from '../adapters/session.adapter.ts';
 import { sessionDoubleScriptPath, spawnSessionDouble } from '../adapters/session-double.adapter.ts';
@@ -600,22 +598,6 @@ export function buildSupervisorLoopConfig(
   };
 }
 
-/** Task 17 (card `campaign-supervisor`, `fixtures-mirror-reality.md`): infers which of the
- * three one-shot kinds a spawn is for, FROM THE OPTIONS THEMSELVES — `OneShotSpawnParams`
- * (`core/supervisor/session.ts`) carries only `prompt`/`options`, no `kind` field. The inference
- * keys on the GRANT, which is fixed per kind, never on `settingSources`, which is the same
- * `['user','project','local']` for all three (card supervisor-session-settings, G3):
- * `closing` is the only kind granted `Bash` (`CLOSING_ALLOWED_TOOLS`); of the other two, only
- * `ruling` carries `additionalDirectories` (repo read access, §5.2) — `ratify` never does
- * (§5.3: "no repo access at all"). Unit-tested in `cli/main.test.ts` against the real
- * `buildOneShotOptions` output for every kind. */
-export function inferOneShotKind(options: OneShotSessionOptions): SessionKind {
-  const isGrantedShell = options.allowedTools?.includes('Bash') === true;
-  if (isGrantedShell) return 'closing';
-  const hasRepoReadAccess = options.additionalDirectories !== undefined;
-  return hasRepoReadAccess ? 'ruling' : 'ratify';
-}
-
 // ---------------------------------------------------------------------------------------
 // `transcript-metrics` subcommand (Task 3, spec §15, card `## Measure first`). Token-free by
 // construction: it spawns nothing and reads nothing but transcript files.
@@ -844,7 +826,7 @@ export async function main(): Promise<void> {
       // adaptation at the composition root, never a behavior change.
       spawnSession: doubleScript === null
         ? (params) => sdkSpawnSession(params as unknown as SpawnSessionParams)
-        : (params) => spawnSessionDouble(doubleScript, home.homeDir, inferOneShotKind(params.options)),
+        : (params) => spawnSessionDouble(doubleScript, home.homeDir, params.kind),
       // Unlike the card loop's `buildSessionIOForCard`, the supervisor keeps no per-card
       // session object to crash-safely persist here — the session id is already carried by
       // `verify.ts`'s postcondition checks and the ledger line `runSupervisor` writes once the
@@ -855,10 +837,6 @@ export async function main(): Promise<void> {
       // the newline `appendFile`'s own callers are expected to supply (mirrors
       // `adapters/run-io.adapter.ts`'s own `appendLog` contract).
       appendLog: (logPath, line) => supervisorIo.appendFile(logPath, `${line}\n`),
-      // Card supervisor-home-settings-containment (spec §6.3): the one-shot runner restores the
-      // campaign home's configuration surface after every session through these two edges.
-      snapshotHomeConfig,
-      restoreHomeConfig,
       // `SupervisorLoopSeam`'s own contract ("returns its input unchanged when the path does
       // not exist") is `watchdogIo.realpath`'s contract verbatim (mirrored from
       // `adapters/watchdog-io.adapter.ts`) — reused rather than reimplemented.

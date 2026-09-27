@@ -11,8 +11,6 @@ import {
   type OneShotSpawnParams,
 } from './session.ts';
 import { SCAN_DENIED_REASON, type HookDecision, type SessionMessage } from '../session.ts';
-import { HOME_CONFIG_DENIED_REASON } from './permit.ts';
-import type { HomeConfigRestorePlan, HomeConfigSnapshot } from './home-config.ts';
 import type { SessionKind } from './model.ts';
 
 function fixtureConfig(overrides: Partial<OneShotSessionConfig> = {}): OneShotSessionConfig {
@@ -32,15 +30,9 @@ function recordingIo(): {
   appendLog: (logPath: string, line: string) => void;
   calls: string[];
   logLines: string[];
-  snapshotQueue: HomeConfigSnapshot[];
-  restored: HomeConfigRestorePlan[];
-  snapshotHomeConfig: (homeDir: string) => HomeConfigSnapshot;
-  restoreHomeConfig: (homeDir: string, plan: HomeConfigRestorePlan) => void;
 } {
   const calls: string[] = [];
   const logLines: string[] = [];
-  const snapshotQueue: HomeConfigSnapshot[] = [];
-  const restored: HomeConfigRestorePlan[] = [];
   return {
     calls,
     logLines,
@@ -53,12 +45,6 @@ function recordingIo(): {
     appendLog: (path: string, line: string) => {
       calls.push(`appendLog:${path}`);
       logLines.push(line);
-    },
-    snapshotQueue,
-    restored,
-    snapshotHomeConfig: () => snapshotQueue.shift() ?? [],
-    restoreHomeConfig: (_homeDir: string, plan: HomeConfigRestorePlan) => {
-      restored.push(plan);
     },
   };
 }
@@ -84,6 +70,23 @@ const RESULT_MESSAGE: SessionMessage = {
   permission_denials: [{ tool_name: 'Write', tool_input: { file_path: '/abs/repo/src/touched.txt' } }],
 };
 
+// Task 6 (card supervisor-sessions-in-repo): layer 2 (the snapshot-and-restore of the campaign
+// home's configuration surface) has no reason to exist now that no session loads the campaign
+// home as configuration (Task 5 moved `cwd` to the target repo) — this is the RED that proves the
+// seam no longer NEEDS the two members `OneShotSessionSeam` still declares as of Task 5.
+test('runOneShotSession needs only spawnSession/onSessionStart/appendLog — nothing reads or restores the campaign home', async () => {
+  const io = {
+    spawnSession: () => messages([
+      { type: 'system', subtype: 'init', session_id: 's-1' },
+      { type: 'result', subtype: 'success', result: 'ok' },
+    ]),
+    onSessionStart: () => {},
+    appendLog: () => {},
+  };
+  const result = await runOneShotSession({ kind: 'ratify', prompt: 'p', config: fixtureConfig() }, io as never);
+  expect(result.outcome).toBe('success');
+});
+
 describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () => {
   test('resume is never a property of the built options, for any kind', () => {
     for (const kind of ['ruling', 'ratify', 'closing'] as SessionKind[]) {
@@ -92,11 +95,14 @@ describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () =>
     }
   });
 
-  test('cwd is the campaign home, for every kind (S-P9 — this is what attributes the transcript)', () => {
-    for (const kind of ['ruling', 'ratify', 'closing'] as SessionKind[]) {
-      const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
-      expect(options.cwd).toBe('/abs/home/.tribe/key/campaigns/slug');
-    }
+  test.each(['ruling', 'ratify', 'closing'] as const)('%s starts in the target repo, never the campaign home (card supervisor-sessions-in-repo, G1)', (kind) => {
+    const options = buildOneShotOptions(kind, fixtureConfig({ verifyShippedPluginDir: '/abs/vs' }), new AbortController());
+    expect(options.cwd).toBe('/abs/repo');
+    // The home must never be an additional directory: MEASURED (spec §3.2) it loads the home's
+    // .claude/skills. `additionalDirectories` is deleted from OneShotSessionOptions entirely
+    // (never merely unset), so the guard is a key-membership check — same idiom as this file's
+    // own "'resume' in options" above, for a field that likewise does not exist in the type.
+    expect('additionalDirectories' in options).toBe(false);
   });
 
   test('permissionMode is "default" for every kind — never "bypassPermissions" (decision 4)', () => {
@@ -388,96 +394,24 @@ describe('the scan wall is wired into every supervisor envelope (issue #163, G2)
   });
 });
 
-describe('closing refuses configuration writes into the home (card supervisor-home-settings-containment)', () => {
-  test('the wired closing hooks deny Write <home>/CLAUDE.md', async () => {
+// Task 7 (card supervisor-sessions-in-repo): layer 1 is deleted — `buildHomeConfigWriteHook` no
+// longer exists and no longer wires into `closing`'s PreToolUse list.
+describe('closing has no configuration-surface refusal (Task 7 deletes layer 1)', () => {
+  test("closing's PreToolUse is exactly two entries: the grant hook, then the scan wall", () => {
+    const options = buildOneShotOptions('closing', fixtureConfig(), new AbortController());
+    expect(options.hooks?.PreToolUse).toHaveLength(2);
+  });
+
+  test('the wired closing hooks do not deny a Write of <home>/CLAUDE.md', async () => {
     const config = fixtureConfig();
     const options = buildOneShotOptions('closing', config, new AbortController());
     const decisions = await wiredDecisions(options, { tool_name: 'Write', tool_input: { file_path: `${config.homeDir}/CLAUDE.md` } });
-    expect(decisions.some((d) => d.hookSpecificOutput?.permissionDecisionReason === HOME_CONFIG_DENIED_REASON)).toBe(true);
+    expect(decisions.every((d) => d.hookSpecificOutput?.permissionDecision !== 'deny')).toBe(true);
   });
 
   test('the wired closing hooks still allow Write <repo>/CLAUDE.md (closing lands the governance PR)', async () => {
     const options = buildOneShotOptions('closing', fixtureConfig(), new AbortController());
     const decisions = await wiredDecisions(options, { tool_name: 'Write', tool_input: { file_path: '/abs/repo/CLAUDE.md' } });
     expect(decisions.every((d) => d.hookSpecificOutput?.permissionDecision !== 'deny')).toBe(true);
-  });
-
-  for (const kind of ['ruling', 'ratify'] as SessionKind[]) {
-    test(`${kind}: the wired hooks deny Write <home>/CLAUDE.md with the configuration reason`, async () => {
-      const config = fixtureConfig();
-      const options = buildOneShotOptions(kind, config, new AbortController());
-      const decisions = await wiredDecisions(options, { tool_name: 'Write', tool_input: { file_path: `${config.homeDir}/CLAUDE.md` } });
-      expect(decisions.some((d) => d.hookSpecificOutput?.permissionDecisionReason === HOME_CONFIG_DENIED_REASON)).toBe(true);
-    });
-  }
-});
-
-describe('runOneShotSession restores the home configuration (card supervisor-home-settings-containment, spec §6.3)', () => {
-  const PLANTED = { path: 'CLAUDE.md', kind: 'file' as const, content: 'cGxhbnRlZA==' };
-
-  test('a surface the session planted is restored away, and the restore is logged', async () => {
-    const io = recordingIo();
-    io.snapshotQueue.push([], [PLANTED]); // before, after
-    io.spawnSession = () => messages([INIT_MESSAGE, RESULT_MESSAGE]);
-    const result = await runOneShotSession({ kind: 'closing', prompt: 'close', config: fixtureConfig() }, io);
-    expect(result.outcome).toBe('success');
-    expect(io.restored.map((plan) => plan.remove.map((e) => e.path))).toEqual([['CLAUDE.md']]);
-    const logged = io.logLines.map((l) => JSON.parse(l) as Record<string, unknown>).find((m) => m.subtype === 'home_config_restored');
-    expect(logged).toEqual({ type: 'tribe', subtype: 'home_config_restored', removed: ['CLAUDE.md'], rewritten: [] });
-  });
-
-  test('an unchanged home is never restored and nothing extra is logged', async () => {
-    const io = recordingIo();
-    io.spawnSession = () => messages([INIT_MESSAGE, RESULT_MESSAGE]);
-    await runOneShotSession({ kind: 'ruling', prompt: 'rule', config: fixtureConfig() }, io);
-    expect(io.restored).toEqual([]);
-    expect(io.logLines.some((l) => l.includes('home_config_restored'))).toBe(false);
-  });
-
-  test('a home that cannot be snapshotted before the session is never spawned into (fail closed)', async () => {
-    const io = recordingIo();
-    let spawned = false;
-    io.snapshotHomeConfig = () => {
-      throw new Error('EACCES');
-    };
-    io.spawnSession = () => {
-      spawned = true;
-      return messages([INIT_MESSAGE, RESULT_MESSAGE]);
-    };
-    const result = await runOneShotSession({ kind: 'ruling', prompt: 'rule', config: fixtureConfig() }, io);
-    expect(spawned).toBe(false);
-    expect(result.outcome).toBe('error');
-    expect(result.finalText).toContain("the campaign home's configuration could not be read");
-  });
-
-  test('a restore that fails turns the outcome into error (fail closed)', async () => {
-    const io = recordingIo();
-    io.snapshotQueue.push([], [PLANTED]);
-    io.restoreHomeConfig = () => {
-      throw new Error('EPERM');
-    };
-    io.spawnSession = () => messages([INIT_MESSAGE, RESULT_MESSAGE]);
-    const result = await runOneShotSession({ kind: 'closing', prompt: 'close', config: fixtureConfig() }, io);
-    expect(result.outcome).toBe('error');
-    expect(result.finalText).toContain("could not be restored after the session");
-    expect(result.finalText).toContain('EPERM');
-  });
-
-  test('a timed-out session gets a second restore pass when its stream finally settles', async () => {
-    const io = recordingIo();
-    let plantedAfterAbort = false;
-    io.snapshotHomeConfig = () => (plantedAfterAbort ? [PLANTED] : []);
-    io.spawnSession = (params) =>
-      (async function* () {
-        yield INIT_MESSAGE;
-        await new Promise<void>((resolve) => params.options.abortController.signal.addEventListener('abort', () => resolve()));
-        await new Promise((resolve) => setTimeout(resolve, 10)); // the aborted session still writes
-        plantedAfterAbort = true;
-      })();
-    const result = await runOneShotSession({ kind: 'closing', prompt: 'close', config: fixtureConfig(), sessionTimeoutMs: 20 }, io);
-    expect(result.outcome).toBe('timeout');
-    expect(io.restored).toEqual([]); // the first pass saw nothing yet
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(io.restored.map((plan) => plan.remove.map((e) => e.path))).toEqual([['CLAUDE.md']]);
   });
 });

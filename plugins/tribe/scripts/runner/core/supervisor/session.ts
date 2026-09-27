@@ -16,8 +16,7 @@
 import { decideScanGuardHook, type HookDecision, type SessionMessage } from '../session.ts';
 import type { SessionKind } from './model.ts';
 import type { LedgerEntryUsage } from './model.ts';
-import { buildContainmentHook, buildHomeConfigWriteHook, decideClosingGrantHook } from './permit.ts';
-import { isEmptyRestorePlan, planHomeConfigRestore, type HomeConfigRestorePlan, type HomeConfigSnapshot } from './home-config.ts';
+import { buildContainmentHook, decideClosingGrantHook } from './permit.ts';
 
 /** spec §5.2/§5.3: the tool grant for a `ruling`/`ratify` session. `closing` (§5.4) carries its
  * OWN, wider grant — R11 (Task 20), below `CLOSING_ALLOWED_TOOLS`/`CLOSING_DISALLOWED_TOOLS` —
@@ -67,7 +66,6 @@ export interface OneShotSessionOptions {
   permissionMode: 'default';
   allowedTools?: readonly string[];
   disallowedTools?: readonly string[];
-  additionalDirectories?: string[];
   /** R11 (Task 20, spec §5.4 item 4): the SDK's local-plugin option, set on `closing` only, so
    * `verify-shipped` resolves BY NAME inside the session from the repo itself. Kept after the
    * user tier loaded (card supervisor-session-settings, G4, MEASURED): the user tier finds
@@ -83,21 +81,19 @@ export interface OneShotSessionOptions {
   maxTurns: number;
 }
 
-/** `buildOneShotOptions`'s input. `repoRoot` is read access for `ruling` (spec §5.2's
- * `additionalDirectories`) and repo access for `closing` (§5.4's named exception); `ratify` never
- * reads it (§5.3: "No repo access at all"). `realpath` is the containment hook's one injected
- * capability (`permit.ts`'s `buildContainmentHook`) — never `fs` directly (`pure-core.md`).
- * Also used by `closing`'s configuration-write hook (`permit.ts#buildHomeConfigWriteHook`). */
+/** `buildOneShotOptions`'s input. `repoRoot` is `cwd` for every kind (spec §4.1); `realpath` is
+ * the containment hook's one injected capability (`permit.ts`'s `buildContainmentHook`) — never
+ * `fs` directly (`pure-core.md`). */
 export interface OneShotSessionConfig {
-  /** The campaign home (S-P9) — `cwd` for every one-shot session, and the containment root for
-   * `ruling`/`ratify` (spec §14: this is what makes the transcript attributable in the viewer
-   * with no viewer change at all). */
+  /** the containment root for `ruling`/`ratify`, and where logs and the ledger live — never
+   * `cwd`. */
   homeDir: string;
   model: string;
   /** Fix 2 (skinner audit): the caller's configured `--session-max-turns` — always supplied
    * (never defaulted here; `args.ts` owns the default), for every one of the three kinds. */
   maxTurns: number;
-  repoRoot?: string;
+  /** the target repo root — `cwd` for every kind. */
+  repoRoot: string;
   realpath: (path: string) => string;
   /** R11 (Task 20, spec §5.4 item 4): the `verify-shipped` plugin directory, resolved and
    * existence-checked by the composition root from ITS OWN location (never cwd, never
@@ -118,18 +114,16 @@ export function buildOneShotOptions(
   abortController: AbortController,
 ): OneShotSessionOptions {
   const options: OneShotSessionOptions = {
-    cwd: config.homeDir,
+    cwd: config.repoRoot,
     model: config.model,
     // Parity with the executor path (card supervisor-session-settings, G3; core/session.ts has
     // the same list): 'user' carries ~/.claude/settings.json's enabledPlugins, so the C3 plugin
     // registers and `Skill c3` no longer returns "Unknown skill: c3". Written explicitly, never by
     // omitting the option, so the regression test keeps a value to assert. MEASURED (spec §4.1):
-    // the SDK's own `model` and `permissionMode: 'default'` still win over the user tier's. For a
-    // supervisor session `cwd` is the campaign home, so 'project'/'local' read
-    // <home>/.claude/settings(.local).json and <home>/CLAUDE.md — MEASURED live (card
-    // supervisor-home-settings-containment, spec §4). No session may leave one there for the next:
-    // the hooks refuse the write (`permit.ts`) and `runOneShotSession` restores the home's
-    // configuration surface after every session.
+    // the SDK's own `model` and `permissionMode: 'default'` still win over the user tier's. `cwd`
+    // is the target repo (card supervisor-sessions-in-repo), so 'project'/'local' read
+    // <repo>/.claude/settings(.local).json and <repo>/CLAUDE.md; the campaign home is never
+    // loaded as configuration (MEASURED, spec §3.2: it would load the home's `.claude/skills`).
     settingSources: ['user', 'project', 'local'],
     permissionMode: 'default',
     abortController,
@@ -144,7 +138,6 @@ export function buildOneShotOptions(
     // left ungoverned.
     options.allowedTools = CLOSING_ALLOWED_TOOLS;
     options.disallowedTools = CLOSING_DISALLOWED_TOOLS;
-    if (config.repoRoot !== undefined) options.additionalDirectories = [config.repoRoot];
     // R11 item 4, kept by card supervisor-session-settings (G4): load `verify-shipped` from the
     // repo so it resolves on a host that never ran install.sh. Absent only when the edge
     // (`decide.ts`) has already fail-closed the spawn itself; see its
@@ -152,17 +145,16 @@ export function buildOneShotOptions(
     if (config.verifyShippedPluginDir !== undefined) {
       options.plugins = [{ type: 'local', path: config.verifyShippedPluginDir }];
     }
-    // Still NO containment hook — `closing` legitimately writes the repo (§5.4); this hook refuses
-    // only configuration surfaces inside the home. The scan wall is not containment either: it
-    // refuses only a filesystem- or home-rooted `find`.
+    // Still NO containment hook — `closing` legitimately writes the repo (§5.4). Card
+    // supervisor-sessions-in-repo (Task 7): no configuration-write hook either — `cwd` is the
+    // target repo (Task 5), so nothing written into the campaign home loads as any session's
+    // configuration any more. The scan wall is not containment either: it refuses only a
+    // filesystem- or home-rooted `find`.
     options.hooks = {
       PreToolUse: [
         // The grant, enforced (card supervisor-session-settings, ruling R1): a host allow rule in a
         // loaded settings tier can never add a tool to CLOSING_ALLOWED_TOOLS.
         { hooks: [(hookInput: unknown) => Promise.resolve(decideClosingGrantHook(CLOSING_ALLOWED_TOOLS, hookInput))] },
-        // Card supervisor-home-settings-containment (spec §6.2): the home is the next session's
-        // settings root; closing still writes the repo freely, only home configuration is refused.
-        { hooks: [buildHomeConfigWriteHook(config.homeDir, { realpath: config.realpath })] },
         SCAN_GUARD_ENTRY,
       ],
     };
@@ -171,12 +163,6 @@ export function buildOneShotOptions(
 
   options.allowedTools = JUDGMENT_ALLOWED_TOOLS;
   options.disallowedTools = JUDGMENT_DISALLOWED_TOOLS;
-  if (kind === 'ruling' && config.repoRoot !== undefined) {
-    // Read access to the card's spec/plan only — NOT a write boundary (§5.1: "additionalDirectories
-    // is a read convenience"); the hook below is what actually denies a repo write. `ratify` gets
-    // no repo access at all (§5.3).
-    options.additionalDirectories = [config.repoRoot];
-  }
   // "The ONLY enforcement there is" (S-P12) — permit.ts's buildContainmentHook, the impure edge —
   // stays first; the scan wall runs alongside it as defence in depth (card D2), since this
   // envelope already denies Bash.
@@ -192,6 +178,11 @@ export function buildOneShotOptions(
 export interface OneShotSpawnParams {
   prompt: string;
   options: OneShotSessionOptions;
+  /** Card supervisor-sessions-in-repo (Task 5): the three kinds' option blocks are no longer
+   * distinguishable from `options` alone (spec §4.1 removed `additionalDirectories`, the only
+   * field that ever differed between `ruling` and `ratify`) — the seam names the kind explicitly
+   * instead of a caller guessing it. */
+  kind: SessionKind;
 }
 
 /** The seam `runOneShotSession` consumes — shaped identically to `core/session.ts`'s `SessionIO`
@@ -206,12 +197,6 @@ export interface OneShotSessionSeam {
   spawnSession(params: OneShotSpawnParams): AsyncIterable<SessionMessage>;
   onSessionStart(sessionId: string): void;
   appendLog(logPath: string, line: string): void;
-  /** Card supervisor-home-settings-containment (spec §6.3): every configuration-surface entry of
-   * the campaign home, never following a symlink. Throws when the home cannot be read. Required,
-   * never optional: an optional member would let a caller skip the restore silently. */
-  snapshotHomeConfig(homeDir: string): HomeConfigSnapshot;
-  /** Applies `plan` inside the home, proving containment first. Throws when it cannot. */
-  restoreHomeConfig(homeDir: string, plan: HomeConfigRestorePlan): void;
 }
 
 export type OneShotSessionOutcome = 'success' | 'error' | 'timeout';
@@ -272,7 +257,7 @@ async function consumeOneShot(
 ): Promise<OneShotSessionResult> {
   let sessionMessages: AsyncIterable<SessionMessage>;
   try {
-    sessionMessages = io.spawnSession({ prompt: input.prompt, options });
+    sessionMessages = io.spawnSession({ prompt: input.prompt, options, kind: input.kind });
   } catch (err) {
     return errorResult(err);
   }
@@ -307,37 +292,14 @@ async function consumeOneShot(
 /** Runs one judgment/closing session end-to-end: builds spec §5.1's options, streams messages to
  * `<homeDir>/supervisor/sessions/<sessionId>.log`, and resolves to a typed `OneShotSessionResult`
  * — never throws, never rejects, mirroring `core/session.ts`'s `runSession` contract exactly.
- * Card supervisor-home-settings-containment (spec §6.3): the campaign home is also the NEXT
- * session's settings root, so its configuration surface is snapshotted before the spawn and
- * restored to that snapshot after it — whoever wrote the change, including `closing`'s `Bash`. */
+ * Card supervisor-sessions-in-repo (Task 6): NO restore of the campaign home's configuration
+ * surface — `cwd` is now the target repo (Task 5), so nothing in the campaign home loads as
+ * configuration for this or any later session (spec §4), and there is nothing left to undo. */
 export async function runOneShotSession(input: RunOneShotInput, io: OneShotSessionSeam): Promise<OneShotSessionResult> {
-  const homeDir = input.config.homeDir;
-  // A home whose configuration cannot be read cannot be restored afterwards, so no session is
-  // spawned into it (fail closed).
-  let before: HomeConfigSnapshot;
-  try {
-    before = io.snapshotHomeConfig(homeDir);
-  } catch (err) {
-    return errorResult(new Error(`refusing to spawn: the campaign home's configuration could not be read (${messageOf(err)})`));
-  }
-
   const abortController = new AbortController();
   const options = buildOneShotOptions(input.kind, input.config, abortController);
   const sessionPromise = consumeOneShot(input, io, options);
-  const result = await raceWallClock(sessionPromise, input.sessionTimeoutMs, abortController);
-
-  if (result.outcome === 'timeout') {
-    // The race resolved before the aborted stream ended, so a write can still land after the pass
-    // below: restore once more when the stream settles (`consumeOneShot` never rejects).
-    void sessionPromise.then(() => restoreHomeAfterSession(io, homeDir, before, result.sessionId));
-  }
-  const restoreFailure = restoreHomeAfterSession(io, homeDir, before, result.sessionId);
-  if (restoreFailure === null) return result;
-  return {
-    ...result,
-    outcome: 'error',
-    finalText: `the campaign home's configuration could not be restored after the session (${restoreFailure})`,
-  };
+  return raceWallClock(sessionPromise, input.sessionTimeoutMs, abortController);
 }
 
 /** The wall-clock bound (`fail-closed-edges.md` obligation 3), unchanged from before this card:
@@ -366,29 +328,5 @@ async function raceWallClock(
     return await Promise.race([sessionPromise, timeoutPromise]);
   } finally {
     clearTimeout(timer!);
-  }
-}
-
-/** Undoes every change the session made to the home's configuration surface (spec §6.3). Returns
- * `null` when the home is as it was before the session — untouched, or restored — and otherwise
- * the failure's message. Never throws: the caller decides what an unverifiable home means. */
-function restoreHomeAfterSession(
-  io: OneShotSessionSeam, homeDir: string, before: HomeConfigSnapshot, sessionId: string | null,
-): string | null {
-  try {
-    const plan = planHomeConfigRestore(before, io.snapshotHomeConfig(homeDir));
-    if (isEmptyRestorePlan(plan)) return null;
-    io.restoreHomeConfig(homeDir, plan);
-    // No `init` message means no session id to name the log after.
-    const logName = sessionId === null || sessionId === '' ? 'unattributed' : sessionId;
-    io.appendLog(`${homeDir}/supervisor/sessions/${logName}.log`, JSON.stringify({
-      type: 'tribe',
-      subtype: 'home_config_restored',
-      removed: plan.remove.map((entry) => entry.path),
-      rewritten: plan.write.map((entry) => entry.path),
-    }));
-    return null;
-  } catch (err) {
-    return messageOf(err);
   }
 }
