@@ -1,0 +1,6 @@
+---
+target: c3-215
+scope: block
+base: c3-215#n2290@v1:sha256:d69126cd0ebb052640d0938349d7fe7829d8f733f023e111d97bfaaa92cced97
+---
+| Runner accepts an unshipped card, or wedges the campaign | Editing verify.ts (the D3 seven-point replay: merged, mergeShaAncestorOfMaster, checksGreen, worktreeAndBranchGone, schemaGuard, localBaseSynced, doneAtHead), core/loop/card-actions.ts (actOnCard, the turn deps, the Done run, healSafeResidue), core/loop/turns.ts, core/done.ts, core/plan-index.ts, core/merge-gate.ts, core/residue.ts#decideBaseSyncHeal, or any gh/git invocation in the runner | Mocked seams validate logic but NOT the commands: gh api pulls/<pr> 404d in reality while 25 tests passed, which would have failed every card forever. A wrong invocation, a Done run that passes on nothing, or a session that ships without a passing Done run is invisible to the suite | cd plugins/tribe/scripts/runner && bun test && bunx tsc --noEmit; bash plugins/tribe/scripts/tests/test-runner-done-negative.sh; bash plugins/tribe/scripts/tests/test-runner-done-empty.sh; bash plugins/tribe/scripts/tests/test-runner-task-index-refusal.sh; plus execute any changed gh/git command against a real repo before trusting it |

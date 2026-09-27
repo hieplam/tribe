@@ -1,0 +1,54 @@
+renderer: render-prompts.ts @ runner-driver-only API (v2 state, turn prompts)
+prompt kinds rendered: 47
+Tribe-way mentions: 97 in 8 kind(s); injections: 0
+TRIBE_WAY_TOTAL=97
+| kind | bytes | mentions | terms |
+| --- | --- | --- | --- |
+| executor/brief-fresh | 7588 | 0 |  |
+| executor/brief-with-digest | 8133 | 0 |  |
+| executor/turn-task | 531 | 0 |  |
+| executor/turn-done-failed | 532 | 0 |  |
+| executor/turn-protocol-error | 646 | 0 |  |
+| executor/turn-deliver | 877 | 0 |  |
+| executor/hook-backgrounding | 349 | 0 |  |
+| executor/hook-wait-tool | 344 | 0 |  |
+| executor/hook-scan | 482 | 0 |  |
+| executor/hook-merge-forbidden-flag | 458 | 0 |  |
+| executor/hook-merge-checks-error | 108 | 0 |  |
+| executor/hook-merge-not-green | 313 | 0 |  |
+| executor/hook-merge-head-not-done | 272 | 0 |  |
+| escalation/needs-direction | 403 | 0 |  |
+| escalation/planning-needed | 353 | 0 |  |
+| escalation/verify-failed-merged | 1122 | 0 |  |
+| escalation/verify-failed-after-merge | 1091 | 0 |  |
+| escalation/done-failed | 534 | 0 |  |
+| supervisor/ruling | 3079 | 5 | shaman×2, debt×1, ratify×2 |
+| supervisor/ratify | 4657 | 39 | warchief×1, shaman×1, tracker×2, gap-gate×2, harness-gap×2, gap-rule×2, debt×7, ratify×19, governance×3 |
+| supervisor/closing | 7046 | 33 | warchief×1, shaman×1, tracker×2, gap-gate×5, harness-gap×3, gap-rule×2, debt×4, ratify×13, governance×2 |
+| supervisor/hook-containment | 258 | 0 |  |
+| supervisor/hook-not-granted | 130 | 0 |  |
+| supervisor/hook-closing-grant | 128 | 0 |  |
+| supervisor/needs-owner/owner_only | 1249 | 2 | debt×1, ratify×1 |
+| supervisor/needs-owner/too_hard | 1142 | 0 |  |
+| supervisor/needs-owner/w7_cap | 1053 | 0 |  |
+| supervisor/needs-owner/ratify_cap | 1014 | 6 | debt×1, ratify×5 |
+| supervisor/needs-owner/spawn_cap | 940 | 0 |  |
+| supervisor/needs-owner/watchdog_run_cap | 1072 | 0 |  |
+| supervisor/needs-owner/repeat_escalation | 1071 | 0 |  |
+| supervisor/needs-owner/ruling_failed | 1055 | 0 |  |
+| supervisor/needs-owner/ratify_failed | 931 | 3 | ratify×3 |
+| supervisor/needs-owner/closing_failed | 1064 | 0 |  |
+| supervisor/needs-owner/session_incomplete | 977 | 0 |  |
+| supervisor/needs-owner/quota_cap | 817 | 0 |  |
+| supervisor/needs-owner/overloaded | 801 | 0 |  |
+| supervisor/needs-owner/stalled | 944 | 0 |  |
+| supervisor/needs-owner/lock_conflict | 916 | 0 |  |
+| supervisor/needs-owner/error | 904 | 0 |  |
+| supervisor/needs-owner/unexpected_running | 958 | 0 |  |
+| supervisor/needs-owner/watchdog_no_terminal | 982 | 0 |  |
+| supervisor/needs-owner/watchdog_usage | 970 | 0 |  |
+| supervisor/needs-owner/resume_blocked | 965 | 0 |  |
+| supervisor/needs-owner/history_rewritten | 1042 | 0 |  |
+| supervisor/needs-owner/ratify_out_of_scope | 982 | 3 | ratify×3 |
+| report/campaign-report-md | 571 | 6 | debt×1, ratify×4, governance×1 |
+MISSING_REQUIRED_KINDS=0 

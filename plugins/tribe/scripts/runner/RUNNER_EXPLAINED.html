@@ -559,15 +559,19 @@ persistLocalState(state, resolved, io);   // W-F5: flush trạng thái blocked t
       <div class="cs"><strong>Đối chiếu C#:</strong> <code>Set&lt;string&gt;</code> ≈ <code>HashSet&lt;string&gt;</code>. <code>?? Infinity</code> — <code>Infinity</code> là số thật trong JS (vô cực), nên vòng <code>while (worked &lt; Infinity)</code> chạy đến khi <code>break</code>.</div>
 
       <h4>Resume-with-fallback (bên trong <code>actOnCard</code>)</h4>
-      <pre><div class="filebar">loop.ts — runCardSession</div><code class="language-typescript">if (phase.kind === 'resume') {
-  const resumeResult = await runSession({ brief: prompt, resume: phase.sessionId }, ...);
-  if (resumeResult.outcome !== 'error') return resumeResult;   // resume OK
+      <pre><div class="filebar">core/loop/card-actions.ts — actOnCard → driveCardTurns (core/loop/turns.ts)</div><code class="language-typescript">// actOnCard: card được lái qua vòng turn — mỗi turn là 1 query resume cùng session
+return driveCardTurns({ cardId, card, tasks, planPath, delivery }, turnDepsFor(ctx, phase));
+
+// turnDepsFor(ctx, phase).runTurn — turn ĐẦU TIÊN giữ nguyên resume-with-fallback (§D4)
+if (phase.kind === 'resume') {
+  const resumed = await runSession({ brief: prompt, resume: phase.sessionId }, ...);
+  if (resumed.outcome !== 'error') return resumed;              // resume OK
 
   // resume THẤT BẠI (không transcript) → fallback: spawn fresh NHƯNG kèm digest trạng thái
-  const digest = buildStateDigest(cardId, card, resumeResult.finalText);
-  const brief = executorBrief(..., `${digest}\n\n---\n\n${resolved.answersContent}`);
-  return runSession({ brief }, ...);
-}</code></pre>
+  const digest = buildStateDigest(cardId, state.cards[cardId], resumed.finalText);
+  return runSession({ brief: freshBrief(`${digest}\n\n---\n\n${resolved.answersContent}`, prompt) }, ...);
+}
+// các turn sau: prompt của bước kế tiếp (core/turn-prompts.ts), resume: card.sessionId</code></pre>
       <div class="note"><strong>Tinh tế:</strong> chỉ fallback khi outcome là <code class="inl">'error'</code>, <strong>KHÔNG</strong> fallback khi <code class="inl">'timeout'</code> — vì timeout nghĩa là session cũ có thể <em>vẫn đang chạy</em>, spawn thêm sẽ nhân đôi công việc.</div>
     </section>
 

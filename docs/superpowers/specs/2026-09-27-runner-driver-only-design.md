@@ -254,7 +254,8 @@ for.*
 **This section is the oracle for `core/plan-index.ts`. CommonMark is not.** Under-reading (missing a
 command, attributing a command to the wrong task) is a bug. Refusing an ambiguous plan is by design.
 
-- A **heading** is a line outside a fenced code block matching `^(#{1,6})\s+(.*?)\s*#*\s*$`. Fences
+- A **heading** is a line outside a fenced code block matching `^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$`
+  (closing `#`s are stripped only after whitespace, so a heading such as `Task: C#` keeps its `#`). Fences
   are tracked CommonMark-style: a fence opened by N ≥ 3 backticks or tildes closes only on ≥ N of the
   same character (the same rule `plugins/tribe/scripts/validate-plan.sh` already implements).
 - A **task section** is the index heading plus every line after it up to the next heading of the same

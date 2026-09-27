@@ -3,8 +3,9 @@
 //
 // This is the INPUT side of the V1 measurement; `g2-prompts.ts` is the counter and never changes
 // between BEFORE and AFTER. This file calls the runner's own rendering functions, so it follows the
-// runner's API: this copy renders master @ 3194976 (the BEFORE tree). The build's plan updates it in
-// the same commit that changes a rendering API, and its manifest must then carry every kind listed
+// runner's API: this copy renders the runner-driver-only branch's API (v2 state, the turn prompts,
+// the Done-commit merge gate), not the BEFORE tree (master @ 3194976). A commit that changes a
+// rendering API updates this file in the same commit, and its manifest must carry every kind listed
 // in `g2-prompts.ts`'s REQUIRED_AFTER_KINDS.
 //
 // Usage (from anywhere): bun render-prompts.ts --out <dir>
@@ -230,7 +231,7 @@ function main(): void {
     files.push({ kind: p.kind, file, bytes: Buffer.byteLength(p.text) });
   }
   const manifest = {
-    renderer: 'render-prompts.ts @ master 3194976 API',
+    renderer: 'render-prompts.ts @ runner-driver-only API (v2 state, turn prompts)',
     watchdog: 'no session-facing prompt: the watchdog never spawns an LLM session (runner README, Watchdog, "What it never does")',
     files,
     injections,
