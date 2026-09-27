@@ -204,6 +204,9 @@ export interface SessionIO {
    * gate hook, not by every caller of `SessionIO`; a caller that never wires it is treated
    * as "cannot verify checks" (fail-closed) by the hook, not as a crash. */
   execInRepo?(argv: string[]): Promise<{ stdout: string; exitCode: number }>;
+  /** Spec §4.6: the commit at which the runner last passed every task's Done commands, read at
+   * hook time (it moves as turns pass). `null` or unwired = none yet, so the merge gate denies. */
+  currentDoneSha?(): string | null;
 }
 
 /** The exact §D1 pinned option set, pinned in this one module. Every field is load-bearing

@@ -519,8 +519,19 @@ describe('decideMergeGateHook — the pre-merge check gate, enforced (P2 fix-lis
   // hook's array position, so reordering the PreToolUse array can never silently make these
   // tests exercise the wrong function. A single wiring smoke test (in the §D1 option set
   // describe above) is the only place that still goes through the real wiring.
-  function hookWith(execInRepo: SessionIO['execInRepo']): (input: unknown) => Promise<HookDecision> {
-    return decideMergeGateHook({ execInRepo });
+  function hookWith(
+    execInRepo: SessionIO['execInRepo'],
+    currentDoneSha: SessionIO['currentDoneSha'] = () => 'abc',
+  ): (input: unknown) => Promise<HookDecision> {
+    return decideMergeGateHook({ execInRepo, currentDoneSha });
+  }
+
+  /** Answers `gh pr checks` with `checksStdout` and `gh pr view … --json headRefOid` with `headSha`. */
+  function ghAnswering(checksStdout: string, headSha = 'abc'): SessionIO['execInRepo'] {
+    return async (argv) =>
+      argv[2] === 'view'
+        ? { stdout: JSON.stringify({ headRefOid: headSha }), exitCode: 0 }
+        : { stdout: checksStdout, exitCode: 0 };
   }
 
   test('denies a merge attempt when gh pr checks reports a red check (A2 replay: format-check red)', async () => {
@@ -536,10 +547,7 @@ describe('decideMergeGateHook — the pre-merge check gate, enforced (P2 fix-lis
   });
 
   test('allows a merge attempt when gh pr checks reports every check SUCCESS', async () => {
-    const hook = hookWith(async () => ({
-      stdout: JSON.stringify([{ name: 'format-check', state: 'SUCCESS' }]),
-      exitCode: 0,
-    }));
+    const hook = hookWith(ghAnswering(JSON.stringify([{ name: 'format-check', state: 'SUCCESS' }])));
 
     const decision = await hook({ tool_name: 'Bash', tool_input: { command: 'gh pr merge --merge' } });
 
@@ -596,6 +604,38 @@ describe('decideMergeGateHook — the pre-merge check gate, enforced (P2 fix-lis
 
     expect(decision).toEqual({});
     expect(execCalled).toBe(false);
+  });
+
+  test('spec §4.6: checks green and the PR head is the Done commit -> allowed', async () => {
+    const hook = hookWith(ghAnswering(JSON.stringify([{ name: 'go', state: 'SUCCESS' }]), 'abc'), () => 'abc');
+    expect(await hook({ tool_name: 'Bash', tool_input: { command: 'gh pr merge 12 --merge' } })).toEqual({});
+  });
+
+  test('spec §4.6: checks green but the PR head is not the Done commit -> denied', async () => {
+    const hook = hookWith(ghAnswering(JSON.stringify([{ name: 'go', state: 'SUCCESS' }]), 'abc'), () => 'zzz');
+    const decision = await hook({ tool_name: 'Bash', tool_input: { command: 'gh pr merge 12 --merge' } });
+    expect(decision.hookSpecificOutput?.permissionDecision).toBe('deny');
+    expect(decision.hookSpecificOutput?.permissionDecisionReason).toContain('TASK_DONE');
+  });
+
+  test('spec §4.6: an unreadable PR head (gh pr view fails) -> denied', async () => {
+    const hook = hookWith(async (argv) =>
+      argv[2] === 'view'
+        ? { stdout: '', exitCode: 1 }
+        : { stdout: JSON.stringify([{ name: 'go', state: 'SUCCESS' }]), exitCode: 0 },
+    );
+    const decision = await hook({ tool_name: 'Bash', tool_input: { command: 'gh pr merge 12 --merge' } });
+    expect(decision.hookSpecificOutput?.permissionDecision).toBe('deny');
+  });
+
+  test('spec §4.6: the head is read for the same PR ref the merge names', async () => {
+    const argvs: string[][] = [];
+    const hook = hookWith(async (argv) => {
+      argvs.push(argv);
+      return ghAnswering(JSON.stringify([{ name: 'go', state: 'SUCCESS' }]))!(argv);
+    });
+    await hook({ tool_name: 'Bash', tool_input: { command: 'gh pr merge 12 --merge' } });
+    expect(argvs).toContainEqual(['gh', 'pr', 'view', '12', '--json', 'headRefOid']);
   });
 
   // P2 audit fix (skinnerB): a REJECTING execInRepo (real-world: the `gh` binary missing,

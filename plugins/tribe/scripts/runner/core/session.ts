@@ -129,7 +129,7 @@ export function decideWaitToolHook(input: unknown): HookDecision {
  *
  * Bash-only, and only when `parseMergeCommand` says the command is a merge attempt — every
  * other tool call, and every non-merge Bash command, gets an empty decision (no opinion). */
-export function decideMergeGateHook(io: Pick<SessionIO, 'execInRepo'>) {
+export function decideMergeGateHook(io: Pick<SessionIO, 'execInRepo' | 'currentDoneSha'>) {
   return async (hookInput: unknown): Promise<HookDecision> => {
     const event = (hookInput ?? {}) as { tool_name?: unknown; tool_input?: unknown };
     const toolName = typeof event.tool_name === 'string' ? event.tool_name : '';
@@ -151,10 +151,14 @@ export function decideMergeGateHook(io: Pick<SessionIO, 'execInRepo'>) {
       return buildMergeGateDecision({ parsed });
     }
 
-    const argv = ['gh', 'pr', 'checks', ...(parsed.prRef ? [parsed.prRef] : []), '--json', 'name,state'];
+    const prArgs = parsed.prRef ? [parsed.prRef] : [];
     try {
-      const checksExec = await io.execInRepo(argv);
-      return buildMergeGateDecision({ parsed, checksExec });
+      const checksExec = await io.execInRepo(['gh', 'pr', 'checks', ...prArgs, '--json', 'name,state']);
+      // Spec §4.6: read the head only for the pure gate to compare with the Done commit; a failed
+      // or unparseable read is null, which the gate denies.
+      const headExec = await io.execInRepo(['gh', 'pr', 'view', ...prArgs, '--json', 'headRefOid']);
+      const headSha = headExec.exitCode === 0 ? parseHeadRefOid(headExec.stdout) : null;
+      return buildMergeGateDecision({ parsed, checksExec, headSha, doneSha: io.currentDoneSha?.() ?? null });
     } catch {
       // A rejecting execInRepo (e.g. `gh` missing, ENOENT) must still resolve to the
       // module's own fail-closed deny decision, never propagate as a rejected promise —
@@ -163,6 +167,17 @@ export function decideMergeGateHook(io: Pick<SessionIO, 'execInRepo'>) {
       return buildMergeGateDecision({ parsed });
     }
   };
+}
+
+/** `gh pr view --json headRefOid` stdout -> the head sha, or null when it is not that shape. */
+function parseHeadRefOid(stdout: string): string | null {
+  try {
+    const parsed = JSON.parse(stdout) as { headRefOid?: unknown } | null;
+    return typeof parsed?.headRefOid === 'string' && parsed.headRefOid !== '' ? parsed.headRefOid : null;
+  } catch {
+    // Unparseable gh output is an unreadable head: the gate denies on null (fail closed).
+    return null;
+  }
 }
 
 /** The reason a denied filesystem-wide scan reports back. Phrased as an INSTRUCTION, not just a

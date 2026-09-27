@@ -7,6 +7,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   MERGE_GATE_DENIED_CHECKS_ERROR_REASON,
   MERGE_GATE_DENIED_FORBIDDEN_FLAG_REASON,
+  MERGE_GATE_DENIED_HEAD_NOT_DONE_REASON,
   buildMergeGateDecision,
   judgeChecks,
   mergeGateNotGreenReason,
@@ -240,6 +241,8 @@ describe('buildMergeGateDecision', () => {
     const decision = buildMergeGateDecision({
       parsed: { isMerge: true, prRef: '188' },
       checksExec: { stdout: JSON.stringify([{ name: 'format-check', state: 'SUCCESS' }]), exitCode: 0 },
+      headSha: 'donesha', // spec §4.6: green is necessary, not sufficient — the head must be the Done commit
+      doneSha: 'donesha',
     });
     expect(decision).toEqual({});
   });
@@ -267,5 +270,26 @@ describe('deny reason content — steers, not just refuses', () => {
     const reason = mergeGateNotGreenReason(undefined, ['format-check: FAILURE']);
     expect(reason).toContain('gh pr checks --watch');
     expect(reason).not.toContain('gh pr checks undefined');
+  });
+});
+
+describe('merge gate — the Done commit (spec §4.6)', () => {
+  const green = { stdout: JSON.stringify([{ name: 'go', state: 'SUCCESS' }]), exitCode: 0 };
+  const parsed = { isMerge: true, prRef: '12' };
+  test('checks green and PR head == doneSha -> allowed', () => {
+    expect(buildMergeGateDecision({ parsed, checksExec: green, headSha: 'abc', doneSha: 'abc' })).toEqual({});
+  });
+  test('head differs from doneSha -> denied, steering to TASK_DONE', () => {
+    const d = buildMergeGateDecision({ parsed, checksExec: green, headSha: 'new', doneSha: 'old' });
+    expect(d.hookSpecificOutput?.permissionDecisionReason).toBe(MERGE_GATE_DENIED_HEAD_NOT_DONE_REASON('new', 'old'));
+    expect(d.hookSpecificOutput?.permissionDecisionReason).toContain('TASK_DONE');
+  });
+  test('no doneSha or an unreadable head -> denied (fail closed)', () => {
+    expect(buildMergeGateDecision({ parsed, checksExec: green, headSha: 'abc', doneSha: null }).hookSpecificOutput).toBeDefined();
+    expect(buildMergeGateDecision({ parsed, checksExec: green, headSha: null, doneSha: 'abc' }).hookSpecificOutput).toBeDefined();
+  });
+  test('a red check still denies first, with the not-green reason', () => {
+    const red = { stdout: JSON.stringify([{ name: 'go', state: 'FAILURE' }]), exitCode: 0 };
+    expect(buildMergeGateDecision({ parsed, checksExec: red, headSha: 'abc', doneSha: 'abc' }).hookSpecificOutput?.permissionDecisionReason).toContain('not all checks');
   });
 });

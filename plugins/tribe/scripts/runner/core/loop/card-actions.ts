@@ -537,8 +537,10 @@ export function buildSessionIOForCard(ctx: CardCtx): SessionIO {
       }
     },
     // P2 fix-list card: the pre-merge check gate's exec seam — reuses LoopIO's own `exec`,
-    // scoped to this card's repo root.
-    execInRepo: (argv) => io.exec(argv, { cwd: resolved.repoRoot }),
+    // scoped to this card's repo root; both gh calls it makes reach the network, so bounded.
+    execInRepo: (argv) => io.exec(argv, { cwd: resolved.repoRoot, timeoutMs: REMOTE_OR_HOOK_GIT_TIMEOUT_MS }),
+    // Read at hook time: recordPass moves card.doneSha as later Done runs pass.
+    currentDoneSha: () => card.doneSha ?? null,
   };
 }
 

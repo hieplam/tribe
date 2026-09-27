@@ -22,7 +22,8 @@ import {
   buildSessionOptions,
 } from '../../runner/core/session.ts';
 import {
-  MERGE_GATE_DENIED_CHECKS_ERROR_REASON, MERGE_GATE_DENIED_FORBIDDEN_FLAG_REASON, mergeGateNotGreenReason,
+  MERGE_GATE_DENIED_CHECKS_ERROR_REASON, MERGE_GATE_DENIED_FORBIDDEN_FLAG_REASON, MERGE_GATE_DENIED_HEAD_NOT_DONE_REASON,
+  mergeGateNotGreenReason,
 } from '../../runner/core/merge-gate.ts';
 import { renderReportMarkdown, type CampaignReport } from '../../runner/core/report.ts';
 import {
@@ -88,6 +89,7 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
   add('executor/hook-merge-forbidden-flag', MERGE_GATE_DENIED_FORBIDDEN_FLAG_REASON);
   add('executor/hook-merge-checks-error', MERGE_GATE_DENIED_CHECKS_ERROR_REASON);
   add('executor/hook-merge-not-green', mergeGateNotGreenReason('12', ['go: PENDING']));
+  add('executor/hook-merge-head-not-done', MERGE_GATE_DENIED_HEAD_NOT_DONE_REASON('newsha1', 'donesha1'));
 
   // ---- escalation files (a ruling session reads them verbatim; so does the owner) ----
   const needsDirection = buildEscalationMarkdown(CARD_ID, 'needs_direction',
