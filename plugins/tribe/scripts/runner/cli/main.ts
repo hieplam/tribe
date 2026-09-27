@@ -45,6 +45,7 @@ import { SUPERVISOR_EXIT_NEEDS_OWNER, SUPERVISOR_EXIT_USAGE } from '../core/supe
 import { buildSupervisorIo } from '../adapters/supervisor-io.adapter.ts';
 import { sdkSpawnSession } from '../adapters/session.adapter.ts';
 import { sessionDoubleScriptPath, spawnSessionDouble } from '../adapters/session-double.adapter.ts';
+import { executorDoubleScriptPath, spawnExecutorDouble } from '../adapters/executor-double.adapter.ts';
 import type { SpawnSessionParams } from '../core/session.ts';
 
 const DEFAULT_SESSION_TIMEOUT_MS = 3 * 60 * 60 * 1000; // spec §2: 3h protocol default.
@@ -915,6 +916,10 @@ export async function main(): Promise<void> {
   }
 
   const io = buildRealIo(parsed.config);
+  // Spec §4.12: TRIBE_RUNNER_SESSION_DOUBLE swaps only the LLM for a scripted process (hermetic
+  // V3/G5 E2Es). Unset in every production run -> spawnSession stays the real SDK spawn.
+  const executorDouble = executorDoubleScriptPath();
+  if (executorDouble !== null) io.spawnSession = (params) => spawnExecutorDouble(executorDouble, parsed.config.homeDir, params);
   const startedAt = new Date().toISOString();
 
   // P10: scrub a stray ANTHROPIC_API_KEY line out of the target repo's .env.local. Routed
