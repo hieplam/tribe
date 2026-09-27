@@ -8,7 +8,7 @@ import { verifyShipped } from '../verify.ts';
 import type { VerifyConfig, VerifyPointId, VerifyResult } from '../verify.ts';
 import { runSession } from '../session.ts';
 import type { RunSessionConfig, SessionIO, SessionResult } from '../session.ts';
-import { executorBrief, reportPathFor } from '../brief.ts';
+import { executorBrief } from '../brief.ts';
 import type { BriefCard, BriefState } from '../brief.ts';
 import type { CardPhase } from './phase.ts';
 import { buildStateDigest, findWorktreePathForBranch } from './phase.ts';
@@ -628,7 +628,7 @@ export async function runCardSession(ctx: CardCtx, phase: CardPhase): Promise<Se
       toBriefState(state),
       `${digest}\n\n---\n\n${resolved.answersContent}`,
       resolved.briefTemplate,
-      reportPathFor(resolved.homeDir, cardId),
+      resolved.homeDir,
       ctx.state.campaign,
     );
     const freshIO = buildSessionIOForCard(ctx);
@@ -646,7 +646,7 @@ export async function runCardSession(ctx: CardCtx, phase: CardPhase): Promise<Se
     toBriefState(state),
     answersContent,
     resolved.briefTemplate,
-    reportPathFor(resolved.homeDir, cardId),
+    resolved.homeDir,
     ctx.state.campaign,
   );
   const freshIO = buildSessionIOForCard(ctx);

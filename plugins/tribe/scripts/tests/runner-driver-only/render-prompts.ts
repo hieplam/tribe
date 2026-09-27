@@ -12,7 +12,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { BRIEF_TEMPLATE_PATH, executorBrief, reportPathFor } from '../../runner/core/brief.ts';
+import { BRIEF_TEMPLATE_PATH, executorBrief } from '../../runner/core/brief.ts';
 import { buildStateDigest } from '../../runner/core/loop/phase.ts';
 import {
   CONTINUE_BRANCH_PROMPT, CONTINUE_PR_OPEN_PROMPT, CONTINUE_UNKNOWN_STATE_PROMPT,
@@ -76,10 +76,10 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
 
   // ---- executor: first prompt, digest prompt, resume prompts ----
   add('executor/brief-fresh', executorBrief(toBriefCard(CARD_ID, c), toBriefState(s), '', template,
-    reportPathFor(HOME, CARD_ID), CAMPAIGN));
+    HOME, CAMPAIGN));
   const digest = buildStateDigest(CARD_ID, c, 'no transcript found for the recorded session');
   add('executor/brief-with-digest', executorBrief(toBriefCard(CARD_ID, c), toBriefState(s),
-    `${digest}\n\n---\n\n`, template, reportPathFor(HOME, CARD_ID), CAMPAIGN));
+    `${digest}\n\n---\n\n`, template, HOME, CAMPAIGN));
   add('executor/resume-pr-open', CONTINUE_PR_OPEN_PROMPT);
   add('executor/resume-branch', CONTINUE_BRANCH_PROMPT);
   add('executor/resume-unknown', CONTINUE_UNKNOWN_STATE_PROMPT);

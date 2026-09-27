@@ -36,10 +36,8 @@ function renderTemplate(template: string, vars: Record<string, string>): string 
   });
 }
 
-/** Spec §5.3: the worker report lives in the campaign's machine-local home — injected by
- * the caller, ABSOLUTE (executor sessions run with cwd = --repo, so a repo-relative path
- * can no longer express it). The old `.claude/state/...` hardcode violated this module's
- * own stateless-capability header and is gone. */
+/** Spec §5.3: a per-card report file in the campaign's machine-local home — ABSOLUTE
+ * (executor sessions run with cwd = --repo, so a repo-relative path cannot express it). */
 export function reportPathFor(homeDir: string, cardId: string): string {
   return join(homeDir, 'reports', `${cardId}.md`);
 }
@@ -51,13 +49,15 @@ function goalFor(card: BriefCard): string {
 }
 
 /** Renders the committed brief template for one campaign card and embeds the committed
- * `--answers` rulings file content verbatim (spec §D5). */
+ * `--answers` rulings file content verbatim (spec §D5). `campaignHome` is the campaign's
+ * machine-local home, ABSOLUTE — the brief offers its `reports/` directory to a plan that asks
+ * for report files; the runner reads nothing written there. */
 export function executorBrief(
   card: BriefCard,
   state: BriefState,
   answersContent: string,
   template: string,
-  reportPath: string,
+  campaignHome: string,
   campaignSlug: string,
 ): string {
   const ownerOnly =
@@ -73,7 +73,7 @@ export function executorBrief(
     GOAL: goalFor(card),
     MERGE_POLICY: state.mergePolicy,
     OWNER_ONLY_ESCALATIONS: ownerOnly,
-    REPORT_PATH: reportPath,
+    CAMPAIGN_HOME: campaignHome,
     ANSWERS_CONTENT: answersContent,
     CAMPAIGN_SLUG: campaignSlug,
   });
