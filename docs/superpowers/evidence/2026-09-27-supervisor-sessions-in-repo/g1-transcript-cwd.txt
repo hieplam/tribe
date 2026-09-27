@@ -1,0 +1,4 @@
+016febab-20b9-46a3-bec5-53a31c077256 closing log=/Users/hiep/repo/tribe transcript=/Users/hiep/repo/tribe PASS
+34ceffe3-6a97-4300-b1be-314f948f8a7b ratify log=/Users/hiep/repo/tribe transcript=/Users/hiep/repo/tribe PASS
+960f688c-3b66-4cfc-b11c-c99e287df5ff ruling log=/Users/hiep/repo/tribe transcript=/Users/hiep/repo/tribe PASS
+G1 3/3 kinds=closing,ratify,ruling

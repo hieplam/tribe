@@ -1014,9 +1014,19 @@ written by the supervisor):
   one reader serves both.
 - **`events.jsonl`** — append-only, one JSON line per intended action, each carrying its own ISO
   `at`.
-- **`ledger.jsonl`** — append-only, one JSON line per one-shot session spawn (G5): kind, cardId,
-  sessionId, model, usage, costUsd, permissionDenials, and the disk-verified `verdict` (never the
-  session's own words).
+- **`ledger.jsonl`** — append-only (spec §4.4): one **spawn** row per session the campaign
+  starts — the executor, one of its subagents, or a supervisor one-shot (`ruling`/`ratify`/
+  `closing`) — appended the moment that session's id is known, and one **end** row per one-shot.
+  A spawn row is `{at, event: "spawn", kind, sessionId, parentSessionId, rootSessionId,
+  agentType, cardId, resumed?}`: `sessionId` is the SDK `session_id` for a root or a subagent's
+  agent id; `parentSessionId` is `null` for a root (an executor or supervisor session is started
+  by a process, not a session), else the parent session/agent id it was spawned from. An end row
+  keeps the existing shape — kind, cardId, sessionId, model, usage, costUsd, permissionDenials,
+  and the disk-verified `verdict` (never the session's own words) — plus `event: "end"`; a legacy
+  line with no `event` field is still read as an end row. Both the RUNNER (`core/session.ts`'s
+  `consumeSession`, for the executor's own row and one row per subagent it spawns) and the
+  supervisor (`core/supervisor/session.ts` for a one-shot's spawn row, `loop.ts` for its end row)
+  append to this one file.
 - **`state.json`** — the supervisor's own persisted counters: per-card ruling rounds, ratify
   rounds, total spawns, watchdog runs, seen-escalation content hashes (the repeat-escalation
   breaker), `closingVerified`, and per-reason retrigger counts.
@@ -1052,32 +1062,17 @@ All three one-shot kinds — `ruling`, `ratify`, `closing` — load
   loaded and no grant hook, an un-granted tool (`Workflow`) ran. Accepted consequence: `closing`
   stops running `TaskCreate`/`CronList`/`ListAgents`, which ran un-granted before and which the
   closing stage does not use.
-- **Every kind refuses a configuration write into the home, and the home is restored after every
-  session regardless** (card `supervisor-home-settings-containment`): the campaign home doubles as
-  the NEXT one-shot session's settings root, so a `hooks` block in `.claude/settings.json` or
-  `.claude/settings.local.json`, or `CLAUDE.md`/`CLAUDE.local.md`/a nested or lower-case
-  `claude.md`/`.claude/skills`/`.mcp.json` written into the home would load in the next session
-  (MEASURED). Fix round 1 (2026-09-25) re-measured the same class and found one more member:
-  `AGENTS.md` — the memory file the Claude Code CLI loads BY DEFAULT wherever `cwd` has no
-  `CLAUDE.md`, the exact steady state this section's own restore creates — loads at any depth,
-  including a nested `escalations/AGENTS.md`, by the same on-demand mechanism as `CLAUDE.md`; a
-  `closing` session's single `Bash` write of `<home>/AGENTS.md` carried its codeword into the next
-  `ruling` session before the predicate below widened to close it. The one definition of that
-  surface, `isHomeConfigSurface` (`core/supervisor/home-config.ts`, matching `.claude/**`,
-  `CLAUDE*.md` and `AGENTS*.md`, case-insensitive, plus `.mcp.json`), is shared by both layers
-  below — never restated.
-  `ruling`/`ratify`'s `decideContainmentHook` denies a `Write`/`Edit` to any such configuration
-  surface inside the home with its own reason, `HOME_CONFIG_DENIED_REASON` — never the
-  out-of-home containment reason; `closing` carries a third `PreToolUse` hook,
-  `buildHomeConfigWriteHook`, refusing the same surfaces inside the home only (a write outside the
-  home, e.g. the repo's own `CLAUDE.md`, is unaffected). Because a `closing` session's single
-  `Bash` command bypasses every `Write`/`Edit` hook, `runOneShotSession` also snapshots the home's
-  configuration surface before every spawn (`adapters/home-config.adapter.ts#snapshotHomeConfig`)
-  — refusing to spawn at all when it cannot be read — and restores it to that snapshot after the
-  session ends (`#restoreHomeConfig`), whoever wrote the change, appending one
-  `{"type":"tribe","subtype":"home_config_restored","removed":[…],"rewritten":[…]}` line to
-  `sessions/<sessionId>.log` when anything was undone, and failing the session to `outcome:
-  'error'` when the home cannot be restored (`rule-session-cwd-config-restored`).
+- **Every one-shot kind's `cwd` is the target repo root — never the campaign home.**
+  `ruling`, `ratify` and `closing` alike start inside the repo the campaign is working on
+  (`OneShotSessionConfig.repoRoot`, required for all three); `homeDir` stays the containment
+  root, the log directory and the ledger's home, but is never `cwd`. No kind lists the home in
+  `additionalDirectories` either — MEASURED (2026-09-27): a session that has the campaign home as
+  an additional directory loads the home's own `.claude/skills` and lets a planted instruction
+  living in the home reach the session's context, so the home is never handed to a session as a
+  directory it may read configuration from, only through the containment hook below. The
+  containment root itself is unchanged: `ruling`/`ratify` keep `buildContainmentHook(config.homeDir,
+  …)`, so a `Write`/`Edit` still lands only inside the campaign home and a write into the repo is
+  still refused — only where the session starts has moved, not where it may write.
 - **`verify-shipped`'s hand-load is kept.** `closing`'s `options.plugins` hand-load (pointing at
   the repo's own `verify-shipped` plugin directory) predates the tier fix and stays, on purpose:
   MEASURED, the `user` tier resolves `verify-shipped` only where `install.sh` symlinked it into

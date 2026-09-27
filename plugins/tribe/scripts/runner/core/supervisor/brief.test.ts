@@ -232,6 +232,11 @@ describe('renderBrief — closing', () => {
     expect(rendered.toLowerCase()).toContain('the verdict file');
     expect(rendered.toLowerCase()).toContain('not');
   });
+
+  test('the closing brief forbids working in the owner\'s own checkout (card supervisor-sessions-in-repo, G7)', () => {
+    const rendered = renderBrief('closing', fixtureClosingFacts());
+    expect(rendered).toContain('never switch its branch, stage, commit or edit files in it');
+  });
 });
 
 describe('renderBrief — kind/facts mismatch fails closed', () => {

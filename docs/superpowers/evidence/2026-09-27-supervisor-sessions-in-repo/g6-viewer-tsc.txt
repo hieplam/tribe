@@ -1,0 +1,21 @@
+e2e/visual-contract.e2e.test.ts(122,19): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+e2e/visual-contract.e2e.test.ts(124,5): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+e2e/visual-contract.e2e.test.ts(125,15): error TS2304: Cannot find name 'getComputedStyle'.
+e2e/visual-contract.e2e.test.ts(136,16): error TS2304: Cannot find name 'getComputedStyle'.
+e2e/visual-contract.e2e.test.ts(136,39): error TS2304: Cannot find name 'Element'.
+e2e/visual-contract.e2e.test.ts(144,19): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+e2e/visual-contract.e2e.test.ts(146,5): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+e2e/visual-contract.e2e.test.ts(147,27): error TS2304: Cannot find name 'getComputedStyle'.
+e2e/visual-contract.e2e.test.ts(157,21): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+e2e/visual-contract.e2e.test.ts(160,7): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+e2e/visual-contract.e2e.test.ts(161,29): error TS2304: Cannot find name 'getComputedStyle'.
+e2e/visual-contract.e2e.test.ts(172,19): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+e2e/visual-contract.e2e.test.ts(174,5): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+e2e/visual-contract.e2e.test.ts(175,15): error TS2304: Cannot find name 'getComputedStyle'.
+e2e/visual-contract.e2e.test.ts(184,19): error TS2304: Cannot find name 'getComputedStyle'.
+e2e/visual-contract.e2e.test.ts(184,36): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+e2e/visual-contract.e2e.test.ts(199,22): error TS2304: Cannot find name 'Element'.
+e2e/visual-contract.e2e.test.ts(492,18): error TS2304: Cannot find name 'getComputedStyle'.
+e2e/visual-contract.e2e.test.ts(515,14): error TS2304: Cannot find name 'HTMLElement'.
+e2e/visual-contract.e2e.test.ts(551,20): error TS2304: Cannot find name 'getComputedStyle'.
+e2e/visual-parity.ts(226,68): error TS2304: Cannot find name 'HTMLElement'.

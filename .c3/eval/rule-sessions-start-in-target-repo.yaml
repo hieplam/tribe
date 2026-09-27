@@ -1,0 +1,10 @@
+fact: rule-sessions-start-in-target-repo
+claim: >
+  Every session the tribe spawns starts in the target repo: buildSessionOptions
+  (core/session.ts) and buildOneShotOptions (core/supervisor/session.ts) both set cwd to the
+  target repo root, and the supervisor spawn path never lists a campaign home in
+  additionalDirectories.
+code:
+  - plugins/tribe/scripts/runner/core/session.ts
+  - plugins/tribe/scripts/runner/core/supervisor/session.ts
+# no pipeline ⇒ default: every declared code: glob must resolve to ≥1 file

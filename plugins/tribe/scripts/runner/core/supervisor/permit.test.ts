@@ -31,9 +31,10 @@ for (const [tool, input, wantDeny] of ROWS) {
   });
 }
 
-// Task 7 (card supervisor-sessions-in-repo): layer 1's `isHomeConfigSurface` clause is deleted —
-// nothing in the campaign home is loaded as configuration any more (Task 5 moved every one-shot
-// session's `cwd` to the target repo), so a home-root write is judged by containment alone.
+// Layer 1's configuration-surface clause is deleted, so a contained write to any path inside the
+// campaign home is allowed: nothing under the home loads as configuration any more, because
+// every one-shot session's `cwd` is the target repo, never the home — a home-root write is
+// judged by containment alone.
 test.each(['CLAUDE.md', '.claude/settings.json', 'AGENTS.md', '.mcp.json', 'escalations/AGENTS.md'])(
   'ruling/ratify may write %s inside the campaign home: nothing there is loaded as configuration any more', (rel) => {
     expect(decideContainmentHook(HOME, { tool_name: 'Write', tool_input: { file_path: `${HOME}/${rel}` } })).toEqual({});

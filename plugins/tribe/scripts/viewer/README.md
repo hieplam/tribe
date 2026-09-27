@@ -2,8 +2,8 @@
 
 A **stateless, read-only** local HTTP server, **one surface**: every Claude Code session
 transcript on the machine (`~/.claude/projects/`), listed, rendered, and followed live. Campaign
-facts are a small badge read from exactly two files under `~/.tribe` — never a second surface, and
-never a store (D7).
+facts are a small badge read from exactly three files under `~/.tribe` — never a second surface,
+and never a store (D7).
 
 This file documents what the code in this directory **actually does** — verified against the
 code, not asserted from memory. It is written against
@@ -20,8 +20,10 @@ Nothing in this package ever writes, renames, deletes, locks, or executes anythi
 never calls `git`, `gh`, or any network endpoint; it binds `127.0.0.1` unless the owner passes
 `--host` (the `tribe --remote` flag) to open it to the local network. Every filesystem
 access goes through one of two adapters — `adapters/fs.adapter.ts` (every transcript read: stat,
-readdir, ranged read, realpath) or `adapters/campaign.adapter.ts` (the *only* two `~/.tribe` reads
-— `campaign-state.json` and `run.json` — plus the pid liveness probe). `adapters/poller.adapter.ts`
+readdir, ranged read, realpath) or `adapters/campaign.adapter.ts` (the *only* three `~/.tribe`
+reads — `campaign-state.json`, `run.json` and `supervisor/ledger.jsonl` — plus the pid liveness
+probe; the ledger's directory and file are each `resolveContained` against the tribe root before
+either is opened, and a ledger over 8 MiB is not read at all, not even truncated). `adapters/poller.adapter.ts`
 is the only clock owner (one 250 ms poll loop per open `/events` stream). Nothing under `core/`
 touches the filesystem, the clock, the network, or `process.env`/`process.argv` directly —
 `structure.test.ts` enforces this mechanically on every `bun test` run.
@@ -146,11 +148,19 @@ entries, LRU — a miss is always a correct re-read, so this holds derived summa
 not violate the "no store" rule.
 
 **Campaign badges**: `adapters/campaign.adapter.ts` is the *only* code that reads `~/.tribe`, and
-it reads exactly two files per campaign — `campaign-state.json` and `run.json` — never a third. A
-malformed or unreadable state file degrades that campaign's badges to `[]`, per-campaign fault
-isolated; other campaigns are unaffected. `~/.tribe` missing entirely degrades every session's
-`badges` to `[]` (never `null`). A `sessionId` in a state file that is not a valid id is dropped
-from the index and counted in `skippedBadges`.
+it reads exactly three files per campaign — `campaign-state.json`, `run.json` and
+`supervisor/ledger.jsonl` — never a fourth. The ledger's directory and the file are each
+`resolveContained` against the tribe root before either is opened (the same D14 containment
+pattern as the other two files), and a ledger over 8 MiB is not read at all — one stderr line,
+counted in `skippedBadges`, never a truncated read. A malformed or unreadable state file degrades
+that campaign's badges to `[]`, per-campaign fault isolated; other campaigns are unaffected.
+`~/.tribe` missing entirely degrades every session's `badges` to `[]` (never `null`). A
+`sessionId` in a state file, or in a ledger row, that is not a valid id is dropped from the index
+and counted in `skippedBadges`. Supervisor sessions (`ruling`, `ratify`, `closing`) are badged
+from the ledger alone — one badge per row whose `kind` is one of those three and whose
+`sessionId` passes the id pattern, spawn rows and legacy end rows both counted, duplicates
+(same session, same campaign) collapsed to one; executor badges still come only from
+`campaign-state.json`, the ledger is never a second source for them.
 
 ## Tail and the SSE contract
 

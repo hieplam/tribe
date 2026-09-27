@@ -432,8 +432,9 @@ describe('the scan wall is wired into every supervisor envelope (issue #163, G2)
   });
 });
 
-// Task 7 (card supervisor-sessions-in-repo): layer 1 is deleted — `buildHomeConfigWriteHook` no
-// longer exists and no longer wires into `closing`'s PreToolUse list.
+// Layer 1's configuration-surface clause is deleted, so a contained write to any path inside the
+// campaign home is allowed: closing's PreToolUse list carries only the grant hook and the scan
+// wall — no hook refuses a write inside the home any more.
 describe('closing has no configuration-surface refusal (Task 7 deletes layer 1)', () => {
   test("closing's PreToolUse is exactly two entries: the grant hook, then the scan wall", () => {
     const options = buildOneShotOptions('closing', fixtureConfig(), new AbortController());

@@ -936,8 +936,8 @@ cd $S/runner && bun test core/supervisor/brief.test.ts
 ```
 Expected: 0 fail.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 13/16`.
-- [ ] Task 13 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 13/16`.
+- [x] Task 13 complete
 
 ---
 
@@ -1004,8 +1004,8 @@ git status --porcelain .tribe/; echo REGISTRY_UNTOUCHED
 ```
 Expected: `ok: true`; `old_rule=absent new_rule=present c3_check=ok`; nothing before `REGISTRY_UNTOUCHED`.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 14/16`.
-- [ ] Task 14 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 14/16`.
+- [x] Task 14 complete
 
 ---
 
@@ -1040,8 +1040,8 @@ bash $S/tests/test-supervisor-docs.sh | tail -1
 ```
 Expected: `guard_files_lines=0 identifier_hits=0 old_rule=absent new_rule=present c3_check=ok`; the docs test passes.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 15/16`.
-- [ ] Task 15 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 15/16`.
+- [x] Task 15 complete
 
 ---
 
@@ -1162,8 +1162,8 @@ bash $S/tests/sessions-in-repo/test-owner-run-dry.sh
 ```
 Expected: `ok - owner-run start/wait dry run`, within a few seconds.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 16/16`.
-- [ ] Task 16 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 16/16`.
+- [x] Task 16 complete
 
 ---
 
