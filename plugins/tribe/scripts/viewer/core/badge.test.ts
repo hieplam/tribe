@@ -6,7 +6,9 @@ const alwaysAlive = () => true;
 const neverAlive = () => false;
 
 function scan(repoKey: string, slug: string, state: unknown, runs: readonly unknown[] = []): CampaignScan {
-  return { repoKey, slug, state, runs };
+  // `ledger: []` is the shape every scan in THIS file has: these cases pin the executor badges,
+  // which come from `campaign-state.json` only and are unaffected by the ledger (spec §4.5).
+  return { repoKey, slug, state, runs, ledger: [] };
 }
 
 describe('buildBadgeIndex', () => {

@@ -1,7 +1,7 @@
 // adapters/campaign.adapter.ts — the campaign adapter (spec §9). This is the ONLY file in the
-// package that reads under `~/.tribe`, and it reads exactly two FILE types there:
-// `campaign-state.json` and `run.json` (D6/D8) — one of each per campaign/run, never a third
-// kind. A `run.json` body's `repo`, `answersPath`, `escalationsDir` fields, and — the one D6
+// package that reads under `~/.tribe`, and it reads exactly three FILE types there:
+// `campaign-state.json`, `run.json` and `supervisor/ledger.jsonl` (D6/D8, spec §4.5/card D1) —
+// never a fourth kind. A `run.json` body's `repo`, `answersPath`, `escalationsDir` fields, and — the one D6
 // specifically forbids — the runner-LOG-directory field, are never opened; the absolute path a
 // run body carries for its sibling campaign state is never read either (`campaign-state.json` is
 // always found by fixed layout next to its campaign, never by a path *named inside* a run body).
@@ -10,9 +10,9 @@
 // D6 boundary and not merely a behaviour).
 //
 // Containment (D14, spec §9, §12.2): a `readdir` entry cannot spell `..`, but it CAN be a symlink
-// pointing anywhere, so every `repoKey`/`slug`/`runId` DIRECTORY and every
-// `campaign-state.json`/`run.json` FILE is `realpath`-resolved and proven inside the resolved
-// tribe root — via `core/paths.ts#isContainedResolved`, the same pure primitive task 15
+// pointing anywhere, so every `repoKey`/`slug`/`runId`/`supervisor` DIRECTORY and every
+// `campaign-state.json`/`run.json`/`supervisor/ledger.jsonl` FILE is `realpath`-resolved and proven
+// inside the resolved tribe root — via `core/paths.ts#isContainedResolved`, the same pure primitive task 15
 // uses for the transcript side — before it is opened. An escaping one is refused: it contributes
 // no badge, is counted in `skippedBadges`, and exactly one line goes to stderr naming the path.
 // Never a crash, never a silent skip (`fail-closed-edges`).
@@ -86,6 +86,19 @@ function realpathOrNull(path: string): string | null {
 /** One line to stderr naming the refused path — never a crash, never a silent skip. */
 function warnRefused(path: string): void {
   console.error(`campaign.adapter: refused path outside the tribe root: ${path}`);
+}
+
+/** The largest `supervisor/ledger.jsonl` this adapter will read, in bytes (spec §4.5: "a file over
+ * 8 MiB is not read"). The cap is a BOUND on the viewer, not a judgement about the file: a ledger
+ * this large is almost certainly a runaway writer, and reading it would stall every badge scan
+ * behind it (`fail-closed-edges` obligation 3 — an unbounded read is an unbounded wait). */
+const MAX_LEDGER_BYTES = 8 * 1024 * 1024;
+
+/** One line to stderr naming the ledger the size cap refused — the same accounting as an escape
+ * (counted in `skippedBadges`), because both mean "this file's badges are missing from the scan"
+ * and a silent gap would be indistinguishable from a campaign that never had a ledger. */
+function warnOversizedLedger(path: string, sizeBytes: number): void {
+  console.error(`campaign.adapter: refused ledger over ${MAX_LEDGER_BYTES} bytes (${sizeBytes} bytes): ${path}`);
 }
 
 type Containment = { kind: 'ok'; resolved: string } | { kind: 'missing' } | { kind: 'escaped'; resolved: string };
@@ -198,6 +211,75 @@ function readCampaignRuns(root: string, campaignDir: string): { runs: unknown[];
   return { runs, skippedBadges };
 }
 
+/** Reads `<campaignDir>/supervisor/ledger.jsonl` — the third, and last, file type this package
+ * reads under `~/.tribe` (spec §4.5, card D1). The supervisor DIRECTORY and the ledger FILE are
+ * each `resolveContained` before either is opened, because they are two independent symlink
+ * opportunities: a contained directory can still hold an escaping file, and an escaping directory
+ * would hand out an out-of-root file the file-level check alone would never see (D14).
+ *
+ * Every non-security outcome degrades to `[]`: no `supervisor/` yet, no ledger yet, an unreadable
+ * one. Two outcomes are refusals — an escaping path, and a file over `MAX_LEDGER_BYTES` (which is
+ * NOT read at all, not even truncated) — and each is counted in `skippedBadges` with exactly one
+ * stderr line naming it.
+ *
+ * Each line is parsed inside its own narrow `try` so ONE malformed line costs only itself: a
+ * ledger is appended to live, so a half-written final line is the ordinary crash shape, not an
+ * exotic one (`fail-closed-edges` obligation 1). A malformed line is not a security refusal and is
+ * never counted. Rows leave here as `unknown`: nothing about their shape — and in particular no
+ * `sessionId` they carry — is interpreted here, and no value read out of this file is ever joined
+ * into a filesystem path (card D1; `core/badge.ts` uses the ids as `Map` keys only). */
+function readCampaignLedger(root: string, campaignDir: string): { ledger: unknown[]; skippedBadges: number } {
+  const supervisorDir = join(campaignDir, 'supervisor');
+  const dirContainment = resolveContained(root, supervisorDir);
+  if (dirContainment.kind === 'missing') return { ledger: [], skippedBadges: 0 };
+  if (dirContainment.kind === 'escaped') {
+    warnRefused(supervisorDir);
+    return { ledger: [], skippedBadges: 1 };
+  }
+
+  const ledgerPath = join(dirContainment.resolved, 'ledger.jsonl');
+  const fileContainment = resolveContained(root, ledgerPath);
+  if (fileContainment.kind === 'missing') return { ledger: [], skippedBadges: 0 };
+  if (fileContainment.kind === 'escaped') {
+    warnRefused(ledgerPath);
+    return { ledger: [], skippedBadges: 1 };
+  }
+
+  let sizeBytes: number;
+  try {
+    sizeBytes = statSync(fileContainment.resolved).size;
+  } catch (err) {
+    if (isAbsent(err)) return { ledger: [], skippedBadges: 0 };
+    throw err;
+  }
+  if (sizeBytes > MAX_LEDGER_BYTES) {
+    warnOversizedLedger(ledgerPath, sizeBytes);
+    return { ledger: [], skippedBadges: 1 };
+  }
+
+  let raw: string;
+  try {
+    raw = readFileSync(fileContainment.resolved, 'utf8');
+  } catch (err) {
+    if (isAbsent(err)) return { ledger: [], skippedBadges: 0 };
+    throw err;
+  }
+
+  const ledger: unknown[] = [];
+  for (const line of raw.split('\n')) {
+    // A trailing newline (every well-formed append leaves one) and any blank line in between are
+    // not rows and are not malformed — they are skipped before the parse, never counted as drops.
+    if (line.trim() === '') continue;
+    try {
+      ledger.push(JSON.parse(line) as unknown);
+    } catch (err) {
+      if (err instanceof SyntaxError) continue;
+      throw err;
+    }
+  }
+  return { ledger, skippedBadges: 0 };
+}
+
 /** One (`repoKey`, `slug`) candidate to read — exactly what `core/badge.ts#selectCampaigns` (the
  * 200-cap, task 12) admitted. This adapter reads ONLY what `selection` names here; the cap
  * decision is not this file's to make (`pure-core.md`, spec §9). */
@@ -229,8 +311,9 @@ function readOneCampaign(root: string, repoKey: string, slug: string): { scan: C
 
   const { state, skippedBadges: stateSkipped } = readCampaignState(root, campaignContainment.resolved);
   const { runs, skippedBadges: runsSkipped } = readCampaignRuns(root, campaignContainment.resolved);
+  const { ledger, skippedBadges: ledgerSkipped } = readCampaignLedger(root, campaignContainment.resolved);
 
-  return { scan: { repoKey, slug, state, runs }, skippedBadges: stateSkipped + runsSkipped };
+  return { scan: { repoKey, slug, state, runs, ledger }, skippedBadges: stateSkipped + runsSkipped + ledgerSkipped };
 }
 
 /** Discovers every `(repoKey, slug)` candidate under `tribeRoot` (spec §9 steps 1–2), with the

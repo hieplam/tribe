@@ -41,6 +41,13 @@ export interface CampaignScan {
   slug: string;
   state: unknown;
   runs: readonly unknown[];
+  /** Every parsed row of `<campaignDir>/supervisor/ledger.jsonl`, in file order (spec §4.5, card
+   * D1). `unknown` because the file is append-only JSONL written by another process: this core
+   * validates each row's shape itself and never trusts the adapter to have done it. `[]` covers
+   * all three "nothing to read" cases indistinguishably — no ledger yet, a refused (escaping or
+   * oversized) one, or one whose every line was malformed — because none of them changes what a
+   * badge index may contain. */
+  ledger: readonly unknown[];
 }
 
 export interface BuildBadgeIndexResult {
