@@ -13,7 +13,7 @@ import type { BriefCard, BriefState } from '../brief.ts';
 import type { CardPhase } from './phase.ts';
 import { buildStateDigest, findWorktreePathForBranch } from './phase.ts';
 import { persistLocalState } from './commit-guard.ts';
-import { answersPathOf, escalationPathOf } from '../paths.ts';
+import { answersPathOf, escalationPathOf, supervisorLedgerPathOf } from '../paths.ts';
 import { decideResidueHeal, type HealAction } from '../residue.ts';
 import { WORKTREE_STILL_PRESENT_DETAIL } from '../verify.ts';
 import { sessionUrlFor } from '../viewer-launch.ts';
@@ -512,6 +512,9 @@ export function sessionConfigFor(cardId: string, resolved: ResolvedConfig): RunS
     sessionTimeoutMs: resolved.sessionTimeoutMs,
     logsDir: resolved.logsDir,
     card: cardId,
+    // Written whether or not a supervisor ever runs — a watchdog-only campaign gets the
+    // session tree too (spec §4.4, D4).
+    ledgerPath: supervisorLedgerPathOf(resolved.homeDir),
   };
 }
 

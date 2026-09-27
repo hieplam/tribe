@@ -33,3 +33,10 @@ export function escalationPathOf(homeDir: string, cardId: string): string {
 export function reportDirOf(homeDir: string): string {
   return homeDir;
 }
+
+/** `<home>/supervisor/ledger.jsonl` — the campaign's session tree (spec §4.4): one file both the
+ * executor (`core/session.ts` `consumeSession`) and the supervisor (`core/supervisor/loop.ts`
+ * `supervisorPathsOf`) append rows to, so both writers derive the one path from this helper. */
+export function supervisorLedgerPathOf(homeDir: string): string {
+  return join(homeDir, 'supervisor', 'ledger.jsonl');
+}

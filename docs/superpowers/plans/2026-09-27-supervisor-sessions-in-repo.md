@@ -776,8 +776,8 @@ cd /Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo && git diff daf4f9c -- 
 ```
 Expected: 0 fail, tsc 0; no line of the executor envelope in the diff before `fence-check-done`.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 9/16`.
-- [ ] Task 9 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 9/16`.
+- [x] Task 9 complete
 
 ---
 

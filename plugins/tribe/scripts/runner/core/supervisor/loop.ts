@@ -76,7 +76,9 @@ import {
 } from './brief.ts';
 import { parseRulings, unratifiedRulingIds } from '../rulings.ts';
 import { extractReasonLine, parseEscalationQuestion } from '../escalation.ts';
-import { answersPathOf, campaignStatePathOf, escalationPathOf, escalationsDirOf } from '../paths.ts';
+import {
+  answersPathOf, campaignStatePathOf, escalationPathOf, escalationsDirOf, supervisorLedgerPathOf,
+} from '../paths.ts';
 import { REPORT_JSON_FILENAME } from '../report.ts';
 import { runRecordPathOf } from '../run-record.ts';
 import { watchdogPathsOf } from '../watchdog/select.ts';
@@ -172,7 +174,7 @@ export function supervisorPathsOf(homeDir: string): SupervisorPaths {
     dir,
     status: join(dir, 'status.json'),
     events: join(dir, 'events.jsonl'),
-    ledger: join(dir, 'ledger.jsonl'),
+    ledger: supervisorLedgerPathOf(homeDir),
     state: join(dir, 'state.json'),
     lock: join(dir, '.supervisor.lock'),
     parkDir: join(dir, 'park'),
