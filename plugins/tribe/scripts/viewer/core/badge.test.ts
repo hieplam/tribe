@@ -6,7 +6,18 @@ const alwaysAlive = () => true;
 const neverAlive = () => false;
 
 function scan(repoKey: string, slug: string, state: unknown, runs: readonly unknown[] = []): CampaignScan {
-  return { repoKey, slug, state, runs };
+  // `ledger: []` is the shape every scan in THIS file has: these cases pin the executor badges,
+  // which come from `campaign-state.json` only and are unaffected by the ledger (spec §4.5).
+  return { repoKey, slug, state, runs, ledger: [] };
+}
+
+/** A well-formed `campaign-state.json` body, for tests that only care about the LEDGER loop
+ * (spec §4.5) and need a state that contributes nothing surprising to the same index. */
+function validState(): unknown {
+  return {
+    sequence: ['C1'],
+    cards: { C1: { status: 'running', sessionId: 'a0000000-0000-4000-8000-000000000001' } },
+  };
 }
 
 describe('buildBadgeIndex', () => {
@@ -20,10 +31,10 @@ describe('buildBadgeIndex', () => {
     };
     const { index, skippedBadges } = buildBadgeIndex([scan('repoA', 'slug1', state)], alwaysAlive);
     expect(index.get('a0000000-0000-4000-8000-000000000001')).toEqual([
-      { repoKey: 'repoA', slug: 'slug1', cardId: 'C1', cardStatus: 'running', runnerAlive: false, runId: null },
+      { repoKey: 'repoA', slug: 'slug1', cardId: 'C1', cardStatus: 'running', sessionKind: 'card', runnerAlive: false, runId: null },
     ]);
     expect(index.get('b0000000-0000-4000-8000-000000000002')).toEqual([
-      { repoKey: 'repoA', slug: 'slug1', cardId: 'C2', cardStatus: 'merged', runnerAlive: false, runId: null },
+      { repoKey: 'repoA', slug: 'slug1', cardId: 'C2', cardStatus: 'merged', sessionKind: 'card', runnerAlive: false, runId: null },
     ]);
     expect(skippedBadges).toBe(0);
   });
@@ -177,9 +188,28 @@ describe('buildBadgeIndex', () => {
     const migratedRepoKey = '-Users-hip-repo-todd-skills.migrated-1788705562';
     const { index, skippedBadges } = buildBadgeIndex([scan(migratedRepoKey, 'slug1', state)], alwaysAlive);
     expect(index.get('a0000000-0000-4000-8000-000000000001')).toEqual([
-      { repoKey: migratedRepoKey, slug: 'slug1', cardId: 'C1', cardStatus: 'running', runnerAlive: false, runId: null },
+      { repoKey: migratedRepoKey, slug: 'slug1', cardId: 'C1', cardStatus: 'running', sessionKind: 'card', runnerAlive: false, runId: null },
     ]);
     expect(skippedBadges).toBe(0);
+  });
+
+  // Task 12 (spec §4.5): the ledger loop badges supervisor sessions. Ids are `Map` keys ONLY —
+  // never joined into a path (the `../../../etc/passwd` row proves that, same as B3 above).
+  test('ledger rows badge ruling/ratify/closing sessions; ids are keys only, bad ids counted, duplicates collapse', () => {
+    const ledger = [
+      { event: 'spawn', kind: 'closing', sessionId: '1bf2bdf3-c96d-499b-826f-0932f09bd3e3', cardId: null },
+      { kind: 'closing', sessionId: '1bf2bdf3-c96d-499b-826f-0932f09bd3e3', verdict: 'failed' },          // legacy end row, same session
+      { event: 'spawn', kind: 'ruling', sessionId: '6cd0db64-5818-43b2-a094-54e5747412e2', cardId: 'c2' },
+      { event: 'spawn', kind: 'subagent', sessionId: 'aaaaaaaaaaaaaaaaa', cardId: 'c2' },                  // not a supervisor session
+      { event: 'spawn', kind: 'ruling', sessionId: '../../../etc/passwd', cardId: 'c2' },
+      { kind: 'closing', sessionId: null },
+    ];
+    const { index, skippedBadges } = buildBadgeIndex([{ repoKey: 'k', slug: 's', state: validState(), runs: [], ledger }], () => false);
+    expect(index.get('1bf2bdf3-c96d-499b-826f-0932f09bd3e3')).toEqual([
+      { repoKey: 'k', slug: 's', cardId: null, cardStatus: 'closing', sessionKind: 'closing', runnerAlive: false, runId: null }]);
+    expect(index.get('6cd0db64-5818-43b2-a094-54e5747412e2')?.[0]).toMatchObject({ cardId: 'c2', sessionKind: 'ruling' });
+    expect(index.has('aaaaaaaaaaaaaaaaa')).toBe(false);
+    expect(skippedBadges).toBe(1);
   });
 });
 

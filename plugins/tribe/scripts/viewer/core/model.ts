@@ -15,12 +15,14 @@ export interface Project {
 }
 
 /** A campaign's claim on one session. A session can carry more than one badge (§9): identity is
- * the PAIR `(repoKey, slug)`, never the slug alone. */
+ * the PAIR `(repoKey, slug)`, never the slug alone. `cardId` is `null` for a supervisor session
+ * (`sessionKind` other than `'card'`, spec §4.5) — those come from the ledger, not a card. */
 export interface Badge {
   repoKey: string;
   slug: string;
-  cardId: string;
+  cardId: string | null;
   cardStatus: string;
+  sessionKind: 'card' | 'ruling' | 'ratify' | 'closing';
   runnerAlive: boolean;
   runId: string | null;
 }

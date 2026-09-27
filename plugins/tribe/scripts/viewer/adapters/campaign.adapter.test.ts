@@ -32,7 +32,7 @@ function writeCampaign(
   root: string,
   repoKey: string,
   slug: string,
-  opts: { state?: unknown; stateRaw?: string; runs?: Array<{ runId: string; record: Record<string, unknown> }>; noRunsDir?: boolean } = {},
+  opts: { state?: unknown; stateRaw?: string; runs?: Array<{ runId: string; record: Record<string, unknown> }>; noRunsDir?: boolean; ledgerRaw?: string } = {},
 ): string {
   const campaignDir = join(root, repoKey, 'campaigns', slug);
   mkdirSync(campaignDir, { recursive: true });
@@ -40,6 +40,13 @@ function writeCampaign(
     writeFileSync(join(campaignDir, 'campaign-state.json'), opts.stateRaw);
   } else if (opts.state !== undefined) {
     writeFileSync(join(campaignDir, 'campaign-state.json'), JSON.stringify(opts.state));
+  }
+  if (opts.ledgerRaw !== undefined) {
+    // The ledger is written EXACTLY as bytes, never via JSON.stringify: a `.jsonl` fixture must be
+    // able to carry a malformed line, which no serialiser would ever produce
+    // (`fixtures-mirror-reality.md`).
+    mkdirSync(join(campaignDir, 'supervisor'), { recursive: true });
+    writeFileSync(join(campaignDir, 'supervisor', 'ledger.jsonl'), opts.ledgerRaw);
   }
   if (!opts.noRunsDir) {
     const runsDir = join(campaignDir, 'runs');
@@ -145,7 +152,7 @@ describe('readSelectedCampaigns — reads exactly what the selection names (spec
       const selection: CampaignSelector[] = [{ repoKey: 'repo', slug: 'no-runs' }];
       const { scans, skippedBadges } = readSelectedCampaigns(root, selection, 0);
       expect(skippedBadges).toBe(0);
-      expect(scans).toEqual([{ repoKey: 'repo', slug: 'no-runs', state: { sequence: ['C1'], cards: { C1: { status: 'running', sessionId } } }, runs: [] }]);
+      expect(scans).toEqual([{ repoKey: 'repo', slug: 'no-runs', state: { sequence: ['C1'], cards: { C1: { status: 'running', sessionId } } }, runs: [], ledger: [] }]);
 
       const { index } = buildBadgeIndex(scans, () => true);
       const badge = index.get(sessionId)![0]!;
@@ -354,6 +361,120 @@ describe('readSelectedCampaigns — reads exactly what the selection names (spec
       } finally {
         cleanup();
         rmSync(outside, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('supervisor/ledger.jsonl — the THIRD file read per campaign (spec §4.5, card D1, D14, `fail-closed-edges`)', () => {
+    test('two valid lines and one malformed line: the malformed line alone is dropped, the rest are parsed', () => {
+      const { root, cleanup } = makeTribeRoot();
+      try {
+        writeCampaign(root, 'repo', 'has-ledger', {
+          state: { sequence: [], cards: {} },
+          // A real ledger is append-only JSONL, so a half-written final line is the ORDINARY
+          // crash shape, not an exotic one: a narrow catch around each line's parse drops that
+          // line and keeps the campaign readable (`fail-closed-edges` obligation 1).
+          ledgerRaw: '{"kind":"ruling","sessionId":"a1"}\n{bad\n{"kind":"closing","sessionId":"b2"}\n',
+        });
+
+        const selection: CampaignSelector[] = [{ repoKey: 'repo', slug: 'has-ledger' }];
+        const { result, lines } = withCapturedStderr(() => readSelectedCampaigns(root, selection, 0));
+        const scan = result.scans.find((s) => s.slug === 'has-ledger')!;
+        expect(scan.ledger).toHaveLength(2);
+        expect(scan.ledger).toEqual([
+          { kind: 'ruling', sessionId: 'a1' },
+          { kind: 'closing', sessionId: 'b2' },
+        ]);
+        expect(result.skippedBadges).toBe(0); // a malformed line is an ordinary absence, not a refusal
+        expect(lines).toEqual([]);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test('a campaign with no supervisor/ledger.jsonl yields ledger: [] and leaves skippedBadges untouched', () => {
+      const { root, cleanup } = makeTribeRoot();
+      try {
+        writeCampaign(root, 'repo', 'no-ledger', { state: { sequence: [], cards: {} } });
+
+        const selection: CampaignSelector[] = [{ repoKey: 'repo', slug: 'no-ledger' }];
+        const { result, lines } = withCapturedStderr(() => readSelectedCampaigns(root, selection, 0));
+        const scan = result.scans.find((s) => s.slug === 'no-ledger')!;
+        expect(scan.ledger).toEqual([]);
+        expect(result.skippedBadges).toBe(0);
+        expect(lines).toEqual([]);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test('a supervisor/ledger.jsonl that is a symlink to a FILE outside the tribe root is refused, counted, and named on stderr', () => {
+      const { root, cleanup } = makeTribeRoot();
+      const outside = mkdtempSync(join(tmpdir(), 'tribe-viewer-outside-ledger-file-'));
+      try {
+        const outsideFile = join(outside, 'fake-ledger.jsonl');
+        writeFileSync(outsideFile, '{"kind":"ruling","sessionId":"NEVER-READ"}\n');
+        const campaignDir = writeCampaign(root, 'repo', 'evil-ledger-file', { state: { sequence: [], cards: {} } });
+        mkdirSync(join(campaignDir, 'supervisor'), { recursive: true });
+        symlinkSync(outsideFile, join(campaignDir, 'supervisor', 'ledger.jsonl'));
+
+        const selection: CampaignSelector[] = [{ repoKey: 'repo', slug: 'evil-ledger-file' }];
+        const { result, lines } = withCapturedStderr(() => readSelectedCampaigns(root, selection, 0));
+        const scan = result.scans.find((s) => s.slug === 'evil-ledger-file')!;
+        expect(scan.ledger).toEqual([]); // the outside content never entered the ledger array
+        expect(result.skippedBadges).toBe(1);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain(join(campaignDir, 'supervisor', 'ledger.jsonl'));
+      } finally {
+        cleanup();
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
+    test('a supervisor DIRECTORY that is a symlink outside the tribe root is refused before its ledger is ever opened', () => {
+      const { root, cleanup } = makeTribeRoot();
+      const outside = mkdtempSync(join(tmpdir(), 'tribe-viewer-outside-ledger-dir-'));
+      try {
+        // BOTH shapes a hostile tree can take are tested, because each is judged by a SEPARATE
+        // containment check: the directory's, and the file's (`fixtures-mirror-reality.md` rule 1).
+        writeFileSync(join(outside, 'ledger.jsonl'), '{"kind":"ruling","sessionId":"NEVER-READ"}\n');
+        const campaignDir = writeCampaign(root, 'repo', 'evil-ledger-dir', { state: { sequence: [], cards: {} } });
+        symlinkSync(outside, join(campaignDir, 'supervisor'));
+
+        const selection: CampaignSelector[] = [{ repoKey: 'repo', slug: 'evil-ledger-dir' }];
+        const { result, lines } = withCapturedStderr(() => readSelectedCampaigns(root, selection, 0));
+        const scan = result.scans.find((s) => s.slug === 'evil-ledger-dir')!;
+        expect(scan.ledger).toEqual([]);
+        expect(result.skippedBadges).toBe(1);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain(join(campaignDir, 'supervisor'));
+      } finally {
+        cleanup();
+        rmSync(outside, { recursive: true, force: true });
+      }
+    });
+
+    test('a ledger larger than 8 MiB is not read at all: ledger: [], counted, one stderr line naming it', () => {
+      const { root, cleanup } = makeTribeRoot();
+      try {
+        // The FIRST line is valid JSON, so this fixture can only yield `[]` if the size cap
+        // stopped the read before it happened — an absent cap would parse that line and the
+        // assertion below would see a length of 1.
+        const oversized = `{"kind":"ruling","sessionId":"NEVER-READ"}\n${'x'.repeat(8 * 1024 * 1024)}`;
+        const campaignDir = writeCampaign(root, 'repo', 'huge-ledger', {
+          state: { sequence: [], cards: {} },
+          ledgerRaw: oversized,
+        });
+
+        const selection: CampaignSelector[] = [{ repoKey: 'repo', slug: 'huge-ledger' }];
+        const { result, lines } = withCapturedStderr(() => readSelectedCampaigns(root, selection, 0));
+        const scan = result.scans.find((s) => s.slug === 'huge-ledger')!;
+        expect(scan.ledger).toEqual([]);
+        expect(result.skippedBadges).toBe(1);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain(join(campaignDir, 'supervisor', 'ledger.jsonl'));
+      } finally {
+        cleanup();
       }
     });
   });

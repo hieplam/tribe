@@ -854,8 +854,8 @@ cd $S/viewer && bun test adapters/ core/ structure.test.ts && bunx tsc --noEmit 
 ```
 Expected: 0 fail; the tsc error count is 21 (the pre-existing e2e ones, spec §5.1) — no new error.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 11/16`.
-- [ ] Task 11 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 11/16`.
+- [x] Task 11 complete
 
 ---
 
@@ -904,8 +904,8 @@ cd $S/viewer && bun test core/ client/ && bun run build
 ```
 Expected: 0 fail in those directories; build succeeds.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 12/16`.
-- [ ] Task 12 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 12/16`.
+- [x] Task 12 complete
 
 ---
 

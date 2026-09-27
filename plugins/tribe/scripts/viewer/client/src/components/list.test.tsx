@@ -85,6 +85,7 @@ function makeBadge(overrides: Partial<Badge> = {}): Badge {
     slug: 'viewer-consolidation',
     cardId: 'card-7',
     cardStatus: 'in_progress',
+    sessionKind: 'card',
     runnerAlive: true,
     runId: 'run-1',
     ...overrides,
@@ -232,6 +233,19 @@ describe('CampaignBadge (spec §9)', () => {
     const { container, root } = renderInto(<CampaignBadge badge={badge} />);
     try {
       expect((container.textContent ?? '').toLowerCase()).toContain('runner dead');
+    } finally {
+      cleanup(container, root);
+    }
+  });
+
+  test('a supervisor-session badge (cardId: null) renders no card span, and its status shows the session kind, not cardStatus', () => {
+    const badge = makeBadge({ cardId: null, sessionKind: 'ruling', cardStatus: 'unused-for-a-supervisor-session' });
+    const { container, root } = renderInto(<CampaignBadge badge={badge} />);
+    try {
+      expect(container.querySelector('.campaign-badge__card')).toBeNull();
+      const text = container.textContent ?? '';
+      expect(text).toContain('ruling');
+      expect(text).not.toContain('unused-for-a-supervisor-session');
     } finally {
       cleanup(container, root);
     }

@@ -106,8 +106,8 @@ describe('buildScanIndex — badges (spec §9 wiring onto SessionSummary)', () =
 
   test('a session claimed by two campaigns carries BOTH badges (never drops one, spec §9)', () => {
     const badges: Badge[] = [
-      { repoKey: 'repo-a', slug: 'fixture', cardId: 'C1', cardStatus: 'shipped', runnerAlive: false, runId: null },
-      { repoKey: 'repo-b', slug: 'fixture', cardId: 'C1', cardStatus: 'shipped', runnerAlive: true, runId: 'r1' },
+      { repoKey: 'repo-a', slug: 'fixture', cardId: 'C1', cardStatus: 'shipped', sessionKind: 'card', runnerAlive: false, runId: null },
+      { repoKey: 'repo-b', slug: 'fixture', cardId: 'C1', cardStatus: 'shipped', sessionKind: 'card', runnerAlive: true, runId: 'r1' },
     ];
     const badgesBySessionId = new Map([['s1', badges]]);
     const index = buildScanIndex(['proj-a'], [session({ id: 's1', projectDir: 'proj-a' })], badgesBySessionId, NOW_ISO);

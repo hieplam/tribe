@@ -7,15 +7,15 @@
  * injected `processAlive` predicate — nothing here touches the filesystem, spawns a process, or
  * reads the clock.
  *
- * Containment (B3, D6): a `sessionId` read out of a state file is used ONLY as a `Map` key and
- * ONLY after it passes the id charset `^[0-9a-fA-F-]{8,64}$` — it is never concatenated,
- * joined, or otherwise turned into a path. This module never imports a path-joining function
- * and never touches any of the absolute-path fields a `run.json` body carries (the one today's
- * code reads verbatim is B3's other half) nor the runner-log directory field (D6: the viewer
- * never reads a runner log) — this module reads exactly `runId`, `startedAt`, `endedAt`, `pid`
- * off a run body and nothing else. A `sessionId` of `../../../etc/passwd` therefore indexes
- * nothing: it fails the charset check like any other malformed id and is only ever counted,
- * never opened.
+ * Containment (B3, D6): a `sessionId` read out of a state file OR a ledger row is used ONLY as a
+ * `Map` key and ONLY after it passes the id charset `^[0-9a-fA-F-]{8,64}$` — it is never
+ * concatenated, joined, or otherwise turned into a path. This module never imports a
+ * path-joining function and never touches any of the absolute-path fields a `run.json` body
+ * carries (the one today's code reads verbatim is B3's other half) nor the runner-log directory
+ * field (D6: the viewer never reads a runner log) — this module reads exactly `runId`,
+ * `startedAt`, `endedAt`, `pid` off a run body and nothing else. A `sessionId` of
+ * `../../../etc/passwd` therefore indexes nothing: it fails the charset check like any other
+ * malformed id and is only ever counted, never opened.
  */
 
 const SESSION_ID_RE = /^[0-9a-fA-F-]{8,64}$/;
@@ -23,11 +23,22 @@ const SESSION_ID_RE = /^[0-9a-fA-F-]{8,64}$/;
 /** `pid` bound from spec §9: `Number.isInteger && > 0 && < 2**22`. */
 const PID_MAX = 2 ** 22;
 
+/** A ledger row's `kind` values that name a supervisor session (spec §4.5). `subagent` and any
+ * other kind are not a supervisor session and get no badge. */
+type SupervisorSessionKind = 'ruling' | 'ratify' | 'closing';
+
+function isSupervisorSessionKind(kind: unknown): kind is SupervisorSessionKind {
+  return kind === 'ruling' || kind === 'ratify' || kind === 'closing';
+}
+
 export interface Badge {
   repoKey: string;
   slug: string;
-  cardId: string;
+  /** `null` for a supervisor session (`sessionKind !== 'card'`) — those come from the ledger,
+   * which has no card of its own (spec §4.5). */
+  cardId: string | null;
   cardStatus: string;
+  sessionKind: 'card' | SupervisorSessionKind;
   runnerAlive: boolean;
   runId: string | null;
 }
@@ -41,6 +52,13 @@ export interface CampaignScan {
   slug: string;
   state: unknown;
   runs: readonly unknown[];
+  /** Every parsed row of `<campaignDir>/supervisor/ledger.jsonl`, in file order (spec §4.5, card
+   * D1). `unknown` because the file is append-only JSONL written by another process: this core
+   * validates each row's shape itself and never trusts the adapter to have done it. `[]` covers
+   * all three "nothing to read" cases indistinguishably — no ledger yet, a refused (escaping or
+   * oversized) one, or one whose every line was malformed — because none of them changes what a
+   * badge index may contain. */
+  ledger: readonly unknown[];
 }
 
 export interface BuildBadgeIndexResult {
@@ -102,44 +120,79 @@ export function buildBadgeIndex(
   const index = new Map<string, Badge[]>();
   let skippedBadges = 0;
 
-  for (const { repoKey, slug, state, runs } of campaigns) {
+  for (const { repoKey, slug, state, runs, ledger } of campaigns) {
     const latest = pickLatestRun(runs);
     const runnerAlive = computeRunnerAlive(latest, processAlive);
     const runId = latest?.runId ?? null;
 
-    if (!isPlainObject(state) || !Array.isArray(state.sequence) || !isPlainObject(state.cards)) {
-      // A malformed state file contributes nothing and never throws (spec §9).
-      continue;
+    const addBadge = (sessionId: string, badge: Badge): void => {
+      const existing = index.get(sessionId);
+      if (existing) existing.push(badge);
+      else index.set(sessionId, [badge]);
+    };
+
+    // --- state loop: one badge per card with a valid sessionId (executor badges, spec §9). ---
+    if (isPlainObject(state) && Array.isArray(state.sequence) && isPlainObject(state.cards)) {
+      const cards = state.cards;
+      for (const cardId of state.sequence) {
+        if (typeof cardId !== 'string') continue;
+        const card = cards[cardId];
+        if (!isPlainObject(card)) continue;
+
+        const sessionId = card.sessionId;
+        if (sessionId === null || sessionId === undefined) continue; // no session id: skipped, not counted
+
+        if (typeof sessionId !== 'string' || !SESSION_ID_RE.test(sessionId)) {
+          // Fails the id charset — dropped AND counted (B3: this is also where a traversal
+          // string like `../../../etc/passwd` is refused; it is never used as a path).
+          skippedBadges += 1;
+          continue;
+        }
+
+        addBadge(sessionId, {
+          repoKey,
+          slug,
+          cardId,
+          cardStatus: typeof card.status === 'string' ? card.status : 'unknown',
+          sessionKind: 'card',
+          runnerAlive,
+          runId,
+        });
+      }
     }
+    // A malformed state file contributes nothing to the state loop and never throws (spec §9).
 
-    const cards = state.cards;
-    for (const cardId of state.sequence) {
-      if (typeof cardId !== 'string') continue;
-      const card = cards[cardId];
-      if (!isPlainObject(card)) continue;
+    // --- ledger loop: one badge per supervisor session (ruling/ratify/closing), spec §4.5. ---
+    // The ledger is not a second source for executor badges — only these three kinds count.
+    const badgedSessionIdsThisCampaign = new Set<string>();
+    for (const row of ledger) {
+      if (!isPlainObject(row)) continue;
+      const kind = row.kind;
+      if (!isSupervisorSessionKind(kind)) continue; // e.g. `subagent`: not a supervisor session
 
-      const sessionId = card.sessionId;
+      const sessionId = row.sessionId;
       if (sessionId === null || sessionId === undefined) continue; // no session id: skipped, not counted
 
       if (typeof sessionId !== 'string' || !SESSION_ID_RE.test(sessionId)) {
-        // Fails the id charset — dropped AND counted (B3: this is also where a traversal
-        // string like `../../../etc/passwd` is refused; it is never used as a path).
+        // Fails the id charset — dropped AND counted, same rule as the state loop above.
         skippedBadges += 1;
         continue;
       }
 
-      const badge: Badge = {
+      // Spawn rows and legacy end rows for the SAME session, in the SAME campaign, collapse to
+      // one badge — the first row seen for a session wins; later rows for it are ignored.
+      if (badgedSessionIdsThisCampaign.has(sessionId)) continue;
+      badgedSessionIdsThisCampaign.add(sessionId);
+
+      addBadge(sessionId, {
         repoKey,
         slug,
-        cardId,
-        cardStatus: typeof card.status === 'string' ? card.status : 'unknown',
+        cardId: typeof row.cardId === 'string' ? row.cardId : null,
+        cardStatus: kind,
+        sessionKind: kind,
         runnerAlive,
         runId,
-      };
-
-      const existing = index.get(sessionId);
-      if (existing) existing.push(badge);
-      else index.set(sessionId, [badge]);
+      });
     }
   }
 
