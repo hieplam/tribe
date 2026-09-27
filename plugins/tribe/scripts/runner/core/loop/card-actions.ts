@@ -4,7 +4,7 @@
 // itself.
 import type { Card, CampaignState, ResolvedConfig } from '../types.ts';
 import type { LoopIO } from '../../ports/ports.ts';
-import { verifyShipped } from '../verify.ts';
+import { LOCAL_GIT_QUERY_TIMEOUT_MS, REMOTE_OR_HOOK_GIT_TIMEOUT_MS, verifyShipped } from '../verify.ts';
 import type { VerifyConfig, VerifyPointId, VerifyResult } from '../verify.ts';
 import { runSession } from '../session.ts';
 import type { RunSessionConfig, SessionIO, SessionResult } from '../session.ts';
@@ -218,13 +218,14 @@ function fastForwardBaseIfSafe(ctx: CardCtx, firstResult: VerifyResult): Promise
   if (!mergedPassed || !localBaseFailed) return Promise.resolve(false);
   return serializeRepoGitMutation(async () => {
     const { resolved, io } = ctx;
-    const inRepo = { cwd: resolved.repoRoot };
+    const queryInRepo = { cwd: resolved.repoRoot, timeoutMs: LOCAL_GIT_QUERY_TIMEOUT_MS };
+    const mergeInRepo = { cwd: resolved.repoRoot, timeoutMs: REMOTE_OR_HOOK_GIT_TIMEOUT_MS };
     const remoteBase = `${resolved.remote}/${resolved.baseBranch}`;
     // Every fact requires exit 0: a failed probe presents as empty stdout and must never read
     // as "on base" or "clean".
-    const head = await io.exec(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], inRepo);
-    const status = await io.exec(['git', 'status', '--porcelain'], inRepo);
-    const ancestor = await io.exec(['git', 'merge-base', '--is-ancestor', resolved.baseBranch, remoteBase], inRepo);
+    const head = await io.exec(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], queryInRepo);
+    const status = await io.exec(['git', 'status', '--porcelain'], queryInRepo);
+    const ancestor = await io.exec(['git', 'merge-base', '--is-ancestor', resolved.baseBranch, remoteBase], queryInRepo);
     const actions = decideBaseSyncHeal({
       mergedPassed,
       localBaseFailed,
@@ -233,7 +234,7 @@ function fastForwardBaseIfSafe(ctx: CardCtx, firstResult: VerifyResult): Promise
       localIsAncestorOfRemote: ancestor.exitCode === 0,
     });
     if (actions.length === 0) return false;
-    const merged = await io.exec(['git', 'merge', '--ff-only', remoteBase], inRepo);
+    const merged = await io.exec(['git', 'merge', '--ff-only', remoteBase], mergeInRepo);
     return merged.exitCode === 0;
   });
 }

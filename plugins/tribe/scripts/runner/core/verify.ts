@@ -454,6 +454,9 @@ async function checkSchemaGuard(
   };
 }
 
+export const LOCAL_GIT_QUERY_TIMEOUT_MS = 60_000;
+export const REMOTE_OR_HOOK_GIT_TIMEOUT_MS = 120_000;
+
 /** D4 (card runner-driver-only): "the feature is merged and local master has the latest". Race-free
  * form of "local == remote": the merge commit is IN the local base branch, and the local base has no
  * commit the remote lacks. Strict equality would fail whenever a concurrent card merged after this
@@ -462,13 +465,13 @@ async function checkLocalBaseSynced(mergeSha: string | null, config: VerifyConfi
   const id = 'localBaseSynced' as const;
   if (!mergeSha) return { id, passed: false, detail: 'no merge sha available (point 1 did not report one); cannot check the local base' };
   const remoteBase = `${config.remote}/${config.baseBranch}`;
-  const fetched = await run(io, config.repoRoot, ['git', 'fetch', config.remote, config.baseBranch], { timeoutMs: 120_000 });
+  const fetched = await run(io, config.repoRoot, ['git', 'fetch', config.remote, config.baseBranch], { timeoutMs: REMOTE_OR_HOOK_GIT_TIMEOUT_MS });
   if (fetched.exitCode !== 0) return { id, passed: false, detail: `git fetch ${config.remote} ${config.baseBranch} failed (exit ${fetched.exitCode}); cannot compare the local base` };
-  const contains = await run(io, config.repoRoot, ['git', 'merge-base', '--is-ancestor', mergeSha, config.baseBranch]);
+  const contains = await run(io, config.repoRoot, ['git', 'merge-base', '--is-ancestor', mergeSha, config.baseBranch], { timeoutMs: LOCAL_GIT_QUERY_TIMEOUT_MS });
   if (contains.exitCode !== 0) {
     return { id, passed: false, detail: `local ${config.baseBranch} does not contain merge ${mergeSha}; fast-forward it to ${remoteBase}` };
   }
-  const notAhead = await run(io, config.repoRoot, ['git', 'merge-base', '--is-ancestor', config.baseBranch, remoteBase]);
+  const notAhead = await run(io, config.repoRoot, ['git', 'merge-base', '--is-ancestor', config.baseBranch, remoteBase], { timeoutMs: LOCAL_GIT_QUERY_TIMEOUT_MS });
   if (notAhead.exitCode !== 0) {
     return { id, passed: false, detail: `local ${config.baseBranch} has commits ${remoteBase} lacks (diverged); it is never healed automatically` };
   }

@@ -226,9 +226,11 @@ describe('healSafeResidue — D4 safe fast-forward of the local base (Task 1.6)'
   test('only localBaseSynced fails, checkout on base, clean, strictly behind -> ff-only merge, retry ships', async () => {
     let fastForwarded = false;
     const calls: string[][] = [];
+    const timedCalls: Array<{ cmd: string[]; options?: { cwd?: string; timeoutMs?: number } }> = [];
     const ok = (stdout = '') => ({ stdout, stderr: '', exitCode: 0 });
-    const exec = mock(async (cmd: string[]) => {
+    const exec = mock(async (cmd: string[], options?: { cwd?: string; timeoutMs?: number }) => {
       calls.push(cmd);
+      timedCalls.push({ cmd, options });
       const [bin, ...rest] = cmd;
       if (bin === 'gh' && rest[0] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
       if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -261,6 +263,20 @@ describe('healSafeResidue — D4 safe fast-forward of the local base (Task 1.6)'
     const healed = await healSafeResidue(ctx, first, verifyConfig);
 
     expect(calls).toContainEqual(['git', 'merge', '--ff-only', 'origin/master']);
+    for (const cmd of [
+      ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+      ['git', 'status', '--porcelain'],
+      ['git', 'merge-base', '--is-ancestor', 'master', 'origin/master'],
+    ]) {
+      expect(timedCalls.find((call) => call.cmd.join(' ') === cmd.join(' '))).toEqual({
+        cmd,
+        options: { cwd: '/repo', timeoutMs: 60_000 },
+      });
+    }
+    expect(timedCalls.find((call) => call.cmd.join(' ') === 'git merge --ff-only origin/master')).toEqual({
+      cmd: ['git', 'merge', '--ff-only', 'origin/master'],
+      options: { cwd: '/repo', timeoutMs: 120_000 },
+    });
     expect(healed.shipped).toBe(true);
     expect(healed.points.find((p) => p.id === 'localBaseSynced')?.detail).toContain('(healed: fast_forward_base)');
   });
