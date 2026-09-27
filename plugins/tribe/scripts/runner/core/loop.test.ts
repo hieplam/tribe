@@ -488,11 +488,6 @@ interface MockLoopIoOptions {
   /** When true, every card's spec/plan path is treated as MISSING on disk (drives the
    * PLANNING_NEEDED trigger) — off by default so unrelated tests aren't spuriously escalated. */
   missingSpecPlan?: boolean;
-  /** Maps a PR number (as it appears in `gh pr view <pr> --json body`) to the card id whose
-   * gap-gate stamp `checkGapGateStamped` should see in that PR's body — defaults to 'C1' when
-   * a test never sets this. Only used by the shared `gh pr view ... body` handler installed at
-   * the top of the exec mock below (verify.ts's D3 point 6, called on every ship path). */
-  prToCard?: Record<string, string>;
 }
 
 interface MockLoopIoResult {
@@ -525,35 +520,6 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
 
   const exec = mock(async (cmd: string[]): Promise<ExecResult> => {
     calls.push(cmd);
-    if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view' && cmd.includes('body')) {
-      // CU-4: checkGapGateStamped reads `gh pr view <pr> --json body` on every ship path and
-      // asserts stamp.card === cardId. Resolve the verifying card from THIS mock's own persisted
-      // campaign state (writeFile keeps writtenFiles current, and recordBranchFromPr persists
-      // card.pr before verify), so a valid stamp is served for whatever card owns this PR —
-      // C1, C2, B, C, any of them — with no per-test wiring.
-      let stampCard = opts.prToCard?.[cmd[3] as string];
-      if (stampCard === undefined) {
-        try {
-          const persisted = JSON.parse(writtenFiles.get(campaignStatePathOf(homeDir)) ?? '{}') as {
-            cards?: Record<string, { pr?: number | null }>;
-          };
-          for (const [id, c] of Object.entries(persisted.cards ?? {})) {
-            if (c?.pr != null && String(c.pr) === cmd[3]) {
-              stampCard = id;
-              break;
-            }
-          }
-        } catch {
-          /* fall through to the default */
-        }
-      }
-      stampCard = stampCard ?? 'C1';
-      return ok(
-        JSON.stringify({
-          body: `<!-- gap-gate v1 card=${stampCard} base=b0 head=h0 minted=none matched=none debt-delta=0 ledger=none -->`,
-        }),
-      );
-    }
     for (const handler of execHandlers) {
       const result = handler(cmd);
       if (result) return result;
@@ -801,7 +767,6 @@ describe('runLoop — full happy path over two cards', () => {
     const { io, calls, writtenFiles, spawnBriefs } = buildMockLoopIo({
       stateJson: stateJsonWithTwoFreshCards(),
       answers: '# answers\n(none yet)\n',
-      prToCard: { '1': 'C1', '2': 'C2' },
       execHandlers: [
         (cmd) => {
           if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
@@ -2155,7 +2120,6 @@ describe('runLoop — D5′: escalate-then-continue ordering', () => {
       stateJson: JSON.stringify(state),
       answers: '',
       execHandlers: cleanCommitAndVerifyHandlers('c2000001'),
-      prToCard: { '2': 'C2' },
       spawnQueue: [
         () => messages(needsDirectionMessages('sess-c1')),
         () => messages(shippedMessages(2, 'c2000001', 'sess-c2')),
@@ -2224,7 +2188,6 @@ describe('runLoop — D5′: blocked cascade (W6)', () => {
       stateJson: JSON.stringify(state),
       answers: '',
       execHandlers: cleanCommitAndVerifyHandlers('c3000001'),
-      prToCard: { '3': 'C' },
       spawnQueue: [
         () => messages(needsDirectionMessages('sess-a')),
         () => messages(shippedMessages(3, 'c3000001', 'sess-c')),
@@ -2298,7 +2261,6 @@ describe('runLoop — D5′: escalation_pending phase (prior-run escalation file
       answers: '',
       escalationFiles: new Set(['C1']),
       execHandlers: cleanCommitAndVerifyHandlers('abc0002'),
-      prToCard: { '2': 'C2' },
       spawnQueue: [() => messages(shippedMessages(2, 'abc0002', 'sess-c2'))],
     });
 
@@ -2331,7 +2293,6 @@ describe('runLoop — D5′ W-F2: --include-escalated never re-selects the same 
       stateJson: JSON.stringify(state),
       answers: '',
       execHandlers: cleanCommitAndVerifyHandlers('deadc2c2'),
-      prToCard: { '2': 'C2' },
       // Only ONE spawnSession call is scripted for C1. If `nextCard` ever re-selected C1 a
       // second time (the W-F2 bug: an `escalated` card is excluded only when
       // `includeEscalated` is false, and C1 sits BEFORE C2 in `sequence`), this queue would
@@ -2406,7 +2367,6 @@ describe('runLoop — D5′ Warchief audit fix: --max-cards budgets only cards a
       answers: '',
       escalationFiles: new Set(['A']),
       execHandlers: cleanCommitAndVerifyHandlers('bbb0001'),
-      prToCard: { '5': 'B' },
       spawnQueue: [() => messages(shippedMessages(5, 'bbb0001', 'sess-b'))],
     });
 
@@ -2442,7 +2402,6 @@ describe('runLoop — --max-concurrent N (P12 follow-up: bounded card parallelis
       stateJson: stateJsonWithTwoFreshCards(),
       answers: '# answers\n(none yet)\n',
       execHandlers: cleanCommitAndVerifyHandlers('deadbee'),
-      prToCard: { '2': 'C2' },
       spawnQueue: [
         () => messages(shippedMessages(1, 'aaaaaaa', 'sess-c1')),
         () => messages(shippedMessages(2, 'bbbbbbb', 'sess-c2')),
@@ -2454,7 +2413,6 @@ describe('runLoop — --max-concurrent N (P12 follow-up: bounded card parallelis
       stateJson: stateJsonWithTwoFreshCards(),
       answers: '# answers\n(none yet)\n',
       execHandlers: cleanCommitAndVerifyHandlers('deadbee'),
-      prToCard: { '2': 'C2' },
       spawnQueue: [
         () => messages(shippedMessages(1, 'aaaaaaa', 'sess-c1')),
         () => messages(shippedMessages(2, 'bbbbbbb', 'sess-c2')),
@@ -2543,7 +2501,6 @@ describe('runLoop — --max-concurrent N (P12 follow-up: bounded card parallelis
       stateJson: JSON.stringify(state),
       answers: '# answers\n(none yet)\n',
       execHandlers: cleanCommitAndVerifyHandlers('deadbee'),
-      prToCard: { '2': 'C2' },
       spawnQueue: [
         () => gatedShippedSession('C1', 1, 'aaaaaaa', 'sess-c1')(),
         () => messages(shippedMessages(2, 'bbbbbbb', 'sess-c2')),
@@ -2635,7 +2592,6 @@ describe('runLoop — --max-concurrent N (P12 follow-up: bounded card parallelis
       answers: '',
       escalationFiles: new Set(['C1']),
       execHandlers: cleanCommitAndVerifyHandlers('abc0002'),
-      prToCard: { '2': 'C2' },
       spawnQueue: [() => messages(shippedMessages(2, 'abc0002', 'sess-c2'))],
     });
 
@@ -2657,7 +2613,6 @@ describe('runLoop — --max-concurrent N (P12 follow-up: bounded card parallelis
       stateJson: stateJsonWithTwoFreshCards(),
       answers: '# answers\n(none yet)\n',
       execHandlers: cleanCommitAndVerifyHandlers('deadbee'),
-      prToCard: { '2': 'C2' },
       spawnQueue: [() => messages(shippedMessages(2, 'bbbbbbb', 'sess-c2'))],
     });
     // C1's spec/plan (fixtureCard's defaults: docs/specs/c1.md, docs/plans/c1.md) are the only
@@ -2788,7 +2743,6 @@ describe('runPassPool — panel finding #2: one card\'s thrown exception must no
           return null;
         },
       ],
-      prToCard: { '2': 'C2' },
       spawnQueue: [() => messages(shippedMessages(2, 'bbbbbbb', 'sess-c2'))],
     });
 

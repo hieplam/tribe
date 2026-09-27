@@ -99,7 +99,7 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
   add('escalation/planning-needed', buildEscalationMarkdown(CARD_ID, 'planning_needed',
     'Missing on disk: plan', resolved));
   const allPoints: VerifyPointId[] = ['merged', 'mergeShaAncestorOfMaster', 'checksGreen',
-    'worktreeAndBranchGone', 'schemaGuard', 'gapGateStamped', 'ledgerCommitted'];
+    'worktreeAndBranchGone', 'schemaGuard'];
   add('escalation/verify-failed-merged', buildEscalationMarkdown(CARD_ID, 'verify_failed_twice',
     '- merged: PR #12 is not merged', resolved, allPoints));
   add('escalation/verify-failed-after-merge', buildEscalationMarkdown(CARD_ID, 'verify_failed_twice',

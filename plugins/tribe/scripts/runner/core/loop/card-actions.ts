@@ -313,14 +313,6 @@ const VERIFY_FAILURE_BULLETS: Record<Exclude<VerifyPointId, 'worktreeAndBranchGo
     '- schemaGuard: the plan file lacks `allowsSchemaChange: true` front-matter, or the ' +
     "card's baseSha is stale. Designed change → land a PR adding the front-matter to the " +
     'plan. Stale base → correct `baseSha` in the campaign state (see P11).',
-  gapGateStamped:
-    '- gapGateStamped: the merged PR body carries no valid `gap-gate v1` stamp for this card. ' +
-    'Run `bun plugins/tribe/scripts/gaps/gap-gate.ts` on the card branch, paste its ' +
-    '`<card>-gap-gate.md` into the PR body as the `## Harness gaps` section, and re-run.',
-  ledgerCommitted:
-    '- ledgerCommitted: the stamp says ids were minted, but the base branch has no ' +
-    '`.tribe/harness-gaps.jsonl` carrying them. Commit the gate\'s ledger append on the card ' +
-    'branch (trailer `Tribe-Milestone: gap-gate`) so it rides the PR, then re-run.',
 };
 
 /** P5 audit fix-round (blocker, skinnerB): `worktreeAndBranchGone`'s bullet used to fire from

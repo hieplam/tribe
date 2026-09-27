@@ -12,7 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseGapGateStamp, readAllowsSchemaChange, schemaGuardRange, verifyShipped } from './verify.ts';
+import { readAllowsSchemaChange, schemaGuardRange, verifyShipped } from './verify.ts';
 import type { ExecResult, VerifyConfig, VerifyIO, VerifyPointResult } from './verify.ts';
 import type { Card } from './types.ts';
 
@@ -59,8 +59,9 @@ interface MockOptions {
    * `readFile` of it throws ENOENT — the shape a card leaves behind when its own merge
    * deleted its planning docs (C1). Defaults to present. */
   planExists?: boolean;
+  /** A PR body the double serves on `gh pr view`; the done check never reads one, which is
+   * exactly what the happy-path test proves by passing a body with no gap-gate stamp. */
   prBody?: string;
-  ledgerAtBase?: string;
 }
 
 function ok(stdout: string): ExecResult {
@@ -79,10 +80,7 @@ function buildIo(opts: MockOptions = {}): VerifyIO {
   const mergeParents = opts.mergeParents ?? ['parent0001', 'parent0002'];
   const planContent = opts.planContent ?? '# plan\n\nno front matter here.\n';
   const planExists = opts.planExists ?? true;
-  const prBody =
-    opts.prBody ??
-    '## Harness gaps\n\n<!-- gap-gate v1 card=C1 base=base0001 head=head0001 minted=none matched=none debt-delta=0 ledger=none -->\n';
-  const ledgerAtBase = opts.ledgerAtBase ?? '';
+  const prBody = opts.prBody ?? '## Why\n\na plain PR body\n';
 
   return {
     fileExists(): boolean {
@@ -95,17 +93,11 @@ function buildIo(opts: MockOptions = {}): VerifyIO {
       }
       if (bin === 'git' && rest[0] === 'merge-base') {
         // rest = ['merge-base', '--is-ancestor', <sha>, <target>]; only the MERGE sha is governed
-        // by ancestorExitCode — the stamp's base/head shas are ancestors unless a test says
-        // otherwise, so an unrelated ancestry failure never bleeds into the stamp point.
+        // by ancestorExitCode — any other sha is an ancestor unless a test says otherwise.
         return { stdout: '', stderr: '', exitCode: rest[2] === mergeSha ? ancestorExitCode : 0 };
       }
       if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'view') {
         return ok(JSON.stringify({ body: prBody }));
-      }
-      if (bin === 'git' && rest[0] === 'show') {
-        return ledgerAtBase.length > 0
-          ? ok(ledgerAtBase)
-          : { stdout: '', stderr: 'fatal: path does not exist', exitCode: 128 };
       }
       if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'checks') {
         return ok(JSON.stringify(checks));
@@ -162,12 +154,13 @@ function buildIoRecordingCalls(opts: MockOptions = {}): { io: VerifyIO; calls: s
 }
 
 describe('verifyShipped — happy path', () => {
-  test('all seven points pass', async () => {
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo(), 'C1');
+  test('a merged PR with no gap-gate stamp and no ledger ships: the done check names only generic points', async () => {
+    const io = buildIo({ prBody: '## Why\n\nno stamp at all\n' });
+    const result = await verifyShipped(fixtureCard(), fixtureConfig(), io, 'C1');
     expect(result.shipped).toBe(true);
-    expect(result.failedPoints).toEqual([]);
-    expect(result.points).toHaveLength(7);
-    expect(result.points.every((p) => p.passed)).toBe(true);
+    expect(result.points.map((p) => p.id)).toEqual([
+      'merged', 'mergeShaAncestorOfMaster', 'checksGreen', 'worktreeAndBranchGone', 'schemaGuard',
+    ]);
   });
 });
 
@@ -630,175 +623,6 @@ describe('verifyShipped — remote/baseBranch are threaded, never hardcoded', ()
     expect(point?.detail).toContain('parent0001...parent0002');
     expect(point?.detail).not.toContain('upstream/main');
     expect(point?.detail).not.toContain('origin/master');
-  });
-});
-
-describe('gapGateStamped (spec §3, card goal G4)', () => {
-  const STAMP =
-    '<!-- gap-gate v1 card=C1 base=base0001 head=head0001 minted=G-001 matched=none debt-delta=0 ledger=none -->';
-
-  test('a PR body carrying a matching stamp passes the point', async () => {
-    const result = await verifyShipped(
-      fixtureCard(),
-      fixtureConfig(),
-      buildIo({ prBody: `text\n${STAMP}\n`, ledgerAtBase: '{"id":"G-001","event":"opened"}\n' }),
-      'C1',
-    );
-    const point = result.points.find((p) => p.id === 'gapGateStamped');
-    expect(point?.passed).toBe(true);
-  });
-
-  test('a PR body with no stamp fails the point, and the card is not shipped', async () => {
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo({ prBody: '## Why\n\nno stamp here\n' }), 'C1');
-    expect(result.shipped).toBe(false);
-    expect(result.failedPoints).toContain('gapGateStamped');
-    expect(result.points.find((p) => p.id === 'gapGateStamped')?.detail).toContain('no `gap-gate v1` stamp');
-  });
-
-  test("a stamp for a DIFFERENT card fails the point (a copied PR body is not this card's proof)", async () => {
-    const other = STAMP.replace('card=C1', 'card=C9');
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo({ prBody: other }), 'C1');
-    expect(result.failedPoints).toContain('gapGateStamped');
-  });
-
-  test('a stamp whose base sha is not an ancestor of the base branch fails the point', async () => {
-    const io = buildIo({ prBody: STAMP });
-    const spy: string[][] = [];
-    const wrapped = {
-      ...io,
-      async exec(cmd: string[], o?: { cwd?: string }) {
-        spy.push(cmd);
-        if (cmd[0] === 'git' && cmd[1] === 'merge-base' && cmd[3] === 'base0001') {
-          return { stdout: '', stderr: '', exitCode: 1 };
-        }
-        return io.exec(cmd, o);
-      },
-    };
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), wrapped, 'C1');
-    expect(result.failedPoints).toContain('gapGateStamped');
-    expect(spy.some((c) => c[1] === 'merge-base' && c[3] === 'base0001')).toBe(true);
-  });
-
-  test('every point is still reported even when this one fails (never short-circuited)', async () => {
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo({ prBody: 'nothing' }), 'C1');
-    expect(result.points.map((p) => p.id)).toEqual([
-      'merged',
-      'mergeShaAncestorOfMaster',
-      'checksGreen',
-      'worktreeAndBranchGone',
-      'schemaGuard',
-      'gapGateStamped',
-      'ledgerCommitted',
-    ]);
-  });
-
-  test('a stamp naming the Tribe-Card slug of the merged commits passes (runner id differs)', async () => {
-    const slugStamp = STAMP.replace('card=C1', 'card=gap-gate-wiring');
-    const io = buildIo({ prBody: slugStamp, ledgerAtBase: '{"id":"G-001","event":"opened"}\n' });
-    const wrapped = { ...io, async exec(cmd: string[], o?: { cwd?: string }) {
-      if (cmd[0] === 'git' && cmd[1] === 'log') return { stdout: 'gap-gate-wiring\ngap-gate-wiring\n', stderr: '', exitCode: 0 };
-      return io.exec(cmd, o);
-    } };
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), wrapped, 'C1');
-    expect(result.points.find((p) => p.id === 'gapGateStamped')?.passed).toBe(true);
-  });
-
-  test('a stamp naming a slug that NO merged commit carries still fails', async () => {
-    const slugStamp = STAMP.replace('card=C1', 'card=some-other-card');
-    const io = buildIo({ prBody: slugStamp });
-    const wrapped = { ...io, async exec(cmd: string[], o?: { cwd?: string }) {
-      if (cmd[0] === 'git' && cmd[1] === 'log') return { stdout: 'gap-gate-wiring\n', stderr: '', exitCode: 0 };
-      return io.exec(cmd, o);
-    } };
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), wrapped, 'C1');
-    expect(result.failedPoints).toContain('gapGateStamped');
-    expect(result.points.find((p) => p.id === 'gapGateStamped')?.detail).toContain('some-other-card');
-  });
-
-  test('a git log that FAILS but emits partial matching stdout does NOT pass (fail closed)', async () => {
-    const slugStamp = STAMP.replace('card=C1', 'card=gap-gate-wiring');
-    const io = buildIo({ prBody: slugStamp });
-    const wrapped = { ...io, async exec(cmd: string[], o?: { cwd?: string }) {
-      if (cmd[0] === 'git' && cmd[1] === 'log') return { stdout: 'gap-gate-wiring\n', stderr: 'fatal: bad revision', exitCode: 128 };
-      return io.exec(cmd, o);
-    } };
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), wrapped, 'C1');
-    expect(result.failedPoints).toContain('gapGateStamped');
-  });
-
-  test('a differing stamp card with a null merge sha fails clearly and never attempts git log', async () => {
-    const slugStamp = STAMP.replace('card=C1', 'card=gap-gate-wiring');
-    let logCalls = 0;
-    const io = buildIo({ prBody: slugStamp, mergeSha: null });
-    const wrapped = { ...io, async exec(cmd: string[], o?: { cwd?: string }) {
-      if (cmd[0] === 'git' && cmd[1] === 'log') { logCalls++; return { stdout: 'gap-gate-wiring\n', stderr: '', exitCode: 0 }; }
-      return io.exec(cmd, o);
-    } };
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), wrapped, 'C1');
-    expect(result.failedPoints).toContain('gapGateStamped');
-    expect(result.points.find((p) => p.id === 'gapGateStamped')?.detail).toContain('not C1');
-    expect(logCalls).toBe(0);
-  });
-});
-
-describe('ledgerCommitted (spec §3, ledger policy A)', () => {
-  const STAMP =
-    '<!-- gap-gate v1 card=C1 base=base0001 head=head0001 minted=G-004,G-005 matched=none debt-delta=0 ledger=none -->';
-
-  test('passes when the merged base tree carries every id the stamp says was minted', async () => {
-    const ledger = '{"id":"G-004","event":"opened"}\n{"id":"G-005","event":"opened"}\n';
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo({ prBody: STAMP, ledgerAtBase: ledger }), 'C1');
-    expect(result.points.find((p) => p.id === 'ledgerCommitted')?.passed).toBe(true);
-  });
-
-  test('fails, naming the missing id, when the ledger was never committed', async () => {
-    const result = await verifyShipped(
-      fixtureCard(),
-      fixtureConfig(),
-      buildIo({ prBody: STAMP, ledgerAtBase: '{"id":"G-004","event":"opened"}\n' }),
-      'C1',
-    );
-    expect(result.failedPoints).toContain('ledgerCommitted');
-    expect(result.points.find((p) => p.id === 'ledgerCommitted')?.detail).toContain('G-005');
-  });
-
-  test('a stamp that minted nothing needs no ledger at all', async () => {
-    const result = await verifyShipped(fixtureCard(), fixtureConfig(), buildIo(), 'C1');
-    expect(result.points.find((p) => p.id === 'ledgerCommitted')?.passed).toBe(true);
-  });
-
-  test('the ledger path is campaign config, defaulting to the capability constant', async () => {
-    const io = buildIo({ prBody: STAMP, ledgerAtBase: '{"id":"G-004"}{"id":"G-005"}' });
-    const seen: string[][] = [];
-    const wrapped = {
-      ...io,
-      async exec(cmd: string[], o?: { cwd?: string }) {
-        seen.push(cmd);
-        return io.exec(cmd, o);
-      },
-    };
-    await verifyShipped(fixtureCard(), fixtureConfig({ gapLedgerPath: 'ops/gaps.jsonl' }), wrapped, 'C1');
-    expect(seen.some((c) => c[0] === 'git' && c[1] === 'show' && c[2] === 'origin/master:ops/gaps.jsonl')).toBe(true);
-  });
-});
-
-describe('parseGapGateStamp', () => {
-  test('reads the canonical stamp of the gap gate', () => {
-    const parsed = parseGapGateStamp(
-      '<!-- gap-gate v1 card=gap-gate-scripts base=aaaa111 head=bbbb222 minted=G-004,G-005 matched=G-001 debt-delta=0 ledger=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 -->',
-    );
-    expect(parsed).toEqual({
-      card: 'gap-gate-scripts',
-      base: 'aaaa111',
-      head: 'bbbb222',
-      minted: ['G-004', 'G-005'],
-      matched: ['G-001'],
-    });
-  });
-
-  test('none means an empty list; a truncated stamp is not a stamp', () => {
-    expect(parseGapGateStamp('<!-- gap-gate v1 card=C1 base=a head=b minted=none matched=none debt-delta=0 ledger=none -->')?.minted).toEqual([]);
-    expect(parseGapGateStamp('<!-- gap-gate v1 card=C1 base=a -->')).toBeNull();
   });
 });
 
