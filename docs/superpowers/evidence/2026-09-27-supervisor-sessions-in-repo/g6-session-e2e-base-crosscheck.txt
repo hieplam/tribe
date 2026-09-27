@@ -1,0 +1,21 @@
+# G6 cross-check: the one session.e2e failure is inherited, not caused by this card
+
+Branch run (docs/.../g6-session-e2e.txt): 6 pass / 1 fail —
+  "closing: Skill c3 returns C3 content and no Unknown skill appears"
+
+Cause, read from the branch transcript: Haiku guessed the skill name `c3:c3`, the harness answered
+`Unknown skill: c3:c3`, and Haiku then invoked the real name `c3-skill:c3` successfully. The
+session's own `system/init` lists `c3-skill:c3` in `slash_commands`, so the settings tier the test
+exists to protect is intact; the assertion trips on the model's first guess, not on configuration.
+
+Same single test, run on UNTOUCHED origin/master in a detached worktree (/tmp/sir-base):
+
+  $ env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/session.e2e.test.ts \
+      -t 'Skill c3 returns C3 content'
+  error: expect(received).not.toContain(expected)
+  Expected to not contain: "Unknown skill"
+  (session 503479d5-dc6b-4a04-9237-d656a7a0edec; `c3-skill:c3` present in its slash_commands too)
+
+Fails identically on base => inherited. REFUTED in advance by the plan's adjudication rule
+("the intermittent ... tests earlier cards measured as inherited — refuted only when they also
+fail on base").

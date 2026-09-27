@@ -1,0 +1,3 @@
+a3b04345-dee5-49d5-b293-0dd320b9da31 closing log=/Users/hiep/repo/tribe transcript=/Users/hiep/repo/tribe PASS
+dd7f23b6-15b0-4e80-b470-8276c1ad9490 ratify log=/Users/hiep/repo/tribe transcript=/Users/hiep/repo/tribe PASS
+G1 2/2 kinds=closing,ratify

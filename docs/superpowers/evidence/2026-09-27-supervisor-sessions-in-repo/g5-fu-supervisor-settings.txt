@@ -1,0 +1,6 @@
+{"id":"3d0f1f07-1d79-4c44-8e9c-cc84c303d1a1","badges":["fu-supervisor-settings\n·\nratify\n·\nrunner dead"],"pass":true}
+{"id":"789e9dea-ca0b-4274-8860-0c5eb400208f","badges":["fu-supervisor-settings\n·\nclosing\n·\nrunner dead"],"pass":true}
+{"id":"755daa23-83b4-4031-8210-4f59975fc435","badges":[],"pass":false}
+{"id":"148705ea-963b-4717-bb90-ee69a24079b1","badges":[],"pass":false}
+{"id":"1bf2bdf3-c96d-499b-826f-0932f09bd3e3","badges":["fu-supervisor-settings\n·\nclosing\n·\nrunner dead"],"pass":true}
+G5 3/5

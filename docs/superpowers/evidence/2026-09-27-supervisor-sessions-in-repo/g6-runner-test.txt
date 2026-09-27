@@ -1,0 +1,17 @@
+bun test v1.4.2 (744846f84)
+
+adapters/viewer-launch.adapter.test.ts:
+campaign viewer: failed to start (continuing): ENOENT: no such file or directory, posix_spawn '/nonexistent/binary/for/sure/f38'
+
+cli/main.test.ts:
+campaign runner: removed 1 ANTHROPIC_API_KEY line(s) from /some/repo/.env.local
+campaign runner: /some/repo/.env.local has 1 ANTHROPIC_API_KEY line(s) — would remove (--dry-run, not written)
+fatal: ambiguous argument 'HEAD': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+
+ 1357 pass
+ 14 skip
+ 0 fail
+ 3282 expect() calls
+Ran 1371 tests across 56 files. [297.69s]

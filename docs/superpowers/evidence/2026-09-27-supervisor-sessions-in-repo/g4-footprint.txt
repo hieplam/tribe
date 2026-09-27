@@ -1,0 +1,1 @@
+guard_files_lines=0 identifier_hits=0 old_rule=absent new_rule=present c3_check=ok

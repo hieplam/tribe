@@ -1,0 +1,111 @@
+bun test v1.4.2 (744846f84)
+
+e2e/served-build.e2e.test.ts:
+198 |       renameSync(backupDir, DIST_DIR);
+199 |     } else if (backupDir !== null) {
+200 |       rmSync(backupDir, { recursive: true, force: true });
+201 |     }
+202 | 
+203 |     expect(hashAfter).toBe(hashBefore); // D16/G4 — nothing in this suite writes to homeA
+                            ^
+error: expect(received).toBe(expected)
+
+Expected: "986f4a7ccc1bbf0851e05b66f2ec587b4ef6dbdf3e8536a0f693956e57b4613d"
+Received: "aae2a7b5a071b280589ac9517e05e9d310d5a2a4974a14723c04570d7a08c882"
+
+      at <anonymous> (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/viewer/e2e/served-build.e2e.test.ts:203:23)
+(fail) served-build.e2e (G6, spec §16.5): the server serves exactly its fixed dist/ > (unnamed) [31.94ms]
+
+e2e/real-transcript.e2e.test.ts:
+28 |     path = chromium.executablePath();
+29 |   } catch (e) {
+30 |     throw noBrowserError(e instanceof Error ? e.message : String(e));
+31 |   }
+32 |   if (!path || !existsSync(path)) {
+33 |     throw noBrowserError(`expected at ${path || '(empty path)'}`);
+               ^
+error: no Chromium executable found in Playwright's registry (expected at /Users/hiep/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing) — run: bunx playwright install chromium
+      at resolveChromiumExecutable (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/viewer/e2e/browser.ts:33:11)
+      at <anonymous> (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/viewer/e2e/real-transcript.e2e.test.ts:162:53)
+(fail) (unnamed) [0.18ms]
+161 | beforeAll(async () => {
+162 |   browser = await chromium.launch({ executablePath: resolveChromiumExecutable(), headless: true });
+163 | });
+164 | 
+165 | afterAll(async () => {
+166 |   await browser.close();
+              ^
+TypeError: undefined is not an object (evaluating 'browser.close')
+      at <anonymous> (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/viewer/e2e/real-transcript.e2e.test.ts:166:9)
+(fail) (unnamed) [0.06ms]
+
+e2e/navigation.e2e.test.ts:
+28 |     path = chromium.executablePath();
+29 |   } catch (e) {
+30 |     throw noBrowserError(e instanceof Error ? e.message : String(e));
+31 |   }
+32 |   if (!path || !existsSync(path)) {
+33 |     throw noBrowserError(`expected at ${path || '(empty path)'}`);
+               ^
+error: no Chromium executable found in Playwright's registry (expected at /Users/hiep/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing) — run: bunx playwright install chromium
+      at resolveChromiumExecutable (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/viewer/e2e/browser.ts:33:11)
+      at <anonymous> (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/viewer/e2e/navigation.e2e.test.ts:148:26)
+(fail) (unnamed) [0.07ms]
+
+e2e/url-refusals.e2e.test.ts:
+123 | 
+124 |   afterAll(async () => {
+125 |     await viewer.stop();
+126 |     const hashAfter = hashTree(homeDir);
+127 |     rmSync(homeDir, { recursive: true, force: true });
+128 |     expect(hashAfter).toBe(hashBefore); // D16/G4 — nothing in this suite writes to homeA
+                            ^
+error: expect(received).toBe(expected)
+
+Expected: "b892f7776fc51ca13cfcbec381c4dcf431ee6daee80194ffd8acc8bf14646066"
+Received: "e37f4ff36578fb4a413640a2644f5f5690b2c099f1b4ec638b8462557f8007c8"
+
+      at <anonymous> (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/viewer/e2e/url-refusals.e2e.test.ts:128:23)
+(fail) url-refusals.e2e (spec §16.2 URL matrix, over real HTTP) > (unnamed) [26.01ms]
+
+e2e/visual-contract.e2e.test.ts:
+28 |     path = chromium.executablePath();
+29 |   } catch (e) {
+30 |     throw noBrowserError(e instanceof Error ? e.message : String(e));
+31 |   }
+32 |   if (!path || !existsSync(path)) {
+33 |     throw noBrowserError(`expected at ${path || '(empty path)'}`);
+               ^
+error: no Chromium executable found in Playwright's registry (expected at /Users/hiep/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing) — run: bunx playwright install chromium
+      at resolveChromiumExecutable (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/viewer/e2e/browser.ts:33:11)
+      at <anonymous> (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/viewer/e2e/visual-contract.e2e.test.ts:210:53)
+(fail) (unnamed) [0.09ms]
+
+e2e/dom-kinds.e2e.test.ts:
+28 |     path = chromium.executablePath();
+29 |   } catch (e) {
+30 |     throw noBrowserError(e instanceof Error ? e.message : String(e));
+31 |   }
+32 |   if (!path || !existsSync(path)) {
+33 |     throw noBrowserError(`expected at ${path || '(empty path)'}`);
+               ^
+error: no Chromium executable found in Playwright's registry (expected at /Users/hiep/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing) — run: bunx playwright install chromium
+      at resolveChromiumExecutable (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/viewer/e2e/browser.ts:33:11)
+      at <anonymous> (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/viewer/e2e/dom-kinds.e2e.test.ts:179:53)
+(fail) (unnamed) [0.05ms]
+178 |   // this throws with the one-line remedy and every test below reports that failure.
+179 |   browser = await chromium.launch({ executablePath: resolveChromiumExecutable(), headless: true });
+180 | });
+181 | 
+182 | afterAll(async () => {
+183 |   await browser.close();
+              ^
+TypeError: undefined is not an object (evaluating 'browser.close')
+      at <anonymous> (/Users/hiep/repo/tribe-wt/supervisor-sessions-in-repo/plugins/tribe/scripts/viewer/e2e/dom-kinds.e2e.test.ts:183:9)
+(fail) (unnamed) [0.05ms]
+
+ 879 pass
+ 3 skip
+ 8 fail
+ 9497 expect() calls
+Ran 890 tests across 51 files. [22.25s]

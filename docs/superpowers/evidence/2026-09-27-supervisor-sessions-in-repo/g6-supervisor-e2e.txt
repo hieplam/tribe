@@ -1,0 +1,42 @@
+ok - probe1: absolute --home exits 0
+ok - probe1: ledger has exactly one ruling line
+ok - probe1: the escalation file is archived to .resolved-R1
+ok - probe1: answers.md gained exactly one ## block
+ok - probe1: NEEDS_OWNER.md does not exist
+ok - probe2: --campaign exits 0, same as --home
+ok - probe2: resolved to the SAME home tribe-home.sh derives
+ok - probe2: ledger has exactly one ruling line
+ok - probe2: the escalation file is archived, same as probe 1
+ok - probe2: NEEDS_OWNER.md does not exist, same as probe 1
+ok - probe3: an owner-only escalation exits 20
+ok - probe3: the double's own counter file was never created — zero invocations
+ok - probe3: NEEDS_OWNER.md exists
+ok - probe3: it names park reason owner_only
+ok - probe3: NEEDS_OWNER.md carries the escalation's own Context text
+ok - probe4: a silent double exits 20
+ok - probe4: exactly one bounded retry — the counter reads 2
+ok - probe4: park reason is ruling_failed
+ok - probe5: a repo-touching double exits 20
+ok - probe5: the double really did touch the target repo (decision 4's trigger is real)
+ok - probe5: rejected as a failed attempt — park reason is ruling_failed, not owner_only
+ok - probe6: every file under the home is supervisor/watchdog/runner-owned, or the original fixture
+ok - probe6: answers.md's mtime moved during the run
+ok - probe6: answers.md still carries exactly the one block the double wrote — nothing else touched it
+ok - probe7: a second supervisor refuses with exit 21
+ok - probe7: the second invocation wrote nothing
+ok - probe8: a --home outside the tribe root exits 1
+ok - probe8: with a typed refusal naming the root
+ok - probe8: no stack trace for an outside-root --home
+ok - probe8: a --home with no campaign-state.json exits 1
+ok - probe8: with a typed refusal naming the missing file
+ok - probe8: no stack trace for a stateless --home
+ok - probe9: a closing session that wrote no verdict file exits 20, not 0
+ok - probe9: no verdict file was ever written for c1
+ok - probe9: park reason is closing_failed
+ok - probe10: a PASS verdict file present exits 0
+ok - probe10: NEEDS_OWNER.md does not exist
+ok - probe10: the verify-shipped verdict file exists on disk
+ok - probe10: the verdict file carries card c1
+ok - probe10: the verdict file carries a PASS verdict
+
+40 passed, 0 failed
