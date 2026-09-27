@@ -172,8 +172,8 @@ Expected: `guard_files_lines=1070 identifier_hits=149 old_rule=present new_rule=
 `G1 0/5 kinds=?,closing,ratify` (the two sessions with no ledger id read `?`); then one stderr
 line and `rc=2`.
 
-- [ ] **Step 1: Commit** — the two tools and `baseline.md`, trailers `Tribe-Task: 1/16`.
-- [ ] Task 1 complete
+- [x] **Step 1: Commit** — the two tools and `baseline.md`, trailers `Tribe-Task: 1/16`.
+- [x] Task 1 complete
 
 ---
 
