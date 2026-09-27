@@ -195,6 +195,15 @@ describe('renderBrief — ratify', () => {
 });
 
 describe('renderBrief — closing', () => {
+  test('every shipped card is re-verified with --skip-gap-gate (D6: no gap-gate demand)', () => {
+    const rendered = renderBrief('closing', fixtureClosingFacts());
+    // The per-card commands, not the template's prose sentence that also names `--verdict-out`.
+    const verdictLines = rendered.split('\n')
+      .filter((l) => l.includes('--verdict-out') && l.includes('bash "$script_path"'));
+    expect(verdictLines.length).toBeGreaterThan(0);
+    for (const line of verdictLines) expect(line).toContain('--skip-gap-gate');
+  });
+
   test("contains Stage D's four numbered steps, byte-identical to SKILL.md", () => {
     const rendered = renderBrief('closing', fixtureClosingFacts());
     expect(rendered).toContain(STAGE_D_STEP_1);
