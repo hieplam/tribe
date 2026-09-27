@@ -1,0 +1,1 @@
+Resume this card: no branch or PR was ever recorded for it locally (the previous attempt ended its turn before reporting one), so first check what you already did — `git status`, `git branch`, `gh pr list --head <branch>` — before continuing; do not assume a clean slate. Then continue implementing the plan and report the terminal SHIPPED/NEEDS_DIRECTION line.

@@ -1,0 +1,22 @@
+# Campaign needs the owner: go-after
+
+**Park reason:** ratify_failed
+**At:** 2026-09-27T09:00:00.000Z          **Supervisor exit:** 20
+**Campaign home:** /Users/owner/.tribe/-Users-owner-repo-runner-e2e-go/campaigns/go-after
+
+## What happened
+A ratify session failed or timed out and the retry budget for it is exhausted.
+
+## The question (when a card is parked)
+(not applicable — this park is not about one card's escalation)
+
+## What I already did
+- Ruling rounds used: (no ruling rounds used this run)   · Spawns used: 0/8
+- Rulings landed this run: (none landed this run)
+- Watchdog runs: 1; last terminal reason: escalations_pending
+
+## What unblocks it
+Repair the remaining `ratified-as:` fields in /Users/owner/.tribe/-Users-owner-repo-runner-e2e-go/campaigns/go-after/answers.md by hand, delete this file, then re-run: bun run.ts supervise --repo /repo --campaign go-after --model sonnet
+
+## Ledger
+(no spawns this run)

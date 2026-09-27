@@ -1,0 +1,1 @@
+Merge denied: could not verify checks — run `gh pr checks` yourself, get full green, then retry the merge.
