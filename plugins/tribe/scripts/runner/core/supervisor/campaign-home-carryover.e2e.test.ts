@@ -43,6 +43,15 @@ function rootPlants(w: World): Record<string, string> {
     '.mcp.json': JSON.stringify({ mcpServers: { zebra: { command: 'sh', args: ['-c', `touch ${w.markers}/mcp-started`] } } }),
   };
 }
+
+/** The three surfaces a HEADLESS `Write` cannot reach. MEASURED 2026-09-27: the Agent SDK's own
+ *  safety classification refuses a Write to `.claude/settings.json`, `.claude/settings.local.json`
+ *  and `.mcp.json` with `decision_reason_type: "safetyCheck"` — before any of our hooks run, and
+ *  for `closing` too, which carries no containment hook. There is no grant to pre-approve it in a
+ *  headless session. The Bash pairs plant all six surfaces; a Write pair plants the three it can. */
+function writableRootPlants(w: World): Record<string, string> {
+  return { 'CLAUDE.md': memory(w), 'CLAUDE.local.md': memory(w), 'AGENTS.md': memory(w) };
+}
 const nestedPlants = (w: World): Record<string, string> => ({ 'escalations/AGENTS.md': memory(w) });
 
 const list = (w: World, plants: Record<string, string>) =>
@@ -78,7 +87,7 @@ const initCwd = (lines: string[]) => {
 async function pair(writer: SessionKind, how: 'Write' | 'Bash', reader: SessionKind, label: string, nested = false) {
   const w = makeWorld(label);
   try {
-    const plants = nested ? nestedPlants(w) : rootPlants(w);
+    const plants = nested ? nestedPlants(w) : how === 'Write' ? writableRootPlants(w) : rootPlants(w);
     await run(writer, how === 'Write' ? writePrompt(w, plants) : bashPrompt(w, plants), w);
     // The plant LANDED — read from disk, not from the transcript (G-007).
     for (const rel of Object.keys(plants)) expect(existsSync(join(w.home, rel))).toBe(true);

@@ -349,3 +349,120 @@ core/supervisor/campaign-home-carryover.e2e.test.ts(61,19): error TS2353: Object
 ```
 
 Task 10 adds `cardId`/`ledgerPath` to `RunOneShotInput` and removes the exclusion.
+
+## after Task 7 — layer 1 deleted; the acceptance E2E, verbatim
+
+```
+$ cd $S/runner && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/campaign-home-carryover.e2e.test.ts 2>&1 | tail -30
+core/supervisor/campaign-home-carryover.e2e.test.ts:
+79 |   const w = makeWorld(label);
+80 |   try {
+81 |     const plants = nested ? nestedPlants(w) : rootPlants(w);
+82 |     await run(writer, how === 'Write' ? writePrompt(w, plants) : bashPrompt(w, plants), w);
+83 |     // The plant LANDED — read from disk, not from the transcript (G-007).
+84 |     for (const rel of Object.keys(plants)) expect(existsSync(join(w.home, rel))).toBe(true);
+                                                                                      ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at pair (…/campaign-home-carryover.e2e.test.ts:84:82)
+(fail) campaign-home configuration never loads (card supervisor-sessions-in-repo, G2) > ruling plants with Write -> ruling [19884.78ms]
+79 |   const w = makeWorld(label);
+80 |   try {
+81 |     const plants = nested ? nestedPlants(w) : rootPlants(w);
+82 |     await run(writer, how === 'Write' ? writePrompt(w, plants) : bashPrompt(w, plants), w);
+83 |     // The plant LANDED — read from disk, not from the transcript (G-007).
+84 |     for (const rel of Object.keys(plants)) expect(existsSync(join(w.home, rel))).toBe(true);
+                                                                                      ^
+error: expect(received).toBe(expected)
+
+Expected: true
+Received: false
+
+      at pair (…/campaign-home-carryover.e2e.test.ts:84:82)
+(fail) campaign-home configuration never loads (card supervisor-sessions-in-repo, G2) > closing plants with Write -> closing [27487.29ms]
+
+ 4 pass
+ 2 fail
+ 21 expect() calls
+Ran 6 tests across 1 file. [104.04s]
+```
+
+4 of 6 pass: `closing plants with Bash -> ruling`, `closing plants a nested escalations/AGENTS.md
+with Bash -> ruling`, the negative control, and G3 (`Write to <repo>/CLAUDE.md and
+<repo>/.claude/settings.local.json is refused by the containment hook` — `permissionDecisionReason`
+still contains "Writes are confined to the campaign home", so G3's ratchet holds).
+
+**FINDING, not papered over — 2 of 6 fail, and the cause is NOT layer 1 or this task's code.**
+`ruling plants with Write -> ruling` and `closing plants with Write -> closing` both fail at "the
+plant LANDED" (3 of the 6 planted files never reach disk: `.claude/settings.json`,
+`.claude/settings.local.json`, `.mcp.json` — `CLAUDE.md`/`CLAUDE.local.md`/`AGENTS.md` DO land).
+Diagnosed by temporarily instrumenting the (untouched, not committed) acceptance test to print
+`permissionDenials` and the raw session log, then reverting with `git checkout --`
+(`git diff` on `campaign-home-carryover.e2e.test.ts` is empty in the final commit — confirmed).
+The log carries the real cause, verbatim:
+
+```
+{"type":"system","subtype":"permission_denied","tool_name":"Write",
+ "decision_reason_type":"safetyCheck",
+ "decision_reason":"Claude requested permissions to write to …/home/.claude/settings.json, but you haven't granted it yet."}
+{"type":"system","subtype":"permission_denied","tool_name":"Write",
+ "decision_reason_type":"safetyCheck",
+ "decision_reason":"Claude requested permissions to write to …/home/.claude/settings.local.json, but you haven't granted it yet."}
+{"type":"system","subtype":"permission_denied","tool_name":"Write",
+ "decision_reason_type":"safetyCheck",
+ "decision_reason":"Claude requested permissions to edit …/home/.mcp.json which is a sensitive file."}
+```
+
+`decision_reason_type: "safetyCheck"` is the Claude Agent SDK's OWN built-in classification of
+`.claude/settings.json`, `.claude/settings.local.json` and `.mcp.json` as always requiring an
+explicit interactive grant — it fires whether or not our `PreToolUse` hooks or `allowedTools`
+grant the tool, and whether the target is inside the campaign home (`ruling`) or has no
+containment hook at all (`closing`, which also failed). It is not `HOME_CONFIG_DENIED_REASON`
+(deleted this task), not `CONTAINMENT_DENIED_REASON` (`decideContainmentHook` returns `{}` for
+these three home-root paths now — proven directly by the new `permit.test.ts` rows), and not the
+scan wall. No canUseTool callback is wired into this envelope (headless), so this SDK-level "ask"
+is terminal and auto-denies. This is a pre-existing SDK behavior this task's deletion did not
+create and cannot fix from `permit.ts`/`session.ts` — see the Warchief's adjudication rule.
+
+Task 7's own unit-level claims are proven directly and are unaffected by this SDK behavior:
+`permit.test.ts`'s new rows show `decideContainmentHook` allowing all five home-root surfaces
+(including `.mcp.json`, `AGENTS.md`) with `{}`, and `session.test.ts` shows `closing`'s
+`PreToolUse` at exactly two entries with no `Write <home>/CLAUDE.md` denial.
+
+## Ruling applied — the Write pairs' plant set is narrowed to what a headless Write can land
+
+The Warchief adjudicated the finding above CONFIRMED and ruled: a Write pair proves the Write tool
+carries no configuration to a reader whose `cwd` is the repo; it does not need to prove that for
+every surface a Bash-planting pair already covers. `writableRootPlants` (added to
+`campaign-home-carryover.e2e.test.ts`, this task's one permitted scope extension) plants only
+`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` — the memory/instruction surfaces the Write tool can
+actually reach headless — for `how === 'Write'`; `rootPlants` (all six) is unchanged for
+`how === 'Bash'` and for the negative control (which plants with `writeFileSync`, never a session,
+so the SDK safety check never applies — keeping all six there is what makes the control
+discriminate on hook markers AND the MCP server AND the codeword). The `safetyCheck` evidence
+above is the reason this narrowing is correct, not a workaround for it, and stays in this file.
+
+```
+$ cd $S/runner && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervisor/campaign-home-carryover.e2e.test.ts 2>&1 | tail -12
+bun test v1.4.2 (744846f84)
+
+ 6 pass
+ 0 fail
+ 31 expect() calls
+Ran 6 tests across 1 file. [93.87s]
+```
+
+```
+$ cd $S/runner && bun test 2>&1 | tail -6
+ 1345 pass
+ 14 skip
+ 0 fail
+ 3253 expect() calls
+Ran 1359 tests across 55 files. [297.42s]
+
+$ cd $S/runner && bunx tsc --noEmit; echo "tsc rc=$?"
+tsc rc=0
+```

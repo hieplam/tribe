@@ -604,8 +604,8 @@ the runner README, cleared by Tasks 14–15). The acceptance E2E is informative 
 record its tail in `$EV/baseline.md` under "after Task 7" (the four pairs are expected to pass now;
 its binding run is the Verification contract).
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 7/16`.
-- [ ] Task 7 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 7/16`.
+- [x] Task 7 complete
 
 ---
 

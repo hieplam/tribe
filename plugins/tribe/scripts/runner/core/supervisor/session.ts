@@ -16,7 +16,7 @@
 import { decideScanGuardHook, type HookDecision, type SessionMessage } from '../session.ts';
 import type { SessionKind } from './model.ts';
 import type { LedgerEntryUsage } from './model.ts';
-import { buildContainmentHook, buildHomeConfigWriteHook, decideClosingGrantHook } from './permit.ts';
+import { buildContainmentHook, decideClosingGrantHook } from './permit.ts';
 
 /** spec §5.2/§5.3: the tool grant for a `ruling`/`ratify` session. `closing` (§5.4) carries its
  * OWN, wider grant — R11 (Task 20), below `CLOSING_ALLOWED_TOOLS`/`CLOSING_DISALLOWED_TOOLS` —
@@ -83,8 +83,7 @@ export interface OneShotSessionOptions {
 
 /** `buildOneShotOptions`'s input. `repoRoot` is `cwd` for every kind (spec §4.1); `realpath` is
  * the containment hook's one injected capability (`permit.ts`'s `buildContainmentHook`) — never
- * `fs` directly (`pure-core.md`). Also used by `closing`'s configuration-write hook
- * (`permit.ts#buildHomeConfigWriteHook`). */
+ * `fs` directly (`pure-core.md`). */
 export interface OneShotSessionConfig {
   /** the containment root for `ruling`/`ratify`, and where logs and the ledger live — never
    * `cwd`. */
@@ -146,17 +145,16 @@ export function buildOneShotOptions(
     if (config.verifyShippedPluginDir !== undefined) {
       options.plugins = [{ type: 'local', path: config.verifyShippedPluginDir }];
     }
-    // Still NO containment hook — `closing` legitimately writes the repo (§5.4); this hook refuses
-    // only configuration surfaces inside the home. The scan wall is not containment either: it
-    // refuses only a filesystem- or home-rooted `find`.
+    // Still NO containment hook — `closing` legitimately writes the repo (§5.4). Card
+    // supervisor-sessions-in-repo (Task 7): no configuration-write hook either — `cwd` is the
+    // target repo (Task 5), so nothing written into the campaign home loads as any session's
+    // configuration any more. The scan wall is not containment either: it refuses only a
+    // filesystem- or home-rooted `find`.
     options.hooks = {
       PreToolUse: [
         // The grant, enforced (card supervisor-session-settings, ruling R1): a host allow rule in a
         // loaded settings tier can never add a tool to CLOSING_ALLOWED_TOOLS.
         { hooks: [(hookInput: unknown) => Promise.resolve(decideClosingGrantHook(CLOSING_ALLOWED_TOOLS, hookInput))] },
-        // Card supervisor-home-settings-containment (spec §6.2): the home is the next session's
-        // settings root; closing still writes the repo freely, only home configuration is refused.
-        { hooks: [buildHomeConfigWriteHook(config.homeDir, { realpath: config.realpath })] },
         SCAN_GUARD_ENTRY,
       ],
     };
