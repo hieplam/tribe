@@ -1162,8 +1162,8 @@ bash $S/tests/sessions-in-repo/test-owner-run-dry.sh
 ```
 Expected: `ok - owner-run start/wait dry run`, within a few seconds.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 16/16`.
-- [ ] Task 16 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 16/16`.
+- [x] Task 16 complete
 
 ---
 
