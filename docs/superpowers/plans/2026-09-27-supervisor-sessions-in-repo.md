@@ -509,8 +509,8 @@ cd $S/runner && env -u ANTHROPIC_API_KEY RUN_SESSION_E2E=1 bun test core/supervi
 ```
 Expected: 0 fail, tsc exit 0; `7 pass 0 fail`.
 
-- [ ] **Step 1: Commit** — trailers `Tribe-Task: 5/16`.
-- [ ] Task 5 complete
+- [x] **Step 1: Commit** — trailers `Tribe-Task: 5/16`.
+- [x] Task 5 complete
 
 ---
 

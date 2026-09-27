@@ -1038,9 +1038,9 @@ export async function runSupervisor(
           model: config.model,
           maxTurns: config.sessionMaxTurns,
           realpath: (p: string) => io.realpath(p),
-          ...(action.session === 'ruling' || action.session === 'closing'
-            ? { repoRoot: config.repoRoot }
-            : {}),
+          // Card supervisor-sessions-in-repo (spec §4.1): `cwd` for every kind, not only
+          // `ruling`/`closing` — `ratify` now starts in the repo too.
+          repoRoot: config.repoRoot,
           // R11 (Task 20, spec §5.4 item 4): only `closing` ever loads a plugin; `decide()`'s
           // own R11 guard already refused to spawn `closing` when this is `null` (the observation
           // this tick's `spawn_session(closing)` action was decided FROM), so this branch is only

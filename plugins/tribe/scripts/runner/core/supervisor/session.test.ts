@@ -92,11 +92,14 @@ describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () =>
     }
   });
 
-  test('cwd is the campaign home, for every kind (S-P9 — this is what attributes the transcript)', () => {
-    for (const kind of ['ruling', 'ratify', 'closing'] as SessionKind[]) {
-      const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
-      expect(options.cwd).toBe('/abs/home/.tribe/key/campaigns/slug');
-    }
+  test.each(['ruling', 'ratify', 'closing'] as const)('%s starts in the target repo, never the campaign home (card supervisor-sessions-in-repo, G1)', (kind) => {
+    const options = buildOneShotOptions(kind, fixtureConfig({ verifyShippedPluginDir: '/abs/vs' }), new AbortController());
+    expect(options.cwd).toBe('/abs/repo');
+    // The home must never be an additional directory: MEASURED (spec §3.2) it loads the home's
+    // .claude/skills. `additionalDirectories` is deleted from OneShotSessionOptions entirely
+    // (never merely unset), so the guard is a key-membership check — same idiom as this file's
+    // own "'resume' in options" above, for a field that likewise does not exist in the type.
+    expect('additionalDirectories' in options).toBe(false);
   });
 
   test('permissionMode is "default" for every kind — never "bypassPermissions" (decision 4)', () => {

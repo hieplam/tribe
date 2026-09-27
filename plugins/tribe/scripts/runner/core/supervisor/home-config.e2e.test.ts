@@ -170,7 +170,11 @@ async function runInHome(kind: SessionKind, prompt: string, homeDir: string): Pr
         homeDir,
         model: MODEL,
         maxTurns: 8,
-        ...(kind === 'ratify' ? {} : { repoRoot: REPO_ROOT }),
+        // Card supervisor-sessions-in-repo (Task 5): `repoRoot` is required for every kind now
+        // (it is `cwd`). This file predates that card (card supervisor-home-settings-containment)
+        // and is deleted by Task 6 — kept type-checking here only so it does not block Task 5's
+        // gate; it stays `test.skipIf(!RUN_E2E)` and never executes without RUN_SESSION_E2E=1.
+        repoRoot: REPO_ROOT,
         realpath: (p: string) => {
           try {
             return realpathSync(p);

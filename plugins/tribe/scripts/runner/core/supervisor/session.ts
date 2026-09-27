@@ -67,7 +67,6 @@ export interface OneShotSessionOptions {
   permissionMode: 'default';
   allowedTools?: readonly string[];
   disallowedTools?: readonly string[];
-  additionalDirectories?: string[];
   /** R11 (Task 20, spec §5.4 item 4): the SDK's local-plugin option, set on `closing` only, so
    * `verify-shipped` resolves BY NAME inside the session from the repo itself. Kept after the
    * user tier loaded (card supervisor-session-settings, G4, MEASURED): the user tier finds
@@ -83,21 +82,20 @@ export interface OneShotSessionOptions {
   maxTurns: number;
 }
 
-/** `buildOneShotOptions`'s input. `repoRoot` is read access for `ruling` (spec §5.2's
- * `additionalDirectories`) and repo access for `closing` (§5.4's named exception); `ratify` never
- * reads it (§5.3: "No repo access at all"). `realpath` is the containment hook's one injected
- * capability (`permit.ts`'s `buildContainmentHook`) — never `fs` directly (`pure-core.md`).
- * Also used by `closing`'s configuration-write hook (`permit.ts#buildHomeConfigWriteHook`). */
+/** `buildOneShotOptions`'s input. `repoRoot` is `cwd` for every kind (spec §4.1); `realpath` is
+ * the containment hook's one injected capability (`permit.ts`'s `buildContainmentHook`) — never
+ * `fs` directly (`pure-core.md`). Also used by `closing`'s configuration-write hook
+ * (`permit.ts#buildHomeConfigWriteHook`). */
 export interface OneShotSessionConfig {
-  /** The campaign home (S-P9) — `cwd` for every one-shot session, and the containment root for
-   * `ruling`/`ratify` (spec §14: this is what makes the transcript attributable in the viewer
-   * with no viewer change at all). */
+  /** the containment root for `ruling`/`ratify`, and where logs and the ledger live — never
+   * `cwd`. */
   homeDir: string;
   model: string;
   /** Fix 2 (skinner audit): the caller's configured `--session-max-turns` — always supplied
    * (never defaulted here; `args.ts` owns the default), for every one of the three kinds. */
   maxTurns: number;
-  repoRoot?: string;
+  /** the target repo root — `cwd` for every kind. */
+  repoRoot: string;
   realpath: (path: string) => string;
   /** R11 (Task 20, spec §5.4 item 4): the `verify-shipped` plugin directory, resolved and
    * existence-checked by the composition root from ITS OWN location (never cwd, never
@@ -118,18 +116,16 @@ export function buildOneShotOptions(
   abortController: AbortController,
 ): OneShotSessionOptions {
   const options: OneShotSessionOptions = {
-    cwd: config.homeDir,
+    cwd: config.repoRoot,
     model: config.model,
     // Parity with the executor path (card supervisor-session-settings, G3; core/session.ts has
     // the same list): 'user' carries ~/.claude/settings.json's enabledPlugins, so the C3 plugin
     // registers and `Skill c3` no longer returns "Unknown skill: c3". Written explicitly, never by
     // omitting the option, so the regression test keeps a value to assert. MEASURED (spec §4.1):
-    // the SDK's own `model` and `permissionMode: 'default'` still win over the user tier's. For a
-    // supervisor session `cwd` is the campaign home, so 'project'/'local' read
-    // <home>/.claude/settings(.local).json and <home>/CLAUDE.md — MEASURED live (card
-    // supervisor-home-settings-containment, spec §4). No session may leave one there for the next:
-    // the hooks refuse the write (`permit.ts`) and `runOneShotSession` restores the home's
-    // configuration surface after every session.
+    // the SDK's own `model` and `permissionMode: 'default'` still win over the user tier's. `cwd`
+    // is the target repo (card supervisor-sessions-in-repo), so 'project'/'local' read
+    // <repo>/.claude/settings(.local).json and <repo>/CLAUDE.md; the campaign home is never
+    // loaded as configuration (MEASURED, spec §3.2: it would load the home's `.claude/skills`).
     settingSources: ['user', 'project', 'local'],
     permissionMode: 'default',
     abortController,
@@ -144,7 +140,6 @@ export function buildOneShotOptions(
     // left ungoverned.
     options.allowedTools = CLOSING_ALLOWED_TOOLS;
     options.disallowedTools = CLOSING_DISALLOWED_TOOLS;
-    if (config.repoRoot !== undefined) options.additionalDirectories = [config.repoRoot];
     // R11 item 4, kept by card supervisor-session-settings (G4): load `verify-shipped` from the
     // repo so it resolves on a host that never ran install.sh. Absent only when the edge
     // (`decide.ts`) has already fail-closed the spawn itself; see its
@@ -171,12 +166,6 @@ export function buildOneShotOptions(
 
   options.allowedTools = JUDGMENT_ALLOWED_TOOLS;
   options.disallowedTools = JUDGMENT_DISALLOWED_TOOLS;
-  if (kind === 'ruling' && config.repoRoot !== undefined) {
-    // Read access to the card's spec/plan only — NOT a write boundary (§5.1: "additionalDirectories
-    // is a read convenience"); the hook below is what actually denies a repo write. `ratify` gets
-    // no repo access at all (§5.3).
-    options.additionalDirectories = [config.repoRoot];
-  }
   // "The ONLY enforcement there is" (S-P12) — permit.ts's buildContainmentHook, the impure edge —
   // stays first; the scan wall runs alongside it as defence in depth (card D2), since this
   // envelope already denies Bash.
@@ -192,6 +181,11 @@ export function buildOneShotOptions(
 export interface OneShotSpawnParams {
   prompt: string;
   options: OneShotSessionOptions;
+  /** Card supervisor-sessions-in-repo (Task 5): the three kinds' option blocks are no longer
+   * distinguishable from `options` alone (spec §4.1 removed `additionalDirectories`, the only
+   * field that ever differed between `ruling` and `ratify`) — the seam names the kind explicitly
+   * instead of a caller guessing it. */
+  kind: SessionKind;
 }
 
 /** The seam `runOneShotSession` consumes — shaped identically to `core/session.ts`'s `SessionIO`
@@ -272,7 +266,7 @@ async function consumeOneShot(
 ): Promise<OneShotSessionResult> {
   let sessionMessages: AsyncIterable<SessionMessage>;
   try {
-    sessionMessages = io.spawnSession({ prompt: input.prompt, options });
+    sessionMessages = io.spawnSession({ prompt: input.prompt, options, kind: input.kind });
   } catch (err) {
     return errorResult(err);
   }

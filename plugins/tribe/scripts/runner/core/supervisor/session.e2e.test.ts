@@ -3,6 +3,7 @@
 // buildOneShotOptions -> the real SDK adapter, wired exactly as cli/main.ts wires it. Opt-in via
 // RUN_SESSION_E2E=1 (costs tokens, needs Claude Code login auth).
 import { describe, expect, test } from 'bun:test';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,10 +18,22 @@ const RUN_E2E = process.env.RUN_SESSION_E2E === '1';
 /** Optional: where Task 8's ratchet reads the transcripts. Unset = keep them in memory only. */
 const LOG_DIR = process.env.SUPERVISOR_E2E_LOG_DIR;
 const MODEL = 'claude-haiku-4-5-20251001';
-const REPO_ROOT = join(TRIBE_PLUGIN_DIR, '..', '..');
 const VERIFY_SHIPPED_DIR = join(TRIBE_PLUGIN_DIR, '..', 'verify-shipped');
 const SESSION_TIMEOUT_MS = 180_000;
 const TEST_TIMEOUT_MS = 240_000;
+
+/** Card supervisor-sessions-in-repo: `cwd` for every one-shot session is now the target repo —
+ * never the owner's checkout (`fixtures-mirror-reality.md`: a real caller's repo, not a
+ * convenient fixture). A bare temp dir, `git init -q`, isolated from the host's git config
+ * (`fail-closed-edges.md` obligation 2) and bounded by a timeout (obligation 3). */
+function makeRepo(): string {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'sss-e2e-repo-')));
+  execFileSync('git', ['init', '-q', dir], {
+    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+    timeout: 30_000,
+  });
+  return dir;
+}
 
 const C3_PROMPT =
   'Invoke the Skill tool with the skill named "c3" exactly once. Do not use any other tool. ' +
@@ -46,8 +59,8 @@ interface Run {
 }
 
 interface RunOptions {
-  /** A `permissions.allow` list written to <home>/.claude/settings.local.json — the same
-   * mechanism as a user-tier allow rule, in a scratch file (spec §4.2). */
+  /** A `permissions.allow` list written to <repo>/.claude/settings.local.json (the `cwd`'s
+   * local tier) — the same mechanism as a user-tier allow rule, in a scratch file (spec §4.2). */
   hostAllow?: string[];
   withoutVerifyShippedPlugin?: boolean;
   /** The session is TOLD to break a wall; its log goes to adversarial/, never to G5's root. */
@@ -57,13 +70,16 @@ interface RunOptions {
 async function runKind(kind: SessionKind, prompt: string, label: string, opts: RunOptions = {}): Promise<Run> {
   // realpath now: macOS tmpdir is a symlink, and the containment hook realpaths what it checks.
   const homeDir = realpathSync(mkdtempSync(join(tmpdir(), `sss-e2e-${kind}-`)));
+  // Card supervisor-sessions-in-repo: `cwd` is now the repo, never the campaign home — a fresh
+  // temp git repo per run, never the owner's checkout (`fixtures-mirror-reality.md`).
+  const repoDir = makeRepo();
   // `rule-temp-dir-cleanup`: the transcript leaves here in `lines` (and, when LOG_DIR is set, is
   // written OUTSIDE homeDir), so nothing reads this tree after the try block — it is removed even
   // when an assertion below throws.
   try {
     if (opts.hostAllow !== undefined) {
-      mkdirSync(join(homeDir, '.claude'), { recursive: true });
-      writeFileSync(join(homeDir, '.claude', 'settings.local.json'), JSON.stringify({ permissions: { allow: opts.hostAllow } }));
+      mkdirSync(join(repoDir, '.claude'), { recursive: true });
+      writeFileSync(join(repoDir, '.claude', 'settings.local.json'), JSON.stringify({ permissions: { allow: opts.hostAllow } }));
     }
     const lines: string[] = [];
     const io: OneShotSessionSeam = {
@@ -85,7 +101,7 @@ async function runKind(kind: SessionKind, prompt: string, label: string, opts: R
           homeDir,
           model: MODEL,
           maxTurns: 8,
-          ...(kind === 'ratify' ? {} : { repoRoot: REPO_ROOT }),
+          repoRoot: repoDir,
           realpath: (p: string) => {
             try {
               return realpathSync(p);
@@ -107,6 +123,7 @@ async function runKind(kind: SessionKind, prompt: string, label: string, opts: R
     return { lines, transcript: lines.join('\n'), result };
   } finally {
     rmSync(homeDir, { recursive: true, force: true });
+    rmSync(repoDir, { recursive: true, force: true });
   }
 }
 
