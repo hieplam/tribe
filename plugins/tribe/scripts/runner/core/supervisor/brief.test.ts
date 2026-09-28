@@ -15,6 +15,7 @@ import {
   renderBrief,
 } from './brief.ts';
 import type { ClosingBriefFacts, RulingBriefFacts } from './brief.ts';
+import { countTribeMentions } from '../../../tests/runner-driver-only/tribe-lexicon.ts';
 
 const SKILL_MD = readFileSync(
   join(import.meta.dir, '../../../../skills/orchestrate-campaign/SKILL.md'),
@@ -155,6 +156,16 @@ describe('renderBrief — ruling', () => {
   test('is deterministic: two renders of the same facts are byte-identical', () => {
     const facts = fixtureRulingFacts();
     expect(renderBrief('ruling', facts)).toBe(renderBrief('ruling', facts));
+  });
+
+  test('the ruling brief carries no Tribe way of working', () => {
+    const rendered = renderBrief('ruling', fixtureRulingFacts());
+    expect(countTribeMentions(rendered)).toEqual([]);
+    expect(rendered).toContain('answers.md');
+    expect(rendered).toContain('widget-export');
+    expect(rendered).toContain('Should the export button be primary or secondary?');
+    expect(rendered).toContain('Append a ruling to `/tmp/campaign-home/answers.md`');
+    expect(rendered).toContain('Write a park marker');
   });
 });
 

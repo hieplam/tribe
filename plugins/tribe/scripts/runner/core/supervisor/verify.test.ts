@@ -28,17 +28,23 @@ test('the very first ruling ever, appended to an empty answers.md, still verifie
   expect(v.rulingId).toBe('R1 one');
 });
 
-test('a new block with ratified-as: pending is a failed attempt, not a ruling', () => {
+test('a new block with ratified-as: pending is still a ruling — the value is not checked (D6)', () => {
   const after = RULED_BEFORE + '\n## R2 two\nratified-as: pending\n';
   const v = verifyRuling({ before: RULED_BEFORE, after, repoStatus: '' });
-  expect(v.outcome).toBe('failed');
+  expect(v.outcome).toBe('ruled');
   expect(v.retryable).toBe(true);
 });
 
-test('a new block with no ratified-as: field at all is a failed attempt', () => {
+test('a new block with no ratified-as: field at all is a ruling (D6)', () => {
   const after = RULED_BEFORE + '\n## R2 two\nsome other line\n';
   const v = verifyRuling({ before: RULED_BEFORE, after, repoStatus: '' });
-  expect(v.outcome).toBe('failed');
+  expect(v.outcome).toBe('ruled');
+});
+
+test('any new ## block appended after the existing ones is a ruling — no ratified-as: required (D6)', () => {
+  const before = '## R1 — a\n\nx\n';
+  const v = verifyRuling({ before, after: `${before}\n## R2 — b\n\nMax returns ErrEmpty.\n`, repoStatus: '', marker: null });
+  expect(v).toEqual({ outcome: 'ruled', retryable: true, rulingId: 'R2 — b' });
 });
 
 test('no new block and no park marker is a failed attempt', () => {

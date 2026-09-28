@@ -89,10 +89,9 @@ export const PARK_SENTENCES: Record<ParkReason, ParkSentence> = {
   owner_only: {
     what: "A card's escalation reason is on the owner-only list, or is one of the register's "
       + 'four owner-reserved classes — no session may rule on it.',
-    unblock: "Rule on {card}'s question yourself: append a ruling to {home}/answers.md tagged "
-      + 'with the next R<n> id and a `ratified-as:` value (rule <path> | debt <id> | roadmap '
-      + '<ref> | operational | dismissed), archive {home}/escalations/{card}.md to '
-      + '.resolved-R<n>, delete this file, then re-run: {rerun}',
+    unblock: "Rule on {card}'s question yourself: append a ruling to {home}/answers.md as the "
+      + 'next R<n> block, archive {home}/escalations/{card}.md to .resolved-R<n>, delete this '
+      + 'file, then re-run: {rerun}',
   },
   too_hard: {
     what: 'A ruling session judged the question genuinely undecidable on the facts it was given '

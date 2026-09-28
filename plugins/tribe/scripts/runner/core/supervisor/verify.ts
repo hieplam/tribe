@@ -5,12 +5,11 @@
 // `parseParkMarker`). The caller reads `answers.md` before/after, the park-marker file, the
 // closing report, and `git status --porcelain`, and passes each in as a string.
 //
-// A ruling counts only when a NEW `## ` block exists whose `ratified-as:` value passes the
-// EXISTING `isRulingRatified()` (`../rulings.ts`) — this module does not write a second
-// vocabulary for that. It adds exactly the checks `../rulings.ts` does not already do: history
-// integrity (S-P13), the git-repo-untouched check, and the two-value
-// park-marker vocabulary.
-import { isRulingRatified, parseRulings, unratifiedRulingIds } from '../rulings.ts';
+// A ruling counts when a NEW `## ` block exists (block parsing is `../rulings.ts`'s
+// `parseRulings`); its content is not classified — the session rules on the owner's behalf
+// (D6). This module adds history integrity (S-P13), the git-repo-untouched check, and the
+// two-value park-marker vocabulary.
+import { parseRulings, unratifiedRulingIds } from '../rulings.ts';
 import type { ParkMarkerKind } from './model.ts';
 
 /** One postcondition verdict, shared by `verifyRuling` and `verifyClosing`.
@@ -106,14 +105,11 @@ export function verifyRuling(input: VerifyRulingInput): VerifyVerdict {
   if (newBlocks.length > 0) {
     // The append convention (and the prefix check above) means the newest block is last.
     const candidate = newBlocks[newBlocks.length - 1] as (typeof newBlocks)[number];
-    if (isRulingRatified(candidate.ratifiedAs)) {
-      if (repoStatus.trim().length > 0) {
-        // Decision 4: a repo touch fails the ruling even though a valid block landed.
-        return { outcome: 'failed', retryable: true, reason: 'repo_touched' };
-      }
-      return { outcome: 'ruled', retryable: true, rulingId: candidate.id };
+    if (repoStatus.trim().length > 0) {
+      // Decision 4: a repo touch fails the ruling even though a valid block landed.
+      return { outcome: 'failed', retryable: true, reason: 'repo_touched' };
     }
-    return { outcome: 'failed', retryable: true, reason: 'not_ratified' };
+    return { outcome: 'ruled', retryable: true, rulingId: candidate.id };
   }
 
   if (marker !== null && marker !== undefined) {
