@@ -1,10 +1,10 @@
 // Task 19 (card `campaign-supervisor`, G3 — bounded context): replays the `viewer-consolidation`
 // campaign's own escalation history (three rounds for one card, answered R16/R18/R22, plus one
-// ruling left unratified when `runner_done` fires — the shape the real campaign hit when it
-// stopped on the runner's old unratified-rulings exit) as a SYNTHESIZED fixture, and asserts the one-shot SESSION
-// spawn count this drives is bounded at 5 — for a history whose real, measured session took 174
+// pre-existing ruling, R09, already in `answers.md` before the rounds begin) as a SYNTHESIZED
+// fixture, and asserts the one-shot SESSION spawn count this drives is bounded at 4 —
+// `ruling, ruling, ruling, closing` — for a history whose real, measured session took 174
 // turns (card G3, `## Measurable goals`; spec §21 D2 corrects the card's own "168" to 174 — the
-// <= 5 spawn bound is unaffected).
+// <= 4 spawn bound is unaffected).
 //
 // Drives the PURE loop (`runSupervisor`) through a scripted fake `SupervisorIO`, the same seam
 // pattern `core/supervisor/loop.test.ts` already uses: no real fs, no real spawn, no real SDK —
@@ -210,7 +210,7 @@ function fakeSeam(opts: { watchdogRuns: ScriptedWatchdogRun[]; sessions: Scripte
 
 function reportEscalated(): Record<string, unknown> {
   return {
-    run: { reason: 'escalations_pending', unratifiedRulings: [] },
+    run: { reason: 'escalations_pending' },
     cards: { [CARD_ID]: { outcome: 'escalated', escalationFile: `escalations/${CARD_ID}.md`, question: null, autoAnswerRounds: 0 } },
     pending: [],
     stats: { shipped: 0, escalated: 1, blocked: 0, notReached: 0 },
@@ -219,7 +219,7 @@ function reportEscalated(): Record<string, unknown> {
 
 function reportShipped(): Record<string, unknown> {
   return {
-    run: { reason: 'runner_done', unratifiedRulings: [] },
+    run: { reason: 'runner_done' },
     cards: { [CARD_ID]: { outcome: 'shipped', pr: 144, mergeSha: 'deadbeef' } },
     pending: [],
     stats: { shipped: 1, escalated: 0, blocked: 0, notReached: 0 },

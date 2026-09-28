@@ -104,7 +104,7 @@ JSON
  "terminal":{"status":"needs_human","reason":"stalled","exitCode":10}}
 JSON
   cat > "$home/campaign-report.json" <<JSON
-{"run":{"reason":"escalations_pending","unratifiedRulings":[]},
+{"run":{"reason":"escalations_pending"},
  "cards":{"c1":{"outcome":"shipped","escalationFile":null,"question":null,"autoAnswerRounds":0}},
  "pending":[],"stats":{"shipped":1,"escalated":0,"blocked":0,"notReached":0}}
 JSON
@@ -236,7 +236,7 @@ hasnt "G2: the supervisor's own terminal is not a stalled park" "$(terminal_of "
 # MEASURED, and deliberately NOT asserted here (it is a separate defect, in a file this probe
 # does not own): the two vocabularies do not fully overlap. `run.json`'s `reason` is the RUNNER's
 # (`core/report.ts#deriveExitReason`: done | escalations_pending | session_incomplete |
-# rulings_unratified | stop_requested | error), while the supervisor's rows are keyed on the
+# stop_requested | error), while the supervisor's rows are keyed on the
 # WATCHDOG's (`runner_done`, …). A run that finished cleanly therefore arrives as `done`, which
 # no row recognises. Reported to the Warchief with the bisect; do not read this probe's green as
 # "every finalised run routes correctly".

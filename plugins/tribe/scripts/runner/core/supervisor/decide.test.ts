@@ -242,7 +242,7 @@ test('row 6: every escalated card answered this round re-triggers the watchdog',
     lastWatchdog: terminal('escalations_pending'),
     escalations: [escalation({ cardId: 'c1', filePresent: false })],
     report: {
-      run: { reason: 'escalations_pending', unratifiedRulings: [] },
+      run: { reason: 'escalations_pending' },
       pending: [],
       cards: { c2: { outcome: 'not_reached', escalationFile: null, question: null, autoAnswerRounds: null } },
       stats: { shipped: 0, escalated: 1, blocked: 0, notReached: 1 },

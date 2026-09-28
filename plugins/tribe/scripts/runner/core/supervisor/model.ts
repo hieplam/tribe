@@ -70,7 +70,7 @@ export interface CampaignReportCardFact {
 }
 
 export interface CampaignReportFacts {
-  run: { reason: string; unratifiedRulings: string[] };
+  run: { reason: string };
   pending: string[];
   cards: Record<string, CampaignReportCardFact>;
   stats: { shipped: number; escalated: number; blocked: number; notReached: number };

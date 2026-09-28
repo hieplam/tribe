@@ -6,7 +6,7 @@
 #
 # THREE VERBS, not one script. The executor Warchief that drives this card is capped at 600 s per
 # Bash call and may not background anything (runner/core/session.ts `decideBackgroundingHook`),
-# while a real campaign run — an executor card, a PR, CI, a ruling, a ratify and a closing — lasts
+# while a real campaign run — an executor card, a PR, CI, a ruling and a closing — lasts
 # far longer. So: `start` returns at once, leaving `supervise` detached and re-parented away from
 # the calling session; `wait` is a bounded foreground poll that always returns inside its budget;
 # `collect` gathers the evidence. The caller re-invokes `wait` until it prints `terminal`.
@@ -198,36 +198,16 @@ write_campaign_state() {
 JSON
 }
 
-# One pre-seeded ruling whose `ratified-as:` is `pending`, so the run needs a `ratify` session
-# (G1 wants one of each supervisor session kind: `ruling`, `ratify`, `closing`).
-#
-# Its card is `owner-run-seed` — deliberately NOT `owner-run-probe`, and not in the campaign's
-# `sequence` at all. Spec §7's expected flow: "The probe plan's first step returns
-# NEEDS_DIRECTION (a naming question, not owner-only), so the supervisor starts a `ruling`." That
-# escalation is the ONLY path to a `ruling` session (core/supervisor/decide.ts spawns `ruling`
-# on exit reason `escalations_pending` and on nothing else), and the probe plan's "Before any
-# task — ask first" gate escalates only while its executor brief holds no ruling for card
-# `owner-run-probe`. `core/brief.ts#executorBrief` embeds this whole file verbatim, so a pre-seed
-# naming `owner-run-probe` answers the question before it is asked and silently costs the entire
-# `ruling` row — MEASURED: run sir-owner-run-20260927T092641Z exited 0 `campaign_closed` with
-# G1 2/2 kinds=closing,ratify, i.e. 2 supervisor sessions where spec §5 row G8 requires ≥ 3.
-# The body says so in a line of its own, so no model has to infer it.
-#
-# The `ratify` job still lands: `core/rulings.ts#unratifiedRulingIds` classifies by `ratified-as:`
-# per `## ` block and never looks at the card, and `pending` deliberately does not count as
-# ratified. The `ruling` session's own ruling cannot be relied on for that — `core/supervisor/
-# brief-ruling.md` lets it write `operational`, which is already ratified.
+# `answers.md` starts with NO ruling. Card `owner-run-probe` must stay unruled, so the probe
+# plan's "Before any task — ask first" gate fires, the runner exits `escalations_pending`, and
+# the supervisor spawns its `ruling` session — `core/supervisor/decide.ts` spawns `ruling` on
+# that exit reason and on nothing else, so it is the only path to that session.
+# `core/brief.ts#executorBrief` embeds this whole file verbatim, so a ruling for
+# `owner-run-probe` written here would answer the question before it is asked, and the run would
+# have no `ruling` session at all.
 write_answers() {
   cat > "$1/answers.md" <<'MD'
 # Rulings
-
-## R0 — owner-run pre-seed
-
-**Card:** owner-run-seed
-**Ruling:** The ledger is the only evidence this run needs.
-**Not a ruling for `owner-run-probe`:** that card is unruled — this campaign's only card must
-still ask its own question.
-ratified-as: pending
 MD
 }
 
