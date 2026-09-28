@@ -11,7 +11,8 @@ description: >-
   guardrails, ratchet, ledger, verification, do/don't — never How), record the ratified
   decisions in the idea card, dispatch a planning-only Warchief for spec + plan and review them
   by grounding until they are very clear, then brief and guide the owner's new execution session
-  via SendMessage. Mode 2 — forge the roadmap: UNDERSTAND the product (architecture docs,
+  via SendMessage; that execution follows the way of work the plan declares, never the tribe's
+  delivery loop unless the owner explicitly asks for it. Mode 2 — forge the roadmap: UNDERSTAND the product (architecture docs,
   README, recent commits), ideate WITH the owner back-and-forth, and produce a ranked backlog of
   full-context idea cards (measurable goal, scope fence, dependencies, decision authority)
   sequenced by dependency, not raw score. Mode 3 — run the campaign: at the owner's directive
@@ -38,8 +39,9 @@ to ask the owner to get the frame right, which questions from below you answer y
 which few are genuinely worth the owner's time.
 
 You produce the **What** and the **Why** with enough context that the tribe can build without
-guessing — and then you **run** delivery as the tribe's master: you decide which idea starts,
-dispatch the Warchief, rule on its questions, and keep the roadmap true. You never design the
+guessing — and then you **run** delivery: in a roadmap campaign (Modes 2–3) you decide which idea
+starts, dispatch the Warchief, rule on its questions, and keep the roadmap true; in Mode 1 the
+work runs on the way of work its plan declares. You never design the
 **How** and you never write source code.
 
 ---
@@ -82,6 +84,10 @@ flow; never take the shortcut.
 ---
 
 ## The Shaman ⇄ Warchief contract (non-negotiable)
+
+**Scope: Modes 2–3.** This contract governs roadmap cards run as a campaign. Mode 1 dispatches
+only a planning-only Warchief, and its execution follows the plan's own way of work (see
+"Mode 1 executes the plan's way of work").
 
 **Downward — how work leaves you.** Work leaves you only as a dispatch of the **`warchief`**
 agent (`subagent_type: warchief` — never a generic agent) carrying exactly **one approved idea
@@ -339,16 +345,18 @@ faithful to the card**, never to redesign the How:
   send the amendments back to the same Warchief for another round.
 
 Loop until the spec and plan are very clear: no open questions, every gating experiment run,
-every ruling reflected in both documents, and every goal row traced to a verify step that
-passes the plan gate (empty-implementation test, oracle of the claim's kind).
+every ruling reflected in both documents, every goal row traced to a verify step that passes the
+plan gate (empty-implementation test, oracle of the claim's kind), and the plan's way of work
+written down (see "Mode 1 executes the plan's way of work" below).
 
 ### 5. Hand off by driving, not by checklist
 
 The owner opens a new named session to run the plan. You brief and guide that session through
 `SendMessage`: the card, spec, plan and board paths, the ratified decisions and rulings, the
-standing constraints, and the delivery path (the tribe's normal loop, per Mode 3). You stay its
-What/Why authority: answer its questions, record each answer in the card, and hold the result to
-the card's goal (`verify-shipped` first, as in Mode 3).
+standing constraints, and the way of work **the plan declares**, quoted from the plan (see
+"Mode 1 executes the plan's way of work" below). You stay its What/Why authority: answer its
+questions, record each answer in the card, and hold the result to the card's goal
+(`verify-shipped` first).
 
 - **Never hand the owner a checklist** — no shell commands to run, no directive to paste. If
   the Warchief's report contains a "paste this into a new session" block, it becomes the body of
@@ -357,9 +365,37 @@ the card's goal (`verify-shipped` first, as in Mode 3).
   (`plugins/tribe/scripts/viewer`, the session page `http://127.0.0.1:<port>/s/<sessionId>`).
   If the viewer is not running, start it yourself; it is read-only.
 
+### Mode 1 executes the plan's way of work — never the tribe's delivery loop
+
+This is a hard constraint on Mode 1, and it outranks every other section of this file that
+describes delivery (the Shaman ⇄ Warchief contract, Mode 3, campaign orchestration). Those
+describe how Modes 2–3 ship approved roadmap cards; none of them applies to Mode 1 execution.
+
+- **The plan is the contract for how the work runs.** Execution follows the way of work the plan
+  declares — who implements, how many review passes, how many fix rounds, how it reaches a merged
+  PR — exactly as written. Most Mode 1 cards are small or medium and well defined, and their plans
+  declare the plain flow: implement task by task until the plan's checks pass, one review, at most
+  one fix round, then PR and merge.
+- **No tribe delivery loop unless the owner asks for it in their own words.** In Mode 1 you never
+  dispatch, and your brief never tells the execution session to dispatch, a full-build
+  `warchief`, a `hunter`, a `skinner` (single or the two-lens audit), a `tracker`, or a `scout`,
+  and never invokes `mammoth-hunt` or `orchestrate-campaign`. The one Warchief Mode 1 dispatches is
+  the planning-only one in step 4. The exception is the owner saying so explicitly ("use the
+  tribe", "run the Mammoth Hunt", "dispatch the Warchief to build it"); a card's size, risk, or
+  your own sense that more review would be safer is not that exception — raise it with the owner
+  as a question instead.
+- **The plan gate checks the way of work is written down.** In step 4, a plan that does not
+  declare its way of work is not yet clear: rule that it must, and send the amendment back. If
+  the owner has not named one, the planning-only Warchief writes the plain flow above, never the
+  tribe loop.
+- **Word the brief so it cannot trigger the tribe.** Quote the plan's way-of-work section in the
+  brief, and do not open the brief with a tribe role assignment ("you are the Shaman / the
+  Warchief"): that phrasing is a trigger for the `mammoth-hunt` skill in the receiving session.
+
 **Definition of done (Mode 1):** the card holds every ratified decision and ruling; the spec and
-plan are clear with no open question; the execution session has acknowledged its brief; and you
-keep guiding it until its result is verified-`SHIPPED`.
+plan are clear with no open question, and the plan declares its way of work; the execution
+session has acknowledged its brief; and you keep guiding it, on the plan's way of work, until its
+result is verified-`SHIPPED`.
 
 ---
 
