@@ -204,3 +204,109 @@ function isStringArray(value: unknown): value is string[] {
 function refuse(reason: string): Parsed<never> {
   return { ok: false, reason };
 }
+
+/** What reading one JSON file can turn out to be. `missing` is separate from `unreadable`
+ * because a missing `supervisor/status.json` is normal (no supervisor has run yet) while an
+ * unreadable one is a refusal. */
+export type ReadJson = { kind: 'ok'; value: unknown } | { kind: 'missing' } | { kind: 'unreadable'; reason: string };
+
+/** Everything outside this module that `tribe campaign status` needs. The flow below decides;
+ * only the adapter built at the edge touches a disk, a clock or a terminal (pure-core.md). */
+export interface CampaignStatusIo {
+  /** The tribe home of the repo the user is standing in, or the refusal line to print. */
+  home(): Parsed<string>;
+  /** Campaign directories under `<home>/campaigns`, each with the mtime of its state files.
+   * An absent `campaigns` directory is not an error here: it lists as no campaigns. */
+  listCampaigns(home: string): { name: string; updatedMs: number }[];
+  readJson(path: string): ReadJson;
+  now(): number;
+  print(lines: string[]): void;
+  printErr(line: string): void;
+  clear(): void;
+  /** `--watch` only: 'stop' ends the loop. The real adapter always answers 'continue' — a
+   * watching `tribe` is ended by Ctrl-C killing the process, so only tests ever stop it. */
+  sleep(ms: number): Promise<'continue' | 'stop'>;
+}
+
+/** The whole command: which campaign, read its two files, print or refuse. Returns the exit code
+ * (0 rendered, 1 refused); it never throws and never exits the process itself. */
+export async function runCampaignStatus(
+  cmd: { name: string | null; watch: boolean },
+  io: CampaignStatusIo,
+): Promise<number> {
+  const home = io.home();
+  if (!home.ok) {
+    io.printErr(home.reason);
+    return 1;
+  }
+
+  const campaignsDir = `${home.value}/campaigns`;
+  const chosen = chooseCampaign(cmd.name, io.listCampaigns(home.value), campaignsDir);
+  if (!chosen.ok) {
+    io.printErr(chosen.reason);
+    return 1;
+  }
+
+  const name = chosen.value;
+  if (!cmd.watch) return renderOnce(name, `${campaignsDir}/${name}`, io);
+
+  // Each pass re-reads the files, so a campaign moving on disk shows up; a refusal mid-watch
+  // (the campaign was deleted, a file went corrupt) ends the loop instead of looping on it.
+  let code = 0;
+  do {
+    io.clear();
+    code = renderOnce(name, `${campaignsDir}/${name}`, io);
+    if (code !== 0) return code;
+  } while ((await io.sleep(WATCH_INTERVAL_MS)) === 'continue');
+  return code;
+}
+
+/** D1/Q2: a name given must exist; no name means the campaign updated most recently. */
+function chooseCampaign(
+  name: string | null,
+  campaigns: { name: string; updatedMs: number }[],
+  campaignsDir: string,
+): Parsed<string> {
+  if (name === null) {
+    const latest = pickLatest(campaigns);
+    return latest === null ? refuse(`tribe: no campaigns under ${campaignsDir}`) : { ok: true, value: latest };
+  }
+  const known = campaigns.some((campaign) => campaign.name === name);
+  return known ? { ok: true, value: name } : refuse(`tribe: no campaign named "${name}" under ${campaignsDir}`);
+}
+
+/** Prints one rendering, or one refusal line, for the campaign in `dir`. */
+function renderOnce(name: string, dir: string, io: CampaignStatusIo): number {
+  const statePath = `${dir}/campaign-state.json`;
+  const rawState = io.readJson(statePath);
+  // A campaign with no state file is not a campaign this command can report on (G3).
+  if (rawState.kind !== 'ok') {
+    io.printErr(`tribe: cannot read ${statePath}: ${rawState.kind === 'missing' ? 'missing' : rawState.reason}`);
+    return 1;
+  }
+  const state = parseCampaignState(rawState.value);
+  if (!state.ok) {
+    io.printErr(`tribe: ${statePath} is not a campaign state: ${state.reason}`);
+    return 1;
+  }
+
+  const statusPath = `${dir}/supervisor/status.json`;
+  const rawStatus = io.readJson(statusPath);
+  if (rawStatus.kind === 'unreadable') {
+    io.printErr(`tribe: cannot read ${statusPath}: ${rawStatus.reason}`);
+    return 1;
+  }
+  // Q4: no supervisor has run yet — the cards still render, with a header that says so.
+  let supervisor: StatusSupervisor | null = null;
+  if (rawStatus.kind === 'ok') {
+    const parsed = parseSupervisorStatus(rawStatus.value);
+    if (!parsed.ok) {
+      io.printErr(`tribe: ${statusPath} is not a supervisor status: ${parsed.reason}`);
+      return 1;
+    }
+    supervisor = parsed.value;
+  }
+
+  io.print(renderStatus({ name, state: state.value, supervisor, nowMs: io.now() }));
+  return 0;
+}
