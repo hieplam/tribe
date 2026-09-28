@@ -84,10 +84,9 @@ export function parseRulings(content: string | null | undefined): RulingBlock[] 
  * -> unratified" is RETROACTIVE. A historical campaign's `answers.md` authored before this gate
  * existed (e.g. outstanding-17's, whose rulings carry no `ratified-as:` field at all) would
  * classify every one of those rulings as unratified if that campaign were ever re-run/
- * re-reported through this gate. This is accepted, not a bug to work around: the gate only
- * fires on the would-be-`done` path of an ACTIVE run (`core/loop/run-loop.ts`'s
- * `applyRulingsGate`) — it never rewrites or re-reports a closed campaign on its own — and
- * retrofitting `ratified-as:` onto old rulings once, by hand, is exactly the discipline this
+ * re-reported through this check. This is accepted, not a bug to work around: the runner no
+ * longer gates on it (card D3), the check never rewrites or re-reports a closed campaign on
+ * its own, and retrofitting `ratified-as:` onto old rulings once, by hand, is exactly the discipline this
  * gate exists to establish going forward. */
 export function isRulingRatified(ratifiedAs: string | null): boolean {
   if (ratifiedAs === null) return false;

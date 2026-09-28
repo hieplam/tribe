@@ -2,12 +2,11 @@
 // tied together with the §D2 lock.
 import { join } from 'node:path';
 import type { CampaignState, CardResult, NextCardResult, ResolvedConfig, ResolvedTask, RunLoopConfig } from '../types.ts';
-import { EXIT_ESCALATED, EXIT_LOCKED, EXIT_OK, EXIT_RULINGS_UNRATIFIED, EXIT_SESSION_INCOMPLETE } from '../types.ts';
+import { EXIT_ESCALATED, EXIT_LOCKED, EXIT_OK, EXIT_SESSION_INCOMPLETE } from '../types.ts';
 import { loadState, nextCard } from '../state.ts';
 import { BRIEF_TEMPLATE_PATH } from '../brief.ts';
 import { campaignStatePathOf, answersPathOf, planPathWithinRepo } from '../paths.ts';
 import { buildRunRecord, reportsDirOf, runDirOf, runRecordPathOf, serializeRunRecord } from '../run-record.ts';
-import { unratifiedRulingIds } from '../rulings.ts';
 import { resolveTaskIndex, TaskIndexError, type TaskIndexIssue } from '../plan-index.ts';
 import type { LoopIO, StateIO } from '../../ports/ports.ts';
 import { acquireLock, isStopRequested, releaseLock, stopFilePathOf } from './lock.ts';
@@ -72,10 +71,6 @@ export interface LoopResult {
   processed: CardOutcome[];
   message?: string;
   dryRunPlan?: DryRunPlan;
-  /** Harness-gap-wiring PR C: set only when the pass would otherwise have concluded `done` but
-   * `answers.md` still carries ≥1 unratified ruling (`core/rulings.ts`) — see `runLoop`'s
-   * post-`runPass` check, below. */
-  unratifiedRulings?: string[];
 }
 
 /** D5′ park-and-continue (spec §O4/§2 wall reads): a single pass can now end with a MIX of
@@ -275,16 +270,12 @@ async function runCardTurn(ctx: CardCtx, nc: CardResult): Promise<{ outcome: Car
 }
 
 /** One D5′ park-and-continue pass over the campaign: derive-and-act until `done`, STOP, or
- * the --max-cards budget is spent. `reachedDone` records WHICH of the three ended the pass:
- * true only when `filteredNextCard` itself returned `{ kind: 'done' }` (no progressable card
- * remains) — a mid-pass STOP and a spent budget both leave it false, because cards may remain
- * genuinely unattempted on those paths. `computeExitCode` cannot tell these apart (all three
- * can be `EXIT_OK`), and the rulings gate below must fire only on genuine done. */
+ * the --max-cards budget is spent. */
 async function runPass(
   state: CampaignState,
   resolved: ResolvedConfig,
   io: LoopIO,
-): Promise<LoopResult & { reachedDone: boolean }> {
+): Promise<LoopResult> {
   const processed: CardOutcome[] = [];
   // Warchief audit fix (Task 2): `attempted` and the `--max-cards` BUDGET are two different
   // questions, and conflating them was a bug. `attempted` answers ONLY "have I already
@@ -306,17 +297,13 @@ async function runPass(
   // the loop can tick even when `worked` never reaches `limit` (e.g. every remaining card is
   // `escalation_pending`) — see `filteredNextCard`'s doc comment (Warchief ruling W-F2) for
   // why that must be structural, not incidental.
-  let reachedDone = false;
   while (worked < limit) {
     if (isStopRequested(stopFilePathOf(resolved), io)) {
       break;
     }
 
     const nc = filteredNextCard(state, resolved, io, attempted);
-    if (nc.kind === 'done') {
-      reachedDone = true;
-      break;
-    }
+    if (nc.kind === 'done') break;
 
     const ctx: CardCtx = { cardId: nc.cardId, state, resolved, io };
 
@@ -349,7 +336,7 @@ async function runPass(
     // `filteredNextCard`/`nextCard`'s own blocked-cascade reconciliation (W6).
   }
 
-  return { exitCode: computeExitCode(processed), processed, reachedDone };
+  return { exitCode: computeExitCode(processed), processed };
 }
 
 /** P12 follow-up (`--max-concurrent N`, N > 1): the SAME per-card turn (`runCardTurn`) as the
@@ -430,11 +417,10 @@ async function runPassPool(
   resolved: ResolvedConfig,
   io: LoopIO,
   maxConcurrent: number,
-): Promise<LoopResult & { reachedDone: boolean }> {
+): Promise<LoopResult> {
   const processed: CardOutcome[] = [];
   const attempted = new Set<string>();
   let worked = 0;
-  let reachedDone = false;
   const limit = resolved.maxCards ?? Infinity;
   const active = new Set<Promise<void>>();
 
@@ -477,12 +463,7 @@ async function runPassPool(
       // --max-cards budget — see this function's own doc comment.
       while (active.size < maxConcurrent && worked + active.size < limit) {
         const nc = filteredNextCard(state, resolved, io, attempted);
-        if (nc.kind === 'done') {
-          // Genuinely done only when nothing is still in flight to possibly unblock a later
-          // card (e.g. by shipping a dependency) — see point 2 of the doc comment above.
-          if (active.size === 0) reachedDone = true;
-          break;
-        }
+        if (nc.kind === 'done') break;
         if (nc.kind === 'planning_needed') {
           attempted.add(nc.cardId);
           const ctx: CardCtx = { cardId: nc.cardId, state, resolved, io };
@@ -501,40 +482,7 @@ async function runPassPool(
     await Promise.race(active);
   }
 
-  return { exitCode: computeExitCode(processed), processed, reachedDone };
-}
-
-/** Harness-gap-wiring PR C (spec: outstanding-17 postmortem — a ruling that captured a durable
- * convention was never ratified into the target repo's governance files because nothing gated
- * on it): the mechanical gate. Pure — takes the pass's own result and the `answers.md` content
- * `resolveRunContext` already read once through the injected `io` seam (`resolved.answersContent`
- * — no second read here) and decides whether to override an `EXIT_OK` ("done") into
- * `EXIT_RULINGS_UNRATIFIED`. `reachedDone` (runPass) must be true as well as `EXIT_OK`:
- * `computeExitCode` returns `EXIT_OK` equally for genuine done, a mid-pass STOP, and a spent
- * `--max-cards` budget, and gating the latter two would flip "partial progress, come back
- * later" into a rulings failure while cards remain genuinely unattempted (3-lens review,
- * contract lens). Every other exit code (an escalation, a stopped session) passes
- * through UNCHANGED — the brief is explicit that this gate fires only on the path that would
- * otherwise conclude `done`. Mirrors `debt-count.ts`'s own framing of its diff-mode gate: "exit
- * code is a gate, not a report." */
-function applyRulingsGate(
-  result: LoopResult,
-  answersContent: string,
-  reachedDone: boolean,
-): LoopResult {
-  if (!reachedDone || result.exitCode !== EXIT_OK) return result;
-
-  const unratified = unratifiedRulingIds(answersContent);
-  if (unratified.length === 0) return result;
-
-  return {
-    ...result,
-    exitCode: EXIT_RULINGS_UNRATIFIED,
-    unratifiedRulings: unratified,
-    message:
-      `${unratified.length} ruling(s) in answers.md are not yet ratified: ${unratified.join(', ')}. ` +
-      'Add a `ratified-as:` line to each block (see the runner README), then re-run.',
-  };
+  return { exitCode: computeExitCode(processed), processed };
 }
 
 /** The main loop, spec §D2/§D4/§D5′ tied together: acquire the single-instance lock → STOP-file
@@ -607,11 +555,7 @@ export async function runLoop(config: RunLoopConfig, io: LoopIO): Promise<LoopRe
     // byte-identical round-trip means a pass with no reconciliation to flush just rewrites the
     // same bytes (harmless, no spurious diff).
     persistLocalState(state, resolved, io);
-    // Harness-gap-wiring PR C: gate the genuinely-done exit on `answers.md`'s unratified
-    // rulings — see `applyRulingsGate`'s own doc comment. A no-op for every other exit code
-    // and for EXIT_OK passes that ended on STOP or a spent --max-cards budget.
-    const { reachedDone, ...loopResult } = result;
-    return applyRulingsGate(loopResult, resolved.answersContent, reachedDone);
+    return result;
   } finally {
     releaseLock(io);
   }

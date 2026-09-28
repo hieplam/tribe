@@ -191,7 +191,7 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
 
   // ---- the campaign report the orchestrating session reads (and the closing brief embeds) ----
   add('report/campaign-report-md', renderReportMarkdown({
-    ...report, run: { ...report.run, exitCode: 5, reason: 'rulings_unratified', unratifiedRulings: ['R1'] },
+    ...report, run: { ...report.run, exitCode: 2, reason: 'escalations_pending' },
   }));
 
   // ---- injections that are not prose: the executor's session options ----

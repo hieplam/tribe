@@ -198,10 +198,3 @@ export const EXIT_SESSION_INCOMPLETE = 3;
 /** "An unhandled exception surfaced after `runLoop` was entered" — consumed only by run.ts's
  * `main()`; the exit code is a hint, the report is the truth (§O3). */
 export const EXIT_ERROR = 4;
-/** Harness-gap-wiring PR C: the pass would otherwise have concluded `done` (every requested
- * card `shipped`/`blocked`/`escalated`, nothing pending), but `answers.md` carries ≥1 ruling
- * (a `## ` block) with no recognized `ratified-as:` disposition (`core/rulings.ts`). Modeled
- * as its own `EXIT_*` code — not folded into `EXIT_ESCALATED` — because it is a campaign-level
- * gate on the FINAL state, not a per-card outcome `computeExitCode` (run-loop.ts) can see; see
- * that module's own doc comment for exactly where this is checked. */
-export const EXIT_RULINGS_UNRATIFIED = 5;
