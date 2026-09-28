@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The `tribe` command: starts the read-only session viewer (more subcommands later).",
+  "description": "The `tribe` command: starts the session viewer and shows campaign status.",
   "bin": {
     "tribe": "./bin/tribe"
   },
