@@ -842,7 +842,10 @@ is on the base branch, it is clean, and the local base is an ancestor of the rem
 point's detail ends in `(healed: fast_forward_base)`. A diverged local base is never healed.
 
 The runner never checks a gap-gate stamp; a plan that wants the harness-gap gate runs it as a
-task's Done command (the orchestrate-campaign skill's Tribe style).
+task's Done command — the "Harness-gap gate" task in the orchestrate-campaign skill's "Tribe style —
+plan section" (`plugins/tribe/skills/orchestrate-campaign/SKILL.md`), whose Done command runs
+`gap-gate.ts`. The skill's "Tribe style — Stage C and D additions" carries the `ratified-as:`
+vocabulary and the ratification pass, checked by `plugins/tribe/scripts/gaps/rulings-check.ts`.
 
 ## Report contract (spec §O5)
 
