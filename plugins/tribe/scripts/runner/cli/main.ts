@@ -970,10 +970,6 @@ export async function main(): Promise<void> {
       endedAt,
       exitCode,
       reason: deriveExitReason({ threw: Boolean(thrown), exitCode, hasMessage: Boolean(result?.message) }),
-      // Harness-gap-wiring PR C: threads `runLoop`'s rulings-gate ids (see `run-loop.ts`'s
-      // `applyRulingsGate`) onto the ONE artifact an orchestrating session reads — undefined on
-      // every other exit path, exactly like `LoopResult.unratifiedRulings` itself.
-      unratifiedRulings: result?.unratifiedRulings,
     });
     tryFinalizeRunRecord(parsed.config, io, { endedAt, exitCode, reason: deriveExitReason({ threw: Boolean(thrown), exitCode, hasMessage: Boolean(result?.message) }) });
   }

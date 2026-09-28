@@ -5,14 +5,14 @@ import type { EscalationFact, ParkReason, SupervisorObservation } from './model.
 const base = (over: Partial<SupervisorObservation> = {}): SupervisorObservation => ({
   nowMs: 1_000_000, stopFilePresent: false, needsOwnerPresent: false,
   supervisorLock: null, watchdogLive: null, lastWatchdog: null, report: null,
-  escalations: [], ownerOnlyEscalations: [], unratifiedRulings: [], parkMarkers: [],
+  escalations: [], ownerOnlyEscalations: [], parkMarkers: [],
   // Task 4 (spec §2.2, card `supervisor-park-truth`): observation-only fields `decide()` does
   // not read yet (Tasks 5-7 do) — defaulted here purely so this fixture keeps compiling against
   // `SupervisorObservation`'s three new required fields; every existing row below is unaffected.
   runs: [], watchdogRunId: null, parkedTerminal: null,
-  state: { rulingRounds: {}, ratifyRounds: 0, spawns: 0, watchdogRuns: 0, seenEscalations: {},
+  state: { rulingRounds: {}, spawns: 0, watchdogRuns: 0, seenEscalations: {},
            closingVerified: false, retriggers: {} },
-  limits: { maxRulingRounds: 2, maxRatifyRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20,
+  limits: { maxRulingRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20,
             sessionRetries: 1 },
   lastSessionOutcome: null,
   // R11 (Task 20): the composition root resolved the verify-shipped plugin dir and it exists —
@@ -190,15 +190,20 @@ test('P4: a live watchdog is adopted, never a second one spawned', () => {
 // Main rows 1-4: runner_done / stop_requested
 // ---------------------------------------------------------------------------------------------
 
-test('rows 1-3: runner_done closes, ratifies, or closes-out', () => {
+test('rows 1-3: runner_done closes or closes-out', () => {
   expect(decide(base({ lastWatchdog: { terminal: { status: 'done', reason: 'runner_done', exitCode: 0 }, ownedExitCode: 0 },
     state: { ...base().state, closingVerified: true } })))
     .toEqual({ kind: 'exit', status: 'done', reason: 'campaign_closed' });
-  expect(decide(base({ lastWatchdog: { terminal: { status: 'done', reason: 'runner_done', exitCode: 0 }, ownedExitCode: 0 },
-    unratifiedRulings: ['R7'] })))
-    .toEqual({ kind: 'spawn_session', session: 'ratify', cardId: null });
   expect(decide(base({ lastWatchdog: { terminal: { status: 'done', reason: 'runner_done', exitCode: 0 }, ownedExitCode: 0 } })))
     .toEqual({ kind: 'spawn_session', session: 'closing', cardId: null });
+});
+
+test('runner_done with rulings in answers.md goes straight to closing: the supervisor never ratifies (D6)', () => {
+  const o = base({ lastWatchdog: terminal('runner_done') });
+  expect(decide(o)).toEqual({ kind: 'spawn_session', session: 'closing', cardId: null });
+});
+test('an unknown terminal reason (e.g. a retired one) parks as error, never a ratify spawn', () => {
+  expect(decide(base({ lastWatchdog: terminal('retired_reason') }))).toMatchObject({ kind: 'park', reason: 'error' });
 });
 
 // R11 (Task 20, spec §5.4 item 4): fail-closed park. A `closing` spawn without the
@@ -306,31 +311,6 @@ test('row 12: a fresh answerable escalation spawns exactly one ruling session', 
     lastWatchdog: terminal('escalations_pending'),
     escalations: [escalation({ cardId: 'c1', contentSha256: 'h1' })],
   }))).toEqual({ kind: 'spawn_session', session: 'ruling', cardId: 'c1' });
-});
-
-// ---------------------------------------------------------------------------------------------
-// Main rows 13-15: rulings_unratified
-// ---------------------------------------------------------------------------------------------
-
-test('row 13: the ratify-round cap refuses another ratify attempt', () => {
-  const a = decide(base({
-    lastWatchdog: terminal('rulings_unratified'),
-    state: { ...base().state, ratifyRounds: 2 },
-  }));
-  expect(a).toEqual({ kind: 'park', reason: 'ratify_cap', detail: expect.any(String) });
-});
-
-test('row 14: the total spawn budget also caps a ratify attempt', () => {
-  const a = decide(base({
-    lastWatchdog: terminal('rulings_unratified'),
-    state: { ...base().state, spawns: 8 },
-  }));
-  expect(a).toEqual({ kind: 'park', reason: 'spawn_cap', detail: expect.any(String) });
-});
-
-test('row 15: rulings_unratified otherwise spawns a ratify session', () => {
-  const a = decide(base({ lastWatchdog: terminal('rulings_unratified') }));
-  expect(a).toEqual({ kind: 'spawn_session', session: 'ratify', cardId: null });
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -442,15 +422,15 @@ test('G5 (fix B-F1): a run that finalised SUCCESSFULLY while nobody watched rout
     }],
     ...over,
   });
-  // Row 3: nothing closing-verified yet, no unratified rulings -> the closing session.
+  // Row 3: nothing closing-verified yet -> the closing session.
   expect(decide(finishedClean()))
     .toEqual({ kind: 'spawn_session', session: 'closing', cardId: null });
   // Row 1: the campaign is already closing-verified -> it closes.
   expect(decide(finishedClean({ state: { ...base().state, closingVerified: true } })))
     .toEqual({ kind: 'exit', status: 'done', reason: 'campaign_closed' });
-  // Row 2: unratified rulings are ratified first.
-  expect(decide(finishedClean({ unratifiedRulings: ['R1'] })))
-    .toEqual({ kind: 'spawn_session', session: 'ratify', cardId: null });
+  // The supervisor never ratifies (spec §4.11, D6): nothing delays the closing session.
+  expect(decide(finishedClean()))
+    .toEqual({ kind: 'spawn_session', session: 'closing', cardId: null });
 });
 
 test('fix B-F1: an UNRECOGNISED run reason is never passed through — the watchdog\'s own '
@@ -576,14 +556,6 @@ test('V1: a rewritten ruling trail parks and is never retried, whatever the retr
   expect(a).toEqual({ kind: 'park', reason: 'history_rewritten', detail: expect.any(String) });
 });
 
-test('V2: an out-of-scope ratify edit parks and is never retried', () => {
-  const a = decide(base({
-    lastSessionOutcome: { kind: 'ratify', cardId: null, outcome: 'ratify_out_of_scope' },
-    limits: { ...base().limits, sessionRetries: 3 },
-  }));
-  expect(a).toEqual({ kind: 'park', reason: 'ratify_out_of_scope', detail: expect.any(String) });
-});
-
 test('V3: a verified ruling is archived by the supervisor, not re-decided as a fresh escalation', () => {
   const a = decide(base({
     lastSessionOutcome: { kind: 'ruling', cardId: 'c1', outcome: 'ruled', rulingId: 'R9' },
@@ -615,13 +587,6 @@ test('V5/V6: a failed attempt parks once its retry budget is exhausted, keyed pe
   }));
   expect(ruling).toEqual({ kind: 'park', reason: 'ruling_failed', detail: expect.any(String) });
 
-  const ratify = decide(base({
-    lastSessionOutcome: { kind: 'ratify', cardId: null, outcome: 'failed' },
-    state: { ...base().state, retriggers: { 'ratify:null': 1 } },
-    limits: { ...base().limits, sessionRetries: 1 },
-  }));
-  expect(ratify).toEqual({ kind: 'park', reason: 'ratify_failed', detail: expect.any(String) });
-
   const closing = decide(base({
     lastSessionOutcome: { kind: 'closing', cardId: null, outcome: 'failed' },
     state: { ...base().state, retriggers: { 'closing:null': 1 } },
@@ -630,21 +595,7 @@ test('V5/V6: a failed attempt parks once its retry budget is exhausted, keyed pe
   expect(closing).toEqual({ kind: 'park', reason: 'closing_failed', detail: expect.any(String) });
 });
 
-test('V7: the unratified list reached empty re-triggers the watchdog on the same scope — proven '
-  + 'against a stale watchdog fact that would decide DIFFERENTLY if this fell through', () => {
-  const a = decide(base({
-    lastSessionOutcome: { kind: 'ratify', cardId: null, outcome: 'ratified' },
-    // A stale `rulings_unratified` terminal reason: if V7 did not own this outcome and it fell
-    // through to the ordinary rows, row 15 would spawn ANOTHER ratify session forever. Getting
-    // `run_watchdog` here instead is proof V7 fired, not proof of a fallthrough coincidence.
-    lastWatchdog: terminal('rulings_unratified'),
-  }));
-  // The exact literal decide.ts already uses for rows 16/24 — "same scope" resolves to the base
-  // scope, never a card-scoped re-run.
-  expect(a).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: null });
-});
-
-test('V8: the final report exists and nothing is unratified — the campaign closes', () => {
+test('V8: the final report exists — the campaign closes', () => {
   const a = decide(base({
     lastSessionOutcome: { kind: 'closing', cardId: null, outcome: 'closed' },
   }));
@@ -658,7 +609,7 @@ test('a malformed outcome (a "ruled" verdict missing its rulingId) is a contract
   }));
   // With no watchdog fact at all, the ordinary rows land on row 27 — proof the post-session
   // block did not silently produce a wrong action for an outcome it does not own. This is now
-  // the ONLY class of outcome that reaches this fallthrough: V7/V8 own 'ratified'/'closed'.
+  // the ONLY class of outcome that reaches this fallthrough: V8 owns 'closed'.
   expect(a).toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: null });
 });
 

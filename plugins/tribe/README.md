@@ -291,8 +291,8 @@ flag table, exit codes and the frozen action table — this section is only a po
 
 A **layer above the watchdog**, also zero token cost for its own control loop: it launches or
 adopts the watchdog and, when the watchdog parks `needs_human`, spawns a small judgment-only
-Claude Code session — never the full executor — to rule on a card's escalation, ratify a
-harness-gap proposal, or run the closing report, then resumes the watchdog. It is a subcommand
+Claude Code session — never the full executor — to rule on a card's escalation or run
+the closing report (it does no ratification), then resumes the watchdog. It is a subcommand
 of the same runner CLI, `run.ts supervise`, not a separate installable:
 
 ```sh
@@ -306,7 +306,7 @@ escalation-file *rename* — never `campaign-state.json`, `answers.md`, or anyth
 
 | Subcommand | Own flags (defaults) | Exit codes |
 | --- | --- | --- |
-| `run.ts supervise` | `--campaign` \| `--home`, `--watchdog-model` (`--model`'s value), `--max-ruling-rounds` (2), `--max-ratify-rounds` (2), `--max-spawns` (8), `--max-watchdog-runs` (20), `--session-timeout-seconds` (1800), `--session-max-turns` (60), `--session-retries` (1), `--poll-seconds` (30) | `0` done · `1` usage error · `20` needs_owner (reason in `NEEDS_OWNER.md` and `supervisor/status.json`) · `21` a live supervisor already holds the lock |
+| `run.ts supervise` | `--campaign` \| `--home`, `--watchdog-model` (`--model`'s value), `--max-ruling-rounds` (2), `--max-spawns` (8), `--max-watchdog-runs` (20), `--session-timeout-seconds` (1800), `--session-max-turns` (60), `--session-retries` (1), `--poll-seconds` (30) | `0` done · `1` usage error · `20` needs_owner (reason in `NEEDS_OWNER.md` and `supervisor/status.json`) · `21` a live supervisor already holds the lock |
 
 See
 [`scripts/runner/README.md`](scripts/runner/README.md#supervisor-card-campaign-supervisor) for

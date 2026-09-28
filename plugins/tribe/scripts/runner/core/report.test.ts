@@ -22,7 +22,7 @@ import {
   type LoopIO,
   type RunLoopConfig,
 } from './loop.ts';
-import { EXIT_ESCALATED, EXIT_LOCKED, EXIT_OK, EXIT_RULINGS_UNRATIFIED, EXIT_SESSION_INCOMPLETE } from './types.ts';
+import { EXIT_ESCALATED, EXIT_LOCKED, EXIT_OK, EXIT_SESSION_INCOMPLETE } from './types.ts';
 import { BRIEF_TEMPLATE_PATH } from './brief.ts';
 import { parseState } from './state.ts';
 import type { Card, CampaignState } from './types.ts';
@@ -118,17 +118,6 @@ describe('deriveExitReason — maps a run outcome to the §O5 report reason voca
 
   test('EXIT_OK with no message -> done', () => {
     expect(deriveExitReason({ threw: false, exitCode: EXIT_OK, hasMessage: false })).toBe('done');
-  });
-
-  test('EXIT_RULINGS_UNRATIFIED -> rulings_unratified, regardless of hasMessage (harness-gap-wiring PR C)', () => {
-    expect(deriveExitReason({ threw: false, exitCode: EXIT_RULINGS_UNRATIFIED, hasMessage: false })).toBe(
-      'rulings_unratified',
-    );
-    // The gate's LoopResult carries a human-readable message (same as the STOP-file path) —
-    // it must not be misclassified as `stop_requested` the way a bare `hasMessage` check would.
-    expect(deriveExitReason({ threw: false, exitCode: EXIT_RULINGS_UNRATIFIED, hasMessage: true })).toBe(
-      'rulings_unratified',
-    );
   });
 });
 
@@ -479,43 +468,12 @@ describe('renderReportMarkdown — JSON<->MD parity', () => {
 });
 
 // ===========================================================================================
-// renderReportMarkdown — rulings_unratified (harness-gap-wiring PR C): the P5 "answerable"
-// framing (ruling path leads, same as needs_direction) and the unratified ruling ids
+// renderReportMarkdown — D3: the runner requires no ratification, so the report never asks
+// for one
 // ===========================================================================================
 
-describe('renderReportMarkdown — rulings_unratified (maintainer ruling: campaign-level state, folded into "Pending")', () => {
-  test('the unratified ruling ids and guidance land INSIDE the "## Pending" section, not a separate per-card-style block', async () => {
-    const state = fixtureState({ sequence: ['A1'], cards: { A1: fixtureCard({ status: 'shipped' }) } });
-    const report = await buildCampaignReport(
-      state,
-      fixtureRun({
-        exitCode: EXIT_RULINGS_UNRATIFIED,
-        reason: 'rulings_unratified',
-        unratifiedRulings: ['R2 — Still pending', 'R5 — Unrecognized value'],
-      }),
-      fixtureConfig(),
-      ioWith(),
-    );
-    const md = renderReportMarkdown(report);
-
-    expect(md).toContain('rulings_unratified');
-    expect(md).toContain('ratified-as');
-    expect(md).toContain('R2 — Still pending');
-    expect(md).toContain('R5 — Unrecognized value');
-
-    // Placement: the note (and both ruling ids) must appear AFTER the "## Pending" heading —
-    // never as its own top-level "## Options" section, and never inside "## Cards" (no single
-    // card owns this condition — see report.ts's renderRulingsUnratifiedNote doc comment).
-    const pendingIdx = md.indexOf('## Pending (needs the owner)');
-    const cardsIdx = md.indexOf('## Cards');
-    const noteIdx = md.indexOf('Unratified rulings (answerable)');
-    expect(pendingIdx).toBeGreaterThan(-1);
-    expect(noteIdx).toBeGreaterThan(pendingIdx);
-    expect(md).not.toContain('## Options');
-    expect(md.indexOf('R2 — Still pending')).toBeGreaterThan(cardsIdx);
-  });
-
-  test('no rulings note, and no stray field, when the reason is not rulings_unratified', async () => {
+describe('renderReportMarkdown — no ratification note (D3)', () => {
+  test('no rulings note, and no stray field, on a done report', async () => {
     const state = fixtureState({ sequence: ['A1'], cards: { A1: fixtureCard({ status: 'shipped' }) } });
     const report = await buildCampaignReport(state, fixtureRun(), fixtureConfig(), ioWith());
     const md = renderReportMarkdown(report);

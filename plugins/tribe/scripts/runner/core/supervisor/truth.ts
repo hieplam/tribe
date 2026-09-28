@@ -77,7 +77,7 @@ export function terminalContradiction(o: SupervisorObservation): TerminalContrad
  * Substituting raw made a campaign that had just SUCCEEDED fall past every row into the residual
  * `park('error')` backstop — the card's oracle calls that a bug ("parking when the disk says the
  * park is false"). The map below is the whole of `ExitReason`, read off the type itself: `done`
- * is the one value that is spelled differently; the other five are spelled identically in both
+ * is the one value that is spelled differently; the other four are spelled identically in both
  * vocabularies and map to themselves.
  *
  * PURE and TOTAL: no fs, no clock, no throw.
@@ -90,7 +90,6 @@ const RUN_REASON_TO_TERMINAL_REASON: ReadonlyMap<string, string> = new Map([
   ['stop_requested', 'stop_requested'],
   ['escalations_pending', 'escalations_pending'],
   ['session_incomplete', 'session_incomplete'],
-  ['rulings_unratified', 'rulings_unratified'],
   ['error', 'error'],
 ]);
 

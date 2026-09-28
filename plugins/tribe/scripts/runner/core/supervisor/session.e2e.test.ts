@@ -176,9 +176,9 @@ describe('supervisor sessions — real model, the supervisor\'s own spawn path (
     expect(run.result.outcome).toBe('success');
   }, TEST_TIMEOUT_MS);
 
-  // G1, ruling/ratify — the SAME oracle as closing (owner ruling R2 granted Skill): Skill c3
+  // G1, ruling — the SAME oracle as closing (owner ruling R2 granted Skill): Skill c3
   // RETURNS C3 content. The C3 CLI itself cannot run here (no Bash) — accepted, not asserted.
-  for (const kind of ['ruling', 'ratify'] as const) {
+  for (const kind of ['ruling'] as const) {
     test.skipIf(!RUN_E2E)(`${kind}: Skill c3 returns C3 content and no Unknown skill appears`, async () => {
       const run = await runKind(kind, C3_PROMPT, 'c3');
       expect(run.transcript).not.toContain('Unknown skill'); // first, so a tier regression fails HERE

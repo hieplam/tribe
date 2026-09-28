@@ -1,9 +1,9 @@
 /**
  * The watchdog's PURE decision core (D74-3): `(observation) -> action`. No clock, no fs, no
  * spawn, no throw — every world fact arrives on the observation, so the whole action table is
- * exercised as data (`decide.test.ts`, 48 rows).
+ * exercised as data (`decide.test.ts`, 40 rows).
  *
- * Precedence (W-P1): a terminal runner exit (0/2/4/5) answers first — it is more informative
+ * Precedence (W-P1): a terminal runner exit (0/2/4) answers first — it is more informative
  * than `stop_requested`. STOP then suppresses everything that would START work (launch,
  * relaunch, wait). Within exit 3, a rejected quota signal outranks an overload signal: a quota
  * wall has a known reset instant, a 529 is transient.
@@ -63,7 +63,6 @@ export function decide(o: WatchdogObservation): WatchdogAction {
     case 0: return { kind: 'exit', status: 'done', reason: 'runner_done' };
     case 2: return { kind: 'exit', status: 'needs_human', reason: 'escalations_pending' };
     case 4: return { kind: 'exit', status: 'needs_human', reason: 'error' };
-    case 5: return { kind: 'exit', status: 'needs_human', reason: 'rulings_unratified' };
     default: break;
   }
 
@@ -89,8 +88,10 @@ export function decide(o: WatchdogObservation): WatchdogAction {
     }
   }
 
-  // --- 4. Exit 3, or a crash with no code to read (W-P6): the recoverable deaths.
-  if (o.lastExitCode === 3 || (o.lastExitCode === null && o.crashSuspected)) {
+  // --- 4. Exit 3, an unknown runner exit, or a crash with no code to read (W-P6):
+  // the recoverable deaths. Unknown exits must spend the same bounded crash budget as exit 3.
+  const isUnknownExit = o.lastExitCode !== null && ![0, 1, 2, 3, 4].includes(o.lastExitCode);
+  if (o.lastExitCode === 3 || isUnknownExit || (o.lastExitCode === null && o.crashSuspected)) {
     // W-P2: a missing or already-elapsed reset is NOT a quota signal (spec §7).
     // FIX S3: clamp the computed deadline — untrusted log content must never produce an
     // unbounded wait (`MAX_QUOTA_WAIT_MS`, defined above beside `OVERLOAD_BACKOFF_SECONDS`).

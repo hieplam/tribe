@@ -1200,7 +1200,7 @@ function fixtureSupervisorConfig(overrides: Partial<SupervisorConfig> = {}): Sup
     watchdogModel: null,
     campaignSlug: null,
     rawHome: '/h/.tribe/k/campaigns/c',
-    limits: { maxRulingRounds: 2, maxRatifyRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20, sessionRetries: 1 },
+    limits: { maxRulingRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20, sessionRetries: 1 },
     sessionTimeoutSeconds: 1800,
     sessionMaxTurns: 60,
     pollSeconds: 30,

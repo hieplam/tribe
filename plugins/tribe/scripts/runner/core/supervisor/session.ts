@@ -19,7 +19,7 @@ import type { SessionKind } from './model.ts';
 import type { LedgerEntryUsage } from './model.ts';
 import { buildContainmentHook, decideClosingGrantHook } from './permit.ts';
 
-/** spec §5.2/§5.3: the tool grant for a `ruling`/`ratify` session. `closing` (§5.4) carries its
+/** spec §5.2: the tool grant for a `ruling` session. `closing` (§5.4) carries its
  * OWN, wider grant — R11 (Task 20), below `CLOSING_ALLOWED_TOOLS`/`CLOSING_DISALLOWED_TOOLS` —
  * because no loaded settings tier grants `closing` anything by itself (spec §5.4, R11): an
  * un-granted `closing` session cannot run headless at all. `Skill` by owner ruling R2 (card
@@ -27,7 +27,7 @@ import { buildContainmentHook, decideClosingGrantHook } from './permit.ts';
  * because this envelope has no `Bash` (`JUDGMENT_DISALLOWED_TOOLS`) — a known, accepted limit. */
 const JUDGMENT_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Skill'] as const;
 
-/** spec §5.1: no shell, no subagents, no network, and no wait-tool for a ruling/ratify session —
+/** spec §5.1: no shell, no subagents, no network, and no wait-tool for a ruling session —
  * the same wall `core/session.ts`'s executor envelope holds (a one-shot session that arms a
  * Monitor dies before the notification can ever reach it), restated here rather than imported
  * because this envelope is otherwise unrelated to the executor's `PinnedSessionOptions`. */
@@ -43,8 +43,8 @@ const JUDGMENT_DISALLOWED_TOOLS = ['Bash', 'Task', 'Agent', 'WebFetch', 'WebSear
 const CLOSING_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash', 'Skill'] as const;
 
 /** R11: no subagents, no network, no wait-tool for `closing` either — `Bash` stays granted
- * (above) because `closing` legitimately runs `verify-shipped` and lands the governance PR
- * (§5.4's named exception); this list only removes the tools nothing in Stage D needs. */
+ * (above) because `closing` runs `verify-shipped`; it has no containment hook. This list
+ * only removes the tools nothing in Stage D needs. */
 const CLOSING_DISALLOWED_TOOLS = ['Task', 'Agent', 'WebFetch', 'WebSearch', 'Monitor', 'ScheduleWakeup'] as const;
 
 /** The scan wall (issue #163; card D2/D3): the executor's own `decideScanGuardHook`, reused —
@@ -56,7 +56,7 @@ const SCAN_GUARD_ENTRY = {
   hooks: [(hookInput: unknown) => Promise.resolve(decideScanGuardHook(hookInput))],
 };
 
-/** spec §5.1's envelope, for the three one-shot kinds. Deliberately has NO `resume` field at
+/** spec §5.1's envelope, for the two one-shot kinds. Deliberately has NO `resume` field at
  * all — not even optional — because G3 says every one-shot session starts from a rendered brief,
  * never a resumed conversation; there is nothing to omit by mistake because there is nowhere to
  * put it. */
@@ -72,7 +72,7 @@ export interface OneShotSessionOptions {
    * user tier loaded (card supervisor-session-settings, G4, MEASURED): the user tier finds
    * `verify-shipped` only where install.sh symlinked it into ~/.claude/skills — a host fact — while
    * this load works on every host, and where both exist the session registers it once.
-   * `ruling`/`ratify` never carry this field. */
+   * `ruling` never carries this field. */
   plugins?: Array<{ type: 'local'; path: string }>;
   abortController: AbortController;
   hooks?: { PreToolUse: Array<{ hooks: Array<(input: unknown) => Promise<HookDecision>> }> };
@@ -86,12 +86,12 @@ export interface OneShotSessionOptions {
  * the containment hook's one injected capability (`permit.ts`'s `buildContainmentHook`) — never
  * `fs` directly (`pure-core.md`). */
 export interface OneShotSessionConfig {
-  /** the containment root for `ruling`/`ratify`, and where logs and the ledger live — never
+  /** the containment root for `ruling`, and where logs and the ledger live — never
    * `cwd`. */
   homeDir: string;
   model: string;
   /** Fix 2 (skinner audit): the caller's configured `--session-max-turns` — always supplied
-   * (never defaulted here; `args.ts` owns the default), for every one of the three kinds. */
+   * (never defaulted here; `args.ts` owns the default), for both kinds. */
   maxTurns: number;
   /** the target repo root — `cwd` for every kind. */
   repoRoot: string;
@@ -99,7 +99,7 @@ export interface OneShotSessionConfig {
   /** R11 (Task 20, spec §5.4 item 4): the `verify-shipped` plugin directory, resolved and
    * existence-checked by the composition root from ITS OWN location (never cwd, never
    * `~/.claude`, never a literal). Read only for `kind === 'closing'`; `undefined` for
-   * `ruling`/`ratify`, which never load plugins. The edge (`decide.ts`/`loop.ts`) fails closed
+   * `ruling`, which never loads plugins. The edge (`decide.ts`/`loop.ts`) fails closed
    * before a `closing` session is ever spawned without it — this field, when present, is
    * therefore always a real, existing directory. */
   verifyShippedPluginDir?: string;
@@ -135,8 +135,7 @@ export function buildOneShotOptions(
     // R11 (Task 20): §5.4's named exception, now an EXPLICIT tool grant rather than "no
     // list at all" — the settings tiers above grant nothing to this envelope, so without this
     // grant the session could not run headless. Still NO containment hook — this session
-    // legitimately lands the governance PR, and `Bash`/repo write are named IN the grant, not
-    // left ungoverned.
+    // runs `verify-shipped`, and `Bash`/repo write are named IN the grant, not left ungoverned.
     options.allowedTools = CLOSING_ALLOWED_TOOLS;
     options.disallowedTools = CLOSING_DISALLOWED_TOOLS;
     // R11 item 4, kept by card supervisor-session-settings (G4): load `verify-shipped` from the
@@ -179,9 +178,8 @@ export function buildOneShotOptions(
 export interface OneShotSpawnParams {
   prompt: string;
   options: OneShotSessionOptions;
-  /** Card supervisor-sessions-in-repo (Task 5): the three kinds' option blocks are no longer
-   * distinguishable from `options` alone (spec §4.1 removed `additionalDirectories`, the only
-   * field that ever differed between `ruling` and `ratify`) — the seam names the kind explicitly
+  /** Card supervisor-sessions-in-repo (Task 5): the kinds' option blocks are not always
+   * distinguishable from `options` alone (spec §4.1 removed `additionalDirectories`) — the seam names the kind explicitly
    * instead of a caller guessing it. */
   kind: SessionKind;
 }

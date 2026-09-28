@@ -1,7 +1,8 @@
 /**
- * Least-privilege write containment for a `ruling`/`ratify` one-shot session (card
- * `campaign-supervisor`, spec §5.1/§19.4, Ratified decisions item 4 — quoted verbatim):
- * "A ruling/ratify session may write only under the campaign home." **This hook is the ONLY
+ * Least-privilege write containment for a `ruling` one-shot session (card
+ * `campaign-supervisor`, spec §5.1/§19.4, Ratified decisions item 4, which also named the
+ * ratification session the supervisor no longer has — runner-driver-only spec §4.11): a ruling
+ * session may write only under the campaign home. **This hook is the ONLY
  * enforcement there is (S-P12)** — measured (spec §19.4): with the hook removed, the identical
  * envelope wrote to the repo, to `/tmp`, and through a symlink out of the home.
  * `permissionMode: 'default'` confines nothing on its own; `additionalDirectories` is a read
@@ -61,7 +62,7 @@ export function containPath(target: string, homeDir: string): boolean {
 
 /** PURE: the containment decision table. Fails CLOSED by default — the shapes ever ALLOWED are
  * `Read`/`Grep`/`Glob` (any location: spec §5.1's allowedTools row grants all three to
- * ruling/ratify; they are read-only, so — same as `Read` — no `path`/`file_path` argument of
+ * ruling; they are read-only, so — same as `Read` — no `path`/`file_path` argument of
  * theirs can ever write, hence no containment check applies to them), `Skill` (owner ruling R2 —
  * loading a skill's content writes nothing, so it needs no path check either), and a
  * `Write`/`Edit` whose `tool_input.file_path` passes `containPath`. Every other tool — including

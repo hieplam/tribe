@@ -11,8 +11,9 @@ export const SUPERVISOR_EXIT_USAGE = 1;
 export const SUPERVISOR_EXIT_NEEDS_OWNER = 20;
 export const SUPERVISOR_EXIT_RUNNING = 21;
 
-/** §5: the three one-shot session kinds. */
-export type SessionKind = 'ruling' | 'ratify' | 'closing';
+/** §5: the two one-shot session kinds. The supervisor does no ratification (runner-driver-only
+ * spec §4.11, D6). */
+export type SessionKind = 'ruling' | 'closing';
 
 /** §6.1: what a SESSION may write to `<home>/supervisor/park/<cardId>.json`. Closed, two
  * values — an unrecognised `kind` is read as `too_hard` (§6.1), never a third value here. */
@@ -29,20 +30,18 @@ export interface ParkMarker {
   note: string;
 }
 
-/** §6.2: what the SUPERVISOR may write into `NEEDS_OWNER.md`. Twenty-two values (spec §6.2's own
- * count), each produced by exactly one row of §3.4's table or one postcondition failure. The
- * last two (`history_rewritten`, `ratify_out_of_scope`) are the integrity parks added by §5.2 and
- * §5.3 — the only two that bypass the retry budget. */
+/** §6.2: what the SUPERVISOR may write into `NEEDS_OWNER.md`. Nineteen values, each produced
+ * by exactly one row of §3.4's table or one postcondition failure. The last one
+ * (`history_rewritten`) is the integrity park added by §5.2 — the only one that bypasses the
+ * retry budget. */
 export type ParkReason =
   | 'owner_only'
   | 'too_hard'
   | 'w7_cap'
-  | 'ratify_cap'
   | 'spawn_cap'
   | 'watchdog_run_cap'
   | 'repeat_escalation'
   | 'ruling_failed'
-  | 'ratify_failed'
   | 'closing_failed'
   | 'session_incomplete'
   | 'quota_cap'
@@ -54,8 +53,7 @@ export type ParkReason =
   | 'watchdog_no_terminal'
   | 'watchdog_usage'
   | 'resume_blocked'
-  | 'history_rewritten'
-  | 'ratify_out_of_scope';
+  | 'history_rewritten';
 
 /** §3.2: the typed subset of `campaign-report.json` the observation carries — `run.reason`,
  * `pending[]`, `cards[].outcome`, `cards[].escalationFile`, `cards[].question`, `stats` (§1.2's
@@ -99,7 +97,6 @@ export interface EscalationFact {
  * watchdog is awaited, not what `decide()` decides, so they live on the CLI config instead. */
 export interface SupervisorLimits {
   maxRulingRounds: number;
-  maxRatifyRounds: number;
   maxSpawns: number;
   maxWatchdogRuns: number;
   sessionRetries: number;
@@ -108,7 +105,6 @@ export interface SupervisorLimits {
 /** §4/§7: the supervisor's own persisted counters (`<home>/supervisor/state.json`). */
 export interface SupervisorState {
   rulingRounds: Record<string, number>;
-  ratifyRounds: number;
   spawns: number;
   watchdogRuns: number;
   /** §8's repeat-escalation breaker: every escalation body sha256 already ruled, per card. */
@@ -156,8 +152,6 @@ export interface SupervisorObservation {
   escalations: EscalationFact[];
   /** `campaign-state.json`'s `ownerOnlyEscalations`. */
   ownerOnlyEscalations: string[];
-  /** `report.run.unratifiedRulings`. */
-  unratifiedRulings: string[];
   /** `<home>/supervisor/park/*.json` written by a session. */
   parkMarkers: ParkMarker[];
   /** Every run under `<home>/runs/`, ASCENDING by runId (spec §2.2, card
@@ -196,13 +190,11 @@ export interface SessionOutcome {
   cardId: string | null;
   outcome:
     | 'ruled'
-    | 'ratified'
     | 'closed'
     | 'parked'
     | 'failed'
     | 'timeout'
-    | 'history_rewritten'
-    | 'ratify_out_of_scope';
+    | 'history_rewritten';
   rulingId?: string | null;
   parkMarkerKind?: ParkMarkerKind;
 }
@@ -216,11 +208,11 @@ export type SupervisorAction =
     /** G2 (card `supervisor-park-truth`): `'stale_terminal'` when — and only when — this
      * `run_watchdog` IS the bounded re-observation the contradiction row asked for, `null` for
      * every other row that returns this action (row 27's first run, row 6's re-scan, rows
-     * 16/24's own retriggers, V7's post-ratify re-run).
+     * 16/24's own retriggers).
      *
      * The pure core already knows WHY it returned `run_watchdog`, so it says so rather than
-     * leaving the edge to re-derive it. The edge's re-derivation was wrong on the V7
-     * (`ratified`) early return, which also emits `run_watchdog` and can coincide with an
+     * leaving the edge to re-derive it. The edge's re-derivation was wrong on an early
+     * post-session return that also emitted `run_watchdog` and could coincide with an
      * independently-true contradiction, and so consumed the campaign's one-shot
      * `retriggers['stale_terminal']` budget for an unrelated action (`pure-core.md`: "an adapter
      * accumulating business decisions"). Additive: `ParkReason` gains nothing, and no persisted
@@ -259,7 +251,7 @@ export type SupervisorAction =
 
 /** §11: one ledger.jsonl line per spawn (G5) — a session spawn, or an owner ruling transcribed
  * by the doorbell (§12.2, `kind: 'owner'`, no `sessionId`/`usage`). */
-export type LedgerVerdict = 'ruled' | 'ratified' | 'closed' | 'parked' | 'failed' | 'timeout';
+export type LedgerVerdict = 'ruled' | 'closed' | 'parked' | 'failed' | 'timeout';
 
 export interface LedgerEntryUsage {
   input_tokens: number;
@@ -303,7 +295,6 @@ export interface SupervisorStatus {
     | 'running_watchdog'
     | 'awaiting_watchdog'
     | 'session_ruling'
-    | 'session_ratify'
     | 'session_closing'
     | 'terminal';
   lastAction: string;
@@ -313,7 +304,6 @@ export interface SupervisorStatus {
     watchdogRuns: number;
     spawns: number;
     rulingRounds: Record<string, number>;
-    ratifyRounds: number;
     failures: number;
     /** G2/G3 (spec §2.2, card `supervisor-park-truth`): how many times THIS invocation found a
      * park or terminal the disk had already falsified and acted on that — G3's superseded park

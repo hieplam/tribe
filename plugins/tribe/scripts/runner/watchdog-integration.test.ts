@@ -120,7 +120,6 @@ describe('G3 — every terminal state surfaces to the lead', () => {
   const cases: Array<[plan: string, exitCode: number, reason: string]> = [
     ['0:none', 0, 'runner_done'],
     ['2:none', 10, 'escalations_pending'],
-    ['5:none', 10, 'rulings_unratified'],
     ['4:none', 10, 'error'],
     ['3:none 3:none', 10, 'session_incomplete'],
     ['3:overload 3:overload 3:overload 3:overload 3:overload 3:overload', 10, 'overloaded'],

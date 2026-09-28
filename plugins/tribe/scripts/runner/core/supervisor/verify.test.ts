@@ -2,7 +2,7 @@
 // plan's Step 1 test skeleton (extended with the Oracle's remaining enumerated cases); section 2
 // is the plan's Step 2 integrity skeleton, implemented VERBATIM.
 import { expect, test } from 'bun:test';
-import { parseParkMarker, verifyClosing, verifyRatify, verifyRuling } from './verify.ts';
+import { parseParkMarker, verifyClosing, verifyRuling } from './verify.ts';
 
 // ---------------------------------------------------------------------------------------------
 // Section 1 — Step 1: the ruling postcondition, plus park-marker parsing (plan lines 976-982).
@@ -28,17 +28,23 @@ test('the very first ruling ever, appended to an empty answers.md, still verifie
   expect(v.rulingId).toBe('R1 one');
 });
 
-test('a new block with ratified-as: pending is a failed attempt, not a ruling', () => {
+test('a new block with ratified-as: pending is still a ruling — the value is not checked (D6)', () => {
   const after = RULED_BEFORE + '\n## R2 two\nratified-as: pending\n';
   const v = verifyRuling({ before: RULED_BEFORE, after, repoStatus: '' });
-  expect(v.outcome).toBe('failed');
+  expect(v.outcome).toBe('ruled');
   expect(v.retryable).toBe(true);
 });
 
-test('a new block with no ratified-as: field at all is a failed attempt', () => {
+test('a new block with no ratified-as: field at all is a ruling (D6)', () => {
   const after = RULED_BEFORE + '\n## R2 two\nsome other line\n';
   const v = verifyRuling({ before: RULED_BEFORE, after, repoStatus: '' });
-  expect(v.outcome).toBe('failed');
+  expect(v.outcome).toBe('ruled');
+});
+
+test('any new ## block appended after the existing ones is a ruling — no ratified-as: required (D6)', () => {
+  const before = '## R1 — a\n\nx\n';
+  const v = verifyRuling({ before, after: `${before}\n## R2 — b\n\nMax returns ErrEmpty.\n`, repoStatus: '', marker: null });
+  expect(v).toEqual({ outcome: 'ruled', retryable: true, rulingId: 'R2 — b' });
 });
 
 test('no new block and no park marker is a failed attempt', () => {
@@ -99,21 +105,15 @@ test('parseParkMarker treats a missing kind field as malformed, never a throw', 
 
 // verifyClosing (spec §5.4 postconditions).
 
-test('verifyClosing: a non-empty final report plus zero unratified rulings verifies as closed', () => {
-  const v = verifyClosing({ finalReport: '# Final report\n\nAll cards shipped.\n', answers: RULED_BEFORE, shippedVerdicts: [] });
+test('verifyClosing: a non-empty final report verifies as closed', () => {
+  const v = verifyClosing({ finalReport: '# Final report\n\nAll cards shipped.\n', shippedVerdicts: [] });
   expect(v.outcome).toBe('closed');
 });
 
 test('verifyClosing: a missing final report is a failed attempt', () => {
-  const v = verifyClosing({ finalReport: null, answers: RULED_BEFORE, shippedVerdicts: [] });
+  const v = verifyClosing({ finalReport: null, shippedVerdicts: [] });
   expect(v.outcome).toBe('failed');
   expect(v.retryable).toBe(true);
-});
-
-test('verifyClosing: an unratified ruling still on disk is a failed attempt', () => {
-  const unratified = '## R1 one\nratified-as: pending\n';
-  const v = verifyClosing({ finalReport: 'report body', answers: unratified, shippedVerdicts: [] });
-  expect(v.outcome).toBe('failed');
 });
 
 // Task 10 (spec §4b/§4c): the closing verdict must be the verify-shipped SCRIPT's own artifact on
@@ -124,7 +124,7 @@ const GOOD_REPORT = '# Campaign report\n\nEverything shipped.\n';
 
 test('verifyClosing: a shipped card with NO verdict file on disk is a failed attempt (verdict_missing)', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [{ cardId: 'c1', raw: null }],
   });
   expect(v.outcome).toBe('failed');
@@ -134,7 +134,7 @@ test('verifyClosing: a shipped card with NO verdict file on disk is a failed att
 
 test('verifyClosing: a verdict file that is not JSON is a failed attempt (verdict_malformed)', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [{ cardId: 'c1', raw: 'not json at all {' }],
   });
   expect(v.outcome).toBe('failed');
@@ -143,7 +143,7 @@ test('verifyClosing: a verdict file that is not JSON is a failed attempt (verdic
 
 test('verifyClosing: a verdict file missing the card/verdict fields is a failed attempt (verdict_malformed)', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [{ cardId: 'c1', raw: '{"checks":{}}' }],
   });
   expect(v.outcome).toBe('failed');
@@ -152,7 +152,7 @@ test('verifyClosing: a verdict file missing the card/verdict fields is a failed 
 
 test('verifyClosing: a verdict file whose card does not match is a failed attempt (verdict_card_mismatch)', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [{ cardId: 'c1', raw: '{"card":"c2","verdict":"PASS"}' }],
   });
   expect(v.outcome).toBe('failed');
@@ -161,7 +161,7 @@ test('verifyClosing: a verdict file whose card does not match is a failed attemp
 
 test('verifyClosing: a verdict file whose verdict is not PASS is a failed attempt (verdict_fail), reusing the ordinary retryable outcome', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [{ cardId: 'c1', raw: '{"card":"c1","verdict":"FAIL"}' }],
   });
   expect(v.outcome).toBe('failed');
@@ -171,7 +171,7 @@ test('verifyClosing: a verdict file whose verdict is not PASS is a failed attemp
 
 test('verifyClosing: every shipped card with a present, matching, PASS verdict verifies as closed', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [
       { cardId: 'c1', raw: '{"card":"c1","verdict":"PASS"}' },
       { cardId: 'c2', raw: '{"card":"c2","verdict":"PASS"}' },
@@ -182,7 +182,7 @@ test('verifyClosing: every shipped card with a present, matching, PASS verdict v
 
 test('verifyClosing: one PASS and one missing among shipped cards is a failed attempt', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [
       { cardId: 'c1', raw: '{"card":"c1","verdict":"PASS"}' },
       { cardId: 'c2', raw: null },
@@ -193,7 +193,7 @@ test('verifyClosing: one PASS and one missing among shipped cards is a failed at
 });
 
 test("verifyClosing: the spec §4 reproduction — a report body that says BLOCKED never closes, even with no shipped verdicts", () => {
-  const v = verifyClosing({ finalReport: 'Status: BLOCKED\n', answers: '', shippedVerdicts: [] });
+  const v = verifyClosing({ finalReport: 'Status: BLOCKED\n', shippedVerdicts: [] });
   expect(v.outcome).not.toBe('closed');
   expect(v.outcome).toBe('failed');
 });
@@ -244,34 +244,4 @@ test('a clean append at a fresh line still verifies ruled even when before lacks
   const v = verifyRuling({ before, after, repoStatus: '' });
   expect(v.outcome).toBe('ruled');
   expect(v.rulingId).toBe('R2 two');
-});
-
-test('ratify may change only the ids it was given', () => {
-  const before = '## R1 a\nratified-as: pending\n\n## R2 b\nratified-as: operational\n';
-  const okAfter = '## R1 a\nratified-as: operational\n\n## R2 b\nratified-as: operational\n';
-  expect(verifyRatify({ before, after: okAfter, named: ['R1 a'] }).outcome).toBe('ratified');
-
-  const badAfter = '## R1 a\nratified-as: operational\n\n## R2 b\nratified-as: dismissed\n';
-  const v = verifyRatify({ before, after: badAfter, named: ['R1 a'] });
-  expect(v.outcome).toBe('ratify_out_of_scope');
-  expect(v.retryable).toBe(false);
-});
-
-test('ratify that drops a ruling id entirely parks out_of_scope', () => {
-  const before = '## R1 a\nratified-as: pending\n\n## R2 b\nratified-as: operational\n';
-  expect(verifyRatify({ before, after: '## R1 a\nratified-as: operational\n', named: ['R1 a'] }).outcome)
-    .toBe('ratify_out_of_scope');
-});
-
-// F3 fix: spec §5.3 check 1 — "every ruling block whose id is NOT in unratifiedRulings is
-// byte-identical before and after". A brand-new injected block's id is not in `before` at all,
-// so it is trivially "not in unratifiedRulings" and not byte-identical (it did not exist); a
-// ratify session never adds rulings.
-test('ratify that INJECTS a fabricated new ruling block parks ratify_out_of_scope', () => {
-  const before = '## R1 a\nratified-as: pending\n\n## R2 b\nratified-as: operational\n';
-  const after = '## R1 a\nratified-as: operational\n\n## R2 b\nratified-as: operational\n'
-    + '\n## R3 evil\nratified-as: operational\n';
-  const v = verifyRatify({ before, after, named: ['R1 a'] });
-  expect(v.outcome).toBe('ratify_out_of_scope');
-  expect(v.retryable).toBe(false);
 });

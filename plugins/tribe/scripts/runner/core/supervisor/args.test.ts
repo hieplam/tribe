@@ -14,7 +14,6 @@ describe('parseSupervisorArgs', () => {
     expect(got.config.watchdogModel).toBe(null);
     expect(got.config.limits).toEqual({
       maxRulingRounds: 2,
-      maxRatifyRounds: 2,
       maxSpawns: 8,
       maxWatchdogRuns: 20,
       sessionRetries: 1,
@@ -99,7 +98,6 @@ describe('parseSupervisorArgs', () => {
 
   const BOUNDED = [
     ['--max-ruling-rounds', 0, 10, 2],
-    ['--max-ratify-rounds', 0, 10, 2],
     ['--max-spawns', 0, 100, 8],
     ['--max-watchdog-runs', 1, 500, 20],
     ['--session-timeout-seconds', 60, 21600, 1800],

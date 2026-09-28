@@ -11,8 +11,10 @@
 // prompt has no reason to say it, so a hit is worth a human look even when it is innocent.
 //
 // NOT counted, by the card's adjudication rule (REFUTED in advance): the word "tribe" itself and
-// file paths under `plugins/tribe/` (naming, not coupling), and `verify-shipped` (generic done
-// mechanics, card D4).
+// file paths under `plugins/tribe/` (naming, not coupling), `verify-shipped` (generic done
+// mechanics, card D4), and the literal `--skip-gap-gate` flag: it is D6's instruction NOT to do
+// gap-gate work (spec §4.11), so it is not Tribe way of working (ruling R-PR3-FLAG). Only that exact,
+// case-sensitive literal is stripped — every other gap-gate mention still counts.
 //
 // PURE: text in, counts out. No file system, no clock.
 
@@ -48,6 +50,9 @@ export const TRIBE_LEXICON: readonly LexiconTerm[] = [
   { id: 'governance', pattern: /governance/gi, why: 'governance proposals / closing governance PR' },
 ];
 
+/** Ruling R-PR3-FLAG: the one literal excluded before counting (see the header). */
+const SKIP_GAP_GATE_FLAG = '--skip-gap-gate';
+
 export interface TermCount {
   id: string;
   count: number;
@@ -56,9 +61,10 @@ export interface TermCount {
 /** Counts every lexicon term in `text`. Returns only the terms that occur (count > 0), in lexicon
  * order, so an empty array means "no Tribe way of working in this text". */
 export function countTribeMentions(text: string): TermCount[] {
+  const counted = text.replaceAll(SKIP_GAP_GATE_FLAG, '');
   const counts: TermCount[] = [];
   for (const term of TRIBE_LEXICON) {
-    const matches = text.match(term.pattern);
+    const matches = counted.match(term.pattern);
     const count = matches === null ? 0 : matches.length;
     if (count > 0) counts.push({ id: term.id, count });
   }

@@ -97,7 +97,6 @@ case "$exit_code" in
   0) reason=done ;;
   2) reason=escalations_pending ;;
   3) reason=session_incomplete ;;
-  5) reason=rulings_unratified ;;
   *) reason=error ;;
 esac
 write_record "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$exit_code" "$reason"

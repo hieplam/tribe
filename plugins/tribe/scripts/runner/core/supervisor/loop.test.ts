@@ -6,11 +6,11 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  buildOneShotPrompt, extractRulingBlockVerbatim, observe, parseCampaignReportFacts,
-  readGapGateOpenIds, readParkedTerminal, runSupervisor, supervisorPathsOf,
+  observe, parseCampaignReportFacts,
+  readParkedTerminal, runSupervisor, supervisorPathsOf,
   type SupervisorLoopConfig, type SupervisorLoopSeam, type SupervisorTerminal,
 } from './loop.ts';
-import { CLOSING_TEMPLATE_PATH, RATIFY_TEMPLATE_PATH, RULING_TEMPLATE_PATH } from './brief.ts';
+import { CLOSING_TEMPLATE_PATH, RULING_TEMPLATE_PATH } from './brief.ts';
 import { zeroState } from './state.ts';
 import type { OneShotSessionOptions, OneShotSpawnParams } from './session.ts';
 import type { SessionMessage } from '../session.ts';
@@ -26,12 +26,11 @@ const REPO = '/repo';
  * their real, absolute `*_TEMPLATE_PATH` so `renderBrief` sees exactly what a real spawn would. */
 const REAL_TEMPLATES: Record<string, string> = {
   [RULING_TEMPLATE_PATH]: readFileSync(RULING_TEMPLATE_PATH, 'utf8'),
-  [RATIFY_TEMPLATE_PATH]: readFileSync(RATIFY_TEMPLATE_PATH, 'utf8'),
   [CLOSING_TEMPLATE_PATH]: readFileSync(CLOSING_TEMPLATE_PATH, 'utf8'),
 };
 
 const LIMITS: SupervisorLimits = {
-  maxRulingRounds: 2, maxRatifyRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20, sessionRetries: 1,
+  maxRulingRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20, sessionRetries: 1,
 };
 
 function baseConfig(overrides: Partial<SupervisorLoopConfig> = {}): SupervisorLoopConfig {
@@ -624,43 +623,20 @@ describe('runSupervisor — a failed ruling retries exactly once, then parks (ex
   });
 });
 
-describe('runSupervisor — a verified ratify (V7) drives run_watchdog via decide(), never a '
-  + 'loop-owned special case', () => {
-  test('spawn_session(ratify) -> [outcome: ratified] -> run_watchdog, with the real brief '
-    + 'carrying the unratified block\'s own verbatim text', async () => {
+describe('runSupervisor — the supervisor does no ratification (runner-driver-only spec §4.11, D6)', () => {
+  test('an unknown (retired) terminal reason parks as error and spawns no session', async () => {
     const seam = fakeSeam({
       initialFiles: {
         [join(HOME, 'answers.md')]: '## R1\n\nratified-as: pending\n\nSome earlier context.\n',
       },
-      watchdogRuns: [
-        { reason: 'rulings_unratified', exitCode: 11 },
-        { reason: 'stop_requested', exitCode: 0 },
-      ],
-      sessions: [
-        { effect: () => { seam.files.set(join(HOME, 'answers.md'), '## R1\n\nratified-as: operational\n\nSome earlier context.\n'); } },
-      ],
+      watchdogRuns: [{ reason: 'retired_reason', exitCode: 11 }],
     });
     const result = await runSupervisor(baseConfig(), HOME, seam.io);
 
     expect(result).toEqual({
-      exitCode: 0, kind: 'done', reason: 'stop_requested', statusPath: join(HOME, 'supervisor', 'status.json'),
+      exitCode: 20, kind: 'needs_owner', reason: 'error', statusPath: join(HOME, 'supervisor', 'status.json'),
     });
-
-    const events = (seam.files.get(join(HOME, 'supervisor', 'events.jsonl')) ?? '').trim().split('\n');
-    const kinds = events.map((l) => (JSON.parse(l) as { action: string }).action);
-    // The SECOND `run_watchdog` is V7's action, produced by decide() re-entered with
-    // `lastSessionOutcome.outcome === 'ratified'` — not a branch this loop computes itself.
-    expect(kinds).toEqual([
-      'run_watchdog', 'await_watchdog', 'spawn_session', 'run_watchdog', 'await_watchdog', 'exit',
-    ]);
-
-    expect(seam.spawnedPrompts.length).toBe(1);
-    const ratifyPrompt = seam.spawnedPrompts[0] as string;
-    expect(ratifyPrompt).not.toContain('placeholder');
-    // The unratified block's own verbatim text (heading + body), read off `answers.md` BEFORE
-    // the session ran — proof the brief carries the real block, not a description of it.
-    expect(ratifyPrompt).toContain('## R1');
-    expect(ratifyPrompt).toContain('Some earlier context.');
+    expect(seam.spawnedPrompts.length).toBe(0);
   });
 });
 
@@ -767,7 +743,7 @@ describe('runSupervisor — R11 (Task 20, spec §5.4 item 4): verifyShippedPlugi
     );
 
     expect(result.kind).toBe('done');
-    expect(seam.spawnedOptions.length).toBe(1); // closing only — no escalation, nothing to ratify
+    expect(seam.spawnedOptions.length).toBe(1); // closing only — no escalation
     expect(seam.spawnedOptions[0]?.plugins).toEqual([{ type: 'local', path: '/abs/plugins/verify-shipped' }]);
   });
 
@@ -783,107 +759,6 @@ describe('runSupervisor — R11 (Task 20, spec §5.4 item 4): verifyShippedPlugi
       statusPath: join(HOME, 'supervisor', 'status.json'),
     });
     expect(seam.spawnedOptions.length).toBe(0); // never spawned — decide() fails closed first
-  });
-});
-
-describe('extractRulingBlockVerbatim — the ratify brief\'s verbatim-block extractor', () => {
-  const answers = [
-    '## R1 — first ruling',
-    '',
-    'ratified-as: operational',
-    '',
-    'Body of R1, with a blank line above.',
-    '## R2 — second ruling',
-    'ratified-as: pending',
-    'Body of R2.',
-    '',
-  ].join('\n');
-
-  test('returns the heading line through the line before the next heading, verbatim', () => {
-    const block = extractRulingBlockVerbatim(answers, 'R1 — first ruling');
-    expect(block).toBe([
-      '## R1 — first ruling',
-      '',
-      'ratified-as: operational',
-      '',
-      'Body of R1, with a blank line above.',
-    ].join('\n'));
-  });
-
-  test('the last block in the file runs through to EOF', () => {
-    const block = extractRulingBlockVerbatim(answers, 'R2 — second ruling');
-    expect(block).toBe([
-      '## R2 — second ruling',
-      'ratified-as: pending',
-      'Body of R2.',
-      '',
-    ].join('\n'));
-  });
-
-  test('an id with no matching "## " heading fails closed to null, never a throw or a guess', () => {
-    expect(extractRulingBlockVerbatim(answers, 'R99 — does not exist')).toBeNull();
-    expect(extractRulingBlockVerbatim('', 'R1')).toBeNull();
-  });
-});
-
-describe('G5 (spec §6): the closing brief reads gap-gate results from the CAMPAIGN home', () => {
-  // The base tribe home the (now-removed) `io.resolveTribeHome` call would return — a DIFFERENT
-  // directory than the campaign-nested `HOME`. The gate always writes under the campaign home
-  // (its Tracker inputs live there), so a reader that follows `resolveTribeHome` looks in a place
-  // the gate never wrote to. A decoy report is planted there to prove that path is NOT consulted:
-  // one path, no silent fallback (over-checking by design — spec §6 fix item 1).
-  const BASE_HOME = '/h/.tribe/k';
-  const CAMPAIGN_OPEN_ID = 'HG-c1-from-campaign-home';
-  const BASE_DECOY_OPEN_ID = 'HG-c1-from-BASE-home-decoy';
-
-  // Only `.campaignReport`/`.finalReport`/`.verdictsDir` are read by the closing branch; built the
-  // SAME way `supervisorPathsOf` builds them. `SupervisorPaths` is private to loop.ts, named here
-  // via the exported `buildOneShotPrompt`'s own signature rather than by re-exporting the type.
-  const closingPaths = {
-    campaignReport: join(HOME, 'campaign-report.json'),
-    finalReport: join(HOME, 'supervisor', 'final-report.md'),
-    verdictsDir: join(HOME, 'supervisor', 'verdicts'),
-  } as unknown as Parameters<typeof buildOneShotPrompt>[2];
-
-  // The closing branch consults only `observation.report.cards`' keys (one gap-gate lookup per
-  // card id) — the rest of SupervisorObservation is irrelevant to this path.
-  const closingObservation = {
-    report: { cards: { c1: { outcome: 'shipped' } } },
-  } as unknown as Parameters<typeof buildOneShotPrompt>[3];
-
-  const closingAction = { session: 'closing' as const, cardId: null };
-
-  function seamWithSplitHomes() {
-    const seam = fakeSeam({
-      initialFiles: {
-        // The real writer's location: the gate writes under the CAMPAIGN home's reports/.
-        [join(HOME, 'reports', 'c1-gap-gate.json')]: JSON.stringify({ open_ids: [CAMPAIGN_OPEN_ID] }),
-        // The decoy: a stale report under the BASE tribe home. If the reader follows
-        // resolveTribeHome, it finds THIS instead — the exact defect.
-        [join(BASE_HOME, 'reports', 'c1-gap-gate.json')]: JSON.stringify({ open_ids: [BASE_DECOY_OPEN_ID] }),
-      },
-    });
-    // Force the base tribe home to differ from the campaign home — the campaign case, where the
-    // defect manifests. (The default fakeSeam returns HOME, hiding the bug.)
-    seam.io.resolveTribeHome = async () => ({ ok: true, home: BASE_HOME });
-    return seam;
-  }
-
-  test('buildOneShotPrompt renders the closing brief with the CAMPAIGN-home report\'s open ids, '
-    + 'never the base-home decoy (the real defect site: which home the reader is handed)', async () => {
-    const seam = seamWithSplitHomes();
-    const prompt = await buildOneShotPrompt(
-      seam.io, HOME, closingPaths, closingObservation, closingAction, '',
-    );
-    expect(prompt).toContain(CAMPAIGN_OPEN_ID);
-    expect(prompt).not.toContain(BASE_DECOY_OPEN_ID);
-  });
-
-  test('readGapGateOpenIds reads under the home it is GIVEN — the campaign home\'s reports/', () => {
-    const seam = seamWithSplitHomes();
-    expect(readGapGateOpenIds(seam.io, HOME, 'c1')).toEqual([CAMPAIGN_OPEN_ID]);
-    // A card with no report reads as zero open ids (fail-closed: never shipped, gate never ran).
-    expect(readGapGateOpenIds(seam.io, HOME, 'no-such-card')).toEqual([]);
   });
 });
 
@@ -1219,62 +1094,6 @@ describe('runSupervisor — B-F3: a SPENT re-observation budget must not turn su
     expect(eventLines(seam).map((e) => e['action'])).toEqual(['park']);
     expect(seam.files.has(join(HOME, 'NEEDS_OWNER.md'))).toBe(true);
     expect(seam.spawnWatchdogCalls).toBe(0);
-    expect(lastStatus(seam)['counters']['staleTerminals']).toBe(0);
-  });
-});
-
-describe('runSupervisor — B-F5: the stale-terminal budget is spent only by the decision that '
-  + 'actually asked for the stale-terminal re-trigger', () => {
-  test('V7 (a verified ratify) also returns run_watchdog; when a contradiction happens to be '
-    + 'independently true on that same tick, the campaign\'s one-shot stale_terminal budget must '
-    + 'NOT be consumed by it', async () => {
-    const seam = fakeSeam({
-      initialFiles: {
-        [join(HOME, 'campaign-state.json')]: campaignStateFixture(),
-        [join(HOME, 'answers.md')]: '## R1\n\nratified-as: pending\n\nSome earlier context.\n',
-        // Run A: started, never finalised, pid long dead — INCONCLUSIVE, so nothing contradicts
-        // the terminal on the tick that spawns the ratify session.
-        [join(HOME, 'runs', RUN_A, 'run.json')]: JSON.stringify({
-          v: 1, runId: RUN_A, pid: 999999, endedAt: null, exitCode: null, reason: null,
-        }),
-      },
-      initialDeadPids: [999999],
-      watchdogRuns: [
-        // Run 1's terminal is about run A, so `watchdogRunId` is populated from here on.
-        { reason: 'rulings_unratified', exitCode: 11, runId: RUN_A },
-        // Run 2 is the watchdog V7 asks for; it carries no runId, so no contradiction can be
-        // derived afterwards and the scenario terminates deterministically.
-        { reason: 'stop_requested', exitCode: 0 },
-      ],
-      sessions: [
-        {
-          effect: () => {
-            seam.files.set(join(HOME, 'answers.md'), '## R1\n\nratified-as: operational\n\nSome earlier context.\n');
-            // While the ratify session ran, a NEWER run started and is alive — a contradiction
-            // that is independently true and has nothing to do with V7's re-trigger.
-            seam.files.set(join(HOME, 'runs', RUN_B, 'run.json'), JSON.stringify({
-              v: 1, runId: RUN_B, pid: 7777, endedAt: null, exitCode: null, reason: null,
-            }));
-          },
-        },
-      ],
-    });
-
-    const result = await runSupervisor(baseConfig(), HOME, seam.io);
-    expect(result.reason).toBe('stop_requested');
-    const kinds = eventLines(seam).map((e) => e['action']);
-    // The second `run_watchdog` is V7's, produced by the post-session row — not the G2 row.
-    expect(kinds).toEqual([
-      'run_watchdog', 'await_watchdog', 'spawn_session', 'run_watchdog', 'await_watchdog', 'exit',
-    ]);
-
-    const state = JSON.parse(seam.files.get(join(HOME, 'supervisor', 'state.json')) as string) as {
-      retriggers: Record<string, number>;
-    };
-    // The budget bounds ONE action: re-running the watchdog BECAUSE a newer run is alive. V7's
-    // re-trigger is a different action for a different reason, so it may not spend it — nor may it
-    // be counted as a stale-terminal re-observation.
-    expect(state.retriggers['stale_terminal'] ?? 0).toBe(0);
     expect(lastStatus(seam)['counters']['staleTerminals']).toBe(0);
   });
 });

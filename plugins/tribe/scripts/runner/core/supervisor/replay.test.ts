@@ -1,7 +1,7 @@
 // Task 19 (card `campaign-supervisor`, G3 — bounded context): replays the `viewer-consolidation`
 // campaign's own escalation history (three rounds for one card, answered R16/R18/R22, plus one
-// ruling left unratified when `runner_done` fires — the shape the real campaign hit at its own
-// exit code 5, `rulings_unratified`) as a SYNTHESIZED fixture, and asserts the one-shot SESSION
+// ruling left unratified when `runner_done` fires — the shape the real campaign hit when it
+// stopped on the runner's old unratified-rulings exit) as a SYNTHESIZED fixture, and asserts the one-shot SESSION
 // spawn count this drives is bounded at 5 — for a history whose real, measured session took 174
 // turns (card G3, `## Measurable goals`; spec §21 D2 corrects the card's own "168" to 174 — the
 // <= 5 spawn bound is unaffected).
@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import {
   runSupervisor, type SupervisorLoopSeam, type SupervisorLoopConfig,
 } from './loop.ts';
-import { CLOSING_TEMPLATE_PATH, RATIFY_TEMPLATE_PATH, RULING_TEMPLATE_PATH } from './brief.ts';
+import { CLOSING_TEMPLATE_PATH, RULING_TEMPLATE_PATH } from './brief.ts';
 import type { OneShotSessionOptions, OneShotSpawnParams } from './session.ts';
 import type { SessionMessage } from '../session.ts';
 import type { WatchdogHandle } from '../../ports/ports.ts';
@@ -43,7 +43,6 @@ function fixture(...parts: string[]): string {
 // serving its own stand-in template text would prove nothing about the real brief rendering.
 const REAL_TEMPLATES: Record<string, string> = {
   [RULING_TEMPLATE_PATH]: readFileSync(RULING_TEMPLATE_PATH, 'utf8'),
-  [RATIFY_TEMPLATE_PATH]: readFileSync(RATIFY_TEMPLATE_PATH, 'utf8'),
   [CLOSING_TEMPLATE_PATH]: readFileSync(CLOSING_TEMPLATE_PATH, 'utf8'),
 };
 
@@ -54,14 +53,8 @@ function appendRulingBlock(id: string): (answers: string) => string {
   return (answers) => `${answers}\n## ${id} — synthesized ruling for round ${ROUND_RULING_IDS.indexOf(id) + 1}\n\nratified-as: operational\n\nSynthesized ruling body — never the real ruling's own text.\n`;
 }
 
-// Fixes ONLY the pre-existing `## R09 ...` block's `ratified-as:` line — every other block
-// (R16/R18/R22) stays byte-identical, satisfying `verifyRatify`'s by-id fence.
-function ratifyR09(answers: string): string {
-  return answers.replace('ratified-as: pending', 'ratified-as: operational');
-}
-
 const LIMITS: SupervisorLimits = {
-  maxRulingRounds: 3, maxRatifyRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20, sessionRetries: 1,
+  maxRulingRounds: 3, maxSpawns: 8, maxWatchdogRuns: 20, sessionRetries: 1,
 };
 
 function baseConfig(): SupervisorLoopConfig {
@@ -98,7 +91,7 @@ interface ScriptedSession {
 }
 
 interface SpawnLogEntry {
-  kind: 'ruling' | 'ratify' | 'closing';
+  kind: 'ruling' | 'closing';
   resume: string | undefined;
 }
 
@@ -123,7 +116,6 @@ function fakeSeam(opts: { watchdogRuns: ScriptedWatchdogRun[]; sessions: Scripte
 
   function kindOfPrompt(prompt: string): SpawnLogEntry['kind'] {
     if (prompt.startsWith('# Ruling Brief')) return 'ruling';
-    if (prompt.startsWith('# Ratify Brief')) return 'ratify';
     return 'closing';
   }
 
@@ -234,8 +226,8 @@ function reportShipped(): Record<string, unknown> {
   };
 }
 
-describe('replay: the viewer-consolidation escalation history bounds spawns at 5 (G3, task 19)', () => {
-  test('ruling, ruling, ruling, ratify, closing — <= 5 spawns, no resume, every ledger entry usage-typed', async () => {
+describe('replay: the viewer-consolidation escalation history bounds spawns at 4 (G3, task 19)', () => {
+  test('ruling, ruling, ruling, closing — <= 4 spawns, no resume, every ledger entry usage-typed', async () => {
     const seam = fakeSeam({
       watchdogRuns: [
         { reason: 'escalations_pending', exitCode: 12, report: reportEscalated() }, // round 1 (R16)
@@ -247,14 +239,12 @@ describe('replay: the viewer-consolidation escalation history bounds spawns at 5
           reason: 'escalations_pending', exitCode: 12, report: reportEscalated(),
           escalationWrites: { [`escalations/${CARD_ID}.md`]: fixture('escalations', 'round-3-viewer-consolidation.md') },
         }, // round 3 (R22)
-        { reason: 'runner_done', exitCode: 0, report: reportShipped() }, // discovers R09 still unratified
-        { reason: 'runner_done', exitCode: 0, report: reportShipped() }, // after ratify — closes
+        { reason: 'runner_done', exitCode: 0, report: reportShipped() }, // straight to closing
       ],
       sessions: [
         { effect: appendRulingBlock('R16') },
         { effect: appendRulingBlock('R18') },
         { effect: appendRulingBlock('R22') },
-        { effect: ratifyR09 },
         { effect: (answers) => {
           // A real closing session writes final-report.md AND has verify-shipped write one
           // verdict file per shipped card (spec §4b, Task 10); the postcondition reads the file.
@@ -278,8 +268,8 @@ describe('replay: the viewer-consolidation escalation history bounds spawns at 5
     const ledger = (seam.files.get(join(HOME, 'supervisor', 'ledger.jsonl')) ?? '')
       .trim().split('\n').filter((l) => l.length > 0).map((l) => JSON.parse(l));
 
-    expect(spawnLog.length).toBeLessThanOrEqual(5);
-    expect(spawnLog.map((s) => s.kind)).toEqual(['ruling', 'ruling', 'ruling', 'ratify', 'closing']);
+    expect(spawnLog.length).toBeLessThanOrEqual(4);
+    expect(spawnLog.map((s) => s.kind)).toEqual(['ruling', 'ruling', 'ruling', 'closing']);
     expect(spawnLog.every((s) => s.resume === undefined)).toBe(true);
     // Card supervisor-sessions-in-repo (plan Task 10, spec §4.4): the ledger now also carries one
     // SPAWN row per session (`event: 'spawn'`), appended at init and carrying no `usage` at

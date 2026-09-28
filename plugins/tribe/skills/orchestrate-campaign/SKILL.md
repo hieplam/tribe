@@ -6,11 +6,11 @@ description: >-
   "run these N cards", "do these tasks in orchestration", or any request to run a batch of
   roadmap cards unattended end-to-end from any session — the main chat, a Shaman, or a
   Warchief. Use this whenever the ask is "kick off N cards and tell me when they're all
-  shipped or blocked", not "build this one card" (that stays the Warchief/Hunter path) and not
+  shipped or blocked", not "build this one card" (that is a single-card session) and not
   "what should we build" (that's roadmap authorship, What/Why — a different job). This skill
-  assumes Shaman authority for the campaign, authors the campaign state file the campaign
+  assumes the campaign's decision authority, authors the campaign state file the campaign
   runner requires as input, triggers the runner's CLI in the background, answers its
-  escalations into answers.md within Shaman authority (never touching what only the owner may
+  escalations into answers.md within the campaign's authority (never touching what only the owner may
   decide), re-triggers up to a bounded auto-answer cap, and composes the one owner-facing
   report — independently re-verifying every card the runner claims shipped before repeating
   that claim.
@@ -24,13 +24,14 @@ accounts for every card as shipped or blocked. You do the judgment (planning, an
 reporting); the campaign runner (a separate CLI, invoked only through its documented flags and
 exit codes below — never by reading its source) does the deterministic, zero-token looping.
 
-## Assume Shaman authority
+## Assume the campaign's authority
 
-For the duration of this campaign you act with the authority `agents/shaman.md` describes as
-"Mode 3 — run the campaign": you make the ordinary calls yourself and escalate to the owner only
-the register (irreversible data shapes, product-promise changes, new permissions/trust surface,
-privacy-surface changes). You never write source code and never design How yourself — cards still
-go through the Warchief/Hunter chain; your job is running the campaign's outer loop around that.
+For the duration of this campaign you make the ordinary calls yourself and escalate to the owner
+only the register (irreversible data shapes, product-promise changes, new permissions/trust surface,
+privacy-surface changes). You never write source code and never design How yourself — cards go
+through whatever way of working their plan prescribes (see "Choose the plan style" in Stage A);
+your job is running the campaign's outer loop around that. (In the Tribe style this is the
+authority `agents/shaman.md` describes as Mode 3.)
 
 ## Inputs — nothing here is ever hardcoded (wall W1)
 
@@ -62,12 +63,34 @@ value belongs in the campaign's own docs, not here.
 2. **Choose the authorship mode** for the How docs (specs/plans), per the owner-ruled policy:
    - **Few cards (≲3) or genuinely complex work** → you author the specs+plans yourself. Dispatch
      overhead isn't worth it when the thinking itself is the value.
-   - **Many trivial cards (~10–20)** → dispatch one **planning-Warchief** per card (a `warchief`
-     dispatch whose job is "author this one card's spec+plan and return them — no
-     implementation"), then review and stage what comes back.
-   - Record which mode you used as `planning.mode: "shaman"` or `planning.mode: "warchief-fanout"`
-     inside the state file (see schema below) — a resuming session needs to know how the docs
-     were produced without re-deriving it.
+   - **Many trivial cards (~10–20)** → dispatch one planning subagent per card (`general-purpose`
+     in the simple style; a planning-Warchief in the Tribe style) whose job is "author this one
+     card's spec+plan and return them — no implementation", then review and stage what comes back.
+   - Record which mode you used as `planning.mode` inside the state file (see schema below; the
+     values per plan style are in step 2b) — a resuming session needs to know how the docs were
+     produced without re-deriving it.
+2b. **Choose the plan style — the plan, not the runner, decides the way of working.** The runner,
+   its watchdog and its supervisor drive whatever the plan says and prescribe nothing themselves.
+   - **Simple (the default: the owner named no style).** Every plan opens with this section,
+     verbatim, and every task ends with a Done section:
+
+     ```markdown
+     ## How to work
+
+     - Do the tasks in order. Give each task to one `general-purpose` subagent; the subagent
+       writes the test, writes the code, runs the task's Done commands, and commits.
+     - Every task ends with a **Done** section: shell commands, one per line. The task is done
+       when every command exits 0 when run from a clean checkout of the task's commit — the
+       runner runs them itself.
+     - Work on a branch in a separate git worktree.
+     ```
+
+     Name `general-purpose`: other agents stay installed on this machine, and an executor told only
+     "one subagent per task" could pick one of them by its description. Record `planning.mode` as
+     `"self"` (you authored the plans) or `"subagent-fanout"` (one planning subagent per card).
+   - **Tribe (only when the owner asks for it).** The plan opens with "Tribe style — plan section"
+     below instead, verbatim, and ends with the "Harness-gap gate" task it describes. Record
+     `planning.mode` as `"shaman"` or `"warchief-fanout"`.
 3. **Author `campaign-state.json` yourself, under the campaign home** (`--home`, computed above —
    never inside `<target-repo>`). Nothing else in the system creates this file — the runner
    requires it as an input but never authors it, and Stage A owns planning artifacts. See "The
@@ -113,7 +136,7 @@ every optional field may simply be omitted rather than written as `null`/`[]` wh
 {
   "v": 2,
   "campaign": "<campaign-slug>",
-  "planning": { "mode": "shaman" },
+  "planning": { "mode": "self" },
   "mergePolicy": "<e.g. \"regular\" — the merge strategy card PRs must use>",
   "sequence": ["<card-id>", "<card-id>", "..."],
   "schemaLockPaths": ["<path whose diff must stay empty unless a card's plan opts out>"],
@@ -332,7 +355,7 @@ ruling UC-3).
    `run.ts watchdog` (step 2 above) supervises exactly ONE runner pass and hands back to you the
    moment a human decision point is reached; you then drive Stage C's round-trip by hand and
    re-trigger it yourself. The supervisor is a layer above that: it drives the entire Stage
-   B → Stage C loop *for you* — rules on escalations within Shaman authority, appends to
+   B → Stage C loop *for you* — rules on escalations within the campaign's authority, appends to
    `answers.md`, re-triggers the watchdog, repeats — and only returns control to you when a
    question genuinely needs the owner, or the campaign is done. Prefer it whenever you would
    otherwise be round-tripping Stage C by hand across multiple runner passes; the bare watchdog
@@ -377,7 +400,7 @@ ruling UC-3).
 
 3. **On the wake-up, read `<campaign-home>/watchdog/status.json` FIRST, then
    `campaign-report.json`.** The watchdog's `terminal.reason` says why supervision ended
-   (`runner_done` · `escalations_pending` · `rulings_unratified` · `session_incomplete` ·
+   (`runner_done` · `escalations_pending` · `session_incomplete` ·
    `quota_cap` · `overloaded` · `stalled` · `lock_conflict` · `error` · `stop_requested`) and its
    `counters` say what it already absorbed for you (quota waits, overload backoffs, crash
    relaunches). Then read `campaign-report.json` for the campaign truth: **the exit code is a
@@ -417,7 +440,6 @@ worth guessing. An unrecognized flag (including the deleted `--state`/`--answers
 | `1` | `.runner.lock` is held by a live process, or a CLI argument error. |
 | `2` | The pass finished; **at least one escalation is pending.** This is NOT "aborted at the first question" — the runner parks the escalated card and keeps going, and only exits once nothing else is progressable. |
 | `3` | A spawned session ended incomplete (no further resume path); state was already recorded, so the next run resumes it automatically — this is not a human-decision escalation. |
-| `5` | The pass would otherwise have concluded `done`, but `answers.md` carries ≥1 ruling with no recognized `ratified-as:` disposition (harness-gap-wiring PR C, `core/rulings.ts`). Report `run.reason` is `rulings_unratified`; this is answerable by YOU (Shaman authority) — see the report's "Pending (needs the owner)" section for the unratified ruling ids and how to clear it, never a crash and never a reason to re-trigger unchanged. |
 
 `campaign-report.json` (+ its human-readable `campaign-report.md` twin) is written under the
 campaign home on **every** real exit path above — but **not** on `--dry-run` (zero side effects)
@@ -425,8 +447,7 @@ and **not** on a refused start (exit `1` from a held lock). Its per-card `outcom
 `shipped | escalated | blocked | not_reached`; a `shipped` card carries `pr`/`mergeSha`; an
 `escalated` card carries `escalationFile`, a one-line `question` digest, and `autoAnswerRounds`;
 a `blocked` card carries `blockedOn`. Top-level `pending` lists every card still needing the
-owner, and `stats` totals each outcome; a `rulings_unratified` exit (code `5`) additionally
-names every unratified ruling id under "Pending (needs the owner)". Treat this JSON (never the
+owner, and `stats` totals each outcome. Treat this JSON (never the
 exit code alone, never your own memory of what you dispatched) as the single source of truth
 for "what happened."
 
@@ -438,7 +459,7 @@ or to have an in-flight run finish its current card and stop before starting the
 ### Stage C — Round-trip: answer, re-trigger, cap (per design §O6)
 
 **If you launched the supervisor (Stage B step 2b), the supervisor does this ENTIRE stage for
-you** — reading each escalation, ruling within Shaman authority, appending to `answers.md`
+you** — reading each escalation, ruling within the campaign's authority, appending to `answers.md`
 under the same W3/W7 boundaries below, archiving the escalation file, and re-triggering the
 watchdog — automatically, without you round-tripping by hand. It hands back to you **only** when
 a question is genuinely owner-only (exit `20`, `NEEDS_OWNER.md`) — go to "The doorbell session"
@@ -450,7 +471,7 @@ to answer yourself instead of letting the supervisor continue.
 On every exit notification where the report shows `pending` cards:
 
 1. **For each `escalated` card**, read its `escalationFile`. Two outcomes:
-   - **Within your Shaman authority** (scope clarifications, How tradeoffs, sequencing) — rule on
+   - **Within the campaign's authority** (scope clarifications, How tradeoffs, sequencing) — rule on
      it as ONE atomic ritual, not a bare `answers.md` write: append your ruling to `answers.md`
      (under the campaign home, tagged `R<n>`) yourself (this is the only writer of that file
      besides the owner; the runner itself never writes there — wall W3), **then archive the
@@ -469,18 +490,8 @@ On every exit notification where the report shows `pending` cards:
      product promises, new permissions, privacy) **or genuinely too hard to call** — leave it
      parked (escalation file untouched, unanswered). Never rule on an owner-only trigger
      yourself, no matter how confident you are.
-   - **Every ruling you append to `answers.md` carries a `ratified-as:` field** — this applies
-     whether the ruling answers an `escalated` card's ordinary question or adjudicates a
-     harness-gap proposal, surfaced either by an escalation or by a `shipped` card's
-     `## Harness gaps` PR record. Frozen vocabulary: `rule <path>` | `debt <id>` |
-     `roadmap <ref>` | `operational` | `dismissed` | `pending`. `operational` is for
-     campaign-mechanics rulings that die with the campaign (a sequencing tweak, a scope
-     clarification); anything durable — a rule, an anti-rule, a debt entity — names its
-     governance artifact instead. A single ruling can fan out to MORE than one artifact
-     (the worked example: outstanding-17's R7 became both a ROADMAP Decision Log entry
-     and a new roadmap card) — the field names the PRIMARY artifact, one value only (that
-     is what the runner's gate parses); reference every additional artifact in the ruling
-     body itself.
+   - **Tribe style only:** every ruling you append carries a `ratified-as:` field — see 'Tribe
+     style — Stage C and D additions'.
 
    `answers.md` is read once, at the START of a runner invocation (`resolveRunContext`,
    `core/loop/run-loop.ts`) — that single read serves every card the invocation touches, so a
@@ -535,11 +546,16 @@ On every exit notification where the report shows `pending` cards:
 
 **If the supervisor ran this campaign to `0` (done), a closing session may already have run.**
 Check `<campaign-home>/supervisor/final-report.md` before doing anything below — its existence
-means the ratification pass, the `verify-shipped` re-checks, and the owner report were already
-produced by that closing session. **Verify it, do not repeat it**: read it exactly as you would
-your own draft of this stage, confirm each `shipped` card's `verify-shipped` verdict is actually
-present, and relay it — do not re-run Stage D's steps and produce a second, competing report over
-the same campaign.
+means the `verify-shipped` re-checks and the owner report were already produced by that closing
+session (it re-verifies and reports; the ratification pass exists only in the Tribe style, see
+'Tribe style — Stage C and D additions'). **Verify it, do not repeat it**: read it exactly as you
+would your own draft of this stage, confirm each `shipped` card's `verify-shipped` verdict is
+actually present, and relay it — do not re-run Stage D's steps and produce a second, competing
+report over the same campaign. In the Tribe style, before relaying that report, also run both
+Stage D additions in 'Tribe style — Stage C and D additions': re-verify every shipped card with
+`verify-shipped` without `--skip-gap-gate` (report any failed verdict as not shipped, naming the
+failing check), then run the ratification pass and its `rulings-check.ts` check. Include both
+outcomes in what you relay.
 
 Once nothing more is answerable or progressable (or no `supervisor/final-report.md` exists —
 you are driving by hand), read the **last** `campaign-report.json` and build the single message
@@ -547,35 +563,11 @@ the owner reads:
 
 1. **For every card the report marks `shipped`, independently re-verify it before repeating the
    claim.** Invoke the **`verify-shipped` skill by name** (never by reading or calling its script
-   path directly — depend on its contract, not its implementation) with that card's `pr` and its
-   worktree path. This is the design's no-cascade read: the runner's own claim that a card
-   shipped is not evidence on its own. Treat a `verify-shipped` failure as `blocked`, not
-   `shipped`, in your final report.
-2. **The ratification pass.** Collect every convention surfaced across the whole campaign. The
-   authoritative list per card is **the gate's own JSON**, not a PR body you re-read: for each
-   card, read `<campaign-home>/reports/<card>-gap-gate.json` — the same campaign-nested `--home`
-   used above, because `gap-gate.ts` globs its Tracker-report inputs from that home and a
-   campaign card's Tracker reports are written under the campaign home, so the gate's own output
-   lands there too — and take its `open_ids` — the gaps the gate
-   reconciled and left un-ruled. Add each `shipped` card's `## Harness gaps` PR record (the
-   proposals its Warchief landed as reviewable drafts but did not self-ratify, per its brief)
-   plus every ruling already in `answers.md`. Every one of them must end this pass
-   non-`pending`. Durable dispositions (`rule`, `anti-rule`, `debt`) do not stay as prose in a
-   PR body or a diary line — land them as **ONE closing governance PR** on the target repo, and
-   land them **through the CLIs, never by hand**: for every ratified proposal that carries a
-   `G-NNN`, run `gap-rule.ts` with `--ratified-by shaman` (or `--ratified-by owner` when the
-   owner ruled that one) inside that closing PR's worktree, so the registry's `ruled` events —
-   and the rule/anti-rule file or debt entity the ruling creates — ride the same PR. Add the
-   ROADMAP Decision Log entries, then mark each ruling's `ratified-as:` accordingly; a ruling
-   that closes a gap with an id records it as `ratified-as: rule <path> (G-NNN)`. Never
-   hand-write a rule file, a debt entity, or a line of `.tribe/harness-gaps.jsonl` — a ruling
-   that never reaches `gap-rule.ts` leaves the registry claiming the gap is still open and
-   leaves `gap-precision.ts` with nothing to score (this is exactly what the 2026-09-05 closing
-   pass did). The runner's `rulings_unratified` exit is the mechanical backstop for skipping
-   this step — it is not the primary mechanism, do not rely on it to catch what this pass should
-   catch by judgment. A ruling left `pending` means the campaign is **not done**, full stop, no
-   matter how many cards shipped.
-3. **You can also recover which commits belong to this campaign directly from git.** Every
+   path directly — depend on its contract, not its implementation) with `--skip-gap-gate`, that
+   card's `pr` and its worktree path. This is the design's no-cascade read: the runner's own claim
+   that a card shipped is not evidence on its own. Treat a `verify-shipped` failure as `blocked`,
+   not `shipped`, in your final report.
+2. **You can also recover which commits belong to this campaign directly from git.** Every
    commit a card's executor session made should carry a `Campaign: <campaign-slug>` git trailer
    — the runner's executor brief instructs it (see the runner README's "Campaign commit
    trailer" section). `git log --grep="Campaign: <campaign-slug>"` in `<target-repo>` lists
@@ -583,15 +575,18 @@ the owner reads:
    `verify-shipped` confirm the trailer is present, so a missing trailer is a documentation gap
    worth noting, never proof a card didn't ship — `verify-shipped` (item 1) stays the actual
    acceptance gate.
-4. **Compose ONE report** to the owner, covering every card in the campaign:
+3. **Compose ONE report** to the owner, covering every card in the campaign:
    - **Shipped** — PR number, merge sha, and the `verify-shipped` verdict.
    - **Escalated / blocked** — the question (or `blockedOn` dependency), why it needs the owner,
      and how many auto-answer rounds it already used.
-   - **Harness-gap rulings** — every ruling the ratification pass closed, each with where it was
-     ratified to (the rule/debt/roadmap reference, or `operational`/`dismissed`).
    - Overall `stats` (shipped / escalated / blocked / not-reached counts) and pointers to the
      report files and escalation files, so the owner can go deeper without you re-deriving
      anything.
+
+**Tribe style only:** also run both Stage D additions in 'Tribe style — Stage C and D additions'
+below: re-verify every shipped card with `verify-shipped` without `--skip-gap-gate` (report any
+failed verdict as not shipped, naming the failing check), then run the ratification pass and its
+`rulings-check.ts` check. Include both outcomes in the owner report.
 
 This is the ONE message the owner reads — no partial status updates in between beyond the
 irreversible escalations the register requires.
@@ -640,22 +635,19 @@ it, verbatim** — it is a transcriber, never a judge:
 2. **Wait for the owner's words.** If the owner does not rule right now, stop here and change
    nothing — this is not an escalation the doorbell may answer on the owner's behalf.
 3. **Append the ruling to `answers.md`** as the next `R<n>`, carrying the owner's decision
-   verbatim (never summarised, never improved), with two machine-readable fields:
+   verbatim (never summarised, never improved), with one machine-readable field:
 
    ```markdown
    ## R<n> · <ISO date> · card <cardId> · <owner's own title or the escalation's reason>
 
    ruled-by: owner
-   ratified-as: <the owner's own disposition, or `pending` if they gave none>
 
    <the owner's decision, verbatim>
    ```
 
-   `ratified-as: pending` is a legitimate outcome here — if the owner rules the substance but
-   not the disposition, `pending` is the honest value, and the runner's own exit-`5` gate is the
-   backstop that surfaces it at closing time. The doorbell never invents a disposition just to
-   make a gate go green. The same append-only rule as every other `answers.md` write applies:
-   every prior byte stays.
+   (Tribe style only: the ruling also carries a `ratified-as:` line — see 'Tribe style — Stage C
+   and D additions'.) The same append-only rule as every other `answers.md` write applies: every
+   prior byte stays.
 4. **Archive** `escalations/<cardId>.md` to `.resolved-R<n>` — same as the hand-driven Stage C
    round-trip above.
 5. **Delete `<home>/NEEDS_OWNER.md`.** That file is a latch, not a notice — deleting it is the
@@ -710,6 +702,123 @@ as that file's `lastAction` and as a `park` line in `supervisor/events.jsonl`. S
 sequence — you restart, it refuses, and only later does the run finish or a newer one go live —
 still supersedes the park on the restart after that.
 
+## Tribe style — plan section (use only when the owner asks for the Tribe style)
+
+Copy this section into the plan, verbatim, as its "How to work", and end the plan with the
+"Harness-gap gate" task below.
+
+```markdown
+## How to work (Tribe style)
+
+- The executor acts as the Warchief (`agents/warchief.md`) for this card. For each task it dispatches
+  one Hunter (`subagent_type: hunter`) and audits the result with the dual-Skinner cell (two
+  `skinner` instances — the contract lens and the cold lens — dispatched in one message), running
+  the fix loop up to three rounds. The runner still drives the tasks in order and runs each task's
+  Done commands itself; end a task's turn only after its audit closed.
+- Every task is test-first: a failing test before the code, gates (formatter/linter/type-checker/
+  tests) green before commit, and a real commit carrying the code, its test, and the plan's ticked
+  checkboxes together. Claims of done are worthless without the gate output that proves them —
+  paste gate output verbatim into worker reports.
+- Every dispatched worker (Hunter, Skinner) writes its report under the campaign home's `reports/`
+  directory (the brief names the campaign home).
+- Dispatch the Tracker at every audit round (Warchief Method step 6.0b), each with its own report file
+  `<campaign home>/reports/tracker-<card id>-<round>.md` (`<round>` = `task-3`, `wave-2`, `fix-1`,
+  `final`). Use the runner's card id as your card slug — in these file names, in `gap-gate.ts --card`,
+  and in every `Tribe-Card:` trailer.
+- Scout's governance proposals ride this card's PR: rule/anti-rule drafts as reviewable text, a debt
+  proposal as its recorded check command + description only — the debt entity itself is created
+  later, by ratified `gap-rule.ts` execution. Do not self-ratify; record each proposal and its
+  proposed disposition under a `## Harness gaps` heading in the PR body. Only a gap needing an
+  owner-only decision escalates NEEDS_DIRECTION.
+```
+
+The plan's last task, verbatim except its number:
+
+At Stage A, set `gaps_dir="$(dirname "$runner_dir")/gaps"` from the resolved runner directory,
+confirm `gap-gate.ts` exists there, and write that absolute path in place of `<gaps-dir>` in the
+Done command before the runner executes it from a scratch checkout.
+
+```markdown
+### Task N: Harness-gap gate
+
+Run `gap-gate.ts` (Warchief Method step 7) on the card branch; paste `<card id>-gap-gate.md` verbatim
+as the PR body's `## Harness gaps` section, including its `gap-gate v1` stamp line; commit the
+`.tribe/harness-gaps.jsonl` append with the trailer `Tribe-Milestone: gap-gate` before the PR opens;
+run `debt-backfill.ts`.
+
+#### Done
+
+    bun "<gaps-dir>/gap-gate.ts" --repo "$PWD" --home "$RUNNER_CAMPAIGN_HOME" --card "$RUNNER_CARD_ID" --base "$RUNNER_BASE_SHA" --head HEAD
+```
+
+(In the plan itself, that Done command sits in a fenced `bash` block, as every Done section does.)
+
+## Tribe style — Stage C and D additions
+
+- **Stage C:** every ruling you append to `answers.md` carries a `ratified-as:` field — this
+  applies whether the ruling answers an `escalated` card's ordinary question or adjudicates a
+  harness-gap proposal, surfaced either by an escalation or by a `shipped` card's
+  `## Harness gaps` PR record. Frozen vocabulary: `rule <path>` | `debt <id>` |
+  `roadmap <ref>` | `operational` | `dismissed` | `pending`. `operational` is for
+  campaign-mechanics rulings that die with the campaign (a sequencing tweak, a scope
+  clarification); anything durable — a rule, an anti-rule, a debt entity — names its
+  governance artifact instead. A single ruling can fan out to MORE than one artifact
+  (the worked example: outstanding-17's R7 became both a ROADMAP Decision Log entry
+  and a new roadmap card) — the field names the PRIMARY artifact, one value only (that
+  is what `rulings-check.ts` parses); reference every additional artifact in the ruling
+  body itself.
+
+  The doorbell transcribes an owner ruling with `ruled-by: owner` and `ratified-as: <the owner's
+  own disposition, or pending if they gave none>`, as a second machine-readable line under
+  `ruled-by:`. `ratified-as: pending` is a legitimate outcome there — if the owner rules the
+  substance but not the disposition, `pending` is the honest value, and `rulings-check.ts` in
+  Stage D below is the backstop that surfaces it at closing time. The doorbell never invents a
+  disposition just to make a check go green.
+- **Stage D:** after the three steps above, (a) re-verify each shipped card with `verify-shipped`
+  WITHOUT `--skip-gap-gate` (the stamp check applies), and (b) run the ratification pass:
+
+  **The ratification pass.** Collect every convention surfaced across the whole campaign. The
+  authoritative list per card is **the gate's own JSON**, not a PR body you re-read: for each
+  card, read `<campaign-home>/reports/<card>-gap-gate.json` — the same campaign-nested `--home`
+  used above, because `gap-gate.ts` globs its Tracker-report inputs from that home and a
+  campaign card's Tracker reports are written under the campaign home, so the gate's own output
+  lands there too — and take its `open_ids` — the gaps the gate
+  reconciled and left un-ruled. Add each `shipped` card's `## Harness gaps` PR record (the
+  proposals its Warchief landed as reviewable drafts but did not self-ratify, per its brief)
+  plus every ruling already in `answers.md`. Every one of them must end this pass
+  non-`pending`. Durable dispositions (`rule`, `anti-rule`, `debt`) do not stay as prose in a
+  PR body or a diary line — land them as **ONE closing governance PR** on the target repo, and
+  land them **through the CLIs, never by hand**: for every ratified proposal that carries a
+  `G-NNN`, run `gap-rule.ts` with `--ratified-by shaman` (or `--ratified-by owner` when the
+  owner ruled that one) inside that closing PR's worktree, so the registry's `ruled` events —
+  and the rule/anti-rule file or debt entity the ruling creates — ride the same PR. Add the
+  ROADMAP Decision Log entries, then mark each ruling's `ratified-as:` accordingly; a ruling
+  that closes a gap with an id records it as `ratified-as: rule <path> (G-NNN)`. Never
+  hand-write a rule file, a debt entity, or a line of `.tribe/harness-gaps.jsonl` — a ruling
+  that never reaches `gap-rule.ts` leaves the registry claiming the gap is still open and
+  leaves `gap-precision.ts` with nothing to score (this is exactly what the 2026-09-05 closing
+  pass did). `rulings-check.ts` (below) is the mechanical backstop for skipping this step — it
+  is not the primary mechanism, do not rely on it to catch what this pass should catch by
+  judgment. A ruling left `pending` means the campaign is **not done**, full stop, no matter
+  how many cards shipped.
+
+  The owner report then also lists **Harness-gap rulings** — every ruling the ratification pass
+  closed, each with where it was ratified to (the rule/debt/roadmap reference, or
+  `operational`/`dismissed`). The campaign is not done until
+  `rulings-check.ts` exits 0. Resolve and check its path before running it:
+
+  ```sh
+  runner_dir="$(bash "<skill-dir>/resolve-runner.sh")" || exit 1
+  gaps_dir="$(dirname "$runner_dir")/gaps"
+  [ -f "$gaps_dir/rulings-check.ts" ] || { printf 'orchestrate-campaign: missing rulings-check.ts at %s\n' "$gaps_dir/rulings-check.ts" >&2; exit 1; }
+  bun "$gaps_dir/rulings-check.ts" <campaign-home>/answers.md
+  ```
+- **Wall:** The diary and `answers.md` are event logs and operational state, never the resting
+  place of a durable convention. Durable means a governance surface of the target repo — a rule
+  file, an anti-rule, a debt entity, a ROADMAP Decision Log entry — reached through a PR. A
+  ruling that never leaves `answers.md` is exactly the failure the ratification pass (Stage D)
+  exists to catch.
+
 ## A campaign can outlive this session
 
 A multi-card campaign can run for hours; the session that triggered it may not still be open
@@ -728,10 +837,5 @@ and its memory never live inside you.
 - **W3 — judgment stays in sessions.** `answers.md` is written only by you (a session) or the
   owner — never by the runner. If you ever see the runner's own commits touching that file,
   something is badly wrong; stop and report it rather than continuing the loop.
-- **The diary and `answers.md` are event logs and operational state, never the resting place of
-  a durable convention.** Durable means a governance surface of the target repo — a rule file,
-  an anti-rule, a debt entity, a ROADMAP Decision Log entry — reached through a PR. A ruling that
-  never leaves `answers.md` is exactly the failure the ratification pass (Stage D) exists to
-  catch.
 - **W7 — bounded auto-answer.** At most 2 auto-answer rounds per card. A card still escalating
   after that parks for the owner, full stop — do not attempt a third ruling.

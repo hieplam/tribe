@@ -1,7 +1,7 @@
 // Tests for status.ts (Task 10, plan §Task 10 Step 1): `exitCodeOf` maps all four terminal
 // shapes; `buildStatus` fills every field of spec §13; `renderNeedsOwner` produces a document
 // containing the reason, the campaign home, the ledger lines, and a re-run command — and a
-// table-driven case asserts EVERY ParkReason value (all 22 — model.ts's own count, spec §6.2)
+// table-driven case asserts EVERY ParkReason value (all 19 — model.ts's own count)
 // renders a non-empty "what unblocks it" instruction.
 import { describe, expect, test } from 'bun:test';
 import {
@@ -23,11 +23,10 @@ import type { SupervisorStatus } from './model.ts';
 // EXACTLY this list, never a hand-shortened one, so a future addition to `ParkReason` that
 // forgets a sentence-table entry fails `tsc`, not this list going stale silently.
 const ALL_PARK_REASONS: ParkReason[] = [
-  'owner_only', 'too_hard', 'w7_cap', 'ratify_cap', 'spawn_cap', 'watchdog_run_cap',
-  'repeat_escalation', 'ruling_failed', 'ratify_failed', 'closing_failed', 'session_incomplete',
+  'owner_only', 'too_hard', 'w7_cap', 'spawn_cap', 'watchdog_run_cap',
+  'repeat_escalation', 'ruling_failed', 'closing_failed', 'session_incomplete',
   'quota_cap', 'overloaded', 'stalled', 'lock_conflict', 'error', 'unexpected_running',
   'watchdog_no_terminal', 'watchdog_usage', 'resume_blocked', 'history_rewritten',
-  'ratify_out_of_scope',
 ];
 
 describe('exitCodeOf — the frozen exit codes (spec §10), all four terminal shapes', () => {
@@ -51,7 +50,7 @@ function statusInput(over: Partial<Parameters<typeof buildStatus>[0]> = {}) {
     watchdog: { pid: null, lastTerminalReason: null },
     currentSession: null,
     counters: {
-      watchdogRuns: 0, spawns: 0, rulingRounds: {}, ratifyRounds: 0, failures: 0, staleTerminals: 0,
+      watchdogRuns: 0, spawns: 0, rulingRounds: {}, failures: 0, staleTerminals: 0,
     },
     terminal: null,
     ...over,
@@ -73,7 +72,7 @@ describe('buildStatus — fills every field of spec §13', () => {
       watchdog: { pid: null, lastTerminalReason: null },
       currentSession: null,
       counters: {
-        watchdogRuns: 0, spawns: 0, rulingRounds: {}, ratifyRounds: 0, failures: 0, staleTerminals: 0,
+        watchdogRuns: 0, spawns: 0, rulingRounds: {}, failures: 0, staleTerminals: 0,
       },
       terminal: null,
     });
@@ -86,7 +85,7 @@ describe('buildStatus — fills every field of spec §13', () => {
       watchdog: { pid: 555, lastTerminalReason: 'escalations_pending' },
       currentSession: { kind: 'ruling', cardId: 'c1', sessionId: 'sess-1' },
       counters: {
-        watchdogRuns: 2, spawns: 1, rulingRounds: { c1: 1 }, ratifyRounds: 0, failures: 0, staleTerminals: 0,
+        watchdogRuns: 2, spawns: 1, rulingRounds: { c1: 1 }, failures: 0, staleTerminals: 0,
       },
     }));
     expect(status.watchdog).toEqual({ pid: 555, lastTerminalReason: 'escalations_pending' });
@@ -201,7 +200,7 @@ describe('renderNeedsOwner — the format (spec §11)', () => {
 
   // brief-contracts.md / the card oracle: the sentence table is FROZEN and keyed by ParkReason;
   // a missing entry is a type error (adjudication rule REFUTED in advance: no generic fallback).
-  // This table-driven case is the mechanical proof that every one of the 22 values (model.ts's
+  // This table-driven case is the mechanical proof that every one of the 19 values (model.ts's
   // own union) renders a real, non-empty "what unblocks it" instruction naming the re-run command.
   describe('every ParkReason renders a non-empty "what unblocks it" instruction', () => {
     for (const reason of ALL_PARK_REASONS) {
@@ -218,8 +217,8 @@ describe('renderNeedsOwner — the format (spec §11)', () => {
       });
     }
 
-    test('all 22 values are covered by this table (model.ts is the source of truth)', () => {
-      expect(ALL_PARK_REASONS.length).toBe(22);
+    test('all 19 values are covered by this table (model.ts is the source of truth)', () => {
+      expect(ALL_PARK_REASONS.length).toBe(19);
     });
   });
 });

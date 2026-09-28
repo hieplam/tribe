@@ -32,7 +32,7 @@ import {
 } from '../../runner/core/merge-gate.ts';
 import { renderReportMarkdown, type CampaignReport } from '../../runner/core/report.ts';
 import {
-  CLOSING_TEMPLATE_PATH, RATIFY_TEMPLATE_PATH, RULING_TEMPLATE_PATH, renderBrief,
+  CLOSING_TEMPLATE_PATH, RULING_TEMPLATE_PATH, renderBrief,
 } from '../../runner/core/supervisor/brief.ts';
 import { decideClosingGrantHook, decideContainmentHook } from '../../runner/core/supervisor/permit.ts';
 import { PARK_SENTENCES, renderNeedsOwner } from '../../runner/core/supervisor/status.ts';
@@ -151,17 +151,12 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
     `task ${t1.id} (${FIXTURE.firstTaskHeading}) did not pass its Done commands after ${MAX_STEP_ATTEMPTS} attempts. Last: ${FIXTURE.failingCommand} exited 1`,
     resolved));
 
-  // ---- supervisor: the three one-shot briefs ----
+  // ---- supervisor: the two one-shot briefs ----
   add('supervisor/ruling', renderBrief('ruling', {
     kind: 'ruling', template: readFileSync(RULING_TEMPLATE_PATH, 'utf8'), cardId: CARD_ID,
     escalationContent: needsDirection, ownerOnlyEscalations: [], existingRulingIds: ['R1'],
     specPath: SPEC, planPath: PLAN, answersPath: ANSWERS_PATH,
     escalationPath: join(HOME, 'escalations', `${CARD_ID}.md`),
-  }));
-  add('supervisor/ratify', renderBrief('ratify', {
-    kind: 'ratify', template: readFileSync(RATIFY_TEMPLATE_PATH, 'utf8'), unratifiedRulingIds: ['R1'],
-    rulingBlocks: [{ id: 'R1', content: '## R1 — Max on empty\n\nReturn ErrEmpty.\n' }],
-    answersPath: ANSWERS_PATH,
   }));
   const report: CampaignReport = {
     v: 1, campaign: CAMPAIGN,
@@ -172,8 +167,6 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
   add('supervisor/closing', renderBrief('closing', {
     kind: 'closing', template: readFileSync(CLOSING_TEMPLATE_PATH, 'utf8'),
     campaignReportContent: JSON.stringify(report, null, 2),
-    rulings: [{ id: 'R1', ratifiedAs: 'operational' }],
-    openIdsByCard: [{ cardId: CARD_ID, openIds: [] }],
     finalReportPath: join(HOME, 'supervisor', 'final-report.md'),
     shippedVerdicts: [{ cardId: CARD_ID, verdictPath: join(HOME, 'supervisor', 'verdicts', `${CARD_ID}.json`) }],
   }));
@@ -198,7 +191,7 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
 
   // ---- the campaign report the orchestrating session reads (and the closing brief embeds) ----
   add('report/campaign-report-md', renderReportMarkdown({
-    ...report, run: { ...report.run, exitCode: 5, reason: 'rulings_unratified', unratifiedRulings: ['R1'] },
+    ...report, run: { ...report.run, exitCode: 2, reason: 'escalations_pending' },
   }));
 
   // ---- injections that are not prose: the executor's session options ----

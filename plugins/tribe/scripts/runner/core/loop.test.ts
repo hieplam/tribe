@@ -23,7 +23,7 @@ import {
   type LoopIO,
   type RunLoopConfig,
 } from './loop.ts';
-import { EXIT_ESCALATED, EXIT_LOCKED, EXIT_OK, EXIT_RULINGS_UNRATIFIED, EXIT_SESSION_INCOMPLETE } from './types.ts';
+import { EXIT_ESCALATED, EXIT_LOCKED, EXIT_OK, EXIT_SESSION_INCOMPLETE } from './types.ts';
 import { BRIEF_TEMPLATE_PATH } from './brief.ts';
 import { answersPathOf, campaignStatePathOf, escalationPathOf } from './paths.ts';
 import type { Card, CampaignState, ResolvedConfig } from './types.ts';
@@ -2803,49 +2803,8 @@ describe('runPassPool — panel finding #2: one card\'s thrown exception must no
   });
 });
 
-describe('runPassPool — panel findings #3/#4: rulings gate and mid-pass STOP under N>1', () => {
-  test('genuine done with an unratified ruling -> EXIT_RULINGS_UNRATIFIED through the pool path (N=2)', async () => {
-    const { io } = buildMockLoopIo({
-      stateJson: stateJsonWithTwoFreshCards(),
-      answers: '## Some ruling\nBody text, no ratified-as line.\n',
-      execHandlers: cleanCommitAndVerifyHandlers('deadbee'),
-      spawnQueue: [
-        () => messages(shippedMessages(1, 'aaaaaaa', 'sess-c1')),
-        () => messages(shippedMessages(2, 'bbbbbbb', 'sess-c2')),
-      ],
-    });
-
-    const result = await runLoop(baseLoopConfig({ maxConcurrent: 2 }), io);
-
-    expect(result.processed).toHaveLength(2);
-    expect(result.exitCode).toBe(EXIT_RULINGS_UNRATIFIED);
-  });
-
-  test('a card still in flight when nextCard first reports done does NOT wrongly gate on rulings (companion case)', async () => {
-    // maxConcurrent 2 but only ONE card is ever selectable (C2's spec/plan are missing, so it
-    // resolves as PLANNING_NEEDED the very first time it's picked, not a live in-flight worker)
-    // — this test's real point is `reachedDone`'s own two-part condition (`nc.kind === 'done'`
-    // AND `active.size === 0`): it must still end up EXIT_OK/gated exactly like the N=1 path
-    // once every card is genuinely accounted for, never fire the rulings gate a tick early
-    // while something was still active. Covered end-to-end via the single-card overlap case
-    // above; this test pins the OK case (no unratified ruling) so a regression that starts
-    // gating early would flip this from EXIT_OK to EXIT_RULINGS_UNRATIFIED and fail loudly.
-    const { io } = buildMockLoopIo({
-      stateJson: stateJsonWithTwoFreshCards(),
-      answers: '# answers\n(none yet)\n',
-      execHandlers: cleanCommitAndVerifyHandlers('deadbee'),
-      spawnQueue: [
-        () => messages(shippedMessages(1, 'aaaaaaa', 'sess-c1')),
-        () => messages(shippedMessages(2, 'bbbbbbb', 'sess-c2')),
-      ],
-    });
-
-    const result = await runLoop(baseLoopConfig({ maxConcurrent: 2 }), io);
-
-    expect(result.exitCode).toBe(EXIT_OK);
-  });
-
-  test('STOP armed while N=2 workers are mid-flight: both in-flight cards drain to completion, no third card is claimed, reachedDone stays false', async () => {
+describe('runPassPool — panel finding #4: mid-pass STOP under N>1', () => {
+  test('STOP armed while N=2 workers are mid-flight: both in-flight cards drain to completion, no third card is claimed', async () => {
     let releaseGate!: () => void;
     const gate = new Promise<void>((resolve) => {
       releaseGate = resolve;
@@ -2898,8 +2857,7 @@ describe('runPassPool — panel findings #3/#4: rulings gate and mid-pass STOP u
     releaseGate();
     const result = await runPromise;
 
-    // Both in-flight cards drained to completion; C3 was never even attempted; the pass did
-    // NOT reach genuine `done` (STOP truncated it), so the rulings gate never fires either.
+    // Both in-flight cards drained to completion; C3 was never even attempted.
     expect(result.processed).toHaveLength(2);
     expect(result.processed.map((o) => o.cardId).sort()).toEqual(['C1', 'C2']);
     expect(result.exitCode).toBe(EXIT_OK);
@@ -2977,136 +2935,11 @@ describe('runLoop — D5′: STOP file created mid-pass finishes the in-flight c
   });
 });
 
-// ===========================================================================================
-// runLoop — harness-gap-wiring PR C: the campaign-level rulings gate. Postmortem
-// (outstanding-17): a ruling that captured a durable convention was never ratified into the
-// target repo's governance files because nothing gated on it. This gate fires ONLY on the
-// path that would otherwise conclude `done` (every requested card resolved) — an
-// `escalations_pending`/`session_incomplete`/`stop_requested` exit is unchanged.
-// ===========================================================================================
-
-describe('runLoop — rulings gate (fires only on the would-be-done path)', () => {
-  function fullyShippedState(): CampaignState {
-    return fixtureState({
-      sequence: ['C1'],
-      cards: { C1: fixtureCard({ status: 'shipped', pr: 41, mergeSha: 'deadbee' }) },
-    });
-  }
-
-  test('an unratified ruling in answers.md blocks the would-be-done exit', async () => {
-    const answers = ['## R1 — Some convention', '', 'ratified-as: pending', ''].join('\n');
-    const { io } = buildMockLoopIo({ stateJson: JSON.stringify(fullyShippedState()), answers });
-
-    const result = await runLoop(baseLoopConfig(), io);
-
-    expect(result.exitCode).toBe(EXIT_RULINGS_UNRATIFIED);
-    expect(result.unratifiedRulings).toEqual(['R1 — Some convention']);
-    expect(result.message).toBeDefined();
-    expect(result.message as string).toContain('R1 — Some convention');
-  });
-
-  test('every ruling ratified -> normal EXIT_OK/done, no unratifiedRulings field', async () => {
-    const answers = ['## R1 — Some convention', '', 'ratified-as: operational', ''].join('\n');
-    const { io } = buildMockLoopIo({ stateJson: JSON.stringify(fullyShippedState()), answers });
-
-    const result = await runLoop(baseLoopConfig(), io);
-
-    expect(result.exitCode).toBe(EXIT_OK);
-    expect(result.unratifiedRulings).toBeUndefined();
-  });
-
-  test('answers.md with no rulings at all -> unaffected (regression: existing happy-path shape)', async () => {
-    const { io } = buildMockLoopIo({
-      stateJson: JSON.stringify(fullyShippedState()),
-      answers: '# answers\n(none yet)\n',
-    });
-
-    const result = await runLoop(baseLoopConfig(), io);
-
-    expect(result.exitCode).toBe(EXIT_OK);
-    expect(result.unratifiedRulings).toBeUndefined();
-  });
-
-  test('an escalating pass is NOT gated by an unratified ruling — gate fires only on would-be-done', async () => {
-    const state = fixtureState({
-      sequence: ['C1'],
-      cards: { C1: fixtureCard({ branch: 'feat/c1-widget' }) },
-    });
-    const answers = ['## R1 — Some convention', '', 'ratified-as: pending', ''].join('\n');
-    const { io } = buildMockLoopIo({
-      stateJson: JSON.stringify(state),
-      answers,
-      spawnQueue: [() => messages(needsDirectionMessages('sess-c1'))],
-    });
-
-    const result = await runLoop(baseLoopConfig(), io);
-
-    expect(result.exitCode).toBe(EXIT_ESCALATED);
-    expect(result.processed[0]).toMatchObject({ kind: 'escalated', cardId: 'C1' });
-    expect(result.unratifiedRulings).toBeUndefined();
-  });
-
-  // Regression (3-lens review, contract lens): `computeExitCode` returns `EXIT_OK` whenever
-  // nothing in `processed` escalated or stopped — that is ALSO true when the pass broke out
-  // early (a mid-pass STOP, or the `--max-cards` budget) with cards still genuinely unattempted,
-  // not just when `filteredNextCard` actually returned `{ kind: 'done' }`. The gate must fire
-  // ONLY on the latter (brief: "all requested cards resolved") — these two tests reproduce the
-  // exact scenario the review caught (an unratified ruling present, but the pass never reached
-  // genuine done) and assert the gate stays quiet.
-  test('a mid-pass STOP with a card still unattempted is NOT gated, even with an unratified ruling', async () => {
-    const state = fixtureState({
-      sequence: ['C1', 'C2'],
-      cards: {
-        C1: fixtureCard({ branch: 'feat/c1-widget' }),
-        C2: fixtureCard({ branch: null, spec: 'docs/specs/c2.md', plan: 'docs/plans/c2.md' }),
-      },
-    });
-    const answers = ['## R1 — Some convention', '', 'ratified-as: pending', ''].join('\n');
-    const { io } = buildMockLoopIo({
-      stateJson: JSON.stringify(state),
-      answers,
-      execHandlers: cleanCommitAndVerifyHandlers('aaaaaaa'),
-      spawnQueue: [() => messages(shippedMessages(1, 'aaaaaaa', 'sess-c1'))],
-    });
-
-    let stopArmed = false;
-    const baseFileExists = io.fileExists as unknown as (p: string) => boolean;
-    io.fileExists = mock((p: string) => {
-      if (p.endsWith('STOP')) return stopArmed;
-      return baseFileExists(p);
-    });
-    const baseSpawnSession = io.spawnSession;
-    io.spawnSession = mock((params) => {
-      // The owner drops STOP while C1's session is in flight — C1 still finishes and ships
-      // (D2's STOP contract), but C2 must never even be attempted this pass.
-      stopArmed = true;
-      return baseSpawnSession(params);
-    });
-
-    const result = await runLoop(baseLoopConfig(), io);
-
-    expect(result.processed).toHaveLength(1);
-    expect(result.processed[0]).toMatchObject({ kind: 'shipped', cardId: 'C1' });
-    expect(result.exitCode).toBe(EXIT_OK);
-    expect(result.unratifiedRulings).toBeUndefined();
-  });
-
-  test('a --max-cards budget exhaustion with a card still unattempted is NOT gated, even with an unratified ruling', async () => {
-    const answers = ['## R1 — Some convention', '', 'ratified-as: pending', ''].join('\n');
-    const { io } = buildMockLoopIo({
-      stateJson: stateJsonWithTwoFreshCards(),
-      answers,
-      execHandlers: cleanCommitAndVerifyHandlers('aaaaaaa'),
-      spawnQueue: [() => messages(shippedMessages(1, 'aaaaaaa', 'sess-c1'))],
-    });
-
-    // maxCards: 1 — only C1 (of C1/C2) is ever worked; C2 stays 'staged', genuinely unattempted.
-    const result = await runLoop(baseLoopConfig({ maxCards: 1 }), io);
-
-    expect(result.processed).toHaveLength(1);
-    expect(result.processed[0]).toMatchObject({ kind: 'shipped', cardId: 'C1' });
-    expect(result.exitCode).toBe(EXIT_OK);
-    expect(result.unratifiedRulings).toBeUndefined();
+describe('runLoop — D3: the runner requires no ratification', () => {
+  test('D3: a finished campaign with a plain owner ruling (no ratified-as:) exits 0 — the runner gates nothing on rulings', async () => {
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ status: 'shipped' }) } });
+    const { io } = buildMockLoopIo({ stateJson: JSON.stringify(state), spawnQueue: [], answers: '## R1 — a ruling\n\nruled-by: owner\n\nDo X.\n' });
+    expect((await runLoop(baseLoopConfig(), io)).exitCode).toBe(EXIT_OK);
   });
 });
 

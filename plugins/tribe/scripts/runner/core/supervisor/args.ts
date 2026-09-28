@@ -33,14 +33,13 @@ export interface ParseSupervisorArgsError { error: string }
 
 const OWN_VALUE_FLAGS = new Set([
   '--repo', '--model', '--watchdog-model', '--campaign', '--home',
-  '--max-ruling-rounds', '--max-ratify-rounds', '--max-spawns', '--max-watchdog-runs',
+  '--max-ruling-rounds', '--max-spawns', '--max-watchdog-runs',
   '--session-timeout-seconds', '--session-max-turns', '--session-retries', '--poll-seconds',
 ]);
 
 interface Bound { min: number; max: number }
 const BOUNDS: Record<string, Bound> = {
   '--max-ruling-rounds': { min: 0, max: 10 },
-  '--max-ratify-rounds': { min: 0, max: 10 },
   '--max-spawns': { min: 0, max: 100 },
   '--max-watchdog-runs': { min: 1, max: 500 },
   '--session-timeout-seconds': { min: 60, max: 21600 },
@@ -102,7 +101,6 @@ export function parseSupervisorArgs(argv: string[]): ParseSupervisorArgsResult |
 
   const numbers: Record<string, number> = {
     '--max-ruling-rounds': 2,
-    '--max-ratify-rounds': 2,
     '--max-spawns': 8,
     '--max-watchdog-runs': 20,
     '--session-timeout-seconds': 1800,
@@ -127,7 +125,6 @@ export function parseSupervisorArgs(argv: string[]): ParseSupervisorArgsResult |
       rawHome: own.get('--home') ?? null,
       limits: {
         maxRulingRounds: numbers['--max-ruling-rounds'] as number,
-        maxRatifyRounds: numbers['--max-ratify-rounds'] as number,
         maxSpawns: numbers['--max-spawns'] as number,
         maxWatchdogRuns: numbers['--max-watchdog-runs'] as number,
         sessionRetries: numbers['--session-retries'] as number,
