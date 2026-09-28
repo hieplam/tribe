@@ -766,54 +766,6 @@ ruling to `answers.md`. Once archived, a flag-less re-trigger of that card proce
 `--include-escalated` is needed only to force a retry of a card whose escalation file is still
 present (i.e. genuinely unanswered).
 
-## Rulings gate (harness-gap-wiring PR C)
-
-**Postmortem (campaign outstanding-17):** a ruling appended to `answers.md` that captured a
-durable convention was never carried into the target repo's own governance files (a rule, a
-debt entry, a roadmap card) — nothing mechanically gated on it, so it was silently dropped.
-Every other step in the campaign runner's loop is mechanically forced (the D3 verify replay,
-the D2 lock, the report contract below); this was the one step that ran 0% of the time because
-nothing checked it. This gate closes that gap.
-
-**When it fires:** only on the pass that would otherwise conclude `EXIT_OK`/`done` — every
-requested card `shipped`/`blocked`/`escalated`, nothing left to do. An
-`escalations_pending`/`session_incomplete`/`stop_requested` exit is completely unaffected; the
-gate never runs on those paths at all (`core/loop/run-loop.ts`'s `applyRulingsGate`, called once,
-right before `runLoop` returns).
-
-**What it checks:** every `## `-headed block in `answers.md` is a "ruling" (the outstanding-17
-convention is `## R<n> — <title>`, but ANY `## ` heading counts). A ruling is **ratified** once
-its block carries a `ratified-as:` line (case-insensitive key; a leading `-`/`*` bullet and
-`**bold**` markers around the key are all tolerated) whose value is one of:
-
-| Value | Meaning |
-| --- | --- |
-| `rule <path>` | Landed as a rule file at `<path>` (e.g. a project rule under `plugins/tribe/rules/` or `.c3/`). |
-| `debt <id>` | Recorded as a harness-gap debt entry with that id (`plugins/tribe/scripts/gaps/`). |
-| `roadmap <ref>` | Carried forward as a roadmap card (`<ref>` names it). |
-| `operational` | A one-off operational decision — deliberately not durable, no governance artifact expected. |
-| `dismissed` | Considered and explicitly rejected — no further action. |
-| `pending` | Explicitly not yet ratified. Valid vocabulary, but **does not** clear the gate. |
-
-Any other value, and a ruling block with **no** `ratified-as:` line at all, both classify as
-unratified — this is strict by design (the gate exists to force the discipline the postmortem
-found missing, not to guess intent). The pure classification lives in `core/rulings.ts`
-(`parseRulings`/`isRulingRatified`/`unratifiedRulingIds`); the gate itself is `core/loop/
-run-loop.ts`'s `applyRulingsGate`, applied to `resolved.answersContent` — the same `answers.md`
-read the loop already performs for every executor brief, not a second file read.
-
-**What happens when it fires:** the exit code becomes `5` (`EXIT_RULINGS_UNRATIFIED`) and the
-report's `run.reason` becomes `'rulings_unratified'`. This is **campaign-level state, not a
-per-card escalation** — no single card owns it, so it is folded into the report's existing
-"## Pending (needs the owner)" section (`renderRulingsUnratifiedNote`, `report.ts`) rather than
-a per-card `escalations/<card>.md` file in the shape "Escalation / answers workflow" above
-describes — `core/loop/card-actions.ts` is untouched by this gate. The note is labeled
-**"answerable"** (the same vocabulary the P5 fix-list uses for reasons a ruling alone clears,
-as opposed to a mechanical verify failure) and names every unratified ruling id verbatim. To
-resolve: add `ratified-as:` to each named block in `answers.md` (or ratify it via the
-governance path it names) and re-trigger; nothing else about the campaign's cards is touched by
-this gate.
-
 ## The done check (D3 replay)
 
 The executor's `SHIPPED <pr> <sha>` line is a signal only; `verifyShipped` (`core/verify.ts`) is
@@ -873,12 +825,11 @@ the report is the truth.**
 ```
 
 - **`run.reason`** — one of `done` | `stop_requested` | `escalations_pending` |
-  `session_incomplete` | `error` | `rulings_unratified` (`report.ts`'s `deriveExitReason`).
+  `session_incomplete` | `error` (`report.ts`'s `deriveExitReason`).
   `error` covers an unhandled exception thrown after `runLoop` was entered (`run.ts`'s own
   `EXIT_ERROR = 4` — see Exit codes below; not one of `loop.ts`'s `EXIT_*` constants).
-  `rulings_unratified` is the rulings gate (see that section above) — its `run` object also
-  carries `unratifiedRulings: string[]`, and the `.md` twin renders them inside the existing
-  "## Pending (needs the owner)" section (a campaign-level note, not a per-card entry).
+  The runner requires no ratification of `answers.md` rulings; a plan that wants it runs
+  `plugins/tribe/scripts/gaps/rulings-check.ts` itself (see "The done check" above).
 - **Per-card `outcome`** is one of `shipped | escalated | blocked | not_reached`, read entirely
   from the final `CampaignState` on disk (never from `loop.ts`'s own `CardOutcome[]`) —
   `main()` reloads state fresh from disk to build the report rather than reusing `runLoop`'s
@@ -909,7 +860,6 @@ the report is the truth.**
 | `EXIT_OK` (`done`, or startup `STOP`) | Yes — `reason: 'done'` or `'stop_requested'`. |
 | `EXIT_ESCALATED` | Yes — `reason: 'escalations_pending'`. |
 | `EXIT_SESSION_INCOMPLETE` | Yes — `reason: 'session_incomplete'`. |
-| `EXIT_RULINGS_UNRATIFIED` (the rulings gate overrode a would-be `done`) | Yes — `reason: 'rulings_unratified'`. |
 | An unhandled exception after `runLoop` was entered | Yes (best-effort) — `reason: 'error'`, exit code `4`. |
 
 ## STOP file and the lock file (spec §D2)
@@ -966,7 +916,6 @@ Read from `EXIT_*` in `loop.ts`, plus `run.ts`'s own `EXIT_ERROR`:
 | `2` | `EXIT_ESCALATED` | D5′: the pass finished and **at least one card is `escalated`** — a fresh escalation this pass, or one still parked, unanswered, from a prior run. Not "aborted at the first question"; other cards in the same pass may have shipped. Read `campaign-report.json`'s `pending` for which card(s) need an answer. |
 | `3` | `EXIT_SESSION_INCOMPLETE` | D5′: at least one card's session ended `error`/`timeout` with no further D4 fallback (no card in this pass escalated); state was already recorded locally, so the next start resumes it — this is not a human-decision escalation. |
 | `4` | `EXIT_ERROR` (`run.ts`, not a `loop.ts` constant) | An unhandled exception surfaced after `runLoop` was entered. The report's `run.reason` is `'error'` — per §O3, treat the report as authoritative over this numeric code. |
-| `5` | `EXIT_RULINGS_UNRATIFIED` | The rulings gate (see "Rulings gate" above): the pass would otherwise have concluded `done`, but `answers.md` carries ≥1 ruling with no recognized `ratified-as:` disposition. `campaign-report.json`'s `run.unratifiedRulings` names them. |
 
 ## Watchdog (card i74, issue #74)
 
@@ -1015,7 +964,7 @@ has nothing to observe. Every optional flag the runner itself accepts — `--car
 | --- | --- | --- |
 | `0` | `WATCHDOG_EXIT_DONE` | The supervised campaign reached a terminal state that needs no human (`runner_done` or `stop_requested`). |
 | `1` | `WATCHDOG_EXIT_USAGE` | A CLI argument error (bad/missing/unknown flag), or `--home` could not be resolved / is outside `$HOME/.tribe` / has no `campaign-state.json`. |
-| `10` | `WATCHDOG_EXIT_NEEDS_HUMAN` | A human must act. The exact reason is in `status.json`'s `terminal.reason` (`escalations_pending`, `rulings_unratified`, `error`, `quota_cap`, `overloaded`, `session_incomplete`, `lock_conflict`, `stalled`), or an unexpected internal I/O failure caught at the CLI edge. |
+| `10` | `WATCHDOG_EXIT_NEEDS_HUMAN` | A human must act. The exact reason is in `status.json`'s `terminal.reason` (`escalations_pending`, `error`, `quota_cap`, `overloaded`, `session_incomplete`, `lock_conflict`, `stalled`), or an unexpected internal I/O failure caught at the CLI edge. |
 | `11` | `WATCHDOG_EXIT_RUNNING` | `--once` only: the runner is still alive, or a quota/overload wait is pending — `status.json`'s `nextWakeAt` says when to re-invoke. |
 
 ### Files (all under `<home>/watchdog/`)
@@ -1039,7 +988,6 @@ The watchdog writes **nowhere else** in the campaign home — never `campaign-st
 | Live runner (lock/pid alive) at start, or right after a `launch`/`relaunch` | `attach` — wait on it; **never** a second launch. In `--follow` mode a `launch`/`relaunch` is always followed by an `attach` on the very next tick, since the loop re-observes the child it just spawned rather than spawning a second one (`--once` returns `exit(running)` immediately after the launch itself, before any such re-observe happens). |
 | Runner exited `0` | `exit(done:runner_done)` — watchdog exit `0` |
 | Runner exited `2` | `exit(needs_human:escalations_pending)` |
-| Runner exited `5` | `exit(needs_human:rulings_unratified)` |
 | Runner exited `4` | `exit(needs_human:error)` |
 | Runner exited `3` (or a crash with no exit code to read), newest log's **last** `rate_limit_event` is `rejected` with a **future** `resetsAt` | `wait_until(resetsAt + --quota-grace-seconds)` then `relaunch`; count a quota wait; at `--max-quota-waits` → `exit(needs_human:quota_cap)` |
 | Runner exited `3` (or crash), no quota signal, newest log's **last** `result` line carries an overload/5xx `api_error_status` | backoff-and-`relaunch` (`30s, 60s, 120s, 240s, 480s`, clamped); count an overload backoff; at `--max-overload-backoffs` → one `--fallback-model` relaunch if configured and not yet used, else `exit(needs_human:overloaded)` |
@@ -1049,7 +997,7 @@ The watchdog writes **nowhere else** in the campaign home — never `campaign-st
 | `--once`, runner alive, not stalled | `exit(running:runner_alive)` |
 | `STOP` file present | suppress only actions that would START work (`launch`/`relaunch`/`wait_until`); `exit(done:stop_requested)` |
 
-**Precedence (W-P1):** a terminal runner exit (`0`/`2`/`4`/`5`) always outranks a `STOP` file —
+**Precedence (W-P1):** a terminal runner exit (`0`/`2`/`4`) always outranks a `STOP` file —
 it is a more informative answer than `stop_requested`. Within exit `3`, a quota signal always
 outranks an overload signal (a quota wall has a known reset instant; a 529 is transient).
 
@@ -1100,9 +1048,9 @@ has never written one, from its own launch.
 A **layer above the watchdog**, at zero token cost for its own control loop: it launches or
 adopts the watchdog (which launches or adopts the runner), and when the watchdog parks
 `needs_human`, the supervisor spawns a small, judgment-only Claude Code session — never the
-full executor — to rule on a card's escalation, ratify a harness-gap proposal, or run the
-closing report, then resumes the watchdog. It is a **subcommand of this same runner CLI**, not a
-separate installable, exactly like `watchdog` above:
+full executor — to rule on a card's escalation or run the closing report (it re-verifies what
+shipped and reports; the supervisor does no ratification), then resumes the watchdog. It is a
+**subcommand of this same runner CLI**, not a separate installable, exactly like `watchdog` above:
 [`docs/superpowers/specs/2026-09-18-campaign-supervisor-design.md`](../../../../docs/superpowers/specs/2026-09-18-campaign-supervisor-design.md)
 is the design this section reproduces (§10 the CLI surface, §11 the on-disk layout) rather than
 reinterprets.
@@ -1129,7 +1077,7 @@ rejected by name (`unknown flag: …`), never silently ignored (`core/supervisor
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--repo` | none (required) | Target repo root, threaded to the watchdog it spawns. |
-| `--model` | none (required) | The Shaman model for the supervisor's own one-shot ruling/ratify/closing sessions, and the fallback value for `--watchdog-model` below. |
+| `--model` | none (required) | The Shaman model for the supervisor's own one-shot ruling/closing sessions, and the fallback value for `--watchdog-model` below. |
 | `--campaign` | none | Card id's slug, e.g. `--campaign widget-export`. Derives `--home` from it (see above). Mutually exclusive with `--home`; one of the two is required. |
 | `--home` | none | An explicit campaign home path instead of `--campaign`. Mutually exclusive with `--campaign`. |
 | `--watchdog-model` | the `--model` value | Executor tier passed to `run.ts watchdog --model` when the supervisor launches it. **Verified against `core/supervisor/loop.ts` (`config.watchdogModel ?? config.model`):** it always falls back to `--model` itself — never reads a campaign-configured value, despite `args.ts`'s own doc comment describing that as the intent; no code path enforces `--watchdog-model` as required. |
@@ -1178,7 +1126,7 @@ written by the supervisor):
 - **`events.jsonl`** — append-only, one JSON line per intended action, each carrying its own ISO
   `at`.
 - **`ledger.jsonl`** — append-only (spec §4.4): one **spawn** row per session the campaign
-  starts — the executor, one of its subagents, or a supervisor one-shot (`ruling`/`ratify`/
+  starts — the executor, one of its subagents, or a supervisor one-shot (`ruling`/
   `closing`) — appended the moment that session's id is known, and one **end** row per one-shot.
   A spawn row is `{at, event: "spawn", kind, sessionId, parentSessionId, rootSessionId,
   agentType, cardId, resumed?}`: `sessionId` is the SDK `session_id` for a root or a subagent's
@@ -1190,8 +1138,8 @@ written by the supervisor):
   `consumeSession`, for the executor's own row and one row per subagent it spawns) and the
   supervisor (`core/supervisor/session.ts` for a one-shot's spawn row, `loop.ts` for its end row)
   append to this one file.
-- **`state.json`** — the supervisor's own persisted counters: per-card ruling rounds, ratify
-  rounds, total spawns, watchdog runs, seen-escalation content hashes (the repeat-escalation
+- **`state.json`** — the supervisor's own persisted counters: per-card ruling rounds, total
+  spawns, watchdog runs, seen-escalation content hashes (the repeat-escalation
   breaker), `closingVerified`, and per-reason retrigger counts.
 - **`park/<cardId>.json`** — a typed park marker (`kind: "owner_only" | "too_hard"`) a one-shot
   *session* wrote for that card (§6.1); an unrecognised `kind` or unparseable JSON is read as
@@ -1203,16 +1151,16 @@ written by the supervisor):
 
 ### The one-shot session envelope (card `supervisor-session-settings`, `buildOneShotOptions`)
 
-All three one-shot kinds — `ruling`, `ratify`, `closing` — load
+Both one-shot kinds — `ruling` and `closing` — load
 `settingSources: ['user', 'project', 'local']`, the same three-tier list the executor path loads
 (`core/session.ts`): the `user` tier is what registers `~/.claude/settings.json`'s
 `enabledPlugins` (the C3 plugin), so `Skill c3` resolves in every kind rather than returning
 `Unknown skill: c3`. Each kind's `PreToolUse` hooks:
 
-- **`ruling`/`ratify`** carry the containment hook (`decideContainmentHook` — the ONLY write
+- **`ruling`** carries the containment hook (`decideContainmentHook` — the ONLY write
   enforcement layer; `additionalDirectories` is a read convenience, never a write boundary) AND
   the scan-wall hook (`decideScanGuardHook`, imported from the executor path, never copied or
-  forked — card D3), wired alongside it as defence in depth. Their `allowedTools` is
+  forked — card D3), wired alongside it as defence in depth. Its `allowedTools` is
   `[Read, Grep, Glob, Write, Edit, Skill]` — `Skill` by owner ruling R2, verbatim "Allow the Skill
   tool" — so the C3 skill's content loads, though its CLI still cannot run there (no `Bash`, a
   known, accepted limit); the containment hook allows the `Skill` load at any location alongside
@@ -1226,14 +1174,14 @@ All three one-shot kinds — `ruling`, `ratify`, `closing` — load
   stops running `TaskCreate`/`CronList`/`ListAgents`, which ran un-granted before and which the
   closing stage does not use.
 - **Every one-shot kind's `cwd` is the target repo root — never the campaign home.**
-  `ruling`, `ratify` and `closing` alike start inside the repo the campaign is working on
-  (`OneShotSessionConfig.repoRoot`, required for all three); `homeDir` stays the containment
+  `ruling` and `closing` alike start inside the repo the campaign is working on
+  (`OneShotSessionConfig.repoRoot`, required for both); `homeDir` stays the containment
   root, the log directory and the ledger's home, but is never `cwd`. No kind lists the home in
   `additionalDirectories` either — MEASURED (2026-09-27): a session that has the campaign home as
   an additional directory loads the home's own `.claude/skills` and lets a planted instruction
   living in the home reach the session's context, so the home is never handed to a session as a
   directory it may read configuration from, only through the containment hook below. The
-  containment root itself is unchanged: `ruling`/`ratify` keep `buildContainmentHook(config.homeDir,
+  containment root itself is unchanged: `ruling` keeps `buildContainmentHook(config.homeDir,
   …)`, so a `Write`/`Edit` still lands only inside the campaign home and a write into the repo is
   still refused — only where the session starts has moved, not where it may write.
 - **`verify-shipped`'s hand-load is kept.** `closing`'s `options.plugins` hand-load (pointing at
@@ -1269,7 +1217,7 @@ comments; first match wins)
 | Watchdog terminal `quota_cap` / `overloaded` / `stalled` / `lock_conflict` / `error` (rows 18-22) | `park` with the matching reason — never retried automatically. |
 | A one-shot session just returned `failed`/`timeout` (V5/V6) | One bounded retry (`--session-retries`), then `park(<kind>_failed)`. |
 | A one-shot session just returned `history_rewritten` (V1) | `park` immediately — an integrity violation, never retried. |
-| The watchdog-run cap is spent (row 28), or an unrecognised terminal reason (including a legacy `rulings_unratified`) | `park(watchdog_run_cap)` / `park(error)` — fail closed, never guess. |
+| The watchdog-run cap is spent (row 28), or an unrecognised terminal reason (including one the runner no longer emits) | `park(watchdog_run_cap)` / `park(error)` — fail closed, never guess. |
 
 ### What it never does
 
@@ -1299,7 +1247,7 @@ comments; first match wins)
   field or delete it from the schema.
 - **A supervisor session gets no viewer badge chip** — the [live viewer](#live-viewer) reads
   `campaign-state.json` and a run's `run.json` for its campaign badge, and the supervisor writes
-  neither. A one-shot ruling/ratify/closing session is visible only as its own entry under that
+  neither. A one-shot ruling/closing session is visible only as its own entry under that
   session's project directory in `~/.claude/projects/`, with no campaign association. Follow-up
   **FU-CS-2**.
 - **A crash of the supervisor itself is not resumed automatically** — exactly the watchdog's own
@@ -1353,8 +1301,9 @@ names, no filename convention required — enforced executably by `structure.tes
   `brief.ts`, `session.ts`, `paths.ts` (pure campaign-home path helpers, spec §4),
   `run-record.ts` (the `run.json` schema), `env-guard.ts` (`scrubEnvContent` — the
   `ANTHROPIC_API_KEY` line-removal logic, fix-list P10; see "ANTHROPIC_API_KEY guard" above),
-  and `rulings.ts` (`answers.md` ruling parsing/classification, harness-gap-wiring PR C; see
-  "Rulings gate" above), and the plan-driving modules (card runner-driver-only; see "Turns and the
+  and `rulings.ts` (`answers.md` ruling parsing, harness-gap-wiring PR C; classifying which
+  rulings are ratified lives on the Tribe side, `plugins/tribe/scripts/gaps/rulings-check.ts`),
+  and the plan-driving modules (card runner-driver-only; see "Turns and the
   Done run"): `plan-index.ts` (the plan reader and `TaskIndexError`), `done.ts` (next step,
   Done-run judgement, rows, the attempt budget), `turn-prompts.ts` (every between-turn prompt), and
   `loop/turns.ts` (`driveCardTurns`, the turn loop, every effect injected).
@@ -1458,7 +1407,8 @@ ESLint, which is deferred until typescript-eslint supports TS >= 7.1 (plan Amend
   - The supervisor's own one-shot session envelope (card `supervisor-session-settings`,
     `core/supervisor/session.e2e.test.ts`, opt-in `RUN_SESSION_E2E=1`) carries the same fix: real
     `claude-haiku-4-5-20251001` sessions through `runOneShotSession` + the real SDK adapter, never
-    a stub, prove `Skill c3` returns C3 content in all three kinds (`ruling`, `ratify`, `closing`),
+    a stub, prove `Skill c3` returns C3 content in every kind (`ruling`, `closing`; a `ratify` kind was also
+    proven then, and has since been removed),
     a real `find /` is refused by the scan wall in `closing`, the `verify-shipped` hand-load is
     measured with and without `options.plugins`, and a host `permissions.allow` rule for
     `Workflow` still cannot run it in `closing` (ruling R1) — all failing for the stated reason

@@ -291,8 +291,8 @@ flag table, exit codes and the frozen action table — this section is only a po
 
 A **layer above the watchdog**, also zero token cost for its own control loop: it launches or
 adopts the watchdog and, when the watchdog parks `needs_human`, spawns a small judgment-only
-Claude Code session — never the full executor — to rule on a card's escalation, ratify a
-harness-gap proposal, or run the closing report, then resumes the watchdog. It is a subcommand
+Claude Code session — never the full executor — to rule on a card's escalation or run
+the closing report (it does no ratification), then resumes the watchdog. It is a subcommand
 of the same runner CLI, `run.ts supervise`, not a separate installable:
 
 ```sh

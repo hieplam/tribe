@@ -107,13 +107,11 @@ function containedPath(homeDir: string, target: string): string {
  * INPUT is resolved and proven to sit inside its declared root ... before anything opens,
  * writes, or deletes through it." `readFileOrEmpty` is also the ONLY read primitive
  * `SupervisorIO` exposes, and `core/supervisor/loop.ts#buildOneShotPrompt` legitimately calls it
- * on two paths that are neither a manifest, a config, nor user/session input, and were never
+ * on paths that are neither a manifest, a config, nor user/session input, and were never
  * meant to be walled to the campaign home: the two committed judgment-session templates
  * (`core/supervisor/brief.ts`'s `RULING_TEMPLATE_PATH`/
- * `CLOSING_TEMPLATE_PATH` — fixed, compile-time constants under the plugin's own source tree)
- * and the gap-gate report under the BASE tribe home (`readGapGateOpenIds`,
- * `orchestrate-campaign/SKILL.md` Stage D step 2: "the BASE tribe home the gate writes to, NOT
- * the campaign-nested `--home`"). Both were unreachable through the pre-Task-17 `readFileOrEmpty`
+ * `CLOSING_TEMPLATE_PATH` — fixed, compile-time constants under the plugin's own source tree).
+ * They were unreachable through the pre-Task-17 `readFileOrEmpty`
  * (it always threw `PathEscapesHomeError`) — a defect invisible to every existing unit test
  * (`supervisor-io.adapter.test.ts` exercises the write-side refusal only; `loop.test.ts`'s fake
  * seam has no containment check at all) and only surfaced by `tests/test-supervisor-e2e.sh`'s
