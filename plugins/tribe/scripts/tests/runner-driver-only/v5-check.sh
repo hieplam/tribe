@@ -10,8 +10,10 @@ HERE="$(cd "$(bounded 120 dirname "${BASH_SOURCE[0]}")" && pwd)"
 R="$(cd "$HERE/../../runner" && pwd)"
 PASS=0; FAIL=0
 check() { if [[ "$2" == "$3" ]]; then PASS=$((PASS+1)); printf 'ok - %s\n' "$1"; else FAIL=$((FAIL+1)); printf 'not ok - %s (got: %s, want: %s)\n' "$1" "$2" "$3"; fi; }
-bounded 120 git -C "$F" fetch -q || { echo 'v5-check: fixture fetch failed or timed out' >&2; exit 1; }
-bounded 120 git -C "$F" merge -q --ff-only origin/master || { echo 'v5-check: fixture merge failed or timed out' >&2; exit 1; }
+# Host git config is off; the private fixture remote needs gh (already a dependency); dry-run keeps the user's environment.
+GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0='!gh auth git-credential' bounded 120 git -C "$F" fetch -q || { echo 'v5-check: fixture fetch failed or timed out' >&2; exit 1; }
+# Host git config is off; the private fixture remote needs gh (already a dependency); dry-run keeps the user's environment.
+GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0='!gh auth git-credential' bounded 120 git -C "$F" merge -q --ff-only origin/master || { echo 'v5-check: fixture merge failed or timed out' >&2; exit 1; }
 # Refuse a plan outside the fixture before either check opens it. Emit its resolved path so a
 # symlink inside the fixture cannot redirect the later read through its original spelling.
 selection="$(bounded 120 python3 -c '
