@@ -495,7 +495,8 @@ an ambiguous plan is by design.
 - Its **Done section** is the one heading inside the task section whose text is `Done`
   (case-insensitive), at a deeper level (`missing_done`, `ambiguous_done`).
 - Its **Done block** is the first fenced code block after the Done heading and before the next
-  heading (`missing_done_block`). Its **Done commands** are the block's lines, trimmed, skipping
+  heading (`missing_done_block`); a fence that never closes is refused (`unclosed_done_block`).
+  Its **Done commands** are the block's lines, trimmed, skipping
   blank lines and lines starting with `#` (none → `empty_done`). A line ending in `\` is refused
   (`continuation_not_supported`), never guessed. Each line is one command, run with `bash -c`.
 
@@ -513,7 +514,8 @@ an ambiguous plan is by design.
    delete the remote branch, remove the worktree, fast-forward the local base in `--repo`).
 3. **Accepting `TASK_DONE <task-id> <branch>`** — the runner trusts the disk, not the words: the id
    must be the task the turn asked for (during delivery, the last task); the branch must exist as
-   `refs/heads/<branch>` in `--repo`, equal `card.branch` once that is known, and its tip must
+   a literal `refs/heads/<branch>` in `--repo` (revision expressions are refused), equal
+   `card.branch` once that is known, and its tip must
    descend from `card.baseSha`. The first accepted line records and persists `card.branch` before
    its Done run, even if that run fails.
 4. **The Done run** at that tip for tasks 1..k (below). Pass → every task 1..k gets
@@ -554,7 +556,8 @@ for one `actOnCard` call; the loop's existing bounded retries of a `stopped` car
   (`core/paths.ts`), which refuses a card id that would leave `<home>/done/`. Before checkout or
   deletion, the adapter requires a real `<home>/done` directory under the real campaign home and
   a non-symlink card path; `removeTree` repeats that guard. A refusal stops the card as an
-  infrastructure failure. Running from a clean checkout of the
+  infrastructure failure. A failed final removal also stops the card as infrastructure failure
+  after the Done record is written. Running from a clean checkout of the
   commit — never the session's worktree — makes the check about committed work; a plan whose Done
   commands need a bootstrap (`bun install`) lists it as its first command.
 - **What:** the Done commands of tasks 1..k in plan order, **deduplicated by exact text** — the

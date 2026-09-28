@@ -541,7 +541,8 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
     // C2: the main checkout's current ref — on the base branch unless a test scripts a
     // detached HEAD / other branch via `execHandlers`.
     if (cmd[0] === 'git' && cmd[1] === 'rev-parse' && cmd.includes('--abbrev-ref')) return ok('master\n');
-    if (cmd[0] === 'git' && cmd[1] === 'rev-parse' && cmd.includes('--verify') && cmd.some((a) => a.startsWith('refs/heads/'))) return ok('basesha0\n');
+    if (cmd[0] === 'git' && cmd[1] === 'check-ref-format') return ok('');
+    if (cmd[0] === 'git' && cmd[1] === 'show-ref' && cmd.includes('--verify')) return ok('basesha0\n');
     if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'add') return ok('');
     if (cmd[0] === 'git' && cmd[1] === 'rev-parse') return ok('basesha0\n');
     if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return fail('no pull requests found');

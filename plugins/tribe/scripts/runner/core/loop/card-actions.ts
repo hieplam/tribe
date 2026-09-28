@@ -626,7 +626,10 @@ function turnDepsFor(ctx: CardCtx, phase: CardPhase): TurnDeps {
       if (branch === '' || /\s/.test(branch) || branch.startsWith('-')) {
         return { ok: false, reason: `"${branch}" is not a branch name` };
       }
-      const tipResult = await io.exec(['git', 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], inRepo);
+      const ref = `refs/heads/${branch}`;
+      const format = await io.exec(['git', 'check-ref-format', ref], inRepo);
+      if (format.exitCode !== 0) return { ok: false, reason: `"${branch}" is not a branch name` };
+      const tipResult = await io.exec(['git', 'show-ref', '--verify', '--hash', ref], inRepo);
       const tip = tipResult.stdout.trim();
       if (tipResult.exitCode !== 0 || tip.length === 0) return { ok: false, reason: `branch ${branch} does not exist in the repo` };
       const card = state.cards[cardId];
@@ -688,10 +691,11 @@ function turnDepsFor(ctx: CardCtx, phase: CardPhase): TurnDeps {
         }
       } finally {
         try {
-          await serializeRepoGitMutation(() => {
+          const removed = await serializeRepoGitMutation(() => {
             io.assertDoneScratchPath(path);
             return io.exec(['git', 'worktree', 'remove', '--force', path], inRepo);
           });
+          if (removed.exitCode !== 0) cleanupFailure = `git worktree remove ${path} failed: ${removed.stderr.trim()}`;
         } catch (err) {
           cleanupFailure = (err as Error).message;
         }

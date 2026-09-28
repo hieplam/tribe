@@ -106,7 +106,7 @@ test('a Done run with a symlinked done directory stops as infrastructure before 
   symlinkSync(outside, join(home, 'done'));
   const realIo = buildRealIo({ homeDir: home });
   const exec = mock(async (cmd: string[]) =>
-    cmd[1] === 'rev-parse' ? { stdout: 'tip\n', stderr: '', exitCode: 0 } : { stdout: '', stderr: '', exitCode: 0 });
+    cmd[1] === 'show-ref' ? { stdout: 'tip\n', stderr: '', exitCode: 0 } : { stdout: '', stderr: '', exitCode: 0 });
   const ctx = fixtureCtx({
     resolved: { homeDir: home, taskIndex: { C1: [{ id: 'T1', heading: 'Task 1', doneCommands: ['true'] }] } },
     io: {
@@ -123,6 +123,86 @@ test('a Done run with a symlinked done directory stops as infrastructure before 
   expect(outcome).toMatchObject({ kind: 'stopped', retryable: false });
   expect(outcome.kind === 'stopped' ? outcome.reason : '').toMatch(/done|symlink/i);
   expect(exec.mock.calls.some((call) => call[0][1] === 'worktree' && call[0][2] === 'add')).toBe(false);
+});
+
+test('TASK_DONE refuses a revision expression before starting Done', async () => {
+  const exec = mock(async (cmd: string[]) => {
+    if (cmd[1] === 'check-ref-format') return { stdout: '', stderr: 'invalid ref', exitCode: 1 };
+    if (cmd[1] === 'rev-parse') return { stdout: 'parent-tip\n', stderr: '', exitCode: 0 };
+    return { stdout: '', stderr: '', exitCode: 0 };
+  });
+  const runShell = mock(async () => ({ exitCode: 0, timedOut: false, durationMs: 0, stdout: '', stderr: '' }));
+  const ctx = fixtureCtx({
+    resolved: { taskIndex: { C1: [{ id: 'T1', heading: 'Task 1', doneCommands: ['true'] }] } },
+    io: {
+      exec,
+      runShell,
+      spawnSession: mock(async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'sess' };
+        yield { type: 'result', subtype: 'success', session_id: 'sess', result: 'TASK_DONE T1 feat/x~1' };
+      }),
+    },
+  });
+  ctx.state.cards.C1 = fixtureCard({ baseSha: 'base', sessionId: 'sess' });
+  const outcome = await actOnCard(ctx, { kind: 'resume', sessionId: 'sess', reason: 'session_only' });
+  expect(outcome.kind).toBe('escalated');
+  expect(ctx.state.cards.C1?.branch).toBeNull();
+  expect(runShell).not.toHaveBeenCalled();
+  expect(exec.mock.calls.some((call) => call[0][1] === 'worktree' && call[0][2] === 'add')).toBe(false);
+});
+
+test('TASK_DONE accepts a literal branch at its exact ref tip', async () => {
+  const exec = mock(async (cmd: string[]) => {
+    if (cmd[1] === 'show-ref') return { stdout: 'exact-tip\n', stderr: '', exitCode: 0 };
+    if (cmd[1] === 'rev-parse') return { stdout: 'parent-tip\n', stderr: '', exitCode: 0 };
+    return { stdout: '', stderr: '', exitCode: 0 };
+  });
+  const ctx = fixtureCtx({
+    resolved: { taskIndex: { C1: [{ id: 'T1', heading: 'Task 1', doneCommands: ['true'] }] } },
+    io: {
+      exec,
+      spawnSession: mock(async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'sess' };
+        yield { type: 'result', subtype: 'success', session_id: 'sess', result: 'TASK_DONE T1 feat/x' };
+      }),
+    },
+  });
+  ctx.state.cards.C1 = fixtureCard({ baseSha: 'base', sessionId: 'sess' });
+  await actOnCard(ctx, { kind: 'resume', sessionId: 'sess', reason: 'session_only' });
+  expect(exec.mock.calls.some((call) => call[0].join(' ') === 'git check-ref-format refs/heads/feat/x')).toBe(true);
+  expect(exec.mock.calls.some((call) => call[0].join(' ') === 'git show-ref --verify --hash refs/heads/feat/x')).toBe(true);
+  expect(exec.mock.calls.some((call) => call[0][1] === 'worktree' && call[0][2] === 'add' && call[0][6] === 'exact-tip')).toBe(true);
+  expect(ctx.state.cards.C1?.tasks[0]?.passedSha).toBe('exact-tip');
+});
+
+test('a failed final Done worktree cleanup stops as infrastructure and keeps the Done record', async () => {
+  let removes = 0;
+  const exec = mock(async (cmd: string[]) => {
+    if (cmd[1] === 'show-ref') return { stdout: 'exact-tip\n', stderr: '', exitCode: 0 };
+    if (cmd[1] === 'rev-parse') return { stdout: 'exact-tip\n', stderr: '', exitCode: 0 };
+    if (cmd[1] === 'worktree' && cmd[2] === 'remove' && ++removes === 2) {
+      return { stdout: '', stderr: 'cleanup denied', exitCode: 1 };
+    }
+    return { stdout: '', stderr: '', exitCode: 0 };
+  });
+  const appendLog = mock((_path: string, _line: string) => {});
+  const ctx = fixtureCtx({
+    resolved: { taskIndex: { C1: [{ id: 'T1', heading: 'Task 1', doneCommands: ['true'] }] } },
+    io: {
+      exec,
+      appendLog,
+      spawnSession: mock(async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'sess' };
+        yield { type: 'result', subtype: 'success', session_id: 'sess', result: 'TASK_DONE T1 feat/x' };
+      }),
+    },
+  });
+  ctx.state.cards.C1 = fixtureCard({ baseSha: 'base', sessionId: 'sess' });
+  const outcome = await actOnCard(ctx, { kind: 'resume', sessionId: 'sess', reason: 'session_only' });
+  expect(outcome).toMatchObject({ kind: 'stopped', retryable: false });
+  expect(outcome.kind === 'stopped' ? outcome.reason : '').toContain('cleanup denied');
+  expect(outcome.kind === 'stopped' ? outcome.reason : '').toContain('/th/done/C1');
+  expect(appendLog.mock.calls.some((call) => call[0].endsWith('done.jsonl'))).toBe(true);
 });
 
 describe('sessionConfigFor — ledgerPath (Task 9, spec §4.4)', () => {

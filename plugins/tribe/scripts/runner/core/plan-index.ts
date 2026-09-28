@@ -14,6 +14,7 @@ export type TaskIndexProblem =
   | 'missing_done'
   | 'ambiguous_done'
   | 'missing_done_block'
+  | 'unclosed_done_block'
   | 'empty_done'
   | 'continuation_not_supported'
   | 'plan_outside_repo';
@@ -55,10 +56,10 @@ const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/;
 interface Scan {
   lines: string[];
   headings: Heading[];
-  /** For each line: is it a fence line or inside a fenced block? */
-  inFence: boolean[];
   /** Line indexes that OPEN a fenced block. */
   fenceOpens: Set<number>;
+  /** Opening line index to its exact closing line index. Unclosed fences have no entry. */
+  fenceCloses: Map<number, number>;
 }
 
 /** Fences are tracked CommonMark-style: a fence opened by N backticks (or tildes) closes only on a
@@ -67,29 +68,29 @@ interface Scan {
 function scan(markdown: string): Scan {
   const lines = markdown.split('\n');
   const headings: Heading[] = [];
-  const inFence: boolean[] = [];
   const fenceOpens = new Set<number>();
-  let open: { char: string; length: number } | null = null;
+  const fenceCloses = new Map<number, number>();
+  let open: { char: string; length: number; line: number } | null = null;
   lines.forEach((line, i) => {
     if (open !== null) {
-      inFence.push(true);
       const close = new RegExp(`^ {0,3}${open.char === '`' ? '`' : '~'}{${open.length},}\\s*$`);
-      if (close.test(line)) open = null;
+      if (close.test(line)) {
+        fenceCloses.set(open.line, i);
+        open = null;
+      }
       return;
     }
     const fence = FENCE_OPEN_RE.exec(line);
     if (fence) {
       const marker = fence[1] as string;
-      open = { char: marker[0] as string, length: marker.length };
-      inFence.push(true);
+      open = { char: marker[0] as string, length: marker.length, line: i };
       fenceOpens.add(i);
       return;
     }
-    inFence.push(false);
     const heading = HEADING_RE.exec(line);
     if (heading) headings.push({ level: (heading[1] as string).length, text: (heading[2] as string).trim(), line: i });
   });
-  return { lines, headings, inFence, fenceOpens };
+  return { lines, headings, fenceOpens, fenceCloses };
 }
 
 type TaskResolution = { ok: true; task: ResolvedTask } | { ok: false; problem: TaskIndexProblem };
@@ -116,12 +117,9 @@ function resolveOne(s: Scan, ref: TaskRef): TaskResolution {
     }
   }
   if (openLine < 0) return { ok: false, problem: 'missing_done_block' };
-  const body: string[] = [];
-  for (let i = openLine + 1; i < s.lines.length && s.inFence[i] === true && !s.fenceOpens.has(i); i++) {
-    body.push(s.lines[i] as string);
-  }
-  // The loop above also collects the closing fence line (it is `inFence`); drop it.
-  if (body.length > 0 && FENCE_OPEN_RE.test(body[body.length - 1] as string)) body.pop();
+  const closeLine = s.fenceCloses.get(openLine);
+  if (closeLine === undefined) return { ok: false, problem: 'unclosed_done_block' };
+  const body = s.lines.slice(openLine + 1, closeLine);
   const commands: string[] = [];
   for (const raw of body) {
     const line = raw.trim();

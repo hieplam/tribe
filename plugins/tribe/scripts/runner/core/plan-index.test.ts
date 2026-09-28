@@ -73,6 +73,22 @@ describe('resolveTaskIndex — spec §4.3', () => {
     const r = resolveTaskIndex('C1', refs('Task 1: x'), '### Task 1: x\n#### Done\n### Task 2: y\n```\ntrue\n```\n');
     expect(r.issues.map((i) => i.problem)).toEqual(['missing_done_block']);
   });
+  test('an unclosed Done fence is refused without a trailing newline', () => {
+    const plan = '### Task 1: a\n\n#### Done\n\n```bash\ntrue\n~~~ false';
+    const r = resolveTaskIndex('C1', refs('Task 1: a'), plan);
+    expect(r.issues.map((i) => i.problem)).toEqual(['unclosed_done_block']);
+  });
+  test('an unclosed Done fence is refused with a trailing newline', () => {
+    const plan = '### Task 1: a\n\n#### Done\n\n```bash\ntrue\n~~~ false\n';
+    const r = resolveTaskIndex('C1', refs('Task 1: a'), plan);
+    expect(r.issues.map((i) => i.problem)).toEqual(['unclosed_done_block']);
+  });
+  test('a tilde marker inside a closed backtick Done fence remains a command', () => {
+    const plan = '### Task 1: a\n\n#### Done\n\n```bash\ntrue\n~~~ false\n```';
+    const r = resolveTaskIndex('C1', refs('Task 1: a'), plan);
+    expect(r.issues).toEqual([]);
+    expect(r.tasks[0]?.doneCommands).toEqual(['true', '~~~ false']);
+  });
   test('closing hashes and trailing spaces are not part of the heading text', () => {
     const r = resolveTaskIndex('C1', refs('Task 1: x'), '### Task 1: x ###  \n#### Done\n```\ntrue\n```\n');
     expect(r.issues).toEqual([]);

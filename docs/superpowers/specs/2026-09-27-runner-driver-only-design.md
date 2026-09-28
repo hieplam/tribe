@@ -265,7 +265,8 @@ command, attributing a command to the wrong task) is a bug. Refusing an ambiguou
   (case-insensitive) at a deeper level than the task heading. Zero → `missing_done`; more than one →
   `ambiguous_done`.
 - Its **Done block** is the first fenced code block after the Done heading and before the next
-  heading of any level. None → `missing_done_block`.
+  heading of any level. None → `missing_done_block`; a block whose fence never closes →
+  `unclosed_done_block`.
 - Its **Done commands** are the block's lines, trimmed, skipping blank lines and lines starting with
   `#`. None → `empty_done`. A line ending in `\` → `continuation_not_supported` (refused, never
   guessed). Each remaining line is one command, run with `bash -c`.
