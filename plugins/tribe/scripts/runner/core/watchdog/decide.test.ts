@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { decide, MAX_QUOTA_WAIT_MS, overloadBackoffSeconds } from './decide.ts';
-import type { WatchdogObservation } from './model.ts';
+import { TERMINAL_REASONS, type WatchdogObservation } from './model.ts';
 
 const NOW = 1_800_000_000_000; // fixed clock, ms
 const FUTURE_RESET_S = Math.floor(NOW / 1000) + 600;
@@ -39,7 +39,7 @@ function obs(over: Partial<WatchdogObservation> = {}): WatchdogObservation {
   };
 }
 
-/** One-line encoding of an action, so 48 expectations stay readable. */
+/** One-line encoding of an action, so 40 expectations stay readable. */
 function encode(a: ReturnType<typeof decide>): string {
   switch (a.kind) {
     case 'exit': return `exit:${a.status}:${a.reason}`;
@@ -100,20 +100,11 @@ const TABLE: Array<[code: number, q: 0 | 1, o: 0 | 1, s: 0 | 1, want: string]> =
   [4, 1, 0, 1, 'exit:needs_human:error'],
   [4, 1, 1, 0, 'exit:needs_human:error'],
   [4, 1, 1, 1, 'exit:needs_human:error'],
-
-  [5, 0, 0, 0, 'exit:needs_human:rulings_unratified'],
-  [5, 0, 0, 1, 'exit:needs_human:rulings_unratified'],
-  [5, 0, 1, 0, 'exit:needs_human:rulings_unratified'],
-  [5, 0, 1, 1, 'exit:needs_human:rulings_unratified'],
-  [5, 1, 0, 0, 'exit:needs_human:rulings_unratified'],
-  [5, 1, 0, 1, 'exit:needs_human:rulings_unratified'],
-  [5, 1, 1, 0, 'exit:needs_human:rulings_unratified'],
-  [5, 1, 1, 1, 'exit:needs_human:rulings_unratified'],
 ];
 
 describe('decide — the frozen action table, every row', () => {
-  test('the table covers 6 exit codes x quota x overload x STOP', () => {
-    expect(TABLE.length).toBe(48);
+  test('the table covers 5 exit codes x quota x overload x STOP', () => {
+    expect(TABLE.length).toBe(40);
   });
 
   for (const [code, q, o, s, want] of TABLE) {
@@ -609,4 +600,8 @@ describe('decide — FIX S3: a corrupt/huge resetsAtEpochS clamps to a bounded w
     const action = decide(obs({ lastExitCode: 3, quota: { resetsAtEpochS: FUTURE_RESET_S } }));
     expect(encode(action)).toBe(QUOTA_WAIT);
   });
+});
+
+test('the watchdog vocabulary has no rulings reason any more: the runner never exits 5', () => {
+  expect(TERMINAL_REASONS.filter((reason) => reason.includes('rulings'))).toEqual([]);
 });

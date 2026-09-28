@@ -377,7 +377,7 @@ ruling UC-3).
 
 3. **On the wake-up, read `<campaign-home>/watchdog/status.json` FIRST, then
    `campaign-report.json`.** The watchdog's `terminal.reason` says why supervision ended
-   (`runner_done` · `escalations_pending` · `rulings_unratified` · `session_incomplete` ·
+   (`runner_done` · `escalations_pending` · `session_incomplete` ·
    `quota_cap` · `overloaded` · `stalled` · `lock_conflict` · `error` · `stop_requested`) and its
    `counters` say what it already absorbed for you (quota waits, overload backoffs, crash
    relaunches). Then read `campaign-report.json` for the campaign truth: **the exit code is a
@@ -417,7 +417,6 @@ worth guessing. An unrecognized flag (including the deleted `--state`/`--answers
 | `1` | `.runner.lock` is held by a live process, or a CLI argument error. |
 | `2` | The pass finished; **at least one escalation is pending.** This is NOT "aborted at the first question" — the runner parks the escalated card and keeps going, and only exits once nothing else is progressable. |
 | `3` | A spawned session ended incomplete (no further resume path); state was already recorded, so the next run resumes it automatically — this is not a human-decision escalation. |
-| `5` | The pass would otherwise have concluded `done`, but `answers.md` carries ≥1 ruling with no recognized `ratified-as:` disposition (harness-gap-wiring PR C, `core/rulings.ts`). Report `run.reason` is `rulings_unratified`; this is answerable by YOU (Shaman authority) — see the report's "Pending (needs the owner)" section for the unratified ruling ids and how to clear it, never a crash and never a reason to re-trigger unchanged. |
 
 `campaign-report.json` (+ its human-readable `campaign-report.md` twin) is written under the
 campaign home on **every** real exit path above — but **not** on `--dry-run` (zero side effects)
@@ -425,8 +424,7 @@ and **not** on a refused start (exit `1` from a held lock). Its per-card `outcom
 `shipped | escalated | blocked | not_reached`; a `shipped` card carries `pr`/`mergeSha`; an
 `escalated` card carries `escalationFile`, a one-line `question` digest, and `autoAnswerRounds`;
 a `blocked` card carries `blockedOn`. Top-level `pending` lists every card still needing the
-owner, and `stats` totals each outcome; a `rulings_unratified` exit (code `5`) additionally
-names every unratified ruling id under "Pending (needs the owner)". Treat this JSON (never the
+owner, and `stats` totals each outcome. Treat this JSON (never the
 exit code alone, never your own memory of what you dispatched) as the single source of truth
 for "what happened."
 

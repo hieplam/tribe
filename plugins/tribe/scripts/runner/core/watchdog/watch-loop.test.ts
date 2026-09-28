@@ -221,7 +221,6 @@ describe('runWatchdog — G3: terminal states surface to the lead', () => {
     [0, 0, 'runner_done'],
     [2, 10, 'escalations_pending'],
     [4, 10, 'error'],
-    [5, 10, 'rulings_unratified'],
   ];
   for (const [runnerExit, watchdogExit, reason] of cases) {
     test(`runner ${runnerExit} maps to watchdog ${watchdogExit}:${reason}`, async () => {

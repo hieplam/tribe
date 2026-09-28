@@ -352,7 +352,7 @@ test('the success value is TRANSLATED: run reason `done` -> terminal reason `run
 test('every ExitReason spelled identically in both vocabularies maps to itself', () => {
   // This list is `core/report.ts#ExitReason` minus `done`, read off the type itself.
   for (const shared of ['stop_requested', 'escalations_pending', 'session_incomplete',
-    'error', 'rulings_unratified']) {
+    'error']) {
     expect(terminalReasonForRunReason(shared)).toBe(shared);
   }
 });

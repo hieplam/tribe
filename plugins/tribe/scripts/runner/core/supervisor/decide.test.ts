@@ -202,8 +202,8 @@ test('runner_done with rulings in answers.md goes straight to closing: the super
   const o = base({ lastWatchdog: terminal('runner_done') });
   expect(decide(o)).toEqual({ kind: 'spawn_session', session: 'closing', cardId: null });
 });
-test('an unknown terminal reason (e.g. a legacy rulings_unratified) parks as error, never a ratify spawn', () => {
-  expect(decide(base({ lastWatchdog: terminal('rulings_unratified') }))).toMatchObject({ kind: 'park', reason: 'error' });
+test('an unknown terminal reason (e.g. a retired one) parks as error, never a ratify spawn', () => {
+  expect(decide(base({ lastWatchdog: terminal('retired_reason') }))).toMatchObject({ kind: 'park', reason: 'error' });
 });
 
 // R11 (Task 20, spec §5.4 item 4): fail-closed park. A `closing` spawn without the

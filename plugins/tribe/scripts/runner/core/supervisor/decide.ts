@@ -239,8 +239,8 @@ export function decide(o: SupervisorObservation): SupervisorAction {
     return { kind: 'spawn_session', session: 'ruling', cardId: next.cardId };
   }
 
-  // Rows 13-15 (rulings_unratified) are gone with the ratification session (spec §4.11): a legacy
-  // `rulings_unratified` terminal falls to the residual backstop below and parks as `error`.
+  // Rows 13-15 (unratified rulings) are gone with the ratification session (spec §4.11): a
+  // terminal reason no row knows falls to the residual backstop below and parks as `error`.
 
   // Rows 16-17: session_incomplete.
   if (reason === 'session_incomplete') {

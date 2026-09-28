@@ -624,12 +624,12 @@ describe('runSupervisor — a failed ruling retries exactly once, then parks (ex
 });
 
 describe('runSupervisor — the supervisor does no ratification (runner-driver-only spec §4.11, D6)', () => {
-  test('a legacy rulings_unratified terminal parks as error and spawns no session', async () => {
+  test('an unknown (retired) terminal reason parks as error and spawns no session', async () => {
     const seam = fakeSeam({
       initialFiles: {
         [join(HOME, 'answers.md')]: '## R1\n\nratified-as: pending\n\nSome earlier context.\n',
       },
-      watchdogRuns: [{ reason: 'rulings_unratified', exitCode: 11 }],
+      watchdogRuns: [{ reason: 'retired_reason', exitCode: 11 }],
     });
     const result = await runSupervisor(baseConfig(), HOME, seam.io);
 

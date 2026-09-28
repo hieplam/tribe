@@ -13,6 +13,14 @@ export const WATCHDOG_EXIT_RUNNING = 11;
 
 export type WatchdogMode = 'once' | 'follow';
 
+/** Every reason a watchdog pass can end on — the `reason` of an `exit` action (and the `stalled`
+ * of a `stall` action), written to `status.json.terminal.reason`. */
+export const TERMINAL_REASONS = [
+  'runner_done', 'escalations_pending', 'error', 'session_incomplete',
+  'stop_requested', 'runner_alive', 'lock_conflict', 'quota_cap', 'quota_wait_pending',
+  'overloaded', 'overload_backoff_pending', 'stalled',
+] as const;
+
 export interface WatchdogConfig {
   repoRoot: string;
   model: string;
