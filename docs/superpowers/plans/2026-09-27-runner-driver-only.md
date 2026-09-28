@@ -3504,7 +3504,7 @@ S=/Users/hiep/.claude-sandboxes/runner-driver-only
 ```bash
 grep -q '^agents: 0 entries$' docs/superpowers/evidence/2026-09-27-runner-driver-only/d9-sandbox-ready.txt
 grep -q '^OK' docs/superpowers/evidence/2026-09-27-runner-driver-only/d9-sandbox-ready.txt
-! grep -E ' [1-9][0-9]* fail|[1-9][0-9]* failed' docs/superpowers/evidence/2026-09-27-runner-driver-only/v7-after-counts.txt
+test -s docs/superpowers/evidence/2026-09-27-runner-driver-only/v7-after-counts.txt && ! grep -E ' [1-9][0-9]* fail|[1-9][0-9]* failed' docs/superpowers/evidence/2026-09-27-runner-driver-only/v7-after-counts.txt
 ```
 
 Expected: every command exits 0.
@@ -3702,7 +3702,7 @@ Expected: every command exits 0.
 #### Done
 
 ```bash
-! grep -E 'gapGateStamped|ledgerCommitted' docs/superpowers/evidence/2026-09-27-runner-driver-only/g3-after-plain-pr2-replay.txt
+test -s docs/superpowers/evidence/2026-09-27-runner-driver-only/g3-after-plain-pr2-replay.txt && ! grep -E 'gapGateStamped|ledgerCommitted' docs/superpowers/evidence/2026-09-27-runner-driver-only/g3-after-plain-pr2-replay.txt
 python3 -c "import json; assert json.load(open('/Users/hiep/.tribe/-Users-hiep-repo-tribe/evidence/runner-driver-only/g3-after-plain-pr2-verify-shipped.json'))['verdict']=='PASS'"
 grep -q 'exit 0' /Users/hiep/.tribe/-Users-hiep-repo-tribe/evidence/runner-driver-only/g3-after-rulings-probe.txt
 ```
