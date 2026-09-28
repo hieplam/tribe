@@ -99,6 +99,7 @@ such as `audit`, `lens`, `governance`) is by design — a driver-only prompt has
   and the old runner — out of scope (spec §8).
 - A `verify-shipped` default that still checks the gap-gate stamp — deliberate (spec §4.11).
 - C3 facts that #173's own reconciliation already covered.
+- The literal `--skip-gap-gate` flag in a prompt (the closing session's `verify-shipped` command) — D6's opt-out of the gap-gate, not Tribe way of working; `tribe-lexicon.ts` strips exactly that literal (ruling R-PR3-FLAG). Task 3.9's 'the lexicon is not edited to pass the gate' is unaffected: no other text is excluded.
 
 ---
 
@@ -3062,7 +3063,7 @@ bun install --cwd plugins/tribe/scripts/runner --frozen-lockfile
 cd plugins/tribe/scripts/runner && bunx tsc --noEmit
 cd plugins/tribe/scripts/runner && bun test core/supervisor
 bash plugins/tribe/scripts/tests/test-supervisor-e2e.sh
-! grep -n -i -E 'gap-gate|ratif|governance|warchief' plugins/tribe/scripts/runner/core/supervisor/brief-closing.md
+! sed 's/--skip-gap-gate//g' plugins/tribe/scripts/runner/core/supervisor/brief-closing.md | grep -n -i -E 'gap-gate|ratif|governance|warchief'
 ! grep -rn 'readGapGateOpenIds' plugins/tribe/scripts/runner/core
 ```
 

@@ -6,8 +6,8 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  buildOneShotPrompt, observe, parseCampaignReportFacts,
-  readGapGateOpenIds, readParkedTerminal, runSupervisor, supervisorPathsOf,
+  observe, parseCampaignReportFacts,
+  readParkedTerminal, runSupervisor, supervisorPathsOf,
   type SupervisorLoopConfig, type SupervisorLoopSeam, type SupervisorTerminal,
 } from './loop.ts';
 import { CLOSING_TEMPLATE_PATH, RULING_TEMPLATE_PATH } from './brief.ts';
@@ -759,67 +759,6 @@ describe('runSupervisor — R11 (Task 20, spec §5.4 item 4): verifyShippedPlugi
       statusPath: join(HOME, 'supervisor', 'status.json'),
     });
     expect(seam.spawnedOptions.length).toBe(0); // never spawned — decide() fails closed first
-  });
-});
-
-describe('G5 (spec §6): the closing brief reads gap-gate results from the CAMPAIGN home', () => {
-  // The base tribe home the (now-removed) `io.resolveTribeHome` call would return — a DIFFERENT
-  // directory than the campaign-nested `HOME`. The gate always writes under the campaign home
-  // (its Tracker inputs live there), so a reader that follows `resolveTribeHome` looks in a place
-  // the gate never wrote to. A decoy report is planted there to prove that path is NOT consulted:
-  // one path, no silent fallback (over-checking by design — spec §6 fix item 1).
-  const BASE_HOME = '/h/.tribe/k';
-  const CAMPAIGN_OPEN_ID = 'HG-c1-from-campaign-home';
-  const BASE_DECOY_OPEN_ID = 'HG-c1-from-BASE-home-decoy';
-
-  // Only `.campaignReport`/`.finalReport`/`.verdictsDir` are read by the closing branch; built the
-  // SAME way `supervisorPathsOf` builds them. `SupervisorPaths` is private to loop.ts, named here
-  // via the exported `buildOneShotPrompt`'s own signature rather than by re-exporting the type.
-  const closingPaths = {
-    campaignReport: join(HOME, 'campaign-report.json'),
-    finalReport: join(HOME, 'supervisor', 'final-report.md'),
-    verdictsDir: join(HOME, 'supervisor', 'verdicts'),
-  } as unknown as Parameters<typeof buildOneShotPrompt>[2];
-
-  // The closing branch consults only `observation.report.cards`' keys (one gap-gate lookup per
-  // card id) — the rest of SupervisorObservation is irrelevant to this path.
-  const closingObservation = {
-    report: { cards: { c1: { outcome: 'shipped' } } },
-  } as unknown as Parameters<typeof buildOneShotPrompt>[3];
-
-  const closingAction = { session: 'closing' as const, cardId: null };
-
-  function seamWithSplitHomes() {
-    const seam = fakeSeam({
-      initialFiles: {
-        // The real writer's location: the gate writes under the CAMPAIGN home's reports/.
-        [join(HOME, 'reports', 'c1-gap-gate.json')]: JSON.stringify({ open_ids: [CAMPAIGN_OPEN_ID] }),
-        // The decoy: a stale report under the BASE tribe home. If the reader follows
-        // resolveTribeHome, it finds THIS instead — the exact defect.
-        [join(BASE_HOME, 'reports', 'c1-gap-gate.json')]: JSON.stringify({ open_ids: [BASE_DECOY_OPEN_ID] }),
-      },
-    });
-    // Force the base tribe home to differ from the campaign home — the campaign case, where the
-    // defect manifests. (The default fakeSeam returns HOME, hiding the bug.)
-    seam.io.resolveTribeHome = async () => ({ ok: true, home: BASE_HOME });
-    return seam;
-  }
-
-  test('buildOneShotPrompt renders the closing brief with the CAMPAIGN-home report\'s open ids, '
-    + 'never the base-home decoy (the real defect site: which home the reader is handed)', async () => {
-    const seam = seamWithSplitHomes();
-    const prompt = await buildOneShotPrompt(
-      seam.io, HOME, closingPaths, closingObservation, closingAction, '',
-    );
-    expect(prompt).toContain(CAMPAIGN_OPEN_ID);
-    expect(prompt).not.toContain(BASE_DECOY_OPEN_ID);
-  });
-
-  test('readGapGateOpenIds reads under the home it is GIVEN — the campaign home\'s reports/', () => {
-    const seam = seamWithSplitHomes();
-    expect(readGapGateOpenIds(seam.io, HOME, 'c1')).toEqual([CAMPAIGN_OPEN_ID]);
-    // A card with no report reads as zero open ids (fail-closed: never shipped, gate never ran).
-    expect(readGapGateOpenIds(seam.io, HOME, 'no-such-card')).toEqual([]);
   });
 });
 

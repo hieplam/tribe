@@ -37,11 +37,7 @@
  * per-card `spec`/`plan` fields, read the same repo-relative way `core/brief.ts`'s executor
  * brief already reads them — Task 16: through `readCampaignState`, `../state.ts`'s own
  * `CampaignStateSchema.safeParse`, imported read-only, never edited),
- * and the closing session's campaign-report/gap-gate facts (each card's gap-gate JSON
- * lives under the CAMPAIGN home — `<campaign-home>/reports/<card>-gap-gate.json` — because the gate
- * writes beside the Tracker reports it consumes, which `core/brief.ts` puts under that same
- * campaign home; the closing reader (`readGapGateOpenIds`) therefore reads `homeDir`, never
- * `resolveTribeHome`'s base tribe home — spec §6).
+ * and the closing session's campaign-report and verdict-path facts.
  */
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -69,7 +65,7 @@ import {
 } from './session.ts';
 import {
   CLOSING_TEMPLATE_PATH, RULING_TEMPLATE_PATH, renderBrief,
-  type ClosingBriefFacts, type ClosingOpenIdsFact, type ClosingRulingFact, type ClosingVerdictFact,
+  type ClosingBriefFacts, type ClosingVerdictFact,
   type RulingBriefFacts,
 } from './brief.ts';
 import { parseRulings } from '../rulings.ts';
@@ -165,7 +161,7 @@ interface SupervisorPaths {
 }
 
 // Exported for its own unit test (Task 4, spec §2.2) — `observe()` needs a real `SupervisorPaths`
-// to be driven directly against a fake seam, the same way `readGapGateOpenIds` is exported below.
+// to be driven directly against a fake seam.
 export function supervisorPathsOf(homeDir: string): SupervisorPaths {
   const dir = join(homeDir, 'supervisor');
   return {
@@ -515,8 +511,7 @@ interface LoopState {
   priorParkedTerminal: { reason: string; atMs: number } | null;
 }
 
-// Exported for its own unit test (Task 4, spec §2.2) — the same "exported so the fake seam can
-// drive it directly" pattern `readGapGateOpenIds` below already uses.
+// Exported for its own unit test (Task 4, spec §2.2), so the fake seam can drive it directly.
 export function observe(
   config: SupervisorLoopConfig, homeDir: string, io: SupervisorLoopSeam, paths: SupervisorPaths,
   loopState: LoopState, supState: SupervisorState, lastSessionOutcome: SessionOutcome | null,
@@ -611,27 +606,6 @@ function readCardSpecPlan(
   return { specPath: card.spec, planPath: card.plan };
 }
 
-/** §5.4's closing brief needs each card's still-open gap ids, from **the gate's own JSON** —
- * `<campaign-home>/reports/<card>-gap-gate.json`'s `open_ids`. `homeDir` is the campaign-nested
- * home the loop already holds (spec §6): the gate writes there because its Tracker inputs live
- * there (`core/brief.ts`'s `reportPathFor(homeDir, …)`), so the reader must look there too — never
- * the base tribe home. One path, no fallback: a reader that quietly tries a second directory is how
- * the reader and writer end up disagreeing again. Fail-closed: a missing or unparseable report
- * reads as zero open ids, never a throw — a card that never shipped (so the gate never ran for it)
- * is exactly this case, and is not an error.
- * Exported ONLY as a test seam (card `supervisor-hardening`, spec §6 oracle): a unit test asserts a
- * report written under the campaign home is found and one under the base home is not consulted. */
-export function readGapGateOpenIds(io: SupervisorLoopSeam, homeDir: string, cardId: string): string[] {
-  const raw = io.readFileOrEmpty(join(homeDir, 'reports', `${cardId}-gap-gate.json`));
-  if (raw === '') return [];
-  try {
-    const openIds = (JSON.parse(raw) as Record<string, unknown>)['open_ids'];
-    return Array.isArray(openIds) ? openIds.filter((x): x is string => typeof x === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-
 /** §4b: the ids of every card the campaign report marks `shipped`. Each one must have a
  * verify-shipped verdict file before the campaign may close. */
 function shippedCardIds(report: CampaignReportFacts | null): string[] {
@@ -661,13 +635,7 @@ function readShippedVerdicts(
  * `answers.md`'s content as already read by the caller (the SAME read used for the
  * postcondition check's `before` snapshot — one read, two uses, never a second read that could
  * observe a different moment). Everything else is read fresh, right here, off the same `io`. */
-// Exported as a test seam ONLY (card `supervisor-hardening`, RW1): the G5 reproduction
-// (`tests/test-supervisor-repro.sh`) calls this directly, with the REAL production io adapter, to
-// prove the closing brief carries the gate's real open ids — the defect (spec §6) was that this
-// function handed `readGapGateOpenIds` the BASE tribe home (`io.resolveTribeHome`), while the gate
-// writes under the campaign home this function already holds as `homeDir`. The closing branch below
-// now reads that campaign home directly.
-export async function buildOneShotPrompt(
+async function buildOneShotPrompt(
   io: SupervisorLoopSeam, homeDir: string, paths: SupervisorPaths,
   observation: SupervisorObservation, action: { session: SessionKind; cardId: string | null }, before: string,
 ): Promise<string> {
@@ -690,16 +658,6 @@ export async function buildOneShotPrompt(
   }
 
   // action.session === 'closing'
-  const rulings: ClosingRulingFact[] = parseRulings(before).map((block) => ({
-    id: block.id,
-    ratifiedAs: block.ratifiedAs ?? '',
-  }));
-  // The gate writes under the campaign home (`homeDir`), so read there — one path, no fallback to
-  // the base tribe home (spec §6 fix). `resolveTribeHome` is deliberately NOT consulted here.
-  const openIdsByCard: ClosingOpenIdsFact[] = Object.keys(observation.report?.cards ?? {}).map((cardId) => ({
-    cardId,
-    openIds: readGapGateOpenIds(io, homeDir, cardId),
-  }));
   const shippedVerdicts: ClosingVerdictFact[] = shippedCardIds(observation.report).map((cardId) => ({
     cardId,
     verdictPath: join(paths.verdictsDir, `${cardId}.json`),
@@ -708,8 +666,6 @@ export async function buildOneShotPrompt(
     kind: 'closing',
     template: io.readFileOrEmpty(CLOSING_TEMPLATE_PATH),
     campaignReportContent: io.readFileOrEmpty(paths.campaignReport),
-    rulings,
-    openIdsByCard,
     finalReportPath: paths.finalReport,
     shippedVerdicts,
   };
@@ -1034,7 +990,7 @@ export async function runSupervisor(
           // §4b: the verdict is the verify-shipped SCRIPT's own artifact, one file per shipped
           // card — never the model's prose. The caller reads each file; `verifyClosing` decides.
           const shippedVerdicts = readShippedVerdicts(io, paths.verdictsDir, observation.report);
-          const verdict = verifyClosing({ finalReport, answers: after, shippedVerdicts });
+          const verdict = verifyClosing({ finalReport, shippedVerdicts });
           outcome = verdict.outcome;
         }
 

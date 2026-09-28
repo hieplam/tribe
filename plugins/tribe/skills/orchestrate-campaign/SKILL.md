@@ -547,35 +547,11 @@ the owner reads:
 
 1. **For every card the report marks `shipped`, independently re-verify it before repeating the
    claim.** Invoke the **`verify-shipped` skill by name** (never by reading or calling its script
-   path directly — depend on its contract, not its implementation) with that card's `pr` and its
-   worktree path. This is the design's no-cascade read: the runner's own claim that a card
-   shipped is not evidence on its own. Treat a `verify-shipped` failure as `blocked`, not
-   `shipped`, in your final report.
-2. **The ratification pass.** Collect every convention surfaced across the whole campaign. The
-   authoritative list per card is **the gate's own JSON**, not a PR body you re-read: for each
-   card, read `<campaign-home>/reports/<card>-gap-gate.json` — the same campaign-nested `--home`
-   used above, because `gap-gate.ts` globs its Tracker-report inputs from that home and a
-   campaign card's Tracker reports are written under the campaign home, so the gate's own output
-   lands there too — and take its `open_ids` — the gaps the gate
-   reconciled and left un-ruled. Add each `shipped` card's `## Harness gaps` PR record (the
-   proposals its Warchief landed as reviewable drafts but did not self-ratify, per its brief)
-   plus every ruling already in `answers.md`. Every one of them must end this pass
-   non-`pending`. Durable dispositions (`rule`, `anti-rule`, `debt`) do not stay as prose in a
-   PR body or a diary line — land them as **ONE closing governance PR** on the target repo, and
-   land them **through the CLIs, never by hand**: for every ratified proposal that carries a
-   `G-NNN`, run `gap-rule.ts` with `--ratified-by shaman` (or `--ratified-by owner` when the
-   owner ruled that one) inside that closing PR's worktree, so the registry's `ruled` events —
-   and the rule/anti-rule file or debt entity the ruling creates — ride the same PR. Add the
-   ROADMAP Decision Log entries, then mark each ruling's `ratified-as:` accordingly; a ruling
-   that closes a gap with an id records it as `ratified-as: rule <path> (G-NNN)`. Never
-   hand-write a rule file, a debt entity, or a line of `.tribe/harness-gaps.jsonl` — a ruling
-   that never reaches `gap-rule.ts` leaves the registry claiming the gap is still open and
-   leaves `gap-precision.ts` with nothing to score (this is exactly what the 2026-09-05 closing
-   pass did). The runner's `rulings_unratified` exit is the mechanical backstop for skipping
-   this step — it is not the primary mechanism, do not rely on it to catch what this pass should
-   catch by judgment. A ruling left `pending` means the campaign is **not done**, full stop, no
-   matter how many cards shipped.
-3. **You can also recover which commits belong to this campaign directly from git.** Every
+   path directly — depend on its contract, not its implementation) with `--skip-gap-gate`, that
+   card's `pr` and its worktree path. This is the design's no-cascade read: the runner's own claim
+   that a card shipped is not evidence on its own. Treat a `verify-shipped` failure as `blocked`,
+   not `shipped`, in your final report.
+2. **You can also recover which commits belong to this campaign directly from git.** Every
    commit a card's executor session made should carry a `Campaign: <campaign-slug>` git trailer
    — the runner's executor brief instructs it (see the runner README's "Campaign commit
    trailer" section). `git log --grep="Campaign: <campaign-slug>"` in `<target-repo>` lists
@@ -583,15 +559,15 @@ the owner reads:
    `verify-shipped` confirm the trailer is present, so a missing trailer is a documentation gap
    worth noting, never proof a card didn't ship — `verify-shipped` (item 1) stays the actual
    acceptance gate.
-4. **Compose ONE report** to the owner, covering every card in the campaign:
+3. **Compose ONE report** to the owner, covering every card in the campaign:
    - **Shipped** — PR number, merge sha, and the `verify-shipped` verdict.
    - **Escalated / blocked** — the question (or `blockedOn` dependency), why it needs the owner,
      and how many auto-answer rounds it already used.
-   - **Harness-gap rulings** — every ruling the ratification pass closed, each with where it was
-     ratified to (the rule/debt/roadmap reference, or `operational`/`dismissed`).
    - Overall `stats` (shipped / escalated / blocked / not-reached counts) and pointers to the
      report files and escalation files, so the owner can go deeper without you re-deriving
      anything.
+
+**Tribe style only:** also run the ratification pass in 'Tribe style — Stage D additions' below.
 
 This is the ONE message the owner reads — no partial status updates in between beyond the
 irreversible escalations the register requires.

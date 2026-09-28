@@ -51,14 +51,16 @@ const W7_QUOTE = skillMdQuote(
 );
 
 const STAGE_D_STEP_1 = '1. **For every card the report marks `shipped`';
-const STAGE_D_STEP_2 = '2. **The ratification pass.**';
-const STAGE_D_STEP_3 =
-  '3. **You can also recover which commits belong to this campaign directly from git.**';
-const STAGE_D_STEP_4 = '4. **Compose ONE report** to the owner';
+const STAGE_D_STEP_2 =
+  '2. **You can also recover which commits belong to this campaign directly from git.**';
+const STAGE_D_STEP_3 = '3. **Compose ONE report** to the owner';
+// The whole three-step block, byte for byte: the brief quotes it verbatim (brief-contracts.md
+// obligation 3), so a paraphrase in either file fails here.
+const STAGE_D_QUOTE = skillMdQuote(STAGE_D_STEP_1, 'without you re-deriving\n     anything.');
 
 // Self-check: fail loudly, not silently, if SKILL.md ever stops containing one of the Stage D
 // step openings this test relies on — the same "oracle honesty" the W3/W7 markers give above.
-for (const marker of [STAGE_D_STEP_1, STAGE_D_STEP_2, STAGE_D_STEP_3, STAGE_D_STEP_4]) {
+for (const marker of [STAGE_D_STEP_1, STAGE_D_STEP_2, STAGE_D_STEP_3]) {
   if (!SKILL_MD.includes(marker)) {
     throw new Error(`SKILL.md oracle: Stage D marker not found: ${JSON.stringify(marker)}`);
   }
@@ -85,8 +87,6 @@ function fixtureClosingFacts(overrides: Partial<ClosingBriefFacts> = {}): Closin
     kind: 'closing',
     template: CLOSING_TEMPLATE,
     campaignReportContent: '{"run":{"reason":"done"},"stats":{"shipped":3}}',
-    rulings: [{ id: 'R1', ratifiedAs: 'operational' }],
-    openIdsByCard: [{ cardId: 'widget-export', openIds: ['G-101'] }],
     finalReportPath: '/th/campaigns/widget-campaign/supervisor/final-report.md',
     shippedVerdicts: [
       { cardId: 'widget-export', verdictPath: '/th/campaigns/widget-campaign/supervisor/verdicts/widget-export.json' },
@@ -179,12 +179,20 @@ describe('renderBrief — closing', () => {
     for (const line of verdictLines) expect(line).toContain('--skip-gap-gate');
   });
 
-  test("contains Stage D's four numbered steps, byte-identical to SKILL.md", () => {
+  test("contains Stage D's three numbered steps, byte-identical to SKILL.md", () => {
     const rendered = renderBrief('closing', fixtureClosingFacts());
     expect(rendered).toContain(STAGE_D_STEP_1);
     expect(rendered).toContain(STAGE_D_STEP_2);
     expect(rendered).toContain(STAGE_D_STEP_3);
-    expect(rendered).toContain(STAGE_D_STEP_4);
+    expect(rendered).toContain(STAGE_D_QUOTE);
+  });
+
+  test('the closing brief is Tribe-free: re-verify, trailer recovery, one report (D6)', () => {
+    const rendered = renderBrief('closing', fixtureClosingFacts());
+    expect(countTribeMentions(rendered)).toEqual([]);
+    for (const s of [STAGE_D_STEP_1, STAGE_D_STEP_2, STAGE_D_STEP_3, '--skip-gap-gate', '--verdict-out']) {
+      expect(rendered).toContain(s);
+    }
   });
 
   test('is deterministic: two renders of the same facts are byte-identical', () => {

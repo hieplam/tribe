@@ -53,14 +53,6 @@ function appendRulingBlock(id: string): (answers: string) => string {
   return (answers) => `${answers}\n## ${id} — synthesized ruling for round ${ROUND_RULING_IDS.indexOf(id) + 1}\n\nratified-as: operational\n\nSynthesized ruling body — never the real ruling's own text.\n`;
 }
 
-// Fixes ONLY the pre-existing `## R09 ...` block's `ratified-as:` line — every other block
-// (R16/R18/R22) stays byte-identical. The supervisor spawns no session for this (spec §4.11);
-// the closing session does it, because the closing brief's ratification pass still asks for it
-// and `verifyClosing` still refuses an unratified ruling until the closing brief loses that pass.
-function ratifyR09(answers: string): string {
-  return answers.replace('ratified-as: pending', 'ratified-as: operational');
-}
-
 const LIMITS: SupervisorLimits = {
   maxRulingRounds: 3, maxSpawns: 8, maxWatchdogRuns: 20, sessionRetries: 1,
 };
@@ -258,7 +250,7 @@ describe('replay: the viewer-consolidation escalation history bounds spawns at 4
           // verdict file per shipped card (spec §4b, Task 10); the postcondition reads the file.
           seam.files.set(join(HOME, 'supervisor', 'final-report.md'), '# Final Report\n\nSynthesized closing report for the replay fixture.\n');
           seam.files.set(join(HOME, 'supervisor', 'verdicts', `${CARD_ID}.json`), `{"card":"${CARD_ID}","verdict":"PASS"}\n`);
-          return ratifyR09(answers);
+          return answers;
         } },
       ],
     });

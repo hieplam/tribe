@@ -40,18 +40,6 @@ export interface RulingBriefFacts {
   escalationPath: string;
 }
 
-/** §5.4: one ruling's disposition, for the closing session's context. */
-export interface ClosingRulingFact {
-  id: string;
-  ratifiedAs: string;
-}
-
-/** §5.4: one card's still-open gap ids from its gap-gate report. */
-export interface ClosingOpenIdsFact {
-  cardId: string;
-  openIds: string[];
-}
-
 /** §4c: one shipped card's verify-shipped verdict artifact. `verdictPath` is the ABSOLUTE
  * `<home>/supervisor/verdicts/<cardId>.json` the closing session must have the script write with
  * `--verdict-out` — the file the supervisor's closing postcondition then reads. The session's own
@@ -67,9 +55,7 @@ export interface ClosingBriefFacts {
   template: string;
   /** The final `campaign-report.json`, verbatim. */
   campaignReportContent: string;
-  rulings: ClosingRulingFact[];
-  openIdsByCard: ClosingOpenIdsFact[];
-  /** `<home>/supervisor/final-report.md` — where Stage D step 4's report is written. */
+  /** `<home>/supervisor/final-report.md` — where Stage D step 3's report is written. */
   finalReportPath: string;
   /** §4c: one entry per card the campaign report marks `shipped` — the verdict path the closing
    * session must have `verify-shipped` write with `--verdict-out`. The postcondition reads these
@@ -112,16 +98,6 @@ function renderRuling(facts: RulingBriefFacts): string {
 }
 
 function renderClosing(facts: ClosingBriefFacts): string {
-  const rulings = bulletList(
-    facts.rulings.map((r) => `${r.id}: ratified-as: ${r.ratifiedAs}`),
-    '(no rulings recorded this campaign)',
-  );
-  const openIds = bulletList(
-    facts.openIdsByCard.map(
-      (c) => `${c.cardId}: ${c.openIds.length > 0 ? c.openIds.join(', ') : '(none open)'}`,
-    ),
-    '(no cards)',
-  );
   // The verdict dir (`<home>/supervisor/verdicts/`) is this command's OWN output location, and
   // `verify-shipped.sh` fail-closes (refuses, never creates) on a missing `--verdict-out` dir —
   // so the command must create it, or a closing session run against a bare home dies before it
@@ -137,8 +113,6 @@ function renderClosing(facts: ClosingBriefFacts): string {
   );
   return renderTemplate(facts.template, {
     CAMPAIGN_REPORT_CONTENT: facts.campaignReportContent,
-    RULINGS: rulings,
-    OPEN_IDS_BY_CARD: openIds,
     FINAL_REPORT_PATH: facts.finalReportPath,
     SHIPPED_VERDICTS: shippedVerdicts,
   });

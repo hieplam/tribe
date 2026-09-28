@@ -105,21 +105,15 @@ test('parseParkMarker treats a missing kind field as malformed, never a throw', 
 
 // verifyClosing (spec §5.4 postconditions).
 
-test('verifyClosing: a non-empty final report plus zero unratified rulings verifies as closed', () => {
-  const v = verifyClosing({ finalReport: '# Final report\n\nAll cards shipped.\n', answers: RULED_BEFORE, shippedVerdicts: [] });
+test('verifyClosing: a non-empty final report verifies as closed', () => {
+  const v = verifyClosing({ finalReport: '# Final report\n\nAll cards shipped.\n', shippedVerdicts: [] });
   expect(v.outcome).toBe('closed');
 });
 
 test('verifyClosing: a missing final report is a failed attempt', () => {
-  const v = verifyClosing({ finalReport: null, answers: RULED_BEFORE, shippedVerdicts: [] });
+  const v = verifyClosing({ finalReport: null, shippedVerdicts: [] });
   expect(v.outcome).toBe('failed');
   expect(v.retryable).toBe(true);
-});
-
-test('verifyClosing: an unratified ruling still on disk is a failed attempt', () => {
-  const unratified = '## R1 one\nratified-as: pending\n';
-  const v = verifyClosing({ finalReport: 'report body', answers: unratified, shippedVerdicts: [] });
-  expect(v.outcome).toBe('failed');
 });
 
 // Task 10 (spec §4b/§4c): the closing verdict must be the verify-shipped SCRIPT's own artifact on
@@ -130,7 +124,7 @@ const GOOD_REPORT = '# Campaign report\n\nEverything shipped.\n';
 
 test('verifyClosing: a shipped card with NO verdict file on disk is a failed attempt (verdict_missing)', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [{ cardId: 'c1', raw: null }],
   });
   expect(v.outcome).toBe('failed');
@@ -140,7 +134,7 @@ test('verifyClosing: a shipped card with NO verdict file on disk is a failed att
 
 test('verifyClosing: a verdict file that is not JSON is a failed attempt (verdict_malformed)', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [{ cardId: 'c1', raw: 'not json at all {' }],
   });
   expect(v.outcome).toBe('failed');
@@ -149,7 +143,7 @@ test('verifyClosing: a verdict file that is not JSON is a failed attempt (verdic
 
 test('verifyClosing: a verdict file missing the card/verdict fields is a failed attempt (verdict_malformed)', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [{ cardId: 'c1', raw: '{"checks":{}}' }],
   });
   expect(v.outcome).toBe('failed');
@@ -158,7 +152,7 @@ test('verifyClosing: a verdict file missing the card/verdict fields is a failed 
 
 test('verifyClosing: a verdict file whose card does not match is a failed attempt (verdict_card_mismatch)', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [{ cardId: 'c1', raw: '{"card":"c2","verdict":"PASS"}' }],
   });
   expect(v.outcome).toBe('failed');
@@ -167,7 +161,7 @@ test('verifyClosing: a verdict file whose card does not match is a failed attemp
 
 test('verifyClosing: a verdict file whose verdict is not PASS is a failed attempt (verdict_fail), reusing the ordinary retryable outcome', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [{ cardId: 'c1', raw: '{"card":"c1","verdict":"FAIL"}' }],
   });
   expect(v.outcome).toBe('failed');
@@ -177,7 +171,7 @@ test('verifyClosing: a verdict file whose verdict is not PASS is a failed attemp
 
 test('verifyClosing: every shipped card with a present, matching, PASS verdict verifies as closed', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [
       { cardId: 'c1', raw: '{"card":"c1","verdict":"PASS"}' },
       { cardId: 'c2', raw: '{"card":"c2","verdict":"PASS"}' },
@@ -188,7 +182,7 @@ test('verifyClosing: every shipped card with a present, matching, PASS verdict v
 
 test('verifyClosing: one PASS and one missing among shipped cards is a failed attempt', () => {
   const v = verifyClosing({
-    finalReport: GOOD_REPORT, answers: RULED_BEFORE,
+    finalReport: GOOD_REPORT,
     shippedVerdicts: [
       { cardId: 'c1', raw: '{"card":"c1","verdict":"PASS"}' },
       { cardId: 'c2', raw: null },
@@ -199,7 +193,7 @@ test('verifyClosing: one PASS and one missing among shipped cards is a failed at
 });
 
 test("verifyClosing: the spec §4 reproduction — a report body that says BLOCKED never closes, even with no shipped verdicts", () => {
-  const v = verifyClosing({ finalReport: 'Status: BLOCKED\n', answers: '', shippedVerdicts: [] });
+  const v = verifyClosing({ finalReport: 'Status: BLOCKED\n', shippedVerdicts: [] });
   expect(v.outcome).not.toBe('closed');
   expect(v.outcome).toBe('failed');
 });

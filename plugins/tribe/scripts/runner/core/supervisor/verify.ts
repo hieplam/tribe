@@ -9,7 +9,7 @@
 // `parseRulings`); its content is not classified — the session rules on the owner's behalf
 // (D6). This module adds history integrity (S-P13), the git-repo-untouched check, and the
 // two-value park-marker vocabulary.
-import { parseRulings, unratifiedRulingIds } from '../rulings.ts';
+import { parseRulings } from '../rulings.ts';
 import type { ParkMarkerKind } from './model.ts';
 
 /** One postcondition verdict, shared by `verifyRuling` and `verifyClosing`.
@@ -49,7 +49,6 @@ export interface ShippedVerdict {
 export interface VerifyClosingInput {
   /** `<home>/supervisor/final-report.md`'s contents, or `null` when the file does not exist. */
   finalReport: string | null;
-  answers: string;
   /** One entry per card the campaign report marks `shipped` — the verify-shipped script's own
    * verdict file, read by the caller and parsed here (spec §4b). */
   shippedVerdicts: ShippedVerdict[];
@@ -163,23 +162,20 @@ function checkShippedVerdict(entry: ShippedVerdict): string | null {
 }
 
 /** §5.4/§4b's postcondition: the owner-facing report exists and is non-empty, it does not
- * self-declare a blocked/failed status, every ruling in `answers.md` is still ratified, AND every
+ * self-declare a blocked/failed status, AND every
  * card the campaign report marks `shipped` has a present, well-formed, matching, `PASS` verdict
  * file the verify-shipped SCRIPT produced. A `FAIL` (or missing/malformed/mismatched) verdict is
  * an ordinary retryable `failed` attempt with a typed `reason` — never a new `ParkReason`: the
  * existing bounded-retry-then-`park(closing_failed)` path handles it (spec §4b). This function
  * reads nothing from disk — the caller reads each file, this function decides (`pure-core.md`). */
 export function verifyClosing(input: VerifyClosingInput): VerifyVerdict {
-  const { finalReport, answers, shippedVerdicts } = input;
+  const { finalReport, shippedVerdicts } = input;
 
   if (finalReport === null || finalReport.trim().length === 0) {
     return { outcome: 'failed', retryable: true, reason: 'final_report_missing' };
   }
   if (finalReportDeclaresBlocked(finalReport)) {
     return { outcome: 'failed', retryable: true, reason: 'final_report_blocked' };
-  }
-  if (unratifiedRulingIds(answers).length > 0) {
-    return { outcome: 'failed', retryable: true, reason: 'rulings_unratified' };
   }
   for (const entry of shippedVerdicts) {
     const reason = checkShippedVerdict(entry);

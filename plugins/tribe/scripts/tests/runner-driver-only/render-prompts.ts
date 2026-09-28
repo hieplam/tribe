@@ -167,8 +167,6 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
   add('supervisor/closing', renderBrief('closing', {
     kind: 'closing', template: readFileSync(CLOSING_TEMPLATE_PATH, 'utf8'),
     campaignReportContent: JSON.stringify(report, null, 2),
-    rulings: [{ id: 'R1', ratifiedAs: 'operational' }],
-    openIdsByCard: [{ cardId: CARD_ID, openIds: [] }],
     finalReportPath: join(HOME, 'supervisor', 'final-report.md'),
     shippedVerdicts: [{ cardId: CARD_ID, verdictPath: join(HOME, 'supervisor', 'verdicts', `${CARD_ID}.json`) }],
   }));
