@@ -551,9 +551,11 @@ session (it re-verifies and reports; the ratification pass exists only in the Tr
 'Tribe style — Stage C and D additions'). **Verify it, do not repeat it**: read it exactly as you
 would your own draft of this stage, confirm each `shipped` card's `verify-shipped` verdict is
 actually present, and relay it — do not re-run Stage D's steps and produce a second, competing
-report over the same campaign. In the Tribe style, before relaying that report, also run the
-ratification pass and its `rulings-check.ts` check from 'Tribe style — Stage C and D additions'
-(the closing session does neither), and include their outcome in what you relay.
+report over the same campaign. In the Tribe style, before relaying that report, also run both
+Stage D additions in 'Tribe style — Stage C and D additions': re-verify every shipped card with
+`verify-shipped` without `--skip-gap-gate` (report any failed verdict as not shipped, naming the
+failing check), then run the ratification pass and its `rulings-check.ts` check. Include both
+outcomes in what you relay.
 
 Once nothing more is answerable or progressable (or no `supervisor/final-report.md` exists —
 you are driving by hand), read the **last** `campaign-report.json` and build the single message
@@ -581,8 +583,10 @@ the owner reads:
      report files and escalation files, so the owner can go deeper without you re-deriving
      anything.
 
-**Tribe style only:** also run the ratification pass in 'Tribe style — Stage C and D additions'
-below.
+**Tribe style only:** also run both Stage D additions in 'Tribe style — Stage C and D additions'
+below: re-verify every shipped card with `verify-shipped` without `--skip-gap-gate` (report any
+failed verdict as not shipped, naming the failing check), then run the ratification pass and its
+`rulings-check.ts` check. Include both outcomes in the owner report.
 
 This is the ONE message the owner reads — no partial status updates in between beyond the
 irreversible escalations the register requires.
