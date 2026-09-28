@@ -21,7 +21,7 @@ import { escalationPathOf } from './paths.ts';
 
 function fixtureState(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    v: 1,
+    v: 2,
     campaign: 'sample-campaign',
     mergePolicy: 'merge',
     sequence: ['C1', 'C2', 'C3'],
@@ -39,6 +39,7 @@ function fixtureState(overrides: Record<string, unknown> = {}): Record<string, u
         mergeSha: 'bbbbbbb',
         sessionId: 'sess-c1',
         updatedAt: '2026-01-02T00:00:00Z',
+        tasks: [{ id: 'T1', heading: 'Task 1' }],
       },
       C2: {
         status: 'staged',
@@ -50,6 +51,7 @@ function fixtureState(overrides: Record<string, unknown> = {}): Record<string, u
         mergeSha: null,
         sessionId: null,
         updatedAt: null,
+        tasks: [{ id: 'T1', heading: 'Task 1' }],
       },
       C3: {
         status: 'staged',
@@ -61,6 +63,7 @@ function fixtureState(overrides: Record<string, unknown> = {}): Record<string, u
         mergeSha: null,
         sessionId: null,
         updatedAt: null,
+        tasks: [{ id: 'T1', heading: 'Task 1' }],
       },
     },
     ...overrides,
@@ -89,6 +92,7 @@ function cardFixture(overrides: Partial<Card> = {}): Card {
     mergeSha: null,
     sessionId: null,
     updatedAt: null,
+    tasks: [{ id: 'T1', heading: 'Task 1' }],
     ...overrides,
   };
 }
@@ -168,6 +172,7 @@ describe('loadState — R3 invariant: staged + sessionId null + baseSha set is n
           mergeSha: null,
           sessionId: null,
           updatedAt: null,
+          tasks: [{ id: 'T1', heading: 'Task 1' }],
         },
       },
     });
@@ -193,6 +198,7 @@ describe('loadState — R3 invariant: staged + sessionId null + baseSha set is n
           mergeSha: null,
           sessionId: 'sess-c2',
           updatedAt: null,
+          tasks: [{ id: 'T1', heading: 'Task 1' }],
         },
       },
     });
@@ -218,7 +224,7 @@ describe('loadState — R3 invariant: staged + sessionId null + baseSha set is n
 
 describe('version rejection', () => {
   test('rejects an unknown major version with a typed error, not a silent parse', () => {
-    const raw = fixtureState({ v: 2 });
+    const raw = fixtureState({ v: 3 });
     expect(() => parseState(raw)).toThrow(UnsupportedStateVersionError);
   });
 
@@ -268,6 +274,7 @@ describe('nextCard', () => {
             mergeSha: null,
             sessionId: null,
             updatedAt: null,
+            tasks: [{ id: 'T1', heading: 'Task 1' }],
           },
         },
       }),
@@ -316,6 +323,7 @@ describe('nextCard', () => {
             mergeSha: null,
             sessionId: null,
             updatedAt: null,
+            tasks: [{ id: 'T1', heading: 'Task 1' }],
           },
         },
       }),
@@ -424,9 +432,10 @@ describe('dependsOn / blocked / autoAnswerRounds — schema (Task 1)', () => {
     expect((caught as CircularDependencyError).path).toEqual(['C1', 'C2', 'C1']);
   });
 
-  test('a pre-existing v1 state file with none of the new fields round-trips byte-identical', async () => {
-    // No card anywhere declares dependsOn/autoAnswerRounds, and no status is "blocked" — this
-    // is exactly what an old (pre-Task-1) campaign-state.json looks like on disk.
+  test('a v2 state file with none of the optional fields round-trips byte-identical', async () => {
+    // No card anywhere declares dependsOn/autoAnswerRounds, and no status is "blocked" — the
+    // optional fields stay absent after a load -> serialize cycle (the v1 case is refused: see
+    // 'a v1 state is refused with the re-author instruction').
     const raw = fixtureState();
     const originalBytes = `${JSON.stringify(raw, null, 2)}\n`;
 
@@ -646,7 +655,7 @@ describe('nextCard — progressable rule (dependsOn / blocked, spec §O4/W6, Tas
 describe('loadState/serializeState — unknown top-level keys survive a round trip', () => {
   test('a caller-authored "planning" metadata field is preserved (not stripped) by loadState + serializeState', async () => {
     const input = {
-      v: 1,
+      v: 2,
       campaign: 'x',
       planning: { mode: 'shaman' },
       mergePolicy: 'regular',
@@ -658,6 +667,7 @@ describe('loadState/serializeState — unknown top-level keys survive a round tr
         a: {
           status: 'staged', spec: null, plan: null, branch: null,
           baseSha: null, pr: null, mergeSha: null, sessionId: null, updatedAt: null,
+          tasks: [{ id: 'T1', heading: 'Task 1' }],
         },
       },
     };
@@ -700,6 +710,7 @@ describe('resetCard — pure core transform (P11 follow-up)', () => {
           mergeSha: 'bbbbbbb',
           sessionId: 'sess-c1',
           updatedAt: '2026-01-02T00:00:00Z',
+          tasks: [{ id: 'T1', heading: 'Task 1' }],
           dependsOn: ['C2'],
           autoAnswerRounds: 2,
           healedResidue: ['remove_worktree'],
@@ -792,5 +803,41 @@ describe('resetCard — pure core transform (P11 follow-up)', () => {
     expect(originalCard.sessionId).toBe('sess-c1');
     expect(next).not.toBe(state);
     expect(next.cards.C1).not.toBe(originalCard);
+  });
+});
+
+describe('v2 — the task index (D1)', () => {
+  // `fixtureState()` is untyped JSON (as read from disk); these views let a test reach one card.
+  const cardsOf = (s: Record<string, unknown>) => s.cards as Record<string, Card>;
+
+  test('a v1 state is refused with the re-author instruction', () => {
+    expect(() => parseState({ ...fixtureState(), v: 1 })).toThrow(/v1 has no task index/);
+  });
+  test('every card must carry at least one task', () => {
+    const s = fixtureState();
+    (cardsOf(s).C1 as { tasks: unknown }).tasks = [];
+    expect(() => parseState(s)).toThrow();
+  });
+  test('task ids follow the grammar and are unique within a card', () => {
+    const bad = fixtureState();
+    (cardsOf(bad).C1 as Card).tasks = [{ id: 'T 1', heading: 'Task 1' }];
+    expect(() => parseState(bad)).toThrow(/task id/);
+    const dup = fixtureState();
+    (cardsOf(dup).C1 as Card).tasks = [{ id: 'T1', heading: 'a' }, { id: 'T1', heading: 'b' }];
+    expect(() => parseState(dup)).toThrow(/duplicate task id/);
+  });
+  test('runner-written progress round-trips; an authored v2 file round-trips byte-identical', () => {
+    const authored = serializeState(fixtureState() as unknown as CampaignState);
+    expect(serializeState(parseState(JSON.parse(authored)))).toBe(authored);
+  });
+  test('resetCard clears every passedSha and the doneSha', () => {
+    const s = fixtureState();
+    const c = cardsOf(s).C1 as Card;
+    c.tasks = [{ id: 'T1', heading: 'Task 1', passedSha: 'abc' }];
+    c.doneSha = 'abc';
+    const { state, summary } = resetCard(parseState(s), 'C1');
+    expect((state.cards.C1 as Card).tasks).toEqual([{ id: 'T1', heading: 'Task 1' }]);
+    expect('doneSha' in (state.cards.C1 as Card)).toBe(false);
+    expect(summary.clearedFields).toEqual(expect.arrayContaining(['tasks.passedSha', 'doneSha']));
   });
 });

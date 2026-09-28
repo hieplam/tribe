@@ -36,7 +36,6 @@ import type { VerifyConfig, VerifyResult } from './verify.ts';
 // observable, which `CardOutcome`'s `shipped` variant deliberately does not carry.
 import {
   healSafeResidue,
-  CONTINUE_UNKNOWN_STATE_PROMPT,
   recordBaseSha,
   shipCard,
   escalateCard,
@@ -70,13 +69,16 @@ function fixtureCard(overrides: Partial<Card> = {}): Card {
     mergeSha: null,
     sessionId: null,
     updatedAt: null,
+    // Deliver-ready: the one task already passed, so each test models "one session ships the card".
+    tasks: [{ id: 'T1', heading: 'Task 1: Widget', passedSha: 'basesha0' }],
+    doneSha: 'basesha0',
     ...overrides,
   };
 }
 
 function fixtureState(overrides: Partial<CampaignState> = {}): CampaignState {
   return {
-    v: 1,
+    v: 2,
     campaign: 'sample-campaign',
     mergePolicy: 'merge',
     sequence: ['C1', 'C2'],
@@ -488,7 +490,17 @@ interface MockLoopIoOptions {
   /** When true, every card's spec/plan path is treated as MISSING on disk (drives the
    * PLANNING_NEEDED trigger) — off by default so unrelated tests aren't spuriously escalated. */
   missingSpecPlan?: boolean;
+  /** The text served for every card's plan (any `.md` under `docs/plans/`); defaults to
+   * `DEFAULT_PLAN`, whose one task resolves `fixtureCard`'s default task index (D1). */
+  planContent?: string;
+  /** Default on: a spawned prompt whose `## This turn:` line is a task step is answered with
+   * `TASK_DONE <id> <branch>` without consuming `spawnQueue` (the fixture's Done commands always
+   * pass), so a test scripts only the sessions it is about. `false` turns it off. */
+  autoTaskTurns?: boolean;
 }
+
+/** A plan with exactly the one task `fixtureCard` points at, so the load-time D1 check passes. */
+const DEFAULT_PLAN = '### Task 1: Widget\n\n#### Done\n\n```bash\ntrue\n```\n';
 
 interface MockLoopIoResult {
   io: LoopIO;
@@ -529,6 +541,9 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
     // C2: the main checkout's current ref — on the base branch unless a test scripts a
     // detached HEAD / other branch via `execHandlers`.
     if (cmd[0] === 'git' && cmd[1] === 'rev-parse' && cmd.includes('--abbrev-ref')) return ok('master\n');
+    if (cmd[0] === 'git' && cmd[1] === 'check-ref-format') return ok('');
+    if (cmd[0] === 'git' && cmd[1] === 'show-ref' && cmd.includes('--verify')) return ok('basesha0\n');
+    if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'add') return ok('');
     if (cmd[0] === 'git' && cmd[1] === 'rev-parse') return ok('basesha0\n');
     if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return fail('no pull requests found');
     if (cmd[0] === 'git' && cmd[1] === 'worktree') return ok('');
@@ -543,6 +558,8 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
   const io: LoopIO = {
     exec,
     sleep: mock(async () => {}),
+    canonicalPath: (p) => p,
+    assertDoneScratchPath: mock(() => {}),
     fileExists: mock((p: string) => {
       if (p.includes('/escalations/')) {
         const cardMatch = /([^/]+)\.md$/.exec(p);
@@ -559,8 +576,12 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
     readFile: mock((p: string) => {
       if (p === BRIEF_TEMPLATE_PATH) return '# Executor brief for {{CARD_ID}}\n{{ANSWERS_CONTENT}}';
       const content = writtenFiles.get(p);
-      if (content === undefined) throw new Error(`readFile: no fixture for ${p}`);
-      return content;
+      if (content !== undefined) return content;
+      // A plan is readable exactly while `fileExists` says it is on disk — a test that makes the
+      // plan vanish (T26's merge shape) gets the ENOENT the real fs would raise.
+      const isPlan = p.includes('/docs/plans/') && p.endsWith('.md');
+      if (isPlan && io.fileExists(p)) return opts.planContent ?? DEFAULT_PLAN;
+      throw new Error(`readFile: no fixture for ${p}`);
     }),
     writeFile: mock((p: string, content: string) => {
       writtenFiles.set(p, content);
@@ -592,6 +613,8 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
     printLine: mock(() => {}),
     spawnSession: mock((params: SpawnSessionParams) => {
       spawnBriefs.push(params.prompt);
+      const taskStep = /^## This turn: task (\S+)/m.exec(params.prompt);
+      if (taskStep && opts.autoTaskTurns !== false) return autoTaskTurn(taskStep[1] as string);
       const next = spawnQueue.shift();
       if (!next) throw new Error('spawnSession called more times than scripted');
       return next(params);
@@ -603,7 +626,19 @@ function buildMockLoopIo(opts: MockLoopIoOptions): MockLoopIoResult {
     writeFileAtomic: mock((p: string, content: string) => {
       atomicWrites.push({ path: p, content });
     }),
+    removeTree: mock(() => {}),
+    runShell: mock(async () => ({ exitCode: 0, timedOut: false, durationMs: 1, stdout: '', stderr: '' })),
   };
+
+  /** The branch the task turn reports: the running card's recorded branch (read after `init`,
+   * once `onSessionStart` has persisted it), else `feat/auto`. */
+  async function* autoTaskTurn(taskId: string): AsyncGenerator<SessionMessage> {
+    yield { type: 'system', subtype: 'init', session_id: `sess-auto-${taskId}` };
+    const current = JSON.parse(writtenFiles.get(campaignStatePathOf(homeDir)) as string) as CampaignState;
+    const running = Object.values(current.cards).find((c) => c.status === 'running');
+    const branch = running?.branch ?? 'feat/auto';
+    yield { type: 'result', subtype: 'success', result: `Task done.\nTASK_DONE ${taskId} ${branch}`, session_id: `sess-auto-${taskId}` };
+  }
 
   return { io, calls, writtenFiles, spawnBriefs, lockCalls, ensuredDirs, atomicWrites, renameCalls };
 }
@@ -660,7 +695,7 @@ describe('runLoop — C1: a card whose merge removed its own plan path finalises
         (cmd) => {
           if (cmd[0] === 'gh' && cmd[1] === 'api') {
             merged = true;
-            return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+            return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           }
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('deadbee parent1 parent2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
@@ -680,8 +715,8 @@ describe('runLoop — C1: a card whose merge removed its own plan path finalises
       spawnQueue: [() => messages(shippedMessages(926, 'aaaaaaa', 'sess-c1'))],
     });
     // The plan exists at pre-flight and vanishes with the merge — exactly T26's shape. The
-    // mock's default `readFile` already throws for any un-fixtured path, so a post-merge read
-    // of the plan is the ENOENT the real fs would raise.
+    // mock's default `readFile` serves a plan only while `fileExists` reports it, so a
+    // post-merge read of the plan is the ENOENT the real fs would raise.
     const planPath = '/repo/docs/plans/c1.md';
     const baseFileExists = io.fileExists;
     io.fileExists = ((p: string) => (merged && p === planPath ? false : baseFileExists(p))) as LoopIO['fileExists'];
@@ -772,7 +807,7 @@ describe('runLoop — full happy path over two cards', () => {
       answers: '# answers\n(none yet)\n',
       execHandlers: [
         (cmd) => {
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('deadbee parent1 parent2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -829,7 +864,7 @@ describe('runLoop — records branch + baseSha (handoff Fix 5)', () => {
         (cmd) => {
           if (cmd[0] === 'git' && cmd[1] === 'rev-parse') return ok('base15ha\n');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return ok(JSON.stringify({ headRefName: 'feature/RecordedBranch' }));
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('deadbee parent1 parent2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -863,7 +898,7 @@ describe('runLoop — recordBaseSha rev-parses the resolved <remote>/<baseBranch
           if (cmd[0] === 'git' && cmd[1] === 'symbolic-ref') return ok('upstream/main\n');
           if (cmd[0] === 'git' && cmd[1] === 'rev-parse') return ok('base15ha\n');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return ok(JSON.stringify({ headRefName: 'feature/RecordedBranch' }));
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('deadbee parent1 parent2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -909,6 +944,7 @@ describe('recordBaseSha — learns the phase (P11, ruling R3)', () => {
       baseBranch: 'master',
       answersContent: '',
       briefTemplate: '',
+      taskIndex: {},
     };
     return { ctx: { cardId: 'C1', state, resolved, io }, calls };
   }
@@ -998,7 +1034,7 @@ describe('runLoop — crash-resume: verify_only phase (PR merged, not yet shippe
       execHandlers: [
         (cmd) => {
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return ok(JSON.stringify({ number: 55, state: 'MERGED' }));
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'cafefee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'cafefee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('cafefee p1 p2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -1041,7 +1077,7 @@ describe('runLoop — resume-probe failure -> fresh-with-digest', () => {
       execHandlers: [
         (cmd) => {
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return ok(JSON.stringify({ number: 8, state: 'OPEN' }));
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'f00dfee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'f00dfee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('f00dfee p1 p2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -1090,7 +1126,7 @@ describe('runLoop — F8: open PR with no sessionId spawns fresh WITH a digest, 
       execHandlers: [
         (cmd) => {
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view') return ok(JSON.stringify({ number: 9, state: 'OPEN' }));
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'ab00001' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'ab00001', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok('ab00001 p1 p2');
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
@@ -1360,7 +1396,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view' && cmd[3] === 'feat/c1-widget') {
             return ok(JSON.stringify({ number: 12, state: 'MERGED' }));
           }
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok('');
@@ -1403,7 +1439,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view' && cmd[3] === 'feat/c1-widget') {
             return ok(JSON.stringify({ number: 12, state: 'MERGED' }));
           }
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok(worktreePorcelain);
@@ -1441,7 +1477,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       answers: '',
       execHandlers: [
         (cmd) => {
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok('');
@@ -1462,6 +1498,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       baseBranch: 'master',
       answersContent: '',
       briefTemplate: '',
+      taskIndex: {},
     };
     const verifyConfig: VerifyConfig = {
       repoRoot: resolved.repoRoot,
@@ -1501,7 +1538,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'view' && cmd[3] === 'feat/c1-widget') {
             return ok(JSON.stringify({ number: 12, state: 'MERGED' }));
           }
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok('');
@@ -1549,7 +1586,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       answers: '',
       execHandlers: [
         (cmd) => {
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok('');
@@ -1568,6 +1605,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       baseBranch: 'master',
       answersContent: '',
       briefTemplate: '',
+      taskIndex: {},
     };
     const verifyConfig: VerifyConfig = {
       repoRoot: resolved.repoRoot,
@@ -1609,7 +1647,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       answers: '',
       execHandlers: [
         (cmd) => {
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok(worktreePorcelain);
           if (cmd[0] === 'git' && cmd[1] === 'ls-remote') return ok('');
@@ -1630,6 +1668,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       baseBranch: 'master',
       answersContent: '',
       briefTemplate: '',
+      taskIndex: {},
     };
     const verifyConfig: VerifyConfig = {
       repoRoot: resolved.repoRoot,
@@ -1667,7 +1706,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       answers: '',
       execHandlers: [
         (cmd) => {
-          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+          if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'basesha0' } }));
           if (cmd[0] === 'gh' && cmd[1] === 'pr' && cmd[2] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
           if (cmd[0] === 'git' && cmd[1] === 'worktree' && cmd[2] === 'list') return ok(worktreePorcelain);
           if (cmd[0] === 'git' && cmd[1] === 'ls-remote') return ok('');
@@ -1684,6 +1723,7 @@ describe('runLoop — self-heals safe residue between the first failed verify an
       baseBranch: 'master',
       answersContent: '',
       briefTemplate: '',
+      taskIndex: {},
     };
     const verifyConfig: VerifyConfig = {
       repoRoot: resolved.repoRoot,
@@ -1722,7 +1762,7 @@ describe('shipCard — archives a leftover escalation file on ship (P6)', () => 
       answers: '',
       escalationFiles: new Set(['C1']),
     });
-    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '' };
+    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '', taskIndex: {} };
     const ctx: CardCtx = { cardId: 'C1', state, resolved, io };
     const escalationPath = escalationPathOf('/th', 'C1');
 
@@ -1742,7 +1782,7 @@ describe('shipCard — archives a leftover escalation file on ship (P6)', () => 
       answers: '',
       // No escalation file for C1 this time.
     });
-    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '' };
+    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '', taskIndex: {} };
     const ctx: CardCtx = { cardId: 'C1', state, resolved, io };
 
     await shipCard(ctx, { shipped: true, points: [], failedPoints: [] });
@@ -1760,7 +1800,7 @@ describe('shipCard — archives a leftover escalation file on ship (P6)', () => 
       answers: '',
       escalationFiles: new Set(['C1']),
     });
-    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '' };
+    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '', taskIndex: {} };
     const ctx: CardCtx = { cardId: 'C1', state, resolved, io };
 
     // `escalateCard` runs the OTHER outcome branch — it must never touch `renameFile`
@@ -2012,7 +2052,7 @@ describe('runLoop — bounded auto-retry (P1 fix-list, spec "wait-aware liveness
     // literal `session_only` resume prompt, with `resume: 'sess-c1-try1'` set on the SDK call
     // (verified indirectly: only the resume path ever sends this exact literal string; a fresh
     // spawn always renders through `executorBrief`'s template).
-    expect(spawnBriefs[1]).toBe(CONTINUE_UNKNOWN_STATE_PROMPT);
+    expect(spawnBriefs[1]?.split('\n')[0]).toBe('## This turn: deliver');
     expect(spawnBriefs[1]).not.toContain('{{CARD_ID}}');
 
     const finalState = JSON.parse(writtenFiles.get('/th/campaign-state.json') as string);
@@ -2025,7 +2065,7 @@ describe('runLoop — bounded auto-retry (P1 fix-list, spec "wait-aware liveness
     // card (branch: null) whose session recorded a sessionId before erroring takes the D4
     // RESUME path on retry (`phase.ts`'s `session_only` reason), each of the 2 bounded retries
     // costs UP TO TWO underlying SDK spawns — the resume attempt itself, and (only when THAT
-    // also surfaces `'error'`) `runCardSession`'s own pre-existing resume-failure fallback to
+    // also surfaces `'error'`) the first turn's resume-failure fallback (`turnDepsFor`'s `runTurn`) to
     // one fresh-with-digest spawn (card-actions.ts, unchanged by this fix-round). Worst case,
     // every one of those 5 spawns (1 initial fresh + 2 retries x [resume attempt + fresh
     // fallback]) errors — this is exactly that worst case, proving the run-loop's own retry
@@ -2051,8 +2091,8 @@ describe('runLoop — bounded auto-retry (P1 fix-list, spec "wait-aware liveness
     expect(spawnBriefs).toHaveLength(5);
     // Retries 1 and 2 both actually took the resume path (the literal prompt, not a rendered
     // executor-brief template) before falling back — the same proof point as test (a) above.
-    expect(spawnBriefs[1]).toBe(CONTINUE_UNKNOWN_STATE_PROMPT);
-    expect(spawnBriefs[3]).toBe(CONTINUE_UNKNOWN_STATE_PROMPT);
+    expect(spawnBriefs[1]?.split('\n')[0]).toBe('## This turn: deliver');
+    expect(spawnBriefs[3]?.split('\n')[0]).toBe('## This turn: deliver');
   });
 
   test('(c) session outcome "timeout": no retry, exactly 1 attempt', async () => {
@@ -2089,7 +2129,7 @@ describe('runLoop — bounded auto-retry (P1 fix-list, spec "wait-aware liveness
 function cleanCommitAndVerifyHandlers(mergeSha: string): Array<(cmd: string[]) => ExecResult | null> {
   return [
     (cmd) => {
-      if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: mergeSha }));
+      if (cmd[0] === 'gh' && cmd[1] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: mergeSha, head: { sha: 'basesha0' } }));
       if (cmd[0] === 'git' && cmd[1] === 'rev-list') return ok(`${mergeSha} p1 p2`);
       if (cmd[0] === 'git' && cmd[1] === 'merge-base') return ok('');
       if (cmd[0] === 'git' && cmd[1] === 'diff') return ok('');
@@ -2676,7 +2716,7 @@ describe('serializeRepoGitMutation (card-actions.ts) — runner-side git worktre
       return realExec(cmd, opts);
     }) as LoopIO['exec'];
 
-    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '' };
+    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '', taskIndex: {} };
     const ctxA: CardCtx = { cardId: 'A', state, resolved, io };
     const ctxB: CardCtx = { cardId: 'B', state, resolved, io };
 
@@ -2710,7 +2750,7 @@ describe('serializeRepoGitMutation (card-actions.ts) — runner-side git worktre
     // no extra await, no change to call order or count.
     const state = fixtureState({ sequence: ['A'], cards: { A: fixtureCard({ branch: 'feat/a-widget' }) } });
     const { io, calls } = buildMockLoopIo({ stateJson: JSON.stringify(state) });
-    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '' };
+    const resolved: ResolvedConfig = { ...baseLoopConfig(), baseBranch: 'master', answersContent: '', briefTemplate: '', taskIndex: {} };
 
     await performRevertAndRedo({ cardId: 'A', state, resolved, io });
 
@@ -3067,5 +3107,82 @@ describe('runLoop — rulings gate (fires only on the would-be-done path)', () =
     expect(result.processed[0]).toMatchObject({ kind: 'shipped', cardId: 'C1' });
     expect(result.exitCode).toBe(EXIT_OK);
     expect(result.unratifiedRulings).toBeUndefined();
+  });
+});
+
+describe('runLoop — D1: the task index is validated at load', () => {
+  test('a plan outside the repo refuses before reading it or spawning a session', async () => {
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ plan: '../outside.md' }) } });
+    const { io, spawnBriefs } = buildMockLoopIo({ stateJson: JSON.stringify(state), answers: '', spawnQueue: [] });
+    await expect(runLoop(baseLoopConfig(), io)).rejects.toThrow(/plan_outside_repo/);
+    expect(spawnBriefs).toEqual([]);
+    expect((io.readFile as ReturnType<typeof mock>).mock.calls.some((call) => String(call[0]).endsWith('outside.md'))).toBe(false);
+  });
+  test('a dangling heading refuses the run before any session spawns, naming card, task and heading', async () => {
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ tasks: [{ id: 'T1', heading: 'Task 9: nowhere' }] }) } });
+    const { io, spawnBriefs } = buildMockLoopIo({ stateJson: JSON.stringify(state), answers: '', spawnQueue: [] });
+    await expect(runLoop(baseLoopConfig(), io)).rejects.toThrow(/C1.*T1.*Task 9: nowhere.*dangling_heading/s);
+    expect(spawnBriefs).toEqual([]);
+  });
+  test('--dry-run refuses the same way', async () => {
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ tasks: [{ id: 'T1', heading: 'Task 9: nowhere' }] }) } });
+    const { io } = buildMockLoopIo({ stateJson: JSON.stringify(state), answers: '', spawnQueue: [] });
+    await expect(runLoop(baseLoopConfig({ dryRun: true }), io)).rejects.toThrow(/dangling_heading/);
+  });
+  test('a card whose plan is missing is not validated: it stays the planning_needed escalation', async () => {
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ tasks: [{ id: 'T1', heading: 'Task 9: nowhere' }] }) } });
+    const { io } = buildMockLoopIo({ stateJson: JSON.stringify(state), answers: '', spawnQueue: [], missingSpecPlan: true });
+    const result = await runLoop(baseLoopConfig(), io);
+    expect(result.processed.map((o) => o.kind)).toEqual(['escalated']);
+  });
+  test('a shipped card is not validated (its plan may be gone)', async () => {
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ status: 'shipped', tasks: [{ id: 'T1', heading: 'Task 9: nowhere' }] }) } });
+    const { io } = buildMockLoopIo({ stateJson: JSON.stringify(state), answers: '', spawnQueue: [] });
+    expect((await runLoop(baseLoopConfig(), io)).exitCode).toBe(EXIT_OK);
+  });
+});
+
+describe('runLoop — the turn loop drives a fresh card end to end (spec §4.4)', () => {
+  test('a fresh card: task turn, runner-run Done, deliver turn, shipped', async () => {
+    const card = fixtureCard({ branch: null, tasks: [{ id: 'T1', heading: 'Task 1: Widget' }] });
+    delete (card as { doneSha?: string }).doneSha;
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: card } });
+    const { io, spawnBriefs, calls } = buildMockLoopIo({
+      stateJson: JSON.stringify(state),
+      answers: '',
+      spawnQueue: [() => messages(shippedMessages(41, 'abc0041', 'sess-c1'))],
+      execHandlers: cleanCommitAndVerifyHandlers('abc0041'),
+    });
+    const result = await runLoop(baseLoopConfig(), io);
+    expect(result.processed.map((o) => o.kind)).toEqual(['shipped']);
+    expect(spawnBriefs[0]).toContain('## This turn: task T1 — Task 1: Widget');
+    expect(spawnBriefs[1]).toContain('## This turn: deliver');
+    expect((io.runShell as ReturnType<typeof mock>).mock.calls.map((c) => c[0])).toEqual(['true']);
+    expect(calls.some((c) => c[0] === 'git' && c[1] === 'worktree' && c[2] === 'add')).toBe(true);
+    const doneRowsWritten = (io.appendLog as ReturnType<typeof mock>).mock.calls
+      .filter((c) => c[0] === '/th/runs/fixture-run/done.jsonl')
+      .map((c) => JSON.parse(c[1] as string).kind);
+    expect(doneRowsWritten).toEqual(['command', 'done_run']);
+  });
+  test('revert_and_redo clears the recorded progress: the first turn is a task turn, not delivery', async () => {
+    let remoteBranch = true;
+    // fixtureCard is deliver-ready (T1 passed, doneSha set); revert_and_redo must throw that away.
+    const state = fixtureState({ sequence: ['C1'], cards: { C1: fixtureCard({ branch: 'feat/c1-widget', sessionId: null }) } });
+    const { io, spawnBriefs } = buildMockLoopIo({
+      stateJson: JSON.stringify(state),
+      answers: '',
+      spawnQueue: [() => messages(shippedMessages(41, 'abc0041', 'sess-c1'))],
+      execHandlers: [
+        (cmd) => (cmd[0] === 'git' && cmd[1] === 'ls-remote' ? ok(remoteBranch ? 'abc\trefs/heads/feat/c1-widget\n' : '') : null),
+        (cmd) => {
+          if (cmd[0] === 'git' && cmd[1] === 'push' && cmd.includes('--delete')) { remoteBranch = false; return ok(''); }
+          return null;
+        },
+        ...cleanCommitAndVerifyHandlers('abc0041'),
+      ],
+    });
+    await runLoop(baseLoopConfig(), io);
+    expect(spawnBriefs[0]).toContain('## This turn: task T1');
+    expect(spawnBriefs[0]).not.toContain('## This turn: deliver');
   });
 });

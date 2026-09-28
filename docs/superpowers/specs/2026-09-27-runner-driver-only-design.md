@@ -254,7 +254,8 @@ for.*
 **This section is the oracle for `core/plan-index.ts`. CommonMark is not.** Under-reading (missing a
 command, attributing a command to the wrong task) is a bug. Refusing an ambiguous plan is by design.
 
-- A **heading** is a line outside a fenced code block matching `^(#{1,6})\s+(.*?)\s*#*\s*$`. Fences
+- A **heading** is a line outside a fenced code block matching `^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$`
+  (closing `#`s are stripped only after whitespace, so a heading such as `Task: C#` keeps its `#`). Fences
   are tracked CommonMark-style: a fence opened by N ≥ 3 backticks or tildes closes only on ≥ N of the
   same character (the same rule `plugins/tribe/scripts/validate-plan.sh` already implements).
 - A **task section** is the index heading plus every line after it up to the next heading of the same
@@ -264,7 +265,8 @@ command, attributing a command to the wrong task) is a bug. Refusing an ambiguou
   (case-insensitive) at a deeper level than the task heading. Zero → `missing_done`; more than one →
   `ambiguous_done`.
 - Its **Done block** is the first fenced code block after the Done heading and before the next
-  heading of any level. None → `missing_done_block`.
+  heading of any level. None → `missing_done_block`; a block whose fence never closes →
+  `unclosed_done_block`.
 - Its **Done commands** are the block's lines, trimmed, skipping blank lines and lines starting with
   `#`. None → `empty_done`. A line ending in `\` → `continuation_not_supported` (refused, never
   guessed). Each remaining line is one command, run with `bash -c`.
@@ -314,6 +316,9 @@ fresh session per task can become a plan-level option later; it is out of scope 
    `MAX_STEP_ATTEMPTS = 3`, a constant, not a flag). The fourth → escalate `done_failed` with the last
    failing command, its output tail and the attempt count. The budget lives in memory for one
    `actOnCard` call; the loop's existing 2 bounded retries of a `stopped` card cap the total.
+   During delivery the budget covers every turn that does not end in an accepted `SHIPPED`: a
+   `TASK_DONE` re-check spends one attempt whether its Done run passes or fails (a pass still records
+   `doneSha`), so a session that never delivers cannot loop forever (Shaman ruling R-2.14).
 7. **`SHIPPED` accepted only in the deliver step** (`doneSha` set). A `SHIPPED` before that is a
    protocol error ("SHIPPED arrived before every task passed its Done commands: T2, T3 remain").
 8. **`NEEDS_DIRECTION`** at any step → the existing `needs_direction` escalation.

@@ -394,7 +394,7 @@ describe('parseResetCardArgs — the reset-card subcommand\'s own tiny flag set'
  * values, matching this file's own stateless-capability wall. */
 function stateFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    v: 1,
+    v: 2,
     campaign: 'sample-campaign',
     mergePolicy: 'merge',
     sequence: ['C1'],
@@ -412,6 +412,7 @@ function stateFixture(overrides: Record<string, unknown> = {}): Record<string, u
         mergeSha: null,
         sessionId: 'sess-c1',
         updatedAt: '2026-01-02T00:00:00Z',
+        tasks: [{ id: 'T1', heading: 'Task 1' }],
       },
     },
     ...overrides,
@@ -1275,4 +1276,45 @@ describe('quoteShellArg / renderRerunCommand — unit-level (Fix 4)', () => {
   test('renderRerunCommand joins the quoted tokens with the fixed prefix', () => {
     expect(renderRerunCommand(['--repo', '/r'])).toBe('bun run.ts supervise --repo /r');
   });
+});
+
+// D1 (card runner-driver-only): a task index that does not resolve against its plan is a
+// refusal the author must fix, not a crash — the CLI says `refused:` and exits EXIT_ERROR (4).
+// A real subprocess, with the flags a person types, because `main()` wires its own adapters.
+describe('campaign run: a dangling task ref is refused at load, never an unexpected error (D1)', () => {
+  test('--dry-run on a state whose task heading is not in the plan prints `refused:` and exits 4', () => {
+    const root = mkdtempSync(join(tmpdir(), 'd1-refusal-'));
+    try {
+      const repo = join(root, 'repo');
+      const home = join(root, 'home');
+      mkdirSync(join(repo, 'docs', 'specs'), { recursive: true });
+      mkdirSync(join(repo, 'docs', 'plans'), { recursive: true });
+      mkdirSync(home, { recursive: true });
+      writeFileSync(join(repo, 'docs', 'specs', 'c1.md'), '# spec\n');
+      writeFileSync(join(repo, 'docs', 'plans', 'c1.md'), '### Task 1: Widget\n\n#### Done\n\n```bash\ntrue\n```\n');
+      const card = {
+        status: 'staged', spec: 'docs/specs/c1.md', plan: 'docs/plans/c1.md', branch: 'feat/c1',
+        baseSha: null, pr: null, mergeSha: null, sessionId: null, updatedAt: null,
+        tasks: [{ id: 'T1', heading: 'Task 9: nowhere' }],
+      };
+      const state = {
+        v: 2, campaign: 'd1', mergePolicy: 'merge', sequence: ['C1'], schemaLockPaths: [],
+        docsOnlyPaths: [], ownerOnlyEscalations: [], cards: { C1: card },
+      };
+      writeFileSync(join(home, 'campaign-state.json'), JSON.stringify(state));
+
+      const result = spawnSync(
+        'bun',
+        ['cli/main.ts', '--repo', repo, '--model', 'x', '--home', home, '--dry-run', '--no-viewer'],
+        { cwd: import.meta.dir + '/..', encoding: 'utf8', timeout: 20_000 },
+      );
+
+      expect(result.stderr).toContain('campaign runner: refused:');
+      expect(result.stderr).toContain('dangling_heading');
+      expect(result.stderr).not.toContain('unexpected error');
+      expect(result.status).toBe(4);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 20_000);
 });

@@ -7,6 +7,7 @@
 // embedded verbatim so a human's ruling on a past escalation reaches every future session
 // (spec §D5).
 import { join } from 'node:path';
+import { MAX_STEP_ATTEMPTS } from './done.ts';
 
 /** Minimal, local view of a campaign card needed to render a brief — decoupled from the
  * full `Card` shape in `types.ts` (Task 5 must not edit that file). */
@@ -14,6 +15,15 @@ export interface BriefCard {
   id: string;
   spec: string | null;
   plan: string | null;
+  /** The card's task index, in the order the runner drives it (spec §4.8). */
+  tasks: Array<{ id: string; heading: string }>;
+}
+
+/** Where the runner reads the plan and what the card lands on — the deliver turn's facts. */
+export interface BriefDriver {
+  repoRoot: string;
+  baseBranch: string;
+  remote: string;
 }
 
 /** Minimal, local view of campaign state needed to render a brief. */
@@ -59,6 +69,7 @@ export function executorBrief(
   template: string,
   campaignHome: string,
   campaignSlug: string,
+  driver: BriefDriver,
 ): string {
   const ownerOnly =
     state.ownerOnlyEscalations.length > 0
@@ -76,5 +87,10 @@ export function executorBrief(
     CAMPAIGN_HOME: campaignHome,
     ANSWERS_CONTENT: answersContent,
     CAMPAIGN_SLUG: campaignSlug,
+    TASK_LIST: card.tasks.map((t) => `- ${t.id} — ${t.heading}`).join('\n'),
+    MAX_STEP_ATTEMPTS: String(MAX_STEP_ATTEMPTS),
+    REPO_ROOT: driver.repoRoot,
+    BASE_BRANCH: driver.baseBranch,
+    REMOTE: driver.remote,
   });
 }

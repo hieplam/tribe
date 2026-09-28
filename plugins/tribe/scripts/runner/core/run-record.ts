@@ -39,6 +39,11 @@ export function runRecordPathOf(homeDir: string, runId: string): string {
   return join(runDirOf(homeDir, runId), 'run.json');
 }
 
+/** `<home>/runs/<runId>/done.jsonl` — one row per Done command the runner ran (spec §4.5). */
+export function doneRecordPathOf(homeDir: string, runId: string): string {
+  return join(runDirOf(homeDir, runId), 'done.jsonl');
+}
+
 export function reportsDirOf(homeDir: string): string {
   return join(homeDir, 'reports');
 }

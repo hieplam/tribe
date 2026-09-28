@@ -2,6 +2,7 @@
 import type { Card, RunLoopConfig } from '../types.ts';
 import type { DerivePhaseIO } from '../../ports/ports.ts';
 import { escalationPathOf } from '../paths.ts';
+import { progressDigestLines } from '../turn-prompts.ts';
 
 /** The five §D4 outcomes, plus the escalation-file short-circuit. `deriveCardPhase` never
  * itself attempts a resume or spawns anything — it only classifies reality; the loop's own
@@ -128,6 +129,8 @@ export function buildStateDigest(cardId: string, card: Card, resumeFailureReason
     `- branch: ${card.branch ?? '(none recorded)'}`,
     `- pr: ${card.pr ?? '(none recorded)'}`,
     `- baseSha: ${card.baseSha ?? '(none recorded)'}`,
+    '',
+    ...progressDigestLines({ tasks: card.tasks, branch: card.branch, doneSha: card.doneSha }),
     '',
     `Inspect the branch/worktree/PR state for ${cardId} before starting fresh work — do not ` +
       'assume a clean slate.',

@@ -197,10 +197,11 @@ interface CardRecord {
   mergeSha: string | null;
   sessionId: string | null;
   updatedAt: string | null;
+  tasks: Array<{ id: string; heading: string }>;
 }
 
 function stagedCardA(): CardRecord {
-  return { status: 'staged', spec: 'spec.md', plan: 'plan.md', branch: null, baseSha: null, pr: null, mergeSha: null, sessionId: null, updatedAt: null };
+  return { status: 'staged', spec: 'spec.md', plan: 'plan.md', branch: null, baseSha: null, pr: null, mergeSha: null, sessionId: null, updatedAt: null, tasks: [{ id: 'T1', heading: 'Task 1' }] };
 }
 
 /** Campaign A's state — the shape the runner's own zod schema requires (`core/state.ts`,
@@ -208,7 +209,7 @@ function stagedCardA(): CardRecord {
 function writeCampaignAHome(homeADir: string): void {
   mkdirSync(homeADir, { recursive: true });
   const state = {
-    v: 1,
+    v: 2,
     campaign: CAMPAIGN_SLUG,
     mergePolicy: 'merge',
     sequence: ['C1'],

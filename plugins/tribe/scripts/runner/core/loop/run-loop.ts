@@ -1,12 +1,14 @@
 // The pass + entry: derive-and-act until `done`, honoring STOP and the `--max-cards` budget,
 // tied together with the §D2 lock.
-import type { CampaignState, CardResult, NextCardResult, ResolvedConfig, RunLoopConfig } from '../types.ts';
+import { join } from 'node:path';
+import type { CampaignState, CardResult, NextCardResult, ResolvedConfig, ResolvedTask, RunLoopConfig } from '../types.ts';
 import { EXIT_ESCALATED, EXIT_LOCKED, EXIT_OK, EXIT_RULINGS_UNRATIFIED, EXIT_SESSION_INCOMPLETE } from '../types.ts';
 import { loadState, nextCard } from '../state.ts';
 import { BRIEF_TEMPLATE_PATH } from '../brief.ts';
-import { campaignStatePathOf, answersPathOf } from '../paths.ts';
+import { campaignStatePathOf, answersPathOf, planPathWithinRepo } from '../paths.ts';
 import { buildRunRecord, reportsDirOf, runDirOf, runRecordPathOf, serializeRunRecord } from '../run-record.ts';
 import { unratifiedRulingIds } from '../rulings.ts';
+import { resolveTaskIndex, TaskIndexError, type TaskIndexIssue } from '../plan-index.ts';
 import type { LoopIO, StateIO } from '../../ports/ports.ts';
 import { acquireLock, isStopRequested, releaseLock, stopFilePathOf } from './lock.ts';
 import { deriveCardPhase, derivePhaseConfigOf, type CardPhase } from './phase.ts';
@@ -136,11 +138,7 @@ function filteredNextCard(
   io: LoopIO,
   attempted: ReadonlySet<string> = new Set(),
 ): NextCardResult {
-  const sequence = (
-    config.cardsFilter && config.cardsFilter.length > 0
-      ? state.sequence.filter((id) => config.cardsFilter?.includes(id))
-      : state.sequence
-  ).filter((id) => !attempted.has(id));
+  const sequence = requestedSequence(state, config).filter((id) => !attempted.has(id));
   const view: CampaignState = { ...state, sequence };
   const stateIO: StateIO = {
     repoRoot: config.repoRoot,
@@ -148,6 +146,47 @@ function filteredNextCard(
     fileExists: (p) => io.fileExists(p),
   };
   return nextCard(view, stateIO, { includeEscalated: config.includeEscalated });
+}
+
+/** The card ids this run may touch: the state's sequence, narrowed by `--cards` when given. */
+function requestedSequence(state: CampaignState, config: RunLoopConfig): string[] {
+  const hasCardsFilter = config.cardsFilter !== undefined && config.cardsFilter.length > 0;
+  return hasCardsFilter ? state.sequence.filter((id) => config.cardsFilter?.includes(id)) : state.sequence;
+}
+
+/** D1: "Refs are validated at load; a dangling ref refuses the run." Resolves the task index of
+ * every card this run may touch against its plan, and throws ONE `TaskIndexError` naming every
+ * issue — before any lock-held work, session, or write. Two kinds of card are skipped on purpose:
+ * a `shipped` card (its plan may be gone after the merge), and a card whose plan is not on disk
+ * (that is the `planning_needed` escalation `nextCard` already raises, not a ref problem). */
+async function resolveTaskIndexes(
+  state: CampaignState,
+  config: RunLoopConfig,
+  io: LoopIO,
+): Promise<Record<string, ResolvedTask[]>> {
+  const taskIndex: Record<string, ResolvedTask[]> = {};
+  const issues: TaskIndexIssue[] = [];
+  for (const cardId of requestedSequence(state, config)) {
+    const card = state.cards[cardId];
+    if (!card || card.status === 'shipped') continue;
+    if (!card.plan) continue;
+    let planPath: string | null;
+    try {
+      planPath = planPathWithinRepo(config.repoRoot, card.plan, io.canonicalPath);
+    } catch {
+      planPath = null; // an unresolvable path cannot be proven inside the repo
+    }
+    if (planPath === null) {
+      for (const task of card.tasks) issues.push({ cardId, taskId: task.id, heading: task.heading, problem: 'plan_outside_repo' });
+      continue;
+    }
+    if (!io.fileExists(planPath)) continue;
+    const resolution = resolveTaskIndex(cardId, card.tasks, String(await io.readFile(planPath)));
+    taskIndex[cardId] = resolution.tasks;
+    issues.push(...resolution.issues);
+  }
+  if (issues.length > 0) throw new TaskIndexError(issues);
+  return taskIndex;
 }
 
 async function runDryRun(config: RunLoopConfig, io: LoopIO): Promise<LoopResult> {
@@ -160,6 +199,7 @@ async function runDryRun(config: RunLoopConfig, io: LoopIO): Promise<LoopResult>
     () => io.readFile(campaignStatePathOf(config.homeDir)),
     (warning) => console.error(`[tribe-runner] ${warning}`),
   );
+  await resolveTaskIndexes(state, config, io);
   const nc = filteredNextCard(state, config, io);
 
   if (nc.kind === 'done') {
@@ -196,8 +236,9 @@ function startupStopResult(config: RunLoopConfig, io: LoopIO): LoopResult | null
 }
 
 /** Loads everything `RunLoopConfig` doesn't carry: the base branch (from origin/HEAD), the
- * committed --answers rulings, and the committed brief template — all through the io seam. */
-async function resolveRunContext(config: RunLoopConfig, io: LoopIO): Promise<ResolvedConfig> {
+ * committed --answers rulings, and the committed brief template — all through the io seam.
+ * The task index is the one exception: it needs the loaded state, so `runLoop` adds it. */
+async function resolveRunContext(config: RunLoopConfig, io: LoopIO): Promise<Omit<ResolvedConfig, 'taskIndex'>> {
   const baseBranch = await resolveBaseBranch(io, config.repoRoot, config.remote);
   const answersContent = String(await io.readFile(answersPathOf(config.homeDir)));
   const briefTemplate = String(await io.readFile(BRIEF_TEMPLATE_PATH));
@@ -537,7 +578,7 @@ export async function runLoop(config: RunLoopConfig, io: LoopIO): Promise<LoopRe
     const stopped = startupStopResult(config, io);
     if (stopped) return stopped;
 
-    const resolved = await resolveRunContext(config, io);
+    const context = await resolveRunContext(config, io);
 
     // P11 fix-list: surfaces `loadState`'s R3-invariant normalization warnings at the edge —
     // state.ts stays pure (it only computes the warning strings; it never imports `console`
@@ -546,6 +587,7 @@ export async function runLoop(config: RunLoopConfig, io: LoopIO): Promise<LoopRe
       () => io.readFile(campaignStatePathOf(config.homeDir)),
       (warning) => console.error(`[tribe-runner] ${warning}`),
     );
+    const resolved: ResolvedConfig = { ...context, taskIndex: await resolveTaskIndexes(state, config, io) };
     // P12 follow-up: N=1 (omitted or explicit) always takes the ORIGINAL `runPass` code path
     // — never `runPassPool`, even with maxConcurrent read as `?? 1` — so the default behavior
     // this whole runner shipped with cannot regress through the new pool path. Only N > 1

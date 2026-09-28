@@ -165,7 +165,7 @@ write_campaign_state() {
   campaign="$(basename "$home")"
   cat > "$home/campaign-state.json" <<JSON
 {
-  "v": 1,
+  "v": 2,
   "campaign": "$campaign",
   "mergePolicy": "regular",
   "sequence": ["owner-run-probe"],
@@ -190,7 +190,8 @@ write_campaign_state() {
       "pr": null,
       "mergeSha": null,
       "sessionId": null,
-      "updatedAt": null
+      "updatedAt": null,
+      "tasks": [{"id": "T1", "heading": "Task 1 — append the line"}]
     }
   }
 }

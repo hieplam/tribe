@@ -3,7 +3,7 @@
  * `~/.tribe/<repo-key>/campaigns/<slug>/`). One campaign per home, so every artifact
  * has a fixed name and needs no CLI flag. No IO, no clock, no fs — string math only.
  */
-import { join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export const CAMPAIGN_STATE_FILENAME = 'campaign-state.json';
 export const ANSWERS_FILENAME = 'answers.md';
@@ -39,4 +39,25 @@ export function reportDirOf(homeDir: string): string {
  * `supervisorPathsOf`) append rows to, so both writers derive the one path from this helper. */
 export function supervisorLedgerPathOf(homeDir: string): string {
   return join(homeDir, 'supervisor', 'ledger.jsonl');
+}
+
+/** `<home>/done/<cardId>` — lexical card-id containment. The adapter proves the real filesystem
+ * path before checkout or cleanup (fail-closed-edges obligation 4). */
+export function doneWorktreePathOf(homeDir: string, cardId: string): string {
+  const root = resolve(homeDir, 'done');
+  const path = resolve(root, cardId);
+  if (cardId === '' || cardId === '.' || isAbsolute(cardId) || dirname(path) !== root) {
+    throw new Error(`doneWorktreePathOf: card id ${JSON.stringify(cardId)} resolves outside ${root}`);
+  }
+  return path;
+}
+
+/** A state-supplied plan may be read only after its real path is inside the real repo root.
+ * `canonicalPath` is injected by the edge so this path decision stays filesystem-free. */
+export function planPathWithinRepo(repoRoot: string, plan: string, canonicalPath: (path: string) => string): string | null {
+  if (isAbsolute(plan)) return null;
+  const root = canonicalPath(repoRoot);
+  const path = canonicalPath(resolve(repoRoot, plan));
+  const fromRoot = relative(root, path);
+  return fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot) ? null : path;
 }

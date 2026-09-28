@@ -5,7 +5,11 @@
 // buildSessionIOForCard's onSessionStart, which prints the per-card session line the instant
 // the SDK assigns a session id.
 import { describe, expect, mock, test } from 'bun:test';
-import { buildEscalationMarkdown, buildSessionIOForCard, healSafeResidue, sessionConfigFor } from './card-actions.ts';
+import { buildEscalationMarkdown, buildSessionIOForCard, healSafeResidue, sessionConfigFor, actOnCard } from './card-actions.ts';
+import { mkdirSync, mkdtempSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { buildRealIo } from '../../adapters/run-io.adapter.ts';
 import type { CardCtx } from './card-actions.ts';
 import type { CampaignState, Card, ResolvedConfig } from '../types.ts';
 import type { LoopIO } from '../../ports/ports.ts';
@@ -26,6 +30,7 @@ function fixtureResolved(overrides: Partial<ResolvedConfig> = {}): ResolvedConfi
     baseBranch: 'main',
     answersContent: '',
     briefTemplate: '',
+    taskIndex: {},
     ...overrides,
   };
 }
@@ -41,6 +46,7 @@ function fixtureCard(overrides: Partial<Card> = {}): Card {
     mergeSha: null,
     sessionId: null,
     updatedAt: null,
+    tasks: [{ id: 'T1', heading: 'Task 1' }],
     ...overrides,
   };
 }
@@ -49,6 +55,8 @@ function fixtureIo(overrides: Partial<LoopIO> = {}): LoopIO {
   return {
     exec: mock(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
     sleep: mock(async () => {}),
+    canonicalPath: (p) => p,
+    assertDoneScratchPath: mock(() => {}),
     fileExists: mock(() => true),
     readFile: mock(() => ''),
     writeFile: mock(() => {}),
@@ -63,6 +71,8 @@ function fixtureIo(overrides: Partial<LoopIO> = {}): LoopIO {
     spawnSession: mock(async function* () {}),
     ensureDir: mock(() => {}),
     writeFileAtomic: mock(() => {}),
+    removeTree: mock(() => {}),
+    runShell: mock(async () => ({ exitCode: 0, timedOut: false, durationMs: 0, stdout: '', stderr: '' })),
     printLine: mock(() => {}),
     ...overrides,
   };
@@ -70,7 +80,7 @@ function fixtureIo(overrides: Partial<LoopIO> = {}): LoopIO {
 
 function fixtureCtx(overrides: { resolved?: Partial<ResolvedConfig>; io?: Partial<LoopIO> } = {}): CardCtx {
   const state: CampaignState = {
-    v: 1,
+    v: 2,
     campaign: 'test',
     mergePolicy: 'merge',
     sequence: ['C1'],
@@ -86,6 +96,114 @@ function fixtureCtx(overrides: { resolved?: Partial<ResolvedConfig>; io?: Partia
     io: fixtureIo(overrides.io),
   };
 }
+
+test('a Done run with a symlinked done directory stops as infrastructure before worktree add', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'rdo-card-done-link-'));
+  const home = join(root, 'home');
+  const outside = join(root, 'outside');
+  mkdirSync(home);
+  mkdirSync(outside);
+  symlinkSync(outside, join(home, 'done'));
+  const realIo = buildRealIo({ homeDir: home });
+  const exec = mock(async (cmd: string[]) =>
+    cmd[1] === 'show-ref' ? { stdout: 'tip\n', stderr: '', exitCode: 0 } : { stdout: '', stderr: '', exitCode: 0 });
+  const ctx = fixtureCtx({
+    resolved: { homeDir: home, taskIndex: { C1: [{ id: 'T1', heading: 'Task 1', doneCommands: ['true'] }] } },
+    io: {
+      exec,
+      assertDoneScratchPath: realIo.assertDoneScratchPath,
+      spawnSession: mock(async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'sess' };
+        yield { type: 'result', subtype: 'success', session_id: 'sess', result: 'TASK_DONE T1 b' };
+      }),
+    },
+  });
+  ctx.state.cards.C1 = fixtureCard({ baseSha: 'base', branch: null, sessionId: 'sess', tasks: [{ id: 'T1', heading: 'Task 1' }] });
+  const outcome = await actOnCard(ctx, { kind: 'resume', sessionId: 'sess', reason: 'session_only' });
+  expect(outcome).toMatchObject({ kind: 'stopped', retryable: false });
+  expect(outcome.kind === 'stopped' ? outcome.reason : '').toMatch(/done|symlink/i);
+  expect(exec.mock.calls.some((call) => call[0][1] === 'worktree' && call[0][2] === 'add')).toBe(false);
+});
+
+test('TASK_DONE refuses a revision expression before starting Done', async () => {
+  const exec = mock(async (cmd: string[]) => {
+    if (cmd[1] === 'check-ref-format') return { stdout: '', stderr: 'invalid ref', exitCode: 1 };
+    if (cmd[1] === 'rev-parse') return { stdout: 'parent-tip\n', stderr: '', exitCode: 0 };
+    return { stdout: '', stderr: '', exitCode: 0 };
+  });
+  const runShell = mock(async () => ({ exitCode: 0, timedOut: false, durationMs: 0, stdout: '', stderr: '' }));
+  const ctx = fixtureCtx({
+    resolved: { taskIndex: { C1: [{ id: 'T1', heading: 'Task 1', doneCommands: ['true'] }] } },
+    io: {
+      exec,
+      runShell,
+      spawnSession: mock(async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'sess' };
+        yield { type: 'result', subtype: 'success', session_id: 'sess', result: 'TASK_DONE T1 feat/x~1' };
+      }),
+    },
+  });
+  ctx.state.cards.C1 = fixtureCard({ baseSha: 'base', sessionId: 'sess' });
+  const outcome = await actOnCard(ctx, { kind: 'resume', sessionId: 'sess', reason: 'session_only' });
+  expect(outcome.kind).toBe('escalated');
+  expect(ctx.state.cards.C1?.branch).toBeNull();
+  expect(runShell).not.toHaveBeenCalled();
+  expect(exec.mock.calls.some((call) => call[0][1] === 'worktree' && call[0][2] === 'add')).toBe(false);
+});
+
+test('TASK_DONE accepts a literal branch at its exact ref tip', async () => {
+  const exec = mock(async (cmd: string[]) => {
+    if (cmd[1] === 'show-ref') return { stdout: 'exact-tip\n', stderr: '', exitCode: 0 };
+    if (cmd[1] === 'rev-parse') return { stdout: 'parent-tip\n', stderr: '', exitCode: 0 };
+    return { stdout: '', stderr: '', exitCode: 0 };
+  });
+  const ctx = fixtureCtx({
+    resolved: { taskIndex: { C1: [{ id: 'T1', heading: 'Task 1', doneCommands: ['true'] }] } },
+    io: {
+      exec,
+      spawnSession: mock(async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'sess' };
+        yield { type: 'result', subtype: 'success', session_id: 'sess', result: 'TASK_DONE T1 feat/x' };
+      }),
+    },
+  });
+  ctx.state.cards.C1 = fixtureCard({ baseSha: 'base', sessionId: 'sess' });
+  await actOnCard(ctx, { kind: 'resume', sessionId: 'sess', reason: 'session_only' });
+  expect(exec.mock.calls.some((call) => call[0].join(' ') === 'git check-ref-format refs/heads/feat/x')).toBe(true);
+  expect(exec.mock.calls.some((call) => call[0].join(' ') === 'git show-ref --verify --hash refs/heads/feat/x')).toBe(true);
+  expect(exec.mock.calls.some((call) => call[0][1] === 'worktree' && call[0][2] === 'add' && call[0][6] === 'exact-tip')).toBe(true);
+  expect(ctx.state.cards.C1?.tasks[0]?.passedSha).toBe('exact-tip');
+});
+
+test('a failed final Done worktree cleanup stops as infrastructure and keeps the Done record', async () => {
+  let removes = 0;
+  const exec = mock(async (cmd: string[]) => {
+    if (cmd[1] === 'show-ref') return { stdout: 'exact-tip\n', stderr: '', exitCode: 0 };
+    if (cmd[1] === 'rev-parse') return { stdout: 'exact-tip\n', stderr: '', exitCode: 0 };
+    if (cmd[1] === 'worktree' && cmd[2] === 'remove' && ++removes === 2) {
+      return { stdout: '', stderr: 'cleanup denied', exitCode: 1 };
+    }
+    return { stdout: '', stderr: '', exitCode: 0 };
+  });
+  const appendLog = mock((_path: string, _line: string) => {});
+  const ctx = fixtureCtx({
+    resolved: { taskIndex: { C1: [{ id: 'T1', heading: 'Task 1', doneCommands: ['true'] }] } },
+    io: {
+      exec,
+      appendLog,
+      spawnSession: mock(async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'sess' };
+        yield { type: 'result', subtype: 'success', session_id: 'sess', result: 'TASK_DONE T1 feat/x' };
+      }),
+    },
+  });
+  ctx.state.cards.C1 = fixtureCard({ baseSha: 'base', sessionId: 'sess' });
+  const outcome = await actOnCard(ctx, { kind: 'resume', sessionId: 'sess', reason: 'session_only' });
+  expect(outcome).toMatchObject({ kind: 'stopped', retryable: false });
+  expect(outcome.kind === 'stopped' ? outcome.reason : '').toContain('cleanup denied');
+  expect(outcome.kind === 'stopped' ? outcome.reason : '').toContain('/th/done/C1');
+  expect(appendLog.mock.calls.some((call) => call[0].endsWith('done.jsonl'))).toBe(true);
+});
 
 describe('sessionConfigFor — ledgerPath (Task 9, spec §4.4)', () => {
   test('sets ledgerPath from resolved.homeDir via supervisorLedgerPathOf', () => {
@@ -104,6 +222,14 @@ describe('buildEscalationMarkdown — P5 reason-specific Options', () => {
   test('planning_needed also leads with the ruling path', () => {
     const markdown = buildEscalationMarkdown('C1', 'planning_needed', 'Missing on disk: spec, plan', fixtureResolved());
     expect(markdown).toContain('Append a ruling');
+    expect(markdown).not.toContain('CANNOT clear');
+  });
+
+  test('done_failed offers a clarifying ruling or a plan fix, never the verify-failure block', () => {
+    const markdown = buildEscalationMarkdown('C1', 'done_failed', 'task T1 did not pass', fixtureResolved({ homeDir: '/th' }));
+    expect(markdown).toContain('a ruling that clarifies the task helps the next attempt');
+    expect(markdown).toContain('/th/answers.md');
+    expect(markdown).toContain('A Done command in the plan is wrong');
     expect(markdown).not.toContain('CANNOT clear');
   });
 
@@ -232,7 +358,7 @@ describe('healSafeResidue — D4 safe fast-forward of the local base (Task 1.6)'
       calls.push(cmd);
       timedCalls.push({ cmd, options });
       const [bin, ...rest] = cmd;
-      if (bin === 'gh' && rest[0] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+      if (bin === 'gh' && rest[0] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'donesha1' } }));
       if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
       if (bin === 'git' && rest[0] === 'merge-base' && rest[2] === 'deadbee' && rest[3] === 'master') {
         // The local base lacks the merge until the heal fast-forwards it.
@@ -248,7 +374,7 @@ describe('healSafeResidue — D4 safe fast-forward of the local base (Task 1.6)'
       return ok('');
     });
     const ctx = fixtureCtx({ resolved: { baseBranch: 'master' }, io: { exec } });
-    ctx.state.cards.C1 = fixtureCard({ branch: 'feat/c1-widget', pr: 12 });
+    ctx.state.cards.C1 = fixtureCard({ branch: 'feat/c1-widget', pr: 12, doneSha: 'donesha1' });
     const verifyConfig: VerifyConfig = {
       repoRoot: '/repo',
       remote: 'origin',
@@ -287,7 +413,7 @@ describe('healSafeResidue — D4 safe fast-forward of the local base (Task 1.6)'
     const exec = mock(async (cmd: string[]) => {
       calls.push(cmd);
       const [bin, ...rest] = cmd;
-      if (bin === 'gh' && rest[0] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee' }));
+      if (bin === 'gh' && rest[0] === 'api') return ok(JSON.stringify({ merged: true, merge_commit_sha: 'deadbee', head: { sha: 'donesha1' } }));
       if (bin === 'gh' && rest[0] === 'pr' && rest[1] === 'checks') return ok(JSON.stringify([{ name: 'ci', bucket: 'pass' }]));
       if (bin === 'git' && rest[0] === 'merge-base' && rest[2] === 'deadbee' && rest[3] === 'master') {
         return { stdout: '', stderr: '', exitCode: 1 };
@@ -297,7 +423,7 @@ describe('healSafeResidue — D4 safe fast-forward of the local base (Task 1.6)'
       return ok('');
     });
     const ctx = fixtureCtx({ resolved: { baseBranch: 'master' }, io: { exec } });
-    ctx.state.cards.C1 = fixtureCard({ branch: 'feat/c1-widget', pr: 12 });
+    ctx.state.cards.C1 = fixtureCard({ branch: 'feat/c1-widget', pr: 12, doneSha: 'donesha1' });
     const verifyConfig: VerifyConfig = {
       repoRoot: '/repo',
       remote: 'origin',

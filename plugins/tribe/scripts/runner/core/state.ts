@@ -15,8 +15,9 @@ import type {
 import type { StateIO } from '../ports/ports.ts';
 import { escalationPathOf } from './paths.ts';
 
-/** The only major version this runner understands today (D2). */
-export const CURRENT_STATE_VERSION = 1;
+/** The only major version this runner understands today (D2). v2 (D1) made `cards.<id>.tasks`
+ * required, so a v1 file can never be a valid v2 one — it is refused, never migrated. */
+export const CURRENT_STATE_VERSION = 2;
 
 /** Thrown by `parseState`/`loadState` when the state file's `v` field is not a version this
  * runner knows how to read. Never silently parsed as a lower/best-effort version. */
@@ -24,8 +25,10 @@ export class UnsupportedStateVersionError extends Error {
   readonly version: unknown;
 
   constructor(version: unknown) {
+    const what =
+      version === 1 ? 'campaign state v1 has no task index' : `Unsupported campaign state version ${JSON.stringify(version)}`;
     super(
-      `Unsupported campaign state version ${JSON.stringify(version)}; this runner supports v${CURRENT_STATE_VERSION}.`,
+      `${what}: this runner reads v2. A v1 state has no task index (cards.<id>.tasks) — re-author the state with the orchestrate-campaign skill.`,
     );
     this.name = 'UnsupportedStateVersionError';
     this.version = version;
@@ -127,6 +130,18 @@ const CardSchema = z.looseObject({
   // P4 fix-list item: same optional-with-no-default reasoning as `dependsOn`/`autoAnswerRounds`
   // above — only ever present when `shipCard` actually recorded a heal.
   healedResidue: z.array(z.string()).optional(),
+  // D1: the task index — pointers into the plan, at least one per card. `passedSha` and
+  // `doneSha` are runner-written progress, absent until a Done run passes.
+  tasks: z
+    .array(
+      z.looseObject({
+        id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'task id must match ^[A-Za-z0-9][A-Za-z0-9._-]*$'),
+        heading: z.string().min(1),
+        passedSha: z.string().optional(),
+      }),
+    )
+    .min(1),
+  doneSha: z.string().optional(),
 });
 
 export const CampaignStateSchema = z.looseObject({
@@ -167,6 +182,18 @@ function assertDependsOnReferentialIntegrity(state: CampaignState): void {
       if (!(dependencyId in state.cards)) {
         throw new UndefinedDependencyCardError(cardId, dependencyId);
       }
+    }
+  }
+}
+
+/** D1: a task id names one task within its card; two tasks sharing an id would make every
+ * per-task record (`passedSha`, a Done run) ambiguous. zod can't express uniqueness. */
+function assertUniqueTaskIds(state: CampaignState): void {
+  for (const [cardId, card] of Object.entries(state.cards)) {
+    const seen = new Set<string>();
+    for (const { id } of card.tasks) {
+      if (seen.has(id)) throw new Error(`card ${cardId}: duplicate task id ${id}`);
+      seen.add(id);
     }
   }
 }
@@ -214,6 +241,7 @@ export function parseState(raw: unknown): CampaignState {
   assertSequenceReferentialIntegrity(state);
   assertDependsOnReferentialIntegrity(state);
   assertNoDependsOnCycles(state);
+  assertUniqueTaskIds(state);
   return state;
 }
 
@@ -363,6 +391,13 @@ export function resetCard(
   if ('healedResidue' in next) {
     clearedFields.push('healedResidue');
     delete next.healedResidue;
+  }
+  // D1: task progress belongs to the discarded run; the task index itself is structural.
+  if (next.tasks.some((task) => 'passedSha' in task)) clearedFields.push('tasks.passedSha');
+  next.tasks = next.tasks.map(({ passedSha: _cleared, ...task }) => task);
+  if ('doneSha' in next) {
+    clearedFields.push('doneSha');
+    delete next.doneSha;
   }
 
   return {

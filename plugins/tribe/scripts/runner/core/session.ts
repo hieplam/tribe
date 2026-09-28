@@ -12,13 +12,16 @@ export type { HookDecision, PinnedSessionOptions, SessionIO, SessionMessage, Spa
 
 /** Terminal outcome of one executor session, derived only from the typed `result` message —
  * never by scraping stdout (spec §D3: done is script-verified, agent SHIPPED is a signal). */
-export type SessionOutcome = 'shipped' | 'needs_direction' | 'error' | 'timeout';
+export type SessionOutcome = 'shipped' | 'task_done' | 'needs_direction' | 'error' | 'timeout';
 
 export interface SessionResult {
   outcome: SessionOutcome;
   finalText: string;
   pr?: number;
   sha?: string;
+  /** Set only on `task_done`: the task the session claims and the branch it committed on. */
+  taskId?: string;
+  branch?: string;
 }
 
 export interface RunSessionInput {
@@ -126,7 +129,7 @@ export function decideWaitToolHook(input: unknown): HookDecision {
  *
  * Bash-only, and only when `parseMergeCommand` says the command is a merge attempt — every
  * other tool call, and every non-merge Bash command, gets an empty decision (no opinion). */
-export function decideMergeGateHook(io: Pick<SessionIO, 'execInRepo'>) {
+export function decideMergeGateHook(io: Pick<SessionIO, 'execInRepo' | 'currentDoneSha'>) {
   return async (hookInput: unknown): Promise<HookDecision> => {
     const event = (hookInput ?? {}) as { tool_name?: unknown; tool_input?: unknown };
     const toolName = typeof event.tool_name === 'string' ? event.tool_name : '';
@@ -148,10 +151,14 @@ export function decideMergeGateHook(io: Pick<SessionIO, 'execInRepo'>) {
       return buildMergeGateDecision({ parsed });
     }
 
-    const argv = ['gh', 'pr', 'checks', ...(parsed.prRef ? [parsed.prRef] : []), '--json', 'name,state'];
+    const prArgs = parsed.prRef ? [parsed.prRef] : [];
     try {
-      const checksExec = await io.execInRepo(argv);
-      return buildMergeGateDecision({ parsed, checksExec });
+      const checksExec = await io.execInRepo(['gh', 'pr', 'checks', ...prArgs, '--json', 'name,state']);
+      // Spec §4.6: read the head only for the pure gate to compare with the Done commit; a failed
+      // or unparseable read is null, which the gate denies.
+      const headExec = await io.execInRepo(['gh', 'pr', 'view', ...prArgs, '--json', 'headRefOid']);
+      const headSha = headExec.exitCode === 0 ? parseHeadRefOid(headExec.stdout) : null;
+      return buildMergeGateDecision({ parsed, checksExec, headSha, doneSha: io.currentDoneSha?.() ?? null });
     } catch {
       // A rejecting execInRepo (e.g. `gh` missing, ENOENT) must still resolve to the
       // module's own fail-closed deny decision, never propagate as a rejected promise —
@@ -160,6 +167,17 @@ export function decideMergeGateHook(io: Pick<SessionIO, 'execInRepo'>) {
       return buildMergeGateDecision({ parsed });
     }
   };
+}
+
+/** `gh pr view --json headRefOid` stdout -> the head sha, or null when it is not that shape. */
+function parseHeadRefOid(stdout: string): string | null {
+  try {
+    const parsed = JSON.parse(stdout) as { headRefOid?: unknown } | null;
+    return typeof parsed?.headRefOid === 'string' && parsed.headRefOid !== '' ? parsed.headRefOid : null;
+  } catch {
+    // Unparseable gh output is an unreadable head: the gate denies on null (fail closed).
+    return null;
+  }
 }
 
 /** The reason a denied filesystem-wide scan reports back. Phrased as an INSTRUCTION, not just a
@@ -233,8 +251,10 @@ export function buildSessionOptions(
   return options;
 }
 
-const SHIPPED_RE = /SHIPPED\s+#?(\d+)\s+([0-9a-f]{7,40})/i;
-const NEEDS_DIRECTION_RE = /NEEDS_DIRECTION:/;
+/** The three terminal lines (spec §4.4). A marker counts anywhere on a line, as the single-marker
+ * parser before it did, so `later: SHIPPED 12 abc1234` is still a SHIPPED line. */
+const TERMINAL_LINE_RE =
+  /(?:(SHIPPED)\s+#?(\d+)\s+([0-9a-f]{7,40})|(TASK_DONE)\s+([A-Za-z0-9][A-Za-z0-9._-]*)\s+(\S+)|(NEEDS_DIRECTION):)/i;
 
 /** Parses the typed `result` message into a `SessionResult` — the only place stdout-style
  * scraping happens, and even here it operates on the SDK's own structured `result` field,
@@ -249,16 +269,18 @@ function parseResultMessage(message: SessionMessage): SessionResult {
     };
   }
 
-  const shipped = finalText.match(SHIPPED_RE);
-  if (shipped) {
-    return { outcome: 'shipped', finalText, pr: Number(shipped[1]), sha: shipped[2] };
-  }
-  if (NEEDS_DIRECTION_RE.test(finalText)) {
+  // Spec §4.4: with three terminal lines, the LAST one the session wrote is its answer.
+  const lines = finalText.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = TERMINAL_LINE_RE.exec(lines[i] as string);
+    if (!m) continue;
+    if (m[1]) return { outcome: 'shipped', finalText, pr: Number(m[2]), sha: m[3] };
+    if (m[4]) return { outcome: 'task_done', finalText, taskId: m[5], branch: m[6] };
     return { outcome: 'needs_direction', finalText };
   }
   return {
     outcome: 'error',
-    finalText: finalText || 'result message carried neither a SHIPPED nor a NEEDS_DIRECTION terminal line',
+    finalText: finalText || 'result message carried no SHIPPED, TASK_DONE or NEEDS_DIRECTION terminal line',
   };
 }
 
@@ -294,7 +316,7 @@ async function consumeSession(
 ): Promise<SessionResult> {
   let sessionMessages: AsyncIterable<SessionMessage>;
   try {
-    sessionMessages = io.spawnSession({ prompt: input.brief, options });
+    sessionMessages = io.spawnSession({ prompt: input.brief, options, cardId: config.card });
   } catch (err) {
     // A failed resume attempt (no transcript, SDK error) must surface as a typed error, not
     // a crash — §D4's resume matrix falls back to a fresh session on this result.

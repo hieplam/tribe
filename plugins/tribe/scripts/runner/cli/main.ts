@@ -15,7 +15,8 @@ import {
   type LoopResult,
   type RunLoopConfig,
 } from '../core/loop.ts';
-import { loadState, resetCard, serializeState } from '../core/state.ts';
+import { loadState, resetCard, serializeState, UnsupportedStateVersionError } from '../core/state.ts';
+import { TaskIndexError } from '../core/plan-index.ts';
 import { campaignStatePathOf, escalationPathOf, reportDirOf } from '../core/paths.ts';
 import { buildRealIo, unsetAnthropicApiKeyEnv } from '../adapters/run-io.adapter.ts';
 import { launchViewer } from '../adapters/viewer-launch.adapter.ts';
@@ -44,6 +45,7 @@ import { SUPERVISOR_EXIT_NEEDS_OWNER, SUPERVISOR_EXIT_USAGE } from '../core/supe
 import { buildSupervisorIo } from '../adapters/supervisor-io.adapter.ts';
 import { sdkSpawnSession } from '../adapters/session.adapter.ts';
 import { sessionDoubleScriptPath, spawnSessionDouble } from '../adapters/session-double.adapter.ts';
+import { executorDoubleScriptPath, spawnExecutorDouble } from '../adapters/executor-double.adapter.ts';
 import type { SpawnSessionParams } from '../core/session.ts';
 
 const DEFAULT_SESSION_TIMEOUT_MS = 3 * 60 * 60 * 1000; // spec §2: 3h protocol default.
@@ -914,6 +916,13 @@ export async function main(): Promise<void> {
   }
 
   const io = buildRealIo(parsed.config);
+  // Spec §4.12: TRIBE_RUNNER_SESSION_DOUBLE swaps only the LLM for a scripted process (hermetic
+  // V3/G5 E2Es). Unset in every production run -> spawnSession stays the real SDK spawn.
+  const executorDouble = executorDoubleScriptPath();
+  if (executorDouble !== null) io.spawnSession = (params) => {
+    if (!params.cardId) throw new Error('executor double spawn is missing its card id');
+    return spawnExecutorDouble(executorDouble, parsed.config.homeDir, params.cardId, params);
+  };
   const startedAt = new Date().toISOString();
 
   // P10: scrub a stray ANTHROPIC_API_KEY line out of the target repo's .env.local. Routed
@@ -970,9 +979,10 @@ export async function main(): Promise<void> {
   }
 
   if (thrown) {
-    console.error(
-      `campaign runner: unexpected error: ${thrown instanceof Error ? thrown.message : String(thrown)}`,
-    );
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    // A state or task index the author must fix is a refusal with instructions, not a crash.
+    const isRefusal = thrown instanceof TaskIndexError || thrown instanceof UnsupportedStateVersionError;
+    console.error(isRefusal ? `campaign runner: refused: ${message}` : `campaign runner: unexpected error: ${message}`);
     process.exit(EXIT_ERROR);
     return;
   }

@@ -81,10 +81,10 @@ new_campaign() {
   local home="$CAMPAIGNS/$slug"
   mkdir -p "$home/escalations" "$home/watchdog" "$home/runs/$RUN_A/logs"
   cat > "$home/campaign-state.json" <<JSON
-{"v":1,"campaign":"$slug","mergePolicy":"regular-merge-only","sequence":["c1"],
+{"v":2,"campaign":"$slug","mergePolicy":"regular-merge-only","sequence":["c1"],
  "schemaLockPaths":[],"docsOnlyPaths":[],"ownerOnlyEscalations":[],
  "cards":{"c1":{"status":"shipped","spec":"docs/s.md","plan":"docs/p.md","branch":null,
-   "baseSha":null,"pr":1,"mergeSha":"deadbeef","sessionId":null,"updatedAt":null}}}
+   "baseSha":null,"pr":1,"mergeSha":"deadbeef","sessionId":null,"updatedAt":null,"tasks":[{"id":"T1","heading":"Task 1"}]}}}
 JSON
   : > "$home/answers.md"
   : > "$home/runs/$RUN_A/logs/session.log"

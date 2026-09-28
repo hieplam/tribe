@@ -51,9 +51,9 @@ All paths below that are relative are relative to `--repo` unless noted otherwis
 | --- | --- | --- |
 | `--repo` | yes | Target repo root — `cwd` for every `gh`/`git` call and the executor session. |
 | `--model` | yes | Executor model tier passed to each spawned session. |
-| `--home` | yes | The campaign's machine-local operational home (absolute, or resolved against `cwd`). One campaign per home, so every operational artifact resolves to a fixed name under it (`core/paths.ts`) — no separate flag for any of them. Full layout: `campaign-state.json`, `answers.md`, `escalations/<cardId>.md`, `campaign-report.json`, `campaign-report.md`, `.runner.lock`, `STOP`, `reports/<cardId>.md`, `runs/<run-id>/run.json` + `runs/<run-id>/logs/`. Matches the `~/.tribe/<repo-key>/campaigns/<campaign-slug>` convention, but this script never derives that key itself — the caller (normally `orchestrate-campaign`, via `tribe-home.sh`) computes it and passes it in (stateless-capability wall: this is an environment-specific value, not a value worth guessing). |
+| `--home` | yes | The campaign's machine-local operational home (absolute, or resolved against `cwd`). One campaign per home, so every operational artifact resolves to a fixed name under it (`core/paths.ts`) — no separate flag for any of them. Full layout: `campaign-state.json`, `answers.md`, `escalations/<cardId>.md`, `campaign-report.json`, `campaign-report.md`, `.runner.lock`, `STOP`, `reports/<cardId>.md`, `runs/<run-id>/run.json` + `runs/<run-id>/done.jsonl` + `runs/<run-id>/logs/`, and the transient Done-run scratch worktree `done/<cardId>` (see "Turns and the Done run"). Matches the `~/.tribe/<repo-key>/campaigns/<campaign-slug>` convention, but this script never derives that key itself — the caller (normally `orchestrate-campaign`, via `tribe-home.sh`) computes it and passes it in (stateless-capability wall: this is an environment-specific value, not a value worth guessing). |
 | `--logs-dir` | no | Session log destination. Default: `<home>/runs/<run-id>/logs/` (i.e. this invocation's own run directory under `--home`). Explicit `--logs-dir` overrides. |
-| `--session-timeout` | no | Wall-clock abort per executor session. Accepts `<n>ms`, `<n>s`, `<n>m`, `<n>h`, or a plain millisecond integer (e.g. `3h`, `30m`, `90s`, `5000ms`, `5000`). Default: `3h`. |
+| `--session-timeout` | no | Wall-clock abort per executor **turn** (one resumed query of the card's session — see "Turns and the Done run"), not per card. Accepts `<n>ms`, `<n>s`, `<n>m`, `<n>h`, or a plain millisecond integer (e.g. `3h`, `30m`, `90s`, `5000ms`, `5000`). Default: `3h`. |
 | `--dry-run` | no | Derive and print the next action with **zero side effects** — no lock, no writes, no session, no report file (see the report contract below). |
 | `--cards` | no | Comma-separated list of card ids — restricts the loop to only these ids, in the state's own `sequence` order. Default: the full sequence. |
 | `--max-cards` | no | Positive integer — stop after WORKING this many cards in this run (a card actually `shipped`/`escalated`/`stopped` this pass — see D5′ below; a card merely parked on a prior run's escalation, or skipped as `blocked`, does not consume this budget). Default: unbounded (run until `done` or the budget is spent — an escalation no longer stops the run, see D5′). |
@@ -85,6 +85,8 @@ the runner *log* (D6).
                                   there and never clears it
   runs/<run-id>/
     run.json                     this invocation's run record (schema below)
+    done.jsonl                   append-only: one row per Done command the runner ran, plus one
+                                  summary row per Done run (see "Turns and the Done run")
     logs/…                       this invocation's session logs (default --logs-dir)
 ```
 
@@ -123,6 +125,11 @@ writes nothing (it returns before the lock is ever acquired).
 `statePath`/`answersPath`/`escalationsDir` are recorded **absolute** (resolved against
 `--home`, via `core/paths.ts`) — a reader of `run.json` never has to re-derive them relative to
 anything. `argv` is the raw `process.argv.slice(2)` this invocation was started with.
+
+`done.jsonl` sits beside `run.json` because `run.json` is a snapshot rewritten atomically and
+polled for liveness, while Done-run rows only ever accumulate: an append-only sibling is crash-safe
+with no rewrite. It is created on the first Done run of the invocation (`doneRecordPathOf`,
+`core/run-record.ts`); its row shapes are in "Turns and the Done run".
 
 ## Live viewer
 
@@ -174,17 +181,20 @@ be authored before the runner is ever invoked (normally by a Shaman-authority se
 A planning; see `plugins/tribe/agents/shaman.md`'s Mode 3). This section documents the schema
 completely enough to author a valid file from this README alone, derived from the authoritative
 source: the zod schema in `state.ts`'s `CampaignStateSchema`/`CardSchema` and the TypeScript
-types in `types.ts`. Schema version stays `"v": 1` — every field this effort added is optional,
-so a pre-existing v1 file with none of them round-trips through a load→save cycle
-byte-identical.
+types in `types.ts`. Schema version is **`"v": 2`** (card runner-driver-only, D1): every card now
+carries a required **task index** (`tasks`), a list of pointers into its plan. **A `v: 1` file is
+refused, never migrated** — it has no task index, and a v1 card has no Done sections to point at, so
+no automatic migration is possible; re-author the state with the `orchestrate-campaign` skill.
+Every other field is unchanged, and a v2 file with none of the runner-written fields (`passedSha`,
+`doneSha`, below) round-trips through a load→save cycle byte-identical.
 
 ### Top-level fields
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `v` | `number` (int) | yes | Must equal `1` (`CURRENT_STATE_VERSION`). Any other value — including a missing `v` — is rejected before structural validation even runs (see Validation errors below). |
+| `v` | `number` (int) | yes | Must equal `2` (`CURRENT_STATE_VERSION`). Any other value — including `1` and a missing `v` — is rejected before structural validation even runs (see Validation errors below). |
 | `campaign` | `string` | yes | Free-form campaign name/id. Echoed verbatim as `campaign` in the report contract. |
-| `planning` | `{ mode: "shaman" \| "warchief-fanout" }` | **optional** | Records which Stage-A authorship mode produced this campaign's specs/plans (design §O2) — `"shaman"` when the orchestrating session authored the How docs itself, `"warchief-fanout"` when it dispatched one planning-Warchief per card — so a session resuming the campaign later knows without re-deriving it. Not declared in `state.ts`'s `CampaignStateSchema`/`CardSchema` at all: both use `z.looseObject`, which preserves unknown top-level keys through a load→save cycle instead of stripping them (the same property that keeps the v1 byte-identical round-trip true), so `planning` — and any future campaign metadata a caller invents — survives even though the runner itself never reads or interprets it. |
+| `planning` | `{ mode: "shaman" \| "warchief-fanout" }` | **optional** | Records which Stage-A authorship mode produced this campaign's specs/plans (design §O2) — `"shaman"` when the orchestrating session authored the How docs itself, `"warchief-fanout"` when it dispatched one planning-Warchief per card — so a session resuming the campaign later knows without re-deriving it. Not declared in `state.ts`'s `CampaignStateSchema`/`CardSchema` at all: both use `z.looseObject`, which preserves unknown top-level keys through a load→save cycle instead of stripping them (the same property that keeps the byte-identical round-trip true), so `planning` — and any future campaign metadata a caller invents — survives even though the runner itself never reads or interprets it. |
 | `mergePolicy` | `string` | yes | Free-form; carried through into every executor brief, not itself interpreted by this runner. |
 | `sequence` | `string[]` | yes | Card ids, in build order. Every id **must** have a matching entry under `cards` — a dangling id is rejected at load (`UndefinedSequenceCardError`). |
 | `schemaLockPaths` | `string[]` | yes (`[]` is valid) | Paths whose diff across the card branch's **own commits** must stay empty unless that card's plan front-matter declares `allowsSchemaChange: true` (D3 point 6; see "The schema guard's range" below for exactly what "own commits" means and why it changed from `baseSha`). The plan is read **after** the merge, and a card may delete its own planning docs as part of its work — a plan that is gone by then simply grants no waiver (the guard still passes on an empty diff, and names the missing plan when it fails); it never crashes the finalise step. Campaign config, never hardcoded (W1). |
@@ -224,18 +234,21 @@ by design.
 | `status` | `"staged" \| "running" \| "shipped" \| "escalated" \| "blocked"` | yes | Author every card `staged`. `running`/`shipped`/`escalated` are written by the loop as it works the card. `blocked` is **derived** (see `dependsOn`/`blocked` below) — do not hand-author a card as `blocked`; the next `nextCard` call reconciles it back to `staged` if it has no unmet dependency. |
 | `spec` | `string \| null` | yes (nullable) | Path (relative to `--repo`) to the card's spec file. Missing on disk (or `null`) when the card is next up triggers `PLANNING_NEEDED`, which the loop escalates. Resolved against `--repo`'s **working tree**, so if that checkout is parked on another ref (a detached HEAD at a release tag, say) every card reads as missing; the escalation — and `--dry-run`'s `planningNeeded.note` — then names the checkout and the `git -C <repo> checkout <base>` that restores it. |
 | `plan` | `string \| null` | yes (nullable) | Same, for the plan file. |
-| `branch` | `string \| null` | yes (nullable) | The card's git branch, once work starts. `null` at authoring time — this is exactly what makes the D4 resume matrix classify a freshly-authored card `fresh`. The loop fills it in from the card's own PR (`gh pr view --json headRefName`) as soon as a PR number is known, because the executor session picks the branch name itself and never reports it back. |
+| `branch` | `string \| null` | yes (nullable) | The card's git branch, once work starts. `null` at authoring time — this is exactly what makes the D4 resume matrix classify a freshly-authored card `fresh`. The loop fills it in from the first `TASK_DONE <task-id> <branch>` line it accepts (see "Turns and the Done run"), and otherwise from the card's own PR (`gh pr view --json headRefName`) as soon as a PR number is known — the executor session picks the branch name itself. |
 | `baseSha` | `string \| null` | yes (nullable) | The commit the card's branch is built from. **No longer where D3's schema-lock diff is taken from** — see "The schema guard's range" below; `baseSha` is still recorded and still used elsewhere (e.g. as the anchor a hand-reset card must not keep stale, per R3 below). `null` at authoring time; the loop records `origin/<baseBranch>` into it immediately **before** spawning the card's session, and never overwrites an existing value (a resumed card keeps the base it originally started from) — except a blind-fresh spawn (no prior session/PR/digest), which always re-stamps it (P11, ruling R3). To retry a card from scratch, use the `reset-card` subcommand below — never hand-edit this field; a hand-reset card that keeps a stale `baseSha` is the exact incident R3 exists to prevent. |
 | `pr` | `number \| null` | yes (nullable) | The card's PR number, once opened. `null` at authoring time. |
 | `mergeSha` | `string \| null` | yes (nullable) | The merge commit sha, once shipped. `null` until shipped. |
 | `sessionId` | `string \| null` | yes (nullable) | The SDK-assigned executor session id, written the instant a session starts (crash-safe write, before anything else). `null` at authoring time. |
 | `updatedAt` | `string \| null` | yes (nullable) | ISO timestamp of the card's last loop-written change. `null` at authoring time. |
 | `dependsOn` | `string[]` | **optional** | Card ids (each must resolve under `cards`) this card must not start before. Omit entirely for an independent card (the common case) — do not author `[]` as a substitute for omitting it. A dangling id is rejected at load (`UndefinedDependencyCardError`); a cycle — direct (`A -> A`) or indirect (`A -> B -> A`) — is also rejected at load (`CircularDependencyError`). See "`dependsOn` / `blocked`" below for runtime behavior. |
+| `tasks` | `{ id, heading, passedSha? }[]` | **yes** (≥ 1 item) | The card's **task index** (D1), in plan order, authored at Stage A. A reference, not a copy: `heading` is the exact text of one heading line in the card's plan (the `#`s and surrounding whitespace stripped); the Done commands are read from the plan on every run, never stored. `id` must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` and be unique within the card (it travels in the `TASK_DONE` line and in file names). `passedSha` is **runner-written** — the commit at which this task's Done commands last passed — and absent at authoring time. See "Turns and the Done run" for how the plan is read. |
+| `doneSha` | `string` | **optional, runner-written** | The commit at which **every** task's Done commands passed together (set by the Done run of the last task). Absent at authoring time. The merge gate and the final gate's `doneAtHead` point both require the merged head to be this commit. |
 | `autoAnswerRounds` | `number` | **optional** | How many Stage-C auto-answer round-trips this card has been through (wall W7 caps this at 2 — see the runner README's escalation section and `shaman.md`'s Stage C protocol). Omit at authoring time. |
 
-**Why `dependsOn`/`autoAnswerRounds` are optional with no schema-injected default:** a
-schema-level default (e.g. `.default(0)`) would appear in a re-serialized file even when the
-source JSON never had the key, breaking the v1 byte-identical round-trip contract. Omitting them
+**Why `dependsOn`/`autoAnswerRounds` (and `passedSha`/`doneSha`) are optional with no
+schema-injected default:** a schema-level default (e.g. `.default(0)`) would appear in a
+re-serialized file even when the source JSON never had the key, breaking the byte-identical
+round-trip contract. Omitting them
 at authoring time is correct; callers read the conceptual default themselves
 (`card.autoAnswerRounds ?? 0`; "no `dependsOn`" simply means independent).
 
@@ -250,7 +263,7 @@ read-only, so there is no session id to copy and no way to take over a runner-ow
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "campaign": "widget-export",
   "mergePolicy": "regular-merge-only",
   "sequence": ["A1", "A2", "A3"],
@@ -267,7 +280,11 @@ read-only, so there is no session id to copy and no way to take over a runner-ow
       "pr": null,
       "mergeSha": null,
       "sessionId": null,
-      "updatedAt": null
+      "updatedAt": null,
+      "tasks": [
+        { "id": "T1", "heading": "Task 1: export schema" },
+        { "id": "T2", "heading": "Task 2: export command" }
+      ]
     },
     "A2": {
       "status": "staged",
@@ -279,7 +296,11 @@ read-only, so there is no session id to copy and no way to take over a runner-ow
       "mergeSha": null,
       "sessionId": null,
       "updatedAt": null,
-      "dependsOn": ["A1"]
+      "dependsOn": ["A1"],
+      "tasks": [
+        { "id": "T1", "heading": "Task 1: export schema" },
+        { "id": "T2", "heading": "Task 2: export command" }
+      ]
     },
     "A3": {
       "status": "staged",
@@ -290,14 +311,20 @@ read-only, so there is no session id to copy and no way to take over a runner-ow
       "pr": null,
       "mergeSha": null,
       "sessionId": null,
-      "updatedAt": null
+      "updatedAt": null,
+      "tasks": [
+        { "id": "T1", "heading": "Task 1: export schema" },
+        { "id": "T2", "heading": "Task 2: export command" }
+      ]
     }
   }
 }
 ```
 
 `A2` will not start until `A1` ships; `A3` is independent and can ship in any order relative to
-the other two.
+the other two. Each card's plan must carry a heading whose text is exactly `Task 1: export schema`
+(at any level, e.g. `### Task 1: export schema`) with a `Done` section inside it, and the same for
+`Task 2: export command` — otherwise the run is refused at load (`TaskIndexError`, below).
 
 ### Validation errors (thrown by `parseState`/`loadState`, `state.ts`, at load time)
 
@@ -306,10 +333,25 @@ runs, never discovered card-by-card mid-campaign:
 
 | Error | Thrown when |
 | --- | --- |
-| `UnsupportedStateVersionError` | `v` is not exactly `1` (including a missing `v`). |
+| `UnsupportedStateVersionError` | `v` is not exactly `2` (including a missing `v`). For `v: 1` the message names the change: a v1 state has no task index (`cards.<id>.tasks`) — re-author it with the `orchestrate-campaign` skill. |
 | `UndefinedSequenceCardError` | `sequence` names a card id with no matching entry under `cards` (e.g. a typo). |
 | `UndefinedDependencyCardError` | A card's `dependsOn` names an id with no matching entry under `cards`. |
 | `CircularDependencyError` | The `dependsOn` graph contains a cycle — a direct self-dependency (`A -> A`) or an indirect one (`A -> B -> A`). The error carries the full cycle path. |
+| (plain `Error`) | A card's `tasks` has two entries with the same `id` (`card <id>: duplicate task id <task>`); a missing/empty `tasks` or a task id outside the grammar fails the zod parse. |
+
+**`TaskIndexError` (`core/plan-index.ts`) — thrown by the loop right after load, not by
+`parseState`.** For every card that is in the `--cards`-filtered sequence, is not `shipped`, and
+whose plan file exists on disk (a missing plan stays the `planning_needed` escalation), the runner
+parses the plan and resolves every task ref against it (the plan format is in "Turns and the Done
+run"). The problems are **collected across every card before throwing** — never first-fail — so one
+error names every failing card, task, heading and reason (`dangling_heading`, `duplicate_heading`,
+`missing_done`, `ambiguous_done`, `missing_done_block`, `empty_done`,
+`continuation_not_supported`, `plan_outside_repo`). Plan paths are resolved through symlinks and
+must remain inside the real `--repo` root before existence checks or reads. The CLI prints `campaign runner: refused: <message>` on stderr and
+exits `4` (`EXIT_ERROR`) — the same path `UnsupportedStateVersionError` takes — before any session
+spawns and without writing `campaign-state.json` or an escalation. **`--dry-run` refuses the same
+way**, so Stage B's dry run catches a dangling ref before a launch
+(`tests/test-runner-task-index-refusal.sh`).
 
 ### The supervisor's additional input: `runs/<runId>/run.json`
 
@@ -380,6 +422,7 @@ orchestrating session can quote exactly what changed without re-deriving it from
 | `mergeSha` | `null` | Same stale-fallback shape, one line over; also purely observational once the card isn't `shipped`. |
 | `updatedAt` | `null` | Bookkeeping only, never read to decide anything. |
 | `autoAnswerRounds`, `healedResidue` | **deleted** (become absent, not `0`/`[]`) | Both fields are schema-optional specifically so "never happened" means absent — a stale count/record from the discarded attempt would misreport the new one. |
+| every `tasks[i].passedSha`, `doneSha` | **deleted** (`clearedFields` lists `tasks.passedSha` / `doneSha` when present) | Done-run progress belongs to the discarded attempt; the task index itself (`id`, `heading`) is structural and stays. |
 | `branch` | **unchanged** | Never trusted blindly — `deriveCardPhase` re-derives the true phase from live `gh`/`git` every time `branch` is non-null. Clearing it would skip that reality-check and the resume matrix's own residue-cleanup path (`revert_and_redo`), reopening the duplicate-PR hazard a blind fresh spawn over a still-open PR creates. |
 | `dependsOn`, `spec`, `plan` | **unchanged** | Structural (this card's declared dependencies and doc paths), not a per-run value — a reset of one card must never rewire the campaign's dependency graph. |
 | any unknown field (top-level or per-card) | **unchanged, byte-faithful** | `state.ts`'s `looseObject` schemas already guarantee this for every load→save cycle; `reset-card` is no exception. |
@@ -429,6 +472,119 @@ bun plugins/tribe/scripts/runner/run.ts \
   --cards <card-id> --max-cards 1
 ```
 
+## Turns and the Done run
+
+Card runner-driver-only (spec §4.3–§4.6). The plan is the executor's only instructions; the runner
+drives it **task by task** and runs each task's Done commands itself. One executor session per card,
+as before, now driven in **turns**: each turn is one query to that session, every turn after the
+first a `resume: <sessionId>` of it (`driveCardTurns`, `core/loop/turns.ts`, called from
+`actOnCard`). The session keeps its own context across turns, so the next task knows what the
+previous one did.
+
+### The plan format the runner reads (`core/plan-index.ts`)
+
+Spec §4.3 is the contract — **CommonMark is not**. Under-reading a Done command is a bug; refusing
+an ambiguous plan is by design.
+
+- A **heading** is a line outside a fenced code block matching `^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$`.
+  Closing `#`s are stripped only after whitespace, so a heading such as `Task: C#` keeps its `#`.
+  A fence opened by N ≥ 3 backticks or tildes closes only on ≥ N of the same character.
+- A task's **section** is its heading plus every line up to the next heading of the same or a
+  higher level. The heading text must match exactly one heading in the file (`dangling_heading`,
+  `duplicate_heading`).
+- Its **Done section** is the one heading inside the task section whose text is `Done`
+  (case-insensitive), at a deeper level (`missing_done`, `ambiguous_done`).
+- Its **Done block** is the first fenced code block after the Done heading and before the next
+  heading (`missing_done_block`); a fence that never closes is refused (`unclosed_done_block`).
+  Its **Done commands** are the block's lines, trimmed, skipping
+  blank lines and lines starting with `#` (none → `empty_done`). A line ending in `\` is refused
+  (`continuation_not_supported`), never guessed. Each line is one command, run with `bash -c`.
+
+### The step order
+
+1. **Next step** (`nextStep`, `core/done.ts`, pure): the first task with no `passedSha`; once every
+   task has one and `doneSha` is set, **deliver**.
+2. **The first turn** is the full brief (`core/brief-template.md`) followed by the step's prompt
+   (or, for a resumed session, the step's prompt alone — see "Resume semantics"). **Every later
+   turn** is only the step's prompt (`core/turn-prompts.ts`): a *task turn* (the task id and heading,
+   the plan path, its Done commands verbatim), a *done-failed turn* (the failing command, its exit
+   code or timeout, duration, the last 60 lines of stdout and stderr, the commands not run, the
+   attempt count), a *protocol-error turn* (why the last turn could not be accepted, then the step
+   again), or the *deliver turn* (push, PR, checks green in the foreground, `gh pr merge --merge`,
+   delete the remote branch, remove the worktree, fast-forward the local base in `--repo`).
+3. **Accepting `TASK_DONE <task-id> <branch>`** — the runner trusts the disk, not the words: the id
+   must be the task the turn asked for (during delivery, the last task); the branch must exist as
+   a literal `refs/heads/<branch>` in `--repo` (revision expressions are refused), equal
+   `card.branch` once that is known, and its tip must
+   descend from `card.baseSha`. The first accepted line records and persists `card.branch` before
+   its Done run, even if that run fails.
+4. **The Done run** at that tip for tasks 1..k (below). Pass → every task 1..k gets
+   `passedSha = tip`, and if k is the last task, `doneSha = tip`; persisted immediately. Fail → a
+   done-failed turn.
+5. **`SHIPPED <pr> <sha>`** is accepted only at the deliver step; before that it is a protocol error
+   naming the tasks that remain. At the deliver step it runs the D3 done check ("The done check").
+6. **`NEEDS_DIRECTION: <q>`** at any step → the `needs_direction` escalation. A turn with no terminal
+   line, or a timeout, stops the card the way a session error always has (bounded `stopped` retry).
+
+On a later invocation that starts with every task already passed, the runner re-runs the current
+cumulative Done commands at `doneSha` before the deliver turn. A failure clears `doneSha` and the
+last task's `passedSha`, then opens the last task's done-failed turn at attempt 1.
+
+### The three terminal lines
+
+`TASK_DONE <task-id> <branch>`, `SHIPPED <pr> <sha>`, `NEEDS_DIRECTION: <q>` (`parseResultMessage`,
+`core/session.ts`). The **last** line of the session's final text that carries any of the three
+decides — with three possible answers, "last wins" is the unambiguous rule.
+
+### The 3-attempt budget
+
+At most **3 unaccepted turns per step** (`MAX_STEP_ATTEMPTS = 3`, a constant, not a flag): a failed
+Done run and a protocol error each spend one attempt, and the third escalates the card
+`done_failed` with the last problem (the failing command and its output tail, or the refusal
+reason). A step that passes resets the count for the next step. **During delivery, every turn that
+does not end in an accepted `SHIPPED` spends one attempt — a `TASK_DONE` re-check included, whether
+its Done run passes or fails** (a pass still records the new `doneSha`), so a session that never
+delivers cannot loop forever (Shaman ruling R-2.14, spec §4.4 item 6). The budget lives in memory
+for one `actOnCard` call; the loop's existing bounded retries of a `stopped` card cap the total.
+
+### The Done run
+
+- **Where:** a detached scratch worktree of the tip at `<home>/done/<cardId>`
+  (`git worktree add --detach --force`), removed afterwards (`git worktree remove --force`), with a
+  crash leftover removed first; every add/remove is serialized with the runner's other worktree
+  mutations (`serializeRepoGitMutation`). The path comes from `doneWorktreePathOf`
+  (`core/paths.ts`), which refuses a card id that would leave `<home>/done/`. Before checkout or
+  deletion, the adapter requires a real `<home>/done` directory under the real campaign home and
+  a non-symlink card path; `removeTree` repeats that guard. A refusal stops the card as an
+  infrastructure failure. A failed final removal also stops the card as infrastructure failure
+  after the Done record is written. Running from a clean checkout of the
+  commit — never the session's worktree — makes the check about committed work; a plan whose Done
+  commands need a bootstrap (`bun install`) lists it as its first command.
+- **What:** the Done commands of tasks 1..k in plan order, **deduplicated by exact text** — the
+  cumulative set, each command once however many tasks list it (`doneCommandsThrough`,
+  `core/plan-index.ts`). Each runs as `bash -c <line>` (`DonePort.runShell`,
+  `adapters/run-io.adapter.ts`, the only code that spawns a Done command) with `cwd` = the scratch
+  worktree, a 10-minute timeout that kills the whole process group, and the process environment
+  plus five variables: `RUNNER_CAMPAIGN_HOME`, `RUNNER_CARD_ID`, `RUNNER_TASK_ID` (= the step's task
+  k), `RUNNER_BASE_SHA`, `RUNNER_REPO`. The first non-zero exit (or timeout) stops the run; the
+  rest are recorded as not run. A failure of the runner's own checkout is not charged to the
+  session: the card stops, non-retryable.
+- **Record (`<home>/runs/<runId>/done.jsonl`, append-only):** one row per executed command —
+  `{ at, cardId, stepTask, attempt, sha, kind: "command", tasks: [ids listing this command],
+  command, exitCode, timedOut, durationMs, stdoutTail, stderrTail }` — then one summary row
+  `{ at, cardId, stepTask, attempt, sha, kind: "done_run", passed, failedCommand, notRun }`.
+  Tails are the last 60 lines, capped at 4000 characters.
+
+### The merge gate learns the Done commit
+
+The pre-merge `PreToolUse` hook (`decideMergeGateHook`, `core/session.ts`; the pure decision is
+`buildMergeGateDecision`, `core/merge-gate.ts`) denies a `gh pr merge` unless every check is green
+**and** the PR head (`gh pr view --json headRefOid`) is the card's current `doneSha`. An unreadable
+head or no `doneSha` denies (fail closed). The deny reason steers: end the turn with
+`TASK_DONE <last-task-id> <branch>` so the runner re-runs the Done commands on the latest commit.
+Both `gh` reads are bounded. The final gate's `doneAtHead` point ("The done check") repeats the
+comparison after the merge, for a merge that went around the hook.
+
 ## Resume semantics (spec §D4)
 
 **The file is data, `gh`/`git` are authority.** On every start, before acting on a card, the
@@ -440,11 +596,11 @@ state file's own `status` field. The resume matrix, exactly as implemented in
 | --- | --- | --- |
 | Escalation file exists for the card (unless `--include-escalated`) | `escalation_pending` | **Park** — nothing new is attempted or written for this card this pass; the loop records it and moves straight to the next progressable card. The run only exits once no progressable card remains (D5′, below) — this is **not** an immediate abort (`loop.ts:957-965`). |
 | No `branch` recorded for the card | `fresh` | Spawn a fresh session (no digest — genuinely no trace). |
-| PR found for the branch, `state == "MERGED"` | `verify_only` | Run the D3 verify checks (the six points in "The done check (D3 replay)") and record — no session spawned. |
-| PR found for the branch, `state == "OPEN"`, a `sessionId` is recorded | `resume` (`pr_open`) | Attempt `resume: sessionId` with a "check CI, complete the merge" prompt. |
+| PR found for the branch, `state == "MERGED"` | `verify_only` | Run the D3 verify checks (the seven points in "The done check (D3 replay)") and record — no session spawned. |
+| PR found for the branch, `state == "OPEN"`, a `sessionId` is recorded | `resume` (`pr_open`) | Attempt `resume: sessionId` with the card's next-step prompt (see below). |
 | PR found for the branch, `state == "OPEN"`, no `sessionId` recorded | `fresh` (carries a digest) | **F8 fix, verified against `loop.ts:170-184`:** spawn fresh, but carrying a state digest that names the open PR and instructs the session to inspect and continue it rather than open a second one. This is explicitly **NOT** "same as no trace" — the in-code comment at `loop.ts:170-174` rebuts that reading directly. |
-| No PR, but the branch/worktree still exists, a `sessionId` is recorded | `resume` (`branch_no_pr`) | Attempt `resume: sessionId` with a "continue implementing" prompt. |
-| No PR, branch/worktree exists, no `sessionId` recorded | `revert_and_redo` | Delete the worktree + local/remote branch, then spawn fresh. |
+| No PR, but the branch/worktree still exists, a `sessionId` is recorded | `resume` (`branch_no_pr`) | Attempt `resume: sessionId` with the card's next-step prompt (see below). |
+| No PR, branch/worktree exists, no `sessionId` recorded | `revert_and_redo` | Delete the worktree + local/remote branch, clear every `passedSha` and `doneSha` (the branch they point at is gone), then spawn fresh. |
 | No PR, no branch, no worktree | `fresh` | Spawn a fresh session (no digest — genuinely no trace). |
 
 > **Correction (this doc previously got the fifth row wrong):** an earlier revision of this
@@ -462,7 +618,16 @@ distinct situations — never blindly:
    card and open a duplicate PR.
 2. A `resume` attempt itself surfaced a typed `error` outcome (no transcript, an SDK error —
    never on `timeout`, since the prior session may still be running); the loop falls back to a
-   **fresh** session carrying the digest (`loop.ts`'s `runCardSession`).
+   **fresh** session carrying the digest (the first turn of `turnDepsFor`'s `runTurn`,
+   `core/loop/card-actions.ts`).
+
+**What a resumed or re-spawned session is told.** There are no fixed "continue" prompts any more.
+Whatever the phase, the first turn carries the card's **next step** — the first task with no
+`passedSha`, or delivery once every task passed and `doneSha` is set (`nextStep`, `core/done.ts`) —
+rendered by `core/turn-prompts.ts`: a resumed session receives that step's prompt alone; a fresh
+session receives the full brief followed by it. The state digest a fresh fallback carries
+(`buildStateDigest`, `core/loop/phase.ts`) also lists the card's **progress**: which tasks passed
+and at which commit, the branch, and the next step (`progressDigestLines`).
 
 A `fresh` phase with no digest (the two rows above with no PR/branch/worktree trace at all) means
 there really is nothing to report — a blind fresh session is correct there. There is no
@@ -560,7 +725,8 @@ existed.
 ## Escalation / answers workflow (spec §D5) and D5′ park-and-continue (spec §O4)
 
 The runner escalates instead of deciding whenever: the executor reports
-`NEEDS_DIRECTION`, the D3 verify checks fail **twice** in a row for a card, or the next
+`NEEDS_DIRECTION`, a step spends its 3-attempt budget (`done_failed` — see "Turns and the Done
+run"), the D3 verify checks fail **twice** in a row for a card, or the next
 progressable card's spec/plan files are missing on disk (`PLANNING_NEEDED` — when the `--repo`
 checkout is not on the base branch, the escalation says so and how to restore it, since that is
 the usual reason files present on the base branch read as missing). On escalation, the
@@ -651,7 +817,7 @@ this gate.
 ## The done check (D3 replay)
 
 The executor's `SHIPPED <pr> <sha>` line is a signal only; `verifyShipped` (`core/verify.ts`) is
-the acceptance. It replays **six** points, each reported independently (never short-circuited),
+the acceptance. It replays **seven** points, each reported independently (never short-circuited),
 so a failed verdict names every failing point:
 
 | Point | Passes when |
@@ -662,6 +828,7 @@ so a failed verdict names every failing point:
 | `worktreeAndBranchGone` | The card's worktree and local/remote branch are removed. |
 | `schemaGuard` | No diff on `schemaLockPaths` across the card branch's own commits, unless the plan waives it. |
 | `localBaseSynced` | D4: the runner's own `--repo` checkout of the base branch contains the merge sha and has no commit `<remote>/<baseBranch>` lacks. |
+| `doneAtHead` | The merged PR's head (`gh api …/pulls/<pr>`'s `head.sha`, read by the same call as `merged`) equals the card's `doneSha` — the commit at which the runner last passed every task's Done commands. No `doneSha`, or an unreadable head, fails. This catches a merge that bypassed the merge gate (`gh api -X PUT …/merge`, the GitHub UI), and means a card with no passing Done run can never verify. |
 
 The `localBaseSynced` fetch and fast-forward merge have 120-second timeouts; its local Git
 queries and the heal's safety probes have 60-second timeouts. A timeout follows the existing
@@ -1186,7 +1353,10 @@ names, no filename convention required — enforced executably by `structure.tes
   `run-record.ts` (the `run.json` schema), `env-guard.ts` (`scrubEnvContent` — the
   `ANTHROPIC_API_KEY` line-removal logic, fix-list P10; see "ANTHROPIC_API_KEY guard" above),
   and `rulings.ts` (`answers.md` ruling parsing/classification, harness-gap-wiring PR C; see
-  "Rulings gate" above).
+  "Rulings gate" above), and the plan-driving modules (card runner-driver-only; see "Turns and the
+  Done run"): `plan-index.ts` (the plan reader and `TaskIndexError`), `done.ts` (next step,
+  Done-run judgement, rows, the attempt budget), `turn-prompts.ts` (every between-turn prompt), and
+  `loop/turns.ts` (`driveCardTurns`, the turn loop, every effect injected).
   Every world-touching effect is reached through a
   `ports/ports.ts` seam, never a direct import; each of these modules re-exports the seam
   type(s) its own tests/importers pull from it (e.g. `verify.ts` re-exports `VerifyIO`).
@@ -1220,7 +1390,7 @@ ESLint, which is deferred until typescript-eslint supports TS >= 7.1 (plan Amend
   should treat its absence, or a permanently-unfinalized record with a dead pid, as informative
   rather than assume every invocation always produces one.
 - **The verify retry (`verifyThenHealIfNeeded`/`healSafeResidue`, `core/loop/card-actions.ts`)
-  has zero delay.** The D3 done check (`verifyShipped`, six points) is attempted twice
+  has zero delay.** The D3 done check (`verifyShipped`, seven points) is attempted twice
   back-to-back with no sleep between attempts (before the second attempt the runner heals
   whatever residue P4's `decideResidueHeal` proves safe, per spec
   `docs/tribe/fixlists/2026-08-08-outstanding-17/P4-self-heal-safe-residue.md`, and
@@ -1259,6 +1429,12 @@ ESLint, which is deferred until typescript-eslint supports TS >= 7.1 (plan Amend
   (`SCAN_DENIED_REASON`), sharing its predicate (`isFilesystemWideScan`,
   `core/metrics/session-hygiene.ts`) with the `session-hygiene.ts` ratchet counter below so the
   guard and the measurement can never disagree about what a scan is.
+  **`TRIBE_RUNNER_SESSION_DOUBLE=<script>`** (test seam, spec §4.12,
+  `adapters/executor-double.adapter.ts`) swaps only the SDK spawn for a scripted process: the
+  script receives `--home <home> --card <id> --prompt-file <file>` and its stdout is the session's final text
+  (its terminal line), bounded at two minutes. The hermetic Done E2Es
+  (`tests/test-runner-done-negative.sh`, `tests/test-runner-done-empty.sh`) drive the real runner,
+  git and Done commands with it. Unset or empty in every production run, where nothing changes.
 - **What HAS been verified live** (smoke run, 2026-07-16, campaign-runner effort): `--dry-run`
   phase derivation against real merged/open PRs; the D3 five-point replay against a real merged PR
   (all five pass) and its correct rejection of an open PR;

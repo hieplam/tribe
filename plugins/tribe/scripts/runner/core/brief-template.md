@@ -18,6 +18,25 @@ design decision the plan doesn't already make, and never widen scope beyond this
 
 {{GOAL}}
 
+## How the runner drives you
+
+The runner walks the plan's tasks in order, one turn per task:
+
+{{TASK_LIST}}
+
+- Each turn names ONE task (see `## This turn` at the end). Do that task the way the plan says,
+  commit it on your card branch, and end your turn with exactly `TASK_DONE <task-id> <branch>`.
+- The runner then runs that task's **Done** commands itself — together with the Done commands of
+  every task before it — from a clean checkout of your branch tip. A task is done only when every
+  one of those commands exits 0. You may run them yourself first; the runner's run is the one
+  that counts.
+- If a Done command fails, the next turn shows you the command, its exit code and its output. Fix
+  it, commit, and end your turn with `TASK_DONE` again.
+  After {{MAX_STEP_ATTEMPTS}} unaccepted turns on one task the runner escalates the card.
+- When every task is done, the runner sends one more turn: deliver the card (Definition of Done).
+  Delivery has the same limit: every delivery turn that does not end with `SHIPPED` — a
+  `TASK_DONE` re-check included — counts toward it.
+
 ## Walls (non-negotiable)
 
 - Merge policy for this campaign is `{{MERGE_POLICY}}`; land with `gh pr merge --merge`.
@@ -27,9 +46,11 @@ design decision the plan doesn't already make, and never widen scope beyond this
 - Stay inside this card's plan. No scope creep, no adjacent refactors, no speculative
   generality.
 - Merge gate: every PR check must have CONCLUDED green BEFORE `gh pr merge` — pending is
-  not green. A merge attempt with checks not green is blocked at the permission layer; if
-  a check is red for reasons outside this card's diff, escalate NEEDS_DIRECTION instead of
-  merging.
+  not green — and the PR head must be the commit whose Done commands the runner last passed;
+  a merge attempt otherwise is blocked at the permission layer. If a check is red for reasons
+  outside this card's diff, escalate NEEDS_DIRECTION instead of merging.
+- Work on your own card branch in a separate git worktree;
+  never switch the branch of, stage in, or commit in {{REPO_ROOT}} itself — the runner reads the plan there.
 - After creating a worktree, run the repo's dependency bootstrap (e.g. `bun install`)
   before the first commit — repo hooks typically run repo-wide and fail spuriously in a
   worktree without dependencies.
@@ -86,25 +107,33 @@ started.
 
 {{ANSWERS_CONTENT}}
 
-## Definition of Done (preconditions for SHIPPED)
+## Definition of Done (the deliver turn)
 
-"Merged" is not "done". You may print the `SHIPPED` line only after ALL of:
+"Merged" is not "done". On the deliver turn, you may print the `SHIPPED` line only after ALL of:
 
-1. The PR is merged (behind the pre-merge check gate).
-2. The remote feature branch is deleted (`git push origin --delete <branch>`).
-3. The card's worktree is removed (`git worktree remove <path>`).
-4. Local master is fast-forwarded to origin/master.
+1. Your card branch is pushed and its PR is open against {{BASE_BRANCH}}.
+2. Every PR check has concluded green — wait in the foreground with `gh pr checks <pr> --watch`
+   (timeout: 600000).
+3. The PR is merged with `gh pr merge --merge` (behind the pre-merge check gate).
+4. The remote feature branch is deleted (`git push {{REMOTE}} --delete <branch>`) and the card's
+   worktree is removed (`git worktree remove <path>`).
+5. Local {{BASE_BRANCH}} in {{REPO_ROOT}} is fast-forwarded to {{REMOTE}}/{{BASE_BRANCH}}.
 
 Verify each step with a command, not from memory — the runner independently re-verifies
-all four and a missing one costs a full escalation round-trip.
+them and a missing one costs a full escalation round-trip.
+
+If you change any code during delivery, commit and push it, and end the turn with
+`TASK_DONE <last-task-id> <branch>` so the runner re-runs the Done commands.
 
 *done = the next card starts clean on the latest changes.*
 
 ## Terminal contract
 
-End your final message with EXACTLY one of:
+End every turn with EXACTLY one of:
 
-- `SHIPPED <pr> <sha>` — the PR number and the merge commit sha, once verified merged.
+- `TASK_DONE <task-id> <branch>` — the named task is committed on `<branch>`.
+- `SHIPPED <pr> <sha>` — the deliver turn only, after the merge: the PR number and the merge
+  commit sha, once verified merged.
 - `NEEDS_DIRECTION: <question>` — a specific, answerable question, when you cannot proceed
   without a human ruling. Do not guess an answer to unblock yourself.
 

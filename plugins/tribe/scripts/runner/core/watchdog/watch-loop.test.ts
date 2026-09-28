@@ -69,6 +69,7 @@ function fakeIo(passes: Scripted[]) {
     appendFile: (p, content) => files.set(p, (files.get(p) ?? '') + content),
     ensureDir: () => {},
     writeFileAtomic: (p, content) => files.set(p, content),
+    removeTree: () => {},
     listEntries: (dirPath) => {
       if (dirPath === runsDir) {
         for (let i = pendingReveals.length - 1; i >= 0; i--) {

@@ -107,7 +107,7 @@ HOME_DIR="$TRIBE_HOME/campaigns/$SLUG"
 mkdir -p "$HOME_DIR/escalations" "$HOME_DIR/watchdog"
 cat > "$HOME_DIR/campaign-state.json" <<JSON
 {
-  "v": 1,
+  "v": 2,
   "campaign": "$SLUG",
   "mergePolicy": "regular-merge-only",
   "sequence": ["c1"],
@@ -124,7 +124,8 @@ cat > "$HOME_DIR/campaign-state.json" <<JSON
       "pr": 1,
       "mergeSha": "deadbeef",
       "sessionId": null,
-      "updatedAt": null
+      "updatedAt": null,
+      "tasks":[{"id":"T1","heading":"Task 1"}]
     }
   }
 }

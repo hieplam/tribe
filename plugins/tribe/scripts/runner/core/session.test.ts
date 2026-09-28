@@ -20,6 +20,7 @@ import {
   type RunSessionConfig,
   type SessionIO,
   type SessionMessage,
+  type SessionResult,
 } from './session.ts';
 
 function fixtureConfig(overrides: Partial<RunSessionConfig> = {}): RunSessionConfig {
@@ -439,6 +440,29 @@ describe('runSession — typed result parsing', () => {
   });
 });
 
+/** Feeds one `result/success` message carrying `finalText` through `runSession`. */
+async function runWithFinalText(finalText: string): Promise<SessionResult> {
+  const io = recordingIo();
+  io.spawnSession = () =>
+    messages([INIT_MESSAGE, { type: 'result', subtype: 'success', result: finalText, session_id: 'sess-123' }]);
+  return runSession({ brief: 'x' }, fixtureConfig(), io);
+}
+
+describe('parseResultMessage — TASK_DONE (spec §4.4)', () => {
+  test('TASK_DONE <task-id> <branch> -> task_done with both fields', async () => {
+    const r = await runWithFinalText('Committed.\nTASK_DONE T2 feat/small-helpers');
+    expect(r).toMatchObject({ outcome: 'task_done', taskId: 'T2', branch: 'feat/small-helpers' });
+  });
+  test('the LAST terminal line decides', async () => {
+    expect((await runWithFinalText('TASK_DONE T1 b\nlater: SHIPPED 12 abc1234')).outcome).toBe('shipped');
+    expect((await runWithFinalText('SHIPPED 12 abc1234 was wrong\nTASK_DONE T1 b')).outcome).toBe('task_done');
+    expect((await runWithFinalText('TASK_DONE T1 b\nNEEDS_DIRECTION: which?')).outcome).toBe('needs_direction');
+  });
+  test('a TASK_DONE missing its branch is not a terminal line', async () => {
+    expect((await runWithFinalText('TASK_DONE T1')).outcome).toBe('error');
+  });
+});
+
 describe('runSession — timeout path', () => {
   test('aborts and returns outcome "timeout" when the session exceeds the wall-clock budget', async () => {
     const io = recordingIo();
@@ -495,8 +519,19 @@ describe('decideMergeGateHook — the pre-merge check gate, enforced (P2 fix-lis
   // hook's array position, so reordering the PreToolUse array can never silently make these
   // tests exercise the wrong function. A single wiring smoke test (in the §D1 option set
   // describe above) is the only place that still goes through the real wiring.
-  function hookWith(execInRepo: SessionIO['execInRepo']): (input: unknown) => Promise<HookDecision> {
-    return decideMergeGateHook({ execInRepo });
+  function hookWith(
+    execInRepo: SessionIO['execInRepo'],
+    currentDoneSha: SessionIO['currentDoneSha'] = () => 'abc',
+  ): (input: unknown) => Promise<HookDecision> {
+    return decideMergeGateHook({ execInRepo, currentDoneSha });
+  }
+
+  /** Answers `gh pr checks` with `checksStdout` and `gh pr view … --json headRefOid` with `headSha`. */
+  function ghAnswering(checksStdout: string, headSha = 'abc'): SessionIO['execInRepo'] {
+    return async (argv) =>
+      argv[2] === 'view'
+        ? { stdout: JSON.stringify({ headRefOid: headSha }), exitCode: 0 }
+        : { stdout: checksStdout, exitCode: 0 };
   }
 
   test('denies a merge attempt when gh pr checks reports a red check (A2 replay: format-check red)', async () => {
@@ -512,10 +547,7 @@ describe('decideMergeGateHook — the pre-merge check gate, enforced (P2 fix-lis
   });
 
   test('allows a merge attempt when gh pr checks reports every check SUCCESS', async () => {
-    const hook = hookWith(async () => ({
-      stdout: JSON.stringify([{ name: 'format-check', state: 'SUCCESS' }]),
-      exitCode: 0,
-    }));
+    const hook = hookWith(ghAnswering(JSON.stringify([{ name: 'format-check', state: 'SUCCESS' }])));
 
     const decision = await hook({ tool_name: 'Bash', tool_input: { command: 'gh pr merge --merge' } });
 
@@ -572,6 +604,38 @@ describe('decideMergeGateHook — the pre-merge check gate, enforced (P2 fix-lis
 
     expect(decision).toEqual({});
     expect(execCalled).toBe(false);
+  });
+
+  test('spec §4.6: checks green and the PR head is the Done commit -> allowed', async () => {
+    const hook = hookWith(ghAnswering(JSON.stringify([{ name: 'go', state: 'SUCCESS' }]), 'abc'), () => 'abc');
+    expect(await hook({ tool_name: 'Bash', tool_input: { command: 'gh pr merge 12 --merge' } })).toEqual({});
+  });
+
+  test('spec §4.6: checks green but the PR head is not the Done commit -> denied', async () => {
+    const hook = hookWith(ghAnswering(JSON.stringify([{ name: 'go', state: 'SUCCESS' }]), 'abc'), () => 'zzz');
+    const decision = await hook({ tool_name: 'Bash', tool_input: { command: 'gh pr merge 12 --merge' } });
+    expect(decision.hookSpecificOutput?.permissionDecision).toBe('deny');
+    expect(decision.hookSpecificOutput?.permissionDecisionReason).toContain('TASK_DONE');
+  });
+
+  test('spec §4.6: an unreadable PR head (gh pr view fails) -> denied', async () => {
+    const hook = hookWith(async (argv) =>
+      argv[2] === 'view'
+        ? { stdout: '', exitCode: 1 }
+        : { stdout: JSON.stringify([{ name: 'go', state: 'SUCCESS' }]), exitCode: 0 },
+    );
+    const decision = await hook({ tool_name: 'Bash', tool_input: { command: 'gh pr merge 12 --merge' } });
+    expect(decision.hookSpecificOutput?.permissionDecision).toBe('deny');
+  });
+
+  test('spec §4.6: the head is read for the same PR ref the merge names', async () => {
+    const argvs: string[][] = [];
+    const hook = hookWith(async (argv) => {
+      argvs.push(argv);
+      return ghAnswering(JSON.stringify([{ name: 'go', state: 'SUCCESS' }]))!(argv);
+    });
+    await hook({ tool_name: 'Bash', tool_input: { command: 'gh pr merge 12 --merge' } });
+    expect(argvs).toContainEqual(['gh', 'pr', 'view', '12', '--json', 'headRefOid']);
   });
 
   // P2 audit fix (skinnerB): a REJECTING execInRepo (real-world: the `gh` binary missing,

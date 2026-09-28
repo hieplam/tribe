@@ -7,6 +7,23 @@
  * statuses. A stored `blocked` on disk is a hint from a prior run, never trusted as-is. */
 export type CardStatus = 'staged' | 'running' | 'shipped' | 'escalated' | 'blocked';
 
+/** One task of `campaign-state.json`'s `cards.<id>.tasks` (D1): a pointer into the plan, never a copy. */
+export interface TaskRef {
+  id: string;
+  /** The exact text of one heading line in the plan, `#`s and surrounding whitespace stripped. */
+  heading: string;
+  /** Runner-written: the commit at which this task's Done commands last passed. */
+  passedSha?: string;
+}
+
+/** A `TaskRef` resolved against its plan at load (D1): the heading exists once, and its Done
+ * section yields these commands. Produced by `plan-index.ts`'s `resolveTaskIndex`. */
+export interface ResolvedTask {
+  id: string;
+  heading: string;
+  doneCommands: string[];
+}
+
 /** D2 per-card record. Nullable fields are unset until the loop (Task 6) fills them in;
  * `baseSha` is REQUIRED (present, but nullable) because D3's schema guard diffs from it. */
 export interface Card {
@@ -37,6 +54,12 @@ export interface Card {
    * happened; report.ts reads it to surface the heal on the ONE artifact a human/orchestrating
    * session reads after a run. */
   healedResidue?: string[];
+  /** D1: the card's task index — pointers into its plan, in order, at least one. Required: a
+   * campaign state without it is v1, which this runner refuses. */
+  tasks: TaskRef[];
+  /** Runner-written: the commit at which the card's last task's Done commands passed. Absent
+   * until then. */
+  doneSha?: string;
 }
 
 /** D2 campaign state root. `schemaLockPaths` (D3 point 6) and `ownerOnlyEscalations` (D5)
@@ -159,6 +182,10 @@ export interface ResolvedConfig extends RunLoopConfig {
   baseBranch: string;
   answersContent: string;
   briefTemplate: string;
+  /** D1: every eligible card's task index, resolved against its plan at load (card id → tasks
+   * in order). Eligible = in the `--cards`-filtered sequence, not `shipped`, plan on disk; a card
+   * outside that set has no entry. */
+  taskIndex: Record<string, ResolvedTask[]>;
 }
 
 /** Process exit codes — the runner's shared vocabulary, homed in the kernel so leaf modules

@@ -23,6 +23,8 @@ export interface ClockPort {
 }
 export interface FsPort {
   fileExists(resolvedPath: string): boolean;
+  /** Resolve symlinks, including the longest existing parent of a missing path. */
+  canonicalPath(resolvedPath: string): string;
   readFile(resolvedPath: string): Promise<string> | string;
   writeFile(resolvedPath: string, content: string): void;
   /** P6 (fix-list): renames/moves a file already on disk — used to archive a resolved
@@ -54,6 +56,24 @@ export interface RunHomePort {
   ensureDir(resolvedPath: string): void;
   /** Crash-safe write: temp file in the same directory, then rename (spec §4). */
   writeFileAtomic(resolvedPath: string, content: string): void;
+  /** Recursive delete of a runner-built scratch path; the adapter repeats the real-path guard. */
+  removeTree(resolvedPath: string): void;
+}
+export interface DoneScratchPort {
+  /** Require a real `<home>/done` directory and a non-symlink card path before git touches it. */
+  assertDoneScratchPath(resolvedPath: string): void;
+}
+/** One Done command's outcome, as the edge observed it. `timedOut` = killed at `timeoutMs`. */
+export interface ShellRunResult {
+  exitCode: number;
+  timedOut: boolean;
+  durationMs: number;
+  stdout: string;
+  stderr: string;
+}
+/** Card runner-driver-only (D2): the ONLY seam that runs a plan's Done command. */
+export interface DonePort {
+  runShell(command: string, opts: { cwd: string; env: Record<string, string>; timeoutMs: number }): Promise<ShellRunResult>;
 }
 
 /** Task 27 (spec §10.4): the adapter's `/healthz` probe result — a typed report of WHAT the
@@ -173,6 +193,7 @@ export interface SessionMessage {
 export interface SpawnSessionParams {
   prompt: string;
   options: PinnedSessionOptions;
+  cardId?: string;
 }
 
 /** The seam: production code funnels every session spawn through here so tests never hit
@@ -189,6 +210,9 @@ export interface SessionIO {
    * gate hook, not by every caller of `SessionIO`; a caller that never wires it is treated
    * as "cannot verify checks" (fail-closed) by the hook, not as a crash. */
   execInRepo?(argv: string[]): Promise<{ stdout: string; exitCode: number }>;
+  /** Spec §4.6: the commit at which the runner last passed every task's Done commands, read at
+   * hook time (it moves as turns pass). `null` or unwired = none yet, so the merge gate denies. */
+  currentDoneSha?(): string | null;
 }
 
 /** The exact §D1 pinned option set, pinned in this one module. Every field is load-bearing
@@ -253,7 +277,9 @@ export interface LoopIO
     LockStorePort,
     SessionSpawnPort,
     RunHomePort,
-    LinePort {}
+    DoneScratchPort,
+    LinePort,
+    DonePort {}
 
 // ---------------------------------------------------------------------------------------
 // Campaign watchdog seams (card i74). Type declarations only, same as the rest of this file.

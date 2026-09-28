@@ -3,8 +3,9 @@
 //
 // This is the INPUT side of the V1 measurement; `g2-prompts.ts` is the counter and never changes
 // between BEFORE and AFTER. This file calls the runner's own rendering functions, so it follows the
-// runner's API: this copy renders master @ 3194976 (the BEFORE tree). The build's plan updates it in
-// the same commit that changes a rendering API, and its manifest must then carry every kind listed
+// runner's API: this copy renders the runner-driver-only branch's API (v2 state, the turn prompts,
+// the Done-commit merge gate), not the BEFORE tree (master @ 3194976). A commit that changes a
+// rendering API updates this file in the same commit, and its manifest must carry every kind listed
 // in `g2-prompts.ts`'s REQUIRED_AFTER_KINDS.
 //
 // Usage (from anywhere): bun render-prompts.ts --out <dir>
@@ -13,9 +14,12 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { BRIEF_TEMPLATE_PATH, executorBrief } from '../../runner/core/brief.ts';
+import { MAX_STEP_ATTEMPTS } from '../../runner/core/done.ts';
+import {
+  deliverTurnPrompt, doneFailedTurnPrompt, protocolErrorTurnPrompt, taskTurnPrompt,
+} from '../../runner/core/turn-prompts.ts';
 import { buildStateDigest } from '../../runner/core/loop/phase.ts';
 import {
-  CONTINUE_BRANCH_PROMPT, CONTINUE_PR_OPEN_PROMPT, CONTINUE_UNKNOWN_STATE_PROMPT,
   buildEscalationMarkdown, toBriefCard, toBriefState,
 } from '../../runner/core/loop/card-actions.ts';
 import {
@@ -23,7 +27,8 @@ import {
   buildSessionOptions,
 } from '../../runner/core/session.ts';
 import {
-  MERGE_GATE_DENIED_CHECKS_ERROR_REASON, MERGE_GATE_DENIED_FORBIDDEN_FLAG_REASON, mergeGateNotGreenReason,
+  MERGE_GATE_DENIED_CHECKS_ERROR_REASON, MERGE_GATE_DENIED_FORBIDDEN_FLAG_REASON, MERGE_GATE_DENIED_HEAD_NOT_DONE_REASON,
+  mergeGateNotGreenReason,
 } from '../../runner/core/merge-gate.ts';
 import { renderReportMarkdown, type CampaignReport } from '../../runner/core/report.ts';
 import {
@@ -31,7 +36,7 @@ import {
 } from '../../runner/core/supervisor/brief.ts';
 import { decideClosingGrantHook, decideContainmentHook } from '../../runner/core/supervisor/permit.ts';
 import { PARK_SENTENCES, renderNeedsOwner } from '../../runner/core/supervisor/status.ts';
-import type { CampaignState, Card, ResolvedConfig } from '../../runner/core/types.ts';
+import type { CampaignState, Card, ResolvedConfig, ResolvedTask } from '../../runner/core/types.ts';
 import type { VerifyPointId } from '../../runner/core/verify.ts';
 import type { ParkReason } from '../../runner/core/supervisor/model.ts';
 
@@ -44,17 +49,35 @@ const HOME = FIXTURE.home;
 const SPEC = FIXTURE.spec;
 const PLAN = FIXTURE.plan;
 const ANSWERS_PATH = join(HOME, 'answers.md');
+const REPO_ROOT = '/Users/owner/repo/runner-e2e-go';
+const BRANCH = 'feat/small-helpers';
+
+/** The fixture plan's Done section for one task — every task runs the same three module-wide
+ * commands, then its own test by name (hieplam/runner-e2e-go, docs/plans/2026-09-27-small-helpers.md). */
+function doneCommandsFor(test: string, pkg: string): string[] {
+  return ['go build ./...', 'go vet ./...', 'go test ./...',
+    `go test -run '^${test}$' -v ./${pkg} | grep -q -- '--- PASS: ${test}'`];
+}
+
+/** The fixture plan's four tasks, resolved the way `plan-index.ts` resolves them at load. */
+const TASKS: ResolvedTask[] = [
+  { id: FIXTURE.firstTaskId, heading: FIXTURE.firstTaskHeading, doneCommands: doneCommandsFor('TestSum', 'mathx') },
+  { id: FIXTURE.secondTaskId, heading: FIXTURE.secondTaskHeading, doneCommands: doneCommandsFor('TestMax', 'mathx') },
+  { id: 'T3', heading: 'Task 3: `textx.Reverse`', doneCommands: doneCommandsFor('TestReverse', 'textx') },
+  { id: 'T4', heading: 'Task 4: `textx.IsPalindrome`', doneCommands: doneCommandsFor('TestIsPalindrome', 'textx') },
+];
 
 function card(): Card {
   return {
-    status: 'running', spec: SPEC, plan: PLAN, branch: 'feat/small-helpers', baseSha: '9bb6b22',
+    status: 'running', spec: SPEC, plan: PLAN, branch: BRANCH, baseSha: '9bb6b22',
     pr: 12, mergeSha: null, sessionId: 'sess-1', updatedAt: null,
+    tasks: TASKS.map((t) => ({ id: t.id, heading: t.heading })),
   };
 }
 
 function state(): CampaignState {
   return {
-    v: 1, campaign: CAMPAIGN, mergePolicy: 'regular', sequence: [CARD_ID],
+    v: 2, campaign: CAMPAIGN, mergePolicy: 'regular', sequence: [CARD_ID],
     schemaLockPaths: [], docsOnlyPaths: [], ownerOnlyEscalations: [], cards: { [CARD_ID]: card() },
   };
 }
@@ -72,17 +95,36 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
   const template = readFileSync(BRIEF_TEMPLATE_PATH, 'utf8');
   const s = state();
   const c = s.cards[CARD_ID] as Card;
-  const resolved = { homeDir: HOME } as ResolvedConfig;
+  const resolved = { homeDir: HOME, repoRoot: REPO_ROOT, baseBranch: 'master', remote: 'origin' } as ResolvedConfig;
+  const driver = { repoRoot: resolved.repoRoot, baseBranch: resolved.baseBranch, remote: resolved.remote };
+  const [t1, t2, , t4] = TASKS as [ResolvedTask, ResolvedTask, ResolvedTask, ResolvedTask];
 
-  // ---- executor: first prompt, digest prompt, resume prompts ----
-  add('executor/brief-fresh', executorBrief(toBriefCard(CARD_ID, c), toBriefState(s), '', template,
-    HOME, CAMPAIGN));
+  // ---- executor: the first turn is the brief plus the first task's turn prompt; a fresh session
+  // after a failed resume carries the state digest (with the task progress) in the answers slot ----
+  const firstTurn = taskTurnPrompt({ task: t1, planPath: PLAN });
+  add('executor/brief-fresh', `${executorBrief(toBriefCard(CARD_ID, c), toBriefState(s), '', template,
+    HOME, CAMPAIGN, driver)}\n\n${firstTurn}`);
   const digest = buildStateDigest(CARD_ID, c, 'no transcript found for the recorded session');
-  add('executor/brief-with-digest', executorBrief(toBriefCard(CARD_ID, c), toBriefState(s),
-    `${digest}\n\n---\n\n`, template, HOME, CAMPAIGN));
-  add('executor/resume-pr-open', CONTINUE_PR_OPEN_PROMPT);
-  add('executor/resume-branch', CONTINUE_BRANCH_PROMPT);
-  add('executor/resume-unknown', CONTINUE_UNKNOWN_STATE_PROMPT);
+  add('executor/brief-with-digest', `${executorBrief(toBriefCard(CARD_ID, c), toBriefState(s),
+    `${digest}\n\n---\n\n`, template, HOME, CAMPAIGN, driver)}\n\n${firstTurn}`);
+
+  // ---- executor: every turn prompt after the first (the session is resumed with these) ----
+  add('executor/turn-task', taskTurnPrompt({ task: t2, planPath: PLAN }));
+  const failingIndex = t1.doneCommands.indexOf(FIXTURE.failingCommand);
+  add('executor/turn-done-failed', doneFailedTurnPrompt({
+    task: t1, branch: BRANCH, sha: 'abc1234',
+    failed: { command: FIXTURE.failingCommand, exitCode: 1, timedOut: false, durationMs: 2300,
+      stdoutTail: '--- FAIL: TestSum (0.00s)\n    sum_test.go:14: Sum(2, 3) = 6, want 5\nFAIL', stderrTail: '' },
+    notRun: t1.doneCommands.slice(failingIndex + 1), attempt: 1, max: MAX_STEP_ATTEMPTS,
+  }));
+  add('executor/turn-protocol-error', protocolErrorTurnPrompt({
+    reason: `the runner asked for task ${t1.id}; you reported ${t2.id}`, stepPrompt: firstTurn,
+    attempt: 1, max: MAX_STEP_ATTEMPTS,
+  }));
+  add('executor/turn-deliver', deliverTurnPrompt({
+    branch: BRANCH, sha: 'def5678', baseBranch: resolved.baseBranch, remote: resolved.remote,
+    repoRoot: resolved.repoRoot, lastTaskId: t4.id,
+  }));
 
   // ---- executor: every hook denial reason a session can read ----
   add('executor/hook-backgrounding', BACKGROUNDING_DENIED_REASON);
@@ -91,6 +133,7 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
   add('executor/hook-merge-forbidden-flag', MERGE_GATE_DENIED_FORBIDDEN_FLAG_REASON);
   add('executor/hook-merge-checks-error', MERGE_GATE_DENIED_CHECKS_ERROR_REASON);
   add('executor/hook-merge-not-green', mergeGateNotGreenReason('12', ['go: PENDING']));
+  add('executor/hook-merge-head-not-done', MERGE_GATE_DENIED_HEAD_NOT_DONE_REASON('new1234', 'old5678'));
 
   // ---- escalation files (a ruling session reads them verbatim; so does the owner) ----
   const needsDirection = buildEscalationMarkdown(CARD_ID, 'needs_direction',
@@ -104,6 +147,9 @@ function renderAll(): { prompts: Rendered[]; injections: Array<{ kind: string; d
     '- merged: PR #12 is not merged', resolved, allPoints));
   add('escalation/verify-failed-after-merge', buildEscalationMarkdown(CARD_ID, 'verify_failed_twice',
     '- worktreeAndBranchGone: worktree still present', resolved, allPoints.filter((p) => p !== 'merged')));
+  add('escalation/done-failed', buildEscalationMarkdown(CARD_ID, 'done_failed',
+    `task ${t1.id} (${FIXTURE.firstTaskHeading}) did not pass its Done commands after ${MAX_STEP_ATTEMPTS} attempts. Last: ${FIXTURE.failingCommand} exited 1`,
+    resolved));
 
   // ---- supervisor: the three one-shot briefs ----
   add('supervisor/ruling', renderBrief('ruling', {
@@ -185,7 +231,7 @@ function main(): void {
     files.push({ kind: p.kind, file, bytes: Buffer.byteLength(p.text) });
   }
   const manifest = {
-    renderer: 'render-prompts.ts @ master 3194976 API',
+    renderer: 'render-prompts.ts @ runner-driver-only API (v2 state, turn prompts)',
     watchdog: 'no session-facing prompt: the watchdog never spawns an LLM session (runner README, Watchdog, "What it never does")',
     files,
     injections,

@@ -34,6 +34,13 @@ export interface MergeGateDecisionInput {
    * `undefined` means the edge never attempted the call (or couldn't) — fail-closed, same
    * as a non-zero exit code. */
   checksExec?: { stdout: string; exitCode: number };
+  /** Spec §4.6: the PR's current head commit (`gh pr view --json headRefOid`); `null` = unreadable.
+   * Optional so a forbidden-flag deny needs neither this nor `doneSha`; absent after green checks
+   * denies (fail closed). */
+  headSha?: string | null;
+  /** The commit at which the runner last passed every task's Done commands; `null` = no Done run
+   * has passed yet, so nothing may merge. */
+  doneSha?: string | null;
 }
 
 const FORBIDDEN_FLAG_NAMES = ['--auto', '--admin'] as const;
@@ -234,6 +241,16 @@ export function mergeGateNotGreenReason(prRef: string | undefined, notGreen: str
   );
 }
 
+/** Spec §4.6: green checks are not enough — the head being merged must be the exact commit the
+ * runner ran the Done commands on. Steers the session back through `TASK_DONE` to get it there. */
+export function MERGE_GATE_DENIED_HEAD_NOT_DONE_REASON(headSha: string | null, doneSha: string | null): string {
+  return (
+    `Merge denied: the PR head (${headSha ?? 'unreadable'}) is not the commit whose Done commands the runner last ` +
+    `passed (${doneSha ?? 'none yet'}). End your turn with \`TASK_DONE <last-task-id> <branch>\` so the runner ` +
+    're-runs the Done commands on your latest commit, then merge when it sends you back to delivery.'
+  );
+}
+
 function deny(reason: string): HookDecision {
   return {
     hookSpecificOutput: {
@@ -245,7 +262,8 @@ function deny(reason: string): HookDecision {
 }
 
 /** PURE: the full decision for one PreToolUse event, given the already-parsed command and
- * (if the edge attempted it) the already-run `gh pr checks` result. Non-merge commands get
+ * (if the edge attempted it) the already-run `gh pr checks` result, the PR head, and the Done
+ * commit. Order: forbidden flag, then checks green, then head == Done commit. Non-merge commands get
  * an empty decision (no opinion) — this function never decides anything about a tool call
  * that isn't a `gh pr merge` attempt. */
 export function buildMergeGateDecision(input: MergeGateDecisionInput): HookDecision {
@@ -263,6 +281,11 @@ export function buildMergeGateDecision(input: MergeGateDecisionInput): HookDecis
   const judged = judgeChecks(checksExec.stdout);
   if (!judged.allGreen) {
     return deny(mergeGateNotGreenReason(parsed.prRef, judged.notGreen));
+  }
+
+  const headIsDoneCommit = !!input.headSha && !!input.doneSha && input.headSha === input.doneSha;
+  if (!headIsDoneCommit) {
+    return deny(MERGE_GATE_DENIED_HEAD_NOT_DONE_REASON(input.headSha ?? null, input.doneSha ?? null));
   }
 
   return {};

@@ -93,6 +93,12 @@ value belongs in the campaign's own docs, not here.
    specs/plans and use that. Campaign state and `answers.md` are never committed — they live only
    under `--home`, per step 3/4 above. `handoffs.md` DOES land in the repo, alongside the specs
    it covers.
+7. **Every plan task ends with a Done section** — a `Done` heading one level below the task
+   heading, then a fenced block of shell commands, one per line (no `\` continuations). The runner
+   runs them itself from a clean checkout of the task's commit, so list any bootstrap
+   (`bun install`) first. For every task, add `{ "id", "heading" }` to the card's `tasks` in
+   `campaign-state.json` — the heading text exactly as written. `--dry-run` refuses a state whose
+   headings do not resolve (`campaign runner: refused: … dangling_heading`).
 
 #### The campaign state file (`campaign-state.json`, under `--home`)
 
@@ -105,7 +111,7 @@ every optional field may simply be omitted rather than written as `null`/`[]` wh
 
 ```json
 {
-  "v": 1,
+  "v": 2,
   "campaign": "<campaign-slug>",
   "planning": { "mode": "shaman" },
   "mergePolicy": "<e.g. \"regular\" — the merge strategy card PRs must use>",
@@ -118,6 +124,7 @@ every optional field may simply be omitted rather than written as `null`/`[]` wh
       "status": "staged",
       "spec": "<path to the card's spec.md, or null>",
       "plan": "<path to the card's plan.md, or null>",
+      "tasks": [{ "id": "T1", "heading": "<the exact heading text of the plan's first task>" }],
       "branch": null,
       "baseSha": null,
       "pr": null,
@@ -133,6 +140,8 @@ every optional field may simply be omitted rather than written as `null`/`[]` wh
 
 - `sequence` is the dependency-ordered card order; every id in it (and every id named in a
   `dependsOn`) must have a matching entry under `cards`.
+- `tasks` lists every task of the card's plan, in plan order, as `{ "id", "heading" }` — see
+  "Every plan task ends with a Done section" in Stage A.
 - Every card you write starts `"status": "staged"`, `"autoAnswerRounds": 0`, and no `dependsOn`
   unless that card genuinely must not start before another one ships.
 
@@ -479,8 +488,8 @@ On every exit notification where the report shows `pending` cards:
    when the batch started, not a ruling added mid-batch. And within one card's own session, a
    ruling reaches the executor ONLY on a freshly-rendered brief (a blind spawn, a digest-
    carrying spawn, or the fresh-session fallback after a failed resume) — never on a successful
-   `resume`, which sends nothing but a short continuation prompt with no Answers section at all
-   (`core/loop/card-actions.ts`'s `runCardSession`). The card you just ruled on above needs none
+   `resume`, which sends nothing but the next turn's prompt with no Answers section at all
+   (built by `core/turn-prompts.ts`). The card you just ruled on above needs none
    of this: its prior session already ended (that is what produced the escalation), so step 2's
    re-trigger below spawns it fresh against today's `answers.md` unconditionally. This matters
    only for a DIFFERENT card still mid-flight in the same batch, or for the owner editing

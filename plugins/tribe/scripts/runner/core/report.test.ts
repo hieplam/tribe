@@ -43,13 +43,14 @@ function fixtureCard(overrides: Partial<Card> = {}): Card {
     mergeSha: null,
     sessionId: null,
     updatedAt: null,
+    tasks: [{ id: 'T1', heading: 'Task 1' }],
     ...overrides,
   };
 }
 
 function fixtureState(overrides: Partial<CampaignState> = {}): CampaignState {
   return {
-    v: 1,
+    v: 2,
     campaign: 'sample-campaign',
     mergePolicy: 'merge',
     sequence: ['A1'],
@@ -594,8 +595,12 @@ describe('writeReport — W-F5: last-tick blocked reconciliation reaches the rep
     const written = new Map<string, string>();
     written.set('/th/campaign-state.json', JSON.stringify(state));
     written.set('/th/answers.md', '');
+    // B's plan, so the load-time task-index check (D1) resolves B's one task.
+    written.set('/repo/docs/plans/c1.md', '### Task 1\n\n#### Done\n\n```bash\ntrue\n```\n');
 
     const loopIo: LoopIO = {
+      canonicalPath: (p) => p,
+      assertDoneScratchPath: () => {},
       exec: mock(async (cmd: string[]): Promise<ExecResult> => {
         if (cmd[0] === 'git' && cmd[1] === 'symbolic-ref') return { stdout: 'origin/master\n', stderr: '', exitCode: 0 };
         // C2: the planning_needed escalation asks where the main checkout is; on the base branch here.
@@ -641,6 +646,8 @@ describe('writeReport — W-F5: last-tick blocked reconciliation reaches the rep
       appendLog: () => {},
       ensureDir: () => {},
       writeFileAtomic: () => {},
+      removeTree: () => {},
+      runShell: async () => ({ exitCode: 0, timedOut: false, durationMs: 0, stdout: '', stderr: '' }),
     };
 
     const config: RunLoopConfig = {
