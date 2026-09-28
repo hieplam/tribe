@@ -1,0 +1,10 @@
+home: /Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns/go-after
+runner invocations: 1; session logs: 2
+  run 2026-09-28T06-01-29-529Z-845c: exit=0 reason=done wall=164462ms doneRows=26
+TRIBE_AGENT_DISPATCHES=0
+TRIBE_SKILL_CALLS=0
+dispatches by type: {}
+skill calls: {"verify-shipped":1}
+tokens: {"input":102,"cacheWrite":108365,"cacheRead":2674553,"output":13317} total=2796337
+cost_usd=2.633 session_ms=234907 wall_clock_span_ms=164462
+DONE_ROWS=26

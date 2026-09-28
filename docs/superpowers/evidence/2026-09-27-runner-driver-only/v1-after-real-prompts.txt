@@ -1,0 +1,13 @@
+renderer: transcript-prompts.ts over /Users/hiep/.tribe/-Users-hiep-repo-runner-e2e-go/campaigns/go-after
+prompt kinds rendered: 6
+Tribe-way mentions: 0 in 0 kind(s); injections: 0
+TRIBE_WAY_TOTAL=0
+| kind | bytes | mentions | terms |
+| --- | --- | --- | --- |
+| real/69c3cddc-8199-41df-998a-cda2125a826a/0 | 7584 | 0 |  |
+| real/69c3cddc-8199-41df-998a-cda2125a826a/1 | 531 | 0 |  |
+| real/69c3cddc-8199-41df-998a-cda2125a826a/2 | 547 | 0 |  |
+| real/69c3cddc-8199-41df-998a-cda2125a826a/3 | 567 | 0 |  |
+| real/69c3cddc-8199-41df-998a-cda2125a826a/4 | 945 | 0 |  |
+| real/a38559d6-d8df-4a3f-a846-02afb9f14e8e/0 | 4340 | 0 |  |
+MISSING_REQUIRED_KINDS=0 
