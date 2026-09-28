@@ -43,6 +43,23 @@ good_plan_header() {
 
 - Implementer: dispatch each implementation/fix task to the hunter subagent.
 
+## Way of work
+
+Executor: subagent-per-task
+
+EOF
+}
+
+# A complete Verify block: the goal it proves, a Red and a Green that each carry a
+# literal command, and why a stub fails it.
+verify_block() {
+  cat <<'EOF'
+#### Verify
+- Goal: G1 (the fixture goal).
+- Red: `bun test x.test.ts` before building -> `1 fail`.
+- Green (expected): `bun test x.test.ts` -> `1 pass`, `0 fail`.
+- Stub check: a stub returning nothing fails the `toEqual` assertion.
+
 EOF
 }
 
@@ -63,6 +80,12 @@ echo "an <angle-token> stays inside the fence"
 ````
 
 Expected: the quoted file is written verbatim
+
+#### Verify
+- Goal: G1.
+- Red: `bun test fenced.test.ts` -> `1 fail`.
+- Green: `bun test fenced.test.ts` -> `1 pass`.
+- Stub check: an empty file fails the verbatim comparison.
 
 - [ ] **Step 2: Commit**
 
@@ -425,6 +448,129 @@ out9="$(bash "$SCRIPT" --schema-lock-paths "$LOCK_PATH" "$F9" 2>&1)"
 code9=$?
 set -e
 check "exact-path rule: ports.test.ts does not trip ports.ts lock (zero exit)" "$code9" "0"
+
+# --- Per-task Verify block (Goal · Red · Green · Stub check) ---------------------------
+# Oracle: every task carries all four labels outside fences; Red and Green each carry a
+# literal command (inline code or a fenced block). "Red: not applicable" + a reason is
+# allowed for a task with no code to go red (a baseline measurement).
+task_with() { # task_with N BODY-FILE — one task section whose body is the file's content
+  printf '### Task %s: Unit %s\n\n' "$1" "$1"; cat "$2"
+  printf '\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m "feat: %s"\n```\n\n' "$1"
+}
+verify_block > "$TMP/vb.md"
+
+VF1="$TMP/verify-ok.md"
+{ good_plan_header; task_with 1 "$TMP/vb.md"; } > "$VF1"
+bash "$SCRIPT" "$VF1" > "$TMP/vo1.json"
+check "complete Verify block passes" "$(find_check "$TMP/vo1.json" tasks_have_verify_block)" "pass"
+check "complete plan verdict is pass" "$(jget "$TMP/vo1.json" verdict)" "pass"
+
+# The shape that slipped through on 2026-09-28: a shared suite line, no Verify block.
+printf 'Expected: check command green.\n\n```bash\nbun test\n```\n' > "$TMP/shared.md"
+VF2="$TMP/verify-shared.md"
+{ good_plan_header; task_with 1 "$TMP/shared.md"; } > "$VF2"
+bash "$SCRIPT" "$VF2" > "$TMP/vo2.json"
+check "shared 'check command green' line fails" "$(find_check "$TMP/vo2.json" tasks_have_verify_block)" "fail"
+check "shared-line plan verdict is fail" "$(jget "$TMP/vo2.json" verdict)" "fail"
+
+# All four labels present, but Green names no command or output.
+cat > "$TMP/prose-green.md" <<'EOF'
+#### Verify
+- Goal: G1.
+- Red: `bun test x.test.ts` -> `1 fail`.
+- Green: check command green, new tests pass.
+- Stub check: a stub fails it.
+EOF
+VF3="$TMP/verify-prose-green.md"
+{ good_plan_header; task_with 1 "$TMP/prose-green.md"; } > "$VF3"
+bash "$SCRIPT" "$VF3" > "$TMP/vo3.json"
+check "Green with no literal command fails" "$(find_check "$TMP/vo3.json" tasks_have_verify_block)" "fail"
+
+# Green's literal may sit in a fenced block under the label.
+cat > "$TMP/fenced-green.md" <<'EOF'
+#### Verify
+- Goal: G1.
+- Red: not applicable, this task only records the baseline.
+- Green:
+  ```bash
+  tribe campaign status; echo "exit=$?"
+  ```
+- Stub check: an empty baseline file leaves no before value.
+EOF
+VF4="$TMP/verify-fenced-green.md"
+{ good_plan_header; task_with 1 "$TMP/fenced-green.md"; } > "$VF4"
+bash "$SCRIPT" "$VF4" > "$TMP/vo4.json"
+check "fenced Green + Red not applicable passes" "$(find_check "$TMP/vo4.json" tasks_have_verify_block)" "pass"
+
+# A Verify block quoted inside a fence is content, not this task's Verify.
+{ printf '````markdown\n'; cat "$TMP/vb.md"; printf '````\n'; } > "$TMP/quoted-vb.md"
+VF5="$TMP/verify-quoted.md"
+{ good_plan_header; task_with 1 "$TMP/quoted-vb.md"; } > "$VF5"
+bash "$SCRIPT" "$VF5" > "$TMP/vo5.json"
+check "Verify labels inside a fence do not count" "$(find_check "$TMP/vo5.json" tasks_have_verify_block)" "fail"
+
+# One good task and one bare task: the bare one is named.
+VF6="$TMP/verify-mixed.md"
+{ good_plan_header; task_with 1 "$TMP/vb.md"; task_with 2 "$TMP/shared.md"; } > "$VF6"
+bash "$SCRIPT" "$VF6" > "$TMP/vo6.json"
+check "one bare task fails the plan" "$(find_check "$TMP/vo6.json" tasks_have_verify_block)" "fail"
+check "the bare task is named" "$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print([c['detail'] for c in d['checks'] if c['name']=='tasks_have_verify_block'][0].count('Unit 2'))" "$TMP/vo6.json")" "1"
+
+# --- Way of work: Executor line, single-agent only for at most 2 tasks ------------------
+bare_header() { printf '# Fixture Plan\n\n## Global Constraints\n\n- Implementer: the hunter subagent.\n\n'; }
+
+WF1="$TMP/wow-missing.md"
+{ bare_header; task_with 1 "$TMP/vb.md"; } > "$WF1"
+bash "$SCRIPT" "$WF1" > "$TMP/wo1.json"
+check "no Way of work section fails" "$(find_check "$TMP/wo1.json" way_of_work_declared)" "fail"
+
+WF2="$TMP/wow-no-executor.md"
+{ bare_header; printf '## Way of work\n\nImplement until checks pass, one review, PR, merge.\n\n'; task_with 1 "$TMP/vb.md"; } > "$WF2"
+bash "$SCRIPT" "$WF2" > "$TMP/wo2.json"
+check "Way of work with no Executor line fails" "$(find_check "$TMP/wo2.json" way_of_work_declared)" "fail"
+
+WF3="$TMP/wow-single-3.md"
+{ bare_header; printf '## Way of work\n\nExecutor: single-agent\n\n'; for n in 1 2 3; do task_with "$n" "$TMP/vb.md"; done; } > "$WF3"
+bash "$SCRIPT" "$WF3" > "$TMP/wo3.json"
+check "single-agent is declared" "$(find_check "$TMP/wo3.json" way_of_work_declared)" "pass"
+check "single-agent with 3 tasks fails" "$(find_check "$TMP/wo3.json" single_agent_within_limit)" "fail"
+
+WF4="$TMP/wow-single-2.md"
+{ bare_header; printf '## Way of work\n\nExecutor: single-agent\n\n'; for n in 1 2; do task_with "$n" "$TMP/vb.md"; done; } > "$WF4"
+bash "$SCRIPT" "$WF4" > "$TMP/wo4.json"
+check "single-agent with 2 tasks passes" "$(find_check "$TMP/wo4.json" single_agent_within_limit)" "pass"
+
+WF5="$TMP/wow-subagent-3.md"
+{ bare_header; printf '## Way of work (quoted from the card)\n\n- **Executor:** `subagent-per-task`\n\n'; for n in 1 2 3; do task_with "$n" "$TMP/vb.md"; done; } > "$WF5"
+bash "$SCRIPT" "$WF5" > "$TMP/wo5.json"
+check "subagent-per-task (formatted) is declared" "$(find_check "$TMP/wo5.json" way_of_work_declared)" "pass"
+check "subagent-per-task with 3 tasks passes" "$(find_check "$TMP/wo5.json" single_agent_within_limit)" "pass"
+
+# --- Review round 1 (gpt-6-sol): each over- or under-check it found, pinned --------------
+probe() { # probe NAME CHECK WANT BODY-FILE [HEADER-FN]
+  local f="$TMP/probe-$RANDOM.md"
+  { "${5:-good_plan_header}"; task_with 1 "$4"; } > "$f"
+  bash "$SCRIPT" "$f" > "$f.json"
+  check "$1" "$(find_check "$f.json" "$2")" "$3"
+}
+printf -- '- Goal: G1.\n- Red: `bun test x` -> `1 fail`.\n- Green: `bun test x` -> `1 pass`.\n- Stub check: a stub fails.\n' > "$TMP/r1-scattered.md"
+probe "labels with no Verify heading fail" tasks_have_verify_block fail "$TMP/r1-scattered.md"
+printf '#### Verify\n- Goal: G1.\n- Red: `1 fail`.\n- Green: `1 pass`.\n- Stub check: a stub fails.\n' > "$TMP/r1-output-only.md"
+probe "output-only code spans are not commands" tasks_have_verify_block fail "$TMP/r1-output-only.md"
+printf '#### Verify\n- Goal: G1.\n- Red: not applicable.\n- Green: `bun test x` -> `1 pass`.\n- Stub check: a stub fails.\n' > "$TMP/r1-na-bare.md"
+probe "Red 'not applicable' with no reason fails" tasks_have_verify_block fail "$TMP/r1-na-bare.md"
+printf '#### Verify\n1. Goal: G1.\n2. Red: `bun test x` -> `1 fail`.\n3. Green: `bun test x` -> `1 pass`.\n4. Stub check: a stub fails.\n' > "$TMP/r1-numbered.md"
+probe "numbered-list Verify block passes" tasks_have_verify_block pass "$TMP/r1-numbered.md"
+not_wow_header() { printf '# P\n\n## Global Constraints\n\n- the hunter subagent.\n\n## Not the way of work\n\nExecutor: subagent-per-task\n\n'; }
+probe "a heading merely containing 'way of work' does not count" way_of_work_declared fail "$TMP/vb.md" not_wow_header
+bad_exec_header() { printf '# P\n\n## Global Constraints\n\n- the hunter subagent.\n\n## Way of work\n\nExecutor: single-agent-per-task\n\n'; }
+probe "a longer executor value is not single-agent" way_of_work_declared fail "$TMP/vb.md" bad_exec_header
+
+# --- Review round 2 (gpt-6-sol): owner ruled fix these two, then merge -------------------
+printf '#### Verify\n- Goal: G1.\n- Red: `pytest` -> `1 failed`.\n- Green: `pytest` -> `1 passed`.\n- Stub check: a stub fails.\n' > "$TMP/r2-one-word.md"
+probe "a one-word command counts" tasks_have_verify_block pass "$TMP/r2-one-word.md"
+printf '#### Verify\n- Goal: G1.\n- Red:\n  ```text\n  1 failed\n  ```\n- Green:\n  ```output\n  1 passed\n  ```\n- Stub check: a stub fails.\n' > "$TMP/r2-output-fence.md"
+probe "text/output fences are not commands" tasks_have_verify_block fail "$TMP/r2-output-fence.md"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 exit $((FAIL > 0))
