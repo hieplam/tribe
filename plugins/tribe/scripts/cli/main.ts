@@ -19,5 +19,9 @@ if (command.kind === 'refuse') {
   console.error(command.message);
   process.exit(2);
 }
+if (command.kind === 'campaign-status') {
+  console.error('tribe: campaign status not wired yet');
+  process.exit(1);
+}
 
 process.exit(await runViewer(command, buildViewerIo()));

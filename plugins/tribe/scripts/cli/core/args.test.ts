@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { DEFAULT_PORT, parseArgs } from './args.ts';
+import { DEFAULT_PORT, HELP, parseArgs } from './args.ts';
 
 test('bare `tribe` starts the viewer on the default port and opens the browser', () => {
   expect(parseArgs([])).toEqual({ kind: 'viewer', port: DEFAULT_PORT, open: true, strictPort: false, host: '127.0.0.1' });
@@ -51,4 +51,25 @@ test('a --port outside 1-65535 or not an integer refuses', () => {
 test('an unknown flag or a positional argument refuses, naming it', () => {
   expect(parseArgs(['--custom'])).toEqual({ kind: 'refuse', message: 'tribe: unknown option --custom (see tribe --help)' });
   expect(parseArgs(['serve'])).toEqual({ kind: 'refuse', message: 'tribe: unknown option serve (see tribe --help)' });
+});
+
+test('campaign status parses optional name and --watch (D1, D3)', () => {
+  expect(parseArgs(['campaign', 'status'])).toEqual({ kind: 'campaign-status', name: null, watch: false });
+  expect(parseArgs(['campaign', 'status', 'post-rdo-followups']))
+    .toEqual({ kind: 'campaign-status', name: 'post-rdo-followups', watch: false });
+  expect(parseArgs(['campaign', 'status', '--watch', 'c1']))
+    .toEqual({ kind: 'campaign-status', name: 'c1', watch: true });
+});
+
+test('campaign refuses bad shapes with one message (Q3: exit 2 path)', () => {
+  expect(parseArgs(['campaign'])).toEqual({ kind: 'refuse', message: 'tribe: campaign expects a subcommand: status (see tribe --help)' });
+  expect(parseArgs(['campaign', 'list'])).toEqual({ kind: 'refuse', message: 'tribe: campaign expects a subcommand: status (see tribe --help)' });
+  expect(parseArgs(['campaign', 'status', 'a', 'b'])).toEqual({ kind: 'refuse', message: 'tribe: campaign status takes at most one name, got "b"' });
+  expect(parseArgs(['campaign', 'status', '../x'])).toEqual({ kind: 'refuse', message: 'tribe: invalid campaign name "../x"' });
+  expect(parseArgs(['campaign', 'status', '..'])).toEqual({ kind: 'refuse', message: 'tribe: invalid campaign name ".."' });
+  expect(parseArgs(['campaign', 'status', '--port', '1'])).toEqual({ kind: 'refuse', message: 'tribe: unknown option --port for campaign status (see tribe --help)' });
+});
+
+test('help lists the campaign status command', () => {
+  expect(HELP).toContain('tribe campaign status [<name>] [--watch]');
 });
