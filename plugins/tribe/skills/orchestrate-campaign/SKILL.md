@@ -122,6 +122,12 @@ value belongs in the campaign's own docs, not here.
    (`bun install`) first. For every task, add `{ "id", "heading" }` to the card's `tasks` in
    `campaign-state.json` — the heading text exactly as written. `--dry-run` refuses a state whose
    headings do not resolve (`campaign runner: refused: … dangling_heading`).
+8. **Validate the state you wrote before Stage A ends.** Resolve `$runner_dir` and run the
+   `--dry-run` command exactly as Stage B shows them ("First, resolve the runner's own location"
+   and step 1, "Always `--dry-run` first"). A dry run has zero side effects — no lock, nothing
+   written, no session — so it is a check, not a launch. Fix `campaign-state.json` (or the plan)
+   and re-run until it exits 0; a `refused:` line or any non-zero exit means the state is not
+   done.
 
 #### The campaign state file (`campaign-state.json`, under `--home`)
 
@@ -129,8 +135,15 @@ The runner README's own `## State file schema` section is the **authoritative** 
 this schema (field-by-field types, required/optional, and the load-time validation errors) —
 this skill depends on that documentation, never on the runner's source, per the owner's rule to
 depend on a capability's contract rather than keep a private copy of it. The shape looks like
-this — a short worked example for this skill's own convenience, not a competing specification;
-every optional field may simply be omitted rather than written as `null`/`[]` when unused:
+this — a short worked example for this skill's own convenience, not a competing specification.
+
+**Required — the runner refuses the state at load if any is missing:** at the top level `v`,
+`campaign`, `mergePolicy`, `sequence`, `schemaLockPaths`, `docsOnlyPaths`,
+`ownerOnlyEscalations` and `cards`; on every card `status`, `spec`, `plan`, `tasks`, `branch`,
+`baseSha`, `pr`, `mergeSha`, `sessionId` and `updatedAt` (the last seven may be `null`).
+`schemaLockPaths`, `docsOnlyPaths` and `ownerOnlyEscalations` are written as `[]` when unused —
+never omitted. **Optional** — `planning`, and a card's `dependsOn` and `autoAnswerRounds` — may
+simply be omitted rather than written as `null`/`[]` when unused:
 
 ```json
 {
