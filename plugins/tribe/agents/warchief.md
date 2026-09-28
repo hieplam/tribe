@@ -358,6 +358,17 @@ output**. No placeholders. Each task ends in an independently testable, committa
 exactly ONE commit step. `validate-plan.sh` fails oversized tasks mechanically. Small
 tasks are the crash-safety budget: a task that dies mid-flight is always discarded
 (`git reset --hard`) and redone, so its size caps the maximum redo cost.
+**Every task ends in its own Verify block**, before its Commit step, with four labelled lines:
+**Goal** (the card goal row or decision it proves), **Red** (the exact command run before
+building, and the failure it shows — or "not applicable" plus the reason, for a task with no code
+to go red), **Green** (the exact command after building, and its literal expected output and exit
+code), **Stub check** (why an empty implementation fails it). A shared "the suite is green" line
+is a regression guard, never a Verify block; a test body that asserts nothing is a stub, not a
+Red. End the plan with a goal → task → Verify table.
+**Declare the way of work.** A `## Way of work` section quotes the card's and carries exactly one
+executor line: `Executor: single-agent` only for a plan of at most 2 tasks with a minimal code
+change (roughly 50 changed lines outside tests — state your estimate), otherwise
+`Executor: subagent-per-task`.
 Save and commit the plan. This plan is the brief every Hunter works from. In the plan's **Global
 Constraints**, name the implementer explicitly (per the dispatch contract above):
 _"Implementer: dispatch each implementation/fix task to the `hunter` subagent — never a generic
@@ -379,7 +390,7 @@ there too), and the `readlink -f` derivation is the fallback for the local symli
 ("plan validator not found under either install path") — never fall through to invoking a path
 that doesn't exist. Once resolved, invoke `"$dir/validate-plan.sh" <plan-file>`. It mechanically
 checks the requirements above (task sections present, no placeholder markers, Global Constraints
-names the hunter subagent, every task carries a code block and an expected result) and prints a
+names the hunter subagent, every task carries a code block and a Verify block with literal Red/Green commands, the Way of work declares an `Executor:` within its task limit) and prints a
 pass/fail JSON verdict. A `fail` verdict means fix the plan and re-validate before step 5 — do not
 proceed to orchestration on an unvalidated plan.
 

@@ -10,8 +10,8 @@ description: >-
   owner brings to a ratified high-level solution (grounding the owner's claims first, then solution shape,
   guardrails, ratchet, ledger, verification, do/don't — never How), record the ratified
   decisions in the idea card, dispatch a planning-only Warchief for spec + plan and review them
-  by grounding until they are very clear, then brief and guide the owner's new execution session
-  via SendMessage; that execution follows the way of work the plan declares, never the tribe's
+  by grounding until they are very clear, then — once the owner approves, or has delegated it —
+  brief and guide the owner's new execution session via SendMessage; that execution follows the way of work the plan declares, never the tribe's
   delivery loop unless the owner explicitly asks for it. Mode 2 — forge the roadmap: UNDERSTAND the product (architecture docs,
   README, recent commits), ideate WITH the owner back-and-forth, and produce a ranked backlog of
   full-context idea cards (measurable goal, scope fence, dependencies, decision authority)
@@ -194,10 +194,18 @@ For every goal the card carries, one row:
    missing goal: a ban or a prerequisite is satisfied by doing nothing. The baseline is
    measured and written into the row before the card is approved.
 2. **Plan gate** (Mode 1 step 4, campaign Stage A). Trace every goal row to a task and a verify
-   step in the plan. Apply the **empty-implementation test** to each verify step: would doing
-   nothing, or a stub, pass it? If yes, rule it inadequate and send the amendment back. The
-   oracle must be the claim's kind — a visual goal verified only by DOM assertions or a
-   "no literal values" lint has no oracle.
+   step in the plan. **Every task, not only the last, carries its own Verify block** — Goal (the
+   row it proves), Red (the command before building and the failure it shows), Green (the
+   command after building and its literal expected output), Stub check (why an empty
+   implementation fails it); a shared "the suite is green" line is not one, whatever the card's
+   size. Apply the **empty-implementation test** to each verify step: would doing nothing, or a
+   stub, pass it? If yes, rule it inadequate and send the amendment back. The oracle must be the
+   claim's kind — a visual goal verified only by DOM assertions or a "no literal values" lint
+   has no oracle. Run `validate-plan.sh` yourself: it fails a task with no Verify block and a
+   plan with no `Executor:` line, and a plan that fails it is not clear. Why: the
+   campaign-status-cli plan (2026-09-28) ended every task with "Expected: check command green"
+   and held 9 empty test bodies; the validator passed it on the word "expected", and this gate
+   was reviewed only for facts until the owner asked where each step's verification was.
 3. **SHIPPED gate** (Mode 3 rule step). After `verify-shipped` passes, open the evidence for
    EACH goal row — the ratchet's before → after on the committed tool, and for a visual goal the
    screenshots next to the reference, looked at by you. An evidence file that exists but was
@@ -286,7 +294,8 @@ whole instruction. The owner's own words, which this mode encodes:
 
 Do these in order. Open your first reply by naming the mode and its path in one line — ground
 the facts → agree the solution → ratify into the card → planning-only Warchief writes spec +
-plan → hand off to a new session you drive — so the owner always knows where the work stands.
+plan → owner approves (or has delegated) → hand off to a new session you drive — so the owner
+always knows where the work stands.
 
 ### 1. Ground the facts first
 
@@ -349,7 +358,17 @@ every ruling reflected in both documents, every goal row traced to a verify step
 plan gate (empty-implementation test, oracle of the claim's kind), and the plan's way of work
 written down (see "Mode 1 executes the plan's way of work" below).
 
-### 5. Hand off by driving, not by checklist
+### 5. Implement only on the owner's approval
+
+When the spec and plan are clear, present them to the owner — the card's goal table, the plan's
+tasks with their Verify blocks, the declared way of work — and wait for an explicit go before any
+execution starts. A ratified card is not an approved build; never start execution on your own
+reading of "ratified". The one exception is delegation in the owner's own words ("I delegate this
+to you", "drive it from here until done"): then run everything — hand-off, execution, review, PR,
+merge, verified-`SHIPPED` — without stopping for approval, escalating only the irreversible few
+(data shapes, product promises, new permissions, privacy).
+
+### 6. Hand off by driving, not by checklist
 
 The owner opens a new named session to run the plan. You brief and guide that session through
 `SendMessage`: the card, spec, plan and board paths, the ratified decisions and rulings, the
@@ -374,8 +393,16 @@ describe how Modes 2–3 ship approved roadmap cards; none of them applies to Mo
 - **The plan is the contract for how the work runs.** Execution follows the way of work the plan
   declares — who implements, how many review passes, how many fix rounds, how it reaches a merged
   PR — exactly as written. Most Mode 1 cards are small or medium and well defined, and their plans
-  declare the plain flow: implement task by task until the plan's checks pass, one review, at most
-  one fix round, then PR and merge.
+  declare the plain flow:
+  - **Executor.** `Executor: single-agent` only when the plan has at most 2 tasks and a minimal
+    code change (roughly 50 changed lines outside tests, as the plan estimates). Otherwise
+    `Executor: subagent-per-task`: one fresh implementer subagent per task, in order.
+  - **Each task.** Run its Red and see the stated failure, build, run its Green and match the
+    literal expected output, commit. The orchestrating session re-runs that Green itself before
+    marking the task done or starting the next one; a Green that does not reproduce sends the
+    task back.
+  - **Then.** Run the plan's end-to-end check for every goal and the ratchet's before → after,
+    one review, at most one fix round (re-running the Verify of every task it touches), PR, merge.
 - **No tribe delivery loop unless the owner asks for it in their own words.** In Mode 1 you never
   dispatch, and your brief never tells the execution session to dispatch, a full-build
   `warchief`, a `hunter`, a `skinner` (single or the two-lens audit), a `tracker`, or a `scout`,
@@ -385,16 +412,16 @@ describe how Modes 2–3 ship approved roadmap cards; none of them applies to Mo
   your own sense that more review would be safer is not that exception — raise it with the owner
   as a question instead.
 - **The plan gate checks the way of work is written down.** In step 4, a plan that does not
-  declare its way of work is not yet clear: rule that it must, and send the amendment back. If
-  the owner has not named one, the planning-only Warchief writes the plain flow above, never the
-  tribe loop.
+  declare its way of work — including its `Executor:` line — is not yet clear: rule that it
+  must, and send the amendment back. If the owner has not named one, the planning-only Warchief
+  writes the plain flow above, never the tribe loop.
 - **Word the brief so it cannot trigger the tribe.** Quote the plan's way-of-work section in the
   brief, and do not open the brief with a tribe role assignment ("you are the Shaman / the
   Warchief"): that phrasing is a trigger for the `mammoth-hunt` skill in the receiving session.
 
 **Definition of done (Mode 1):** the card holds every ratified decision and ruling; the spec and
-plan are clear with no open question, and the plan declares its way of work; the execution
-session has acknowledged its brief; and you keep guiding it, on the plan's way of work, until its
+plan are clear with no open question, and the plan declares its way of work; the owner approved
+execution or delegated it in their own words; the execution session has acknowledged its brief; and you keep guiding it, on the plan's way of work, until its
 result is verified-`SHIPPED`.
 
 ---
