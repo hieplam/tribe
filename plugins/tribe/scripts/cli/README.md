@@ -1,8 +1,8 @@
 # `tribe` — the command-line entry point
 
-One command for the tribe's local tools. Today it does one thing: start the read-only
-[session viewer](../viewer/README.md) and open it in the browser. New options and subcommands
-land here, in `core/args.ts`, as they are needed.
+One command for the tribe's local tools: start the read-only
+[session viewer](../viewer/README.md) and open it in the browser, or print how a campaign is
+doing. New options and subcommands land here, in `core/args.ts`, as they are needed.
 
 ## Install
 
@@ -23,6 +23,8 @@ tribe --remote            # let your phone/other laptops on the same network ope
 tribe --host 192.168.1.20 # listen on one specific IPv4 address of this machine
 tribe --version           # the tribe plugin version
 tribe --help
+tribe campaign status     # card progress of the campaign you are working on
+tribe campaign status <name> [--watch]   # a named campaign; --watch refreshes every 2 s
 ```
 
 What happens on `tribe`, modelled on [kanna](https://github.com/cuongtranba/kanna)'s CLI:
@@ -56,6 +58,54 @@ rebinding). Typing the IP address or `<your-mac>.local` works.
 `tribe --remote` checks for a running viewer through the LAN address, so a localhost-only viewer
 already on the port is not reused (other devices could not reach it); a network one is.
 
+## `tribe campaign status`
+
+What a campaign is doing, read from the two files the campaign runner keeps outside the repo
+(`~/.tribe/<repo-key>/campaigns/<name>/campaign-state.json` and `supervisor/status.json`). It
+only reads; nothing under `~/.tribe` is ever written. The campaign is found from the repo you are
+standing in — any subdirectory works — so there is no path to know:
+
+```sh
+$ tribe campaign status post-rdo-followups
+campaign post-rdo-followups — terminal (done: campaign_closed)
+cards: 2/2 shipped
+  fu-closing-dismiss  shipped  tasks 1/1  PR #190  waiting on: —
+  rdo-cleanup  shipped  tasks 3/3  PR #191  waiting on: —
+last action: exit:campaign_closed (1h ago)
+```
+
+Line by line:
+
+| Line | Reads |
+| --- | --- |
+| header | `campaign <name> — <supervisor state>`, plus ` (<status>: <reason>)` once the campaign has finished, or `supervisor: not started` when no supervisor has run yet |
+| `cards: N/M shipped` | how many of the campaign's cards have shipped |
+| one line per card | `<id>  <status>  tasks <passed>/<total>  PR #<n>` (or `PR —`), then `waiting on:` the dependencies that have **not** shipped (`—` when nothing is outstanding). `tasks` counts task entries whose `passedSha` the runner has recorded; a campaign whose state file has no task index shows `tasks 0/0` |
+| `session: <kind> <card> <session>` | only while a session is running |
+| `last action: <action> (<age> ago)` | how long ago the supervisor last did anything |
+
+With no name, the campaign whose state files were touched most recently is the one shown — the
+one you are working on. Cards appear in the campaign's planned order, then any card the plan does
+not mention, sorted.
+
+**The stuck warning.** A campaign that has not finished and whose supervisor has been quiet for
+more than 10 minutes gets a last line:
+
+```
+WARNING: possibly stuck — supervisor not updated for 34m
+```
+
+A finished campaign is quiet by design and never warns. `--watch` clears the screen and re-reads
+both files every 2 seconds — a fixed interval, with no flag to change it; Ctrl-C stops it.
+
+Exit codes:
+
+| Code | When |
+| --- | --- |
+| `0` | the status was printed |
+| `1` | it could not be: you are not inside a git repository, this repo has no campaigns, the name does not exist, or a state file is missing, unreadable or not the shape this command expects — always one line on stderr, never a stack trace |
+| `2` | the command line itself is wrong: an unknown flag, a second name, or a name that is not a plain campaign id |
+
 ## Layout
 
 | File | Role |
@@ -64,12 +114,16 @@ already on the port is not reused (other devices could not reach it); a network 
 | `main.ts` | composition root — the only file that reads `process.argv` or exits |
 | `core/args.ts` | pure argv parser; every outcome, refusals included, is a returned value |
 | `core/viewer.ts` | pure launch flow (reuse / start / next port, which address to check and open) over an injected `ViewerIo` |
+| `core/campaign-status.ts` | pure campaign status: lenient readers for the two state files, which campaign is "latest", the age format, the exact lines printed, and the flow over an injected `CampaignStatusIo` |
 | `adapters/viewer.adapter.ts` | the world: `/healthz` probe, the foreground child, the browser |
+| `adapters/campaign-status.adapter.ts` | the world: the repo's tribe home (via `../tribe-home.sh`), the campaign directories and their mtimes, reading JSON, the clock, the terminal |
 
 The `/healthz` probe and its classification are the runner's
 (`../runner/adapters/viewer-launch.adapter.ts`, `../runner/core/viewer-launch.ts#classifyProbe`),
 so the CLI and the campaign runner can never disagree about what counts as a running viewer. The
-LAN address list is the viewer's own (`../viewer/core/net.ts#lanIPv4Addresses`).
+LAN address list is the viewer's own (`../viewer/core/net.ts#lanIPv4Addresses`). The campaign
+home path is `../tribe-home.sh`'s, the single source of truth for `~/.tribe/<repo-key>`, so
+`tribe` can never disagree with the runner about where a campaign's state lives.
 
 ## Tests
 

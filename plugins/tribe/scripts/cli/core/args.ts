@@ -7,12 +7,14 @@ export type Command =
   | { kind: 'help' }
   | { kind: 'version' }
   | { kind: 'viewer'; port: number; open: boolean; strictPort: boolean; host: string }
+  | { kind: 'campaign-status'; name: string | null; watch: boolean }
   | { kind: 'refuse'; message: string };
 
 export const HELP = `tribe — the tribe toolbox
 
 Usage:
   tribe [options]      start the read-only session viewer and open it in the browser
+  tribe campaign status [<name>] [--watch]   card progress of a campaign (default: latest; --watch refreshes every 2 s)
 
 Options:
   --port <number>      port to listen on (default: ${DEFAULT_PORT})
@@ -29,6 +31,7 @@ Options:
 export function parseArgs(args: string[]): Command {
   if (args.includes('--help') || args.includes('-h')) return { kind: 'help' };
   if (args.includes('--version') || args.includes('-v')) return { kind: 'version' };
+  if (args[0] === 'campaign') return parseCampaign(args.slice(1));
 
   let port = DEFAULT_PORT;
   let open = true;
@@ -67,4 +70,38 @@ function parsePort(raw: string): number | null {
   if (!/^\d+$/.test(raw)) return null;
   const port = Number(raw);
   return port >= 1 && port <= 65535 ? port : null;
+}
+
+/** `args` is what follows `campaign`. Only `status` exists today, so anything else — including
+ * nothing at all — is the same refusal, naming the one subcommand there is. */
+function parseCampaign(args: string[]): Command {
+  if (args[0] !== 'status') {
+    return { kind: 'refuse', message: 'tribe: campaign expects a subcommand: status (see tribe --help)' };
+  }
+
+  let name: string | null = null;
+  let watch = false;
+
+  for (const arg of args.slice(1)) {
+    if (arg === '--watch') {
+      watch = true;
+    } else if (arg.startsWith('-')) {
+      // Refuse the flag itself; its value is never consumed (fail-closed-edges §1).
+      return { kind: 'refuse', message: `tribe: unknown option ${arg} for campaign status (see tribe --help)` };
+    } else if (name !== null) {
+      return { kind: 'refuse', message: `tribe: campaign status takes at most one name, got ${JSON.stringify(arg)}` };
+    } else if (!isCampaignName(arg)) {
+      return { kind: 'refuse', message: `tribe: invalid campaign name ${JSON.stringify(arg)}` };
+    } else {
+      name = arg;
+    }
+  }
+
+  return { kind: 'campaign-status', name, watch };
+}
+
+/** A campaign name becomes one path segment under <home>/campaigns, so it is contained here,
+ * before any path is built: no separator, no traversal (fail-closed-edges.md §4). */
+function isCampaignName(raw: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(raw) && raw !== '.' && raw !== '..';
 }
