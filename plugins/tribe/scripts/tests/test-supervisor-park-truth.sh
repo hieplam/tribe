@@ -104,7 +104,7 @@ JSON
  "terminal":{"status":"needs_human","reason":"stalled","exitCode":10}}
 JSON
   cat > "$home/campaign-report.json" <<JSON
-{"run":{"reason":"escalations_pending","unratifiedRulings":[]},
+{"run":{"reason":"escalations_pending"},
  "cards":{"c1":{"outcome":"shipped","escalationFile":null,"question":null,"autoAnswerRounds":0}},
  "pending":[],"stats":{"shipped":1,"escalated":0,"blocked":0,"notReached":0}}
 JSON

@@ -356,9 +356,6 @@ export function parseCampaignReportFacts(raw: string): CampaignReportFacts | nul
   const obj = parsed as Record<string, unknown>;
   const run = obj['run'] as Record<string, unknown> | undefined;
   if (run === undefined || typeof run['reason'] !== 'string') return null;
-  const unratifiedRulings = Array.isArray(run['unratifiedRulings'])
-    ? (run['unratifiedRulings'] as unknown[]).filter((x): x is string => typeof x === 'string')
-    : [];
   const pending = Array.isArray(obj['pending'])
     ? (obj['pending'] as unknown[]).filter((x): x is string => typeof x === 'string')
     : [];
@@ -386,7 +383,7 @@ export function parseCampaignReportFacts(raw: string): CampaignReportFacts | nul
   const statsRaw = obj['stats'] as Record<string, unknown> | undefined;
   const numOr0 = (v: unknown): number => (typeof v === 'number' ? v : 0);
   return {
-    run: { reason: run['reason'], unratifiedRulings },
+    run: { reason: run['reason'] },
     pending,
     cards,
     stats: {

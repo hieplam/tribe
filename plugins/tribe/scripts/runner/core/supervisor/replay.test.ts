@@ -210,7 +210,7 @@ function fakeSeam(opts: { watchdogRuns: ScriptedWatchdogRun[]; sessions: Scripte
 
 function reportEscalated(): Record<string, unknown> {
   return {
-    run: { reason: 'escalations_pending', unratifiedRulings: [] },
+    run: { reason: 'escalations_pending' },
     cards: { [CARD_ID]: { outcome: 'escalated', escalationFile: `escalations/${CARD_ID}.md`, question: null, autoAnswerRounds: 0 } },
     pending: [],
     stats: { shipped: 0, escalated: 1, blocked: 0, notReached: 0 },
@@ -219,7 +219,7 @@ function reportEscalated(): Record<string, unknown> {
 
 function reportShipped(): Record<string, unknown> {
   return {
-    run: { reason: 'runner_done', unratifiedRulings: [] },
+    run: { reason: 'runner_done' },
     cards: { [CARD_ID]: { outcome: 'shipped', pr: 144, mergeSha: 'deadbeef' } },
     pending: [],
     stats: { shipped: 1, escalated: 0, blocked: 0, notReached: 0 },

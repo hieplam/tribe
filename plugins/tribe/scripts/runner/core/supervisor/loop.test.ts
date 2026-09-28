@@ -274,7 +274,7 @@ function cardFixture(overrides: Record<string, unknown> = {}): Record<string, un
 
 function reportEscalated(): Record<string, unknown> {
   return {
-    run: { reason: 'escalations_pending', unratifiedRulings: [] },
+    run: { reason: 'escalations_pending' },
     cards: { c1: { outcome: 'escalated', escalationFile: 'escalations/c1.md', question: 'q', autoAnswerRounds: 0 } },
     pending: [],
     stats: { shipped: 0, escalated: 1, blocked: 0, notReached: 0 },
@@ -283,7 +283,7 @@ function reportEscalated(): Record<string, unknown> {
 
 function reportShipped(): Record<string, unknown> {
   return {
-    run: { reason: 'runner_done', unratifiedRulings: [] },
+    run: { reason: 'runner_done' },
     cards: { c1: { outcome: 'shipped', pr: 1, mergeSha: 'abc' } },
     pending: [],
     stats: { shipped: 1, escalated: 0, blocked: 0, notReached: 0 },

@@ -169,7 +169,7 @@ cat > "$HOME_DIR/watchdog/status.json" <<JSON
 JSON
 cat > "$HOME_DIR/campaign-report.json" <<JSON
 {
-  "run": {"reason": "escalations_pending", "unratifiedRulings": []},
+  "run": {"reason": "escalations_pending"},
   "cards": {"c1": {"outcome": "escalated", "escalationFile": "escalations/c1.md", "question": "generic-ruling-needed", "autoAnswerRounds": 0}},
   "pending": [],
   "stats": {"shipped": 0, "escalated": 1, "blocked": 0, "notReached": 0}
