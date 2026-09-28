@@ -546,5 +546,25 @@ bash "$SCRIPT" "$WF5" > "$TMP/wo5.json"
 check "subagent-per-task (formatted) is declared" "$(find_check "$TMP/wo5.json" way_of_work_declared)" "pass"
 check "subagent-per-task with 3 tasks passes" "$(find_check "$TMP/wo5.json" single_agent_within_limit)" "pass"
 
+# --- Review round 1 (gpt-6-sol): each over- or under-check it found, pinned --------------
+probe() { # probe NAME CHECK WANT BODY-FILE [HEADER-FN]
+  local f="$TMP/probe-$RANDOM.md"
+  { "${5:-good_plan_header}"; task_with 1 "$4"; } > "$f"
+  bash "$SCRIPT" "$f" > "$f.json"
+  check "$1" "$(find_check "$f.json" "$2")" "$3"
+}
+printf -- '- Goal: G1.\n- Red: `bun test x` -> `1 fail`.\n- Green: `bun test x` -> `1 pass`.\n- Stub check: a stub fails.\n' > "$TMP/r1-scattered.md"
+probe "labels with no Verify heading fail" tasks_have_verify_block fail "$TMP/r1-scattered.md"
+printf '#### Verify\n- Goal: G1.\n- Red: `1 fail`.\n- Green: `1 pass`.\n- Stub check: a stub fails.\n' > "$TMP/r1-output-only.md"
+probe "output-only code spans are not commands" tasks_have_verify_block fail "$TMP/r1-output-only.md"
+printf '#### Verify\n- Goal: G1.\n- Red: not applicable.\n- Green: `bun test x` -> `1 pass`.\n- Stub check: a stub fails.\n' > "$TMP/r1-na-bare.md"
+probe "Red 'not applicable' with no reason fails" tasks_have_verify_block fail "$TMP/r1-na-bare.md"
+printf '#### Verify\n1. Goal: G1.\n2. Red: `bun test x` -> `1 fail`.\n3. Green: `bun test x` -> `1 pass`.\n4. Stub check: a stub fails.\n' > "$TMP/r1-numbered.md"
+probe "numbered-list Verify block passes" tasks_have_verify_block pass "$TMP/r1-numbered.md"
+not_wow_header() { printf '# P\n\n## Global Constraints\n\n- the hunter subagent.\n\n## Not the way of work\n\nExecutor: subagent-per-task\n\n'; }
+probe "a heading merely containing 'way of work' does not count" way_of_work_declared fail "$TMP/vb.md" not_wow_header
+bad_exec_header() { printf '# P\n\n## Global Constraints\n\n- the hunter subagent.\n\n## Way of work\n\nExecutor: single-agent-per-task\n\n'; }
+probe "a longer executor value is not single-agent" way_of_work_declared fail "$TMP/vb.md" bad_exec_header
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 exit $((FAIL > 0))

@@ -26,9 +26,10 @@
 #     section structure.
 #   - each task section carries at least one fenced code block (actual commands/code, not
 #     prose-only, whether or not the fence is indented under a list item)
-#   - each task section carries its own Verify block — labelled Goal, Red, Green and Stub
-#     check lines outside any fence, with a literal command under Red and under Green
-#     (Red may instead say "not applicable" plus a reason, for a task with no code)
+#   - each task section carries its own Verify block — a "Verify" heading holding labelled
+#     Goal, Red, Green and Stub check lines outside any fence, with a literal command under
+#     Red and under Green (Red may instead say "not applicable" plus the reason, for a task
+#     with no code)
 #   - a "Way of work" section declares "Executor: single-agent" or
 #     "Executor: subagent-per-task", and single-agent is used for at most 2 tasks
 #   - each task section carries exactly one "Commit" step (a checkbox step whose title
@@ -248,22 +249,36 @@ checks.append({
               else f"missing in: {tasks_missing_code}",
 })
 
-# 4b. each task section carries its own Verify block: four labelled lines outside any
-# fence — Goal (what the task proves), Red (the command run before building and the
-# failure it shows), Green (the command after building and its literal expected output),
-# Stub check (why an empty implementation fails it). Red and Green must each carry a
-# literal command: inline code on the label's lines, or a fenced block under the label.
-# A shared "the suite is green" line has no literal and fails. The one allowed Red with
-# no command is "not applicable" plus a reason, for a task with no code to go red (a
-# baseline measurement). This checks the block's form; whether its oracle is the right
-# one stays with the plan reviewer.
+# 4b. each task section carries its own Verify block: a heading titled "Verify" inside the
+# task, holding four labelled lines outside any fence — Goal (what the task proves), Red (the
+# command run before building and the failure it shows), Green (the command after building
+# and its literal expected output), Stub check (why an empty implementation fails it). Red
+# and Green must each carry a literal command: a fenced block under the label, or an inline
+# code span that reads as a command (a program name followed by an argument, like
+# `bun test x.test.ts`) — an output-only span like `1 fail` is not one. A shared "the suite is
+# green" line has no command and fails. The one allowed Red with no command is "not
+# applicable" plus the reason, for a task with no code to go red (a baseline measurement).
+# This checks the block's form; whether its oracle is the right one stays with the plan
+# reviewer.
+VERIFY_HEADING_RE = re.compile(r"^verify\b", re.IGNORECASE)
 VERIFY_LABEL_RE = re.compile(
-    r"^\s*(?:[-*+]\s+)?(?:\*\*)?(goal|red|green|stub check)\b[^:\n]{0,30}?\s*:", re.IGNORECASE)
-RED_NOT_APPLICABLE_RE = re.compile(r"\bnot applicable\b|\bn/a\b", re.IGNORECASE)
+    r"^\s*(?:(?:[-*+]|\d+[.)])\s+)?(?:\*\*)?(goal|red|green|stub check)\b[^:\n]{0,30}?\s*:",
+    re.IGNORECASE)
+# A command: a program name (a letter or path character first, so `1 fail` and `exit=2` don't
+# qualify, and `tribe: unknown option` doesn't either), then whitespace and an argument.
+COMMAND_SPAN_RE = re.compile(r"`\s*(?:\$\s*)?[A-Za-z./~][\w./~+-]*\s+[^`]+`")
+RED_NOT_APPLICABLE_RE = re.compile(r"\b(?:not applicable|n/a)\b(.*)$", re.IGNORECASE)
 REQUIRED_VERIFY_LABELS = ("goal", "red", "green", "stub check")
 tasks_missing_verify = []
 for s in task_sections:
-    body = range(s["line"], s["end"] - 1)   # 0-based indexes of the task's own lines
+    verify_sections = [v for v in sections
+                       if s["line"] < v["line"] < s["end"] and v["level"] > s["level"]
+                       and VERIFY_HEADING_RE.match(v["title"])]
+    if not verify_sections:
+        tasks_missing_verify.append(f"{s['title']} (no Verify heading)")
+        continue
+    v = verify_sections[0]
+    body = range(v["line"], v["end"] - 1)   # 0-based indexes of the Verify section's lines
     # Each label owns its lines up to the next label or heading outside a fence.
     label_at = {}
     for j in body:
@@ -273,28 +288,31 @@ for s in task_sections:
         if m:
             label_at[j] = m.group(1).lower()
     stops = sorted(set(label_at) | {j for j in body if not in_fence_flags[j]
-                                    and HEADING_RE.match(lines[j])} | {s["end"] - 1})
-    has_literal = {}
-    red_not_applicable = False
+                                    and HEADING_RE.match(lines[j])} | {v["end"] - 1})
+    has_command = {}
+    red_not_applicable_with_reason = False
     for j, label in label_at.items():
         end = next(k for k in stops if k > j)
-        carries = any(fence_opens[k] or (not in_fence_flags[k] and INLINE_CODE_RE.search(lines[k]))
+        carries = any(fence_opens[k] or (not in_fence_flags[k] and COMMAND_SPAN_RE.search(lines[k]))
                       for k in range(j, end))
-        has_literal[label] = has_literal.get(label, False) or carries
-        if label == "red" and RED_NOT_APPLICABLE_RE.search(lines[j]):
-            red_not_applicable = True
-    problems = [label for label in REQUIRED_VERIFY_LABELS if label not in has_literal]
-    if "green" in has_literal and not has_literal["green"]:
+        has_command[label] = has_command.get(label, False) or carries
+        # The reason is at least two words after the phrase ("not applicable." alone is not one).
+        na = RED_NOT_APPLICABLE_RE.search(lines[j]) if label == "red" else None
+        if na and len(re.findall(r"[A-Za-z]{2,}", na.group(1))) >= 2:
+            red_not_applicable_with_reason = True
+    problems = [label for label in REQUIRED_VERIFY_LABELS if label not in has_command]
+    if "green" in has_command and not has_command["green"]:
         problems.append("green has no literal command")
-    if "red" in has_literal and not has_literal["red"] and not red_not_applicable:
-        problems.append("red has no literal command")
+    if "red" in has_command and not has_command["red"] and not red_not_applicable_with_reason:
+        problems.append("red has no literal command, or 'not applicable' with no reason")
     if problems:
         tasks_missing_verify.append(f"{s['title']} ({', '.join(problems)})")
 checks.append({
     "name": "tasks_have_verify_block",
     "status": "pass" if not tasks_missing_verify else "fail",
-    "detail": "every task carries Goal, Red, Green and Stub check, with literal Red/Green commands"
-              if not tasks_missing_verify else f"missing or incomplete in: {tasks_missing_verify}",
+    "detail": "every task carries a Verify block: Goal, Red, Green and Stub check, with literal "
+              "Red/Green commands" if not tasks_missing_verify
+              else f"missing or incomplete in: {tasks_missing_verify}",
 })
 
 # 4c. the plan declares how it is executed, in a "Way of work" section, on a line
@@ -303,10 +321,10 @@ checks.append({
 # minimal code change); every larger plan gets one fresh implementer subagent per task.
 # The "minimal code change" half is judged by the plan reviewer, not here.
 EXECUTOR_RE = re.compile(
-    r"^\s*(?:[-*+]\s+)?(?:\*\*)?executor(?:\*\*)?\s*:(?:\*\*)?\s*`?(single-agent|subagent-per-task)\b",
+    r"^\s*(?:(?:[-*+]|\d+[.)])\s+)?(?:\*\*)?executor(?:\*\*)?\s*:(?:\*\*)?\s*`?(single-agent|subagent-per-task)(?![\w-])",
     re.IGNORECASE)
 SINGLE_AGENT_MAX_TASKS = 2
-wow_sections = [s for s in sections if re.search(r"\bway of work\b", s["title"], re.IGNORECASE)]
+wow_sections = [s for s in sections if re.match(r"^(?:\d+[.)]\s*)?way of work\b", s["title"], re.IGNORECASE)]
 executor = None
 for s in wow_sections:
     for j in range(s["line"], s["end"] - 1):

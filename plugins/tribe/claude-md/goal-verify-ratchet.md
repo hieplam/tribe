@@ -10,7 +10,8 @@ If an item is missing, STOP and fill it in; never guess it, never proceed withou
    against the reference; behaviour → end-to-end run; performance → measurement. **Empty-implementation
    test:** would doing nothing, or a stub, pass this check? If yes, it verifies nothing — replace it.
    **Every plan task carries its own Verify block**, whatever the card's size: **Goal** (the goal
-   row it proves), **Red** (the command run before building, and the failure it shows), **Green**
+   row it proves), **Red** (the command run before building, and the failure it shows — or "not
+   applicable" plus the reason, for a task with no code to go red), **Green**
    (the command after building, and its literal expected output), **Stub check** (why an empty
    implementation fails it). A shared "the suite is green" line is not a Verify block. A task is
    done only when its Green has been run and the output matches.
