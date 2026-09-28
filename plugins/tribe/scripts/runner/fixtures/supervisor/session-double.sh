@@ -8,14 +8,14 @@
 # times was the double invoked" without that count being just another home artifact the
 # write-surface probe would have to special-case).
 #
-# It writes ONLY `<home>/answers.md` (a ruling/ratify session's real target, spec §5.2/§5.3),
+# It writes ONLY `<home>/answers.md` (a ruling session's real target, spec §5.2),
 # `<home>/supervisor/final-report.md` (a closing session's real target, spec §5.4), and — for the
 # `close-pass` spec — `<home>/supervisor/verdicts/<card>.json` (a closing session's verify-shipped
 # verdict artifact, spec §4b/Task 10). All three are inside the supervisor's own write surface
 # (S-P5); it NEVER writes anywhere else under `<home>/supervisor/**` (that directory is otherwise
 # the supervisor's own exclusive write surface) and it NEVER spawns anything.
 #
-# Args: --home <campaign-home> --kind <ruling|ratify|closing>. `kind` is accepted (and
+# Args: --home <campaign-home> --kind <ruling|closing>. `kind` is accepted (and
 # recorded, see DOUBLE_LOG below) so the seam's own contract is satisfied, but this script's
 # BEHAVIOR is fully described by its own DOUBLE_PLAN entry for this attempt — never re-derived
 # from `kind` here. Keeping the two in agreement is the test script's job, the same way it

@@ -43,9 +43,10 @@ const ONCE_ONLY_REASONS = new Set([
 ]);
 
 export function decide(o: SupervisorObservation): SupervisorAction {
-  // --- Post-session rows V1-V8 (§3.4): "the loop records the verdict into the observation as
+  // --- Post-session rows (§3.4): "the loop records the verdict into the observation as
   // `lastSessionOutcome` and re-enters `decide()`" — these run BEFORE any other row, whenever a
-  // session just returned. V7/V8 are handled explicitly here, same as V1-V6; only a MALFORMED
+  // session just returned. V8 is handled explicitly here, same as V1 and V3-V6 (V2 and V7 were
+  // the ratification session's rows; the supervisor no longer ratifies, spec §4.11); only a MALFORMED
   // outcome (a 'ruled'/'parked' verdict missing its required id/kind — a contract violation by
   // the layer below) falls through to the ordinary pre-loop/main rows, rather than being
   // silently swallowed.
@@ -59,14 +60,6 @@ export function decide(o: SupervisorObservation): SupervisorAction {
         `the ${outcome.kind} session for card ${String(outcome.cardId)} rewrote or deleted a `
           + 'prior ruling in answers.md; the ruling trail is no longer trustworthy and this is '
           + 'never retried',
-      );
-    }
-    // V2: same class of violation as V1 — never a retry.
-    if (outcome.outcome === 'ratify_out_of_scope') {
-      return park(
-        'ratify_out_of_scope',
-        `the ratify session for card ${String(outcome.cardId)} touched a ruling block outside `
-          + 'the ids it was asked to ratify; never retried',
       );
     }
     // V3: a verified ruling — the supervisor (not the session) performs the archive (§5.5).
@@ -89,24 +82,14 @@ export function decide(o: SupervisorObservation): SupervisorAction {
       if (retries < o.limits.sessionRetries) {
         return { kind: 'spawn_session', session: outcome.kind, cardId: outcome.cardId };
       }
-      const failedReason: ParkReason = outcome.kind === 'ruling'
-        ? 'ruling_failed'
-        : outcome.kind === 'ratify'
-          ? 'ratify_failed'
-          : 'closing_failed';
+      const failedReason: ParkReason = outcome.kind === 'ruling' ? 'ruling_failed' : 'closing_failed';
       return park(
         failedReason,
         `the ${outcome.kind} session for card ${String(outcome.cardId)} ${outcome.outcome} `
           + `and the retry budget (${o.limits.sessionRetries}) is exhausted`,
       );
     }
-    // V7: the unratified list reached empty. "Same scope" resolves to the base scope
-    // (`{cards: null, includeEscalated: false}`) — the SAME literal used for rows 16/24 above:
-    // a fresh watchdog run over the whole campaign, not a card-scoped re-run.
-    if (outcome.outcome === 'ratified') {
-      return { kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: null };
-    }
-    // V8: the final report exists and nothing is unratified — the campaign closes.
+    // V8: the final report exists — the campaign closes.
     if (outcome.outcome === 'closed') {
       return { kind: 'exit', status: 'done', reason: 'campaign_closed' };
     }
@@ -188,10 +171,10 @@ export function decide(o: SupervisorObservation): SupervisorAction {
     }
   }
 
-  // Rows 1-3: runner_done.
+  // Rows 1-3: runner_done. The supervisor does no ratification (spec §4.11, D6): rulings in
+  // answers.md never delay the closing session.
   if (reason === 'runner_done') {
     if (o.state.closingVerified) return { kind: 'exit', status: 'done', reason: 'campaign_closed' };
-    if (o.unratifiedRulings.length > 0) return { kind: 'spawn_session', session: 'ratify', cardId: null };
     // R11 (Task 20, spec §5.4 item 4): fail closed rather than spawn a `closing` session that
     // cannot verify any card — checked BEFORE the spawn, never after (a session with no
     // verify-shipped plugin loaded would fail `Unknown skill` mid-brief instead of parking with
@@ -256,16 +239,8 @@ export function decide(o: SupervisorObservation): SupervisorAction {
     return { kind: 'spawn_session', session: 'ruling', cardId: next.cardId };
   }
 
-  // Rows 13-15: rulings_unratified.
-  if (reason === 'rulings_unratified') {
-    if (o.state.ratifyRounds >= o.limits.maxRatifyRounds) {
-      return park('ratify_cap', `the ratify-round cap (${o.limits.maxRatifyRounds}) is spent`);
-    }
-    if (o.state.spawns >= o.limits.maxSpawns) {
-      return park('spawn_cap', `the total spawn budget (${o.limits.maxSpawns}) is spent`);
-    }
-    return { kind: 'spawn_session', session: 'ratify', cardId: null };
-  }
+  // Rows 13-15 (rulings_unratified) are gone with the ratification session (spec §4.11): a legacy
+  // `rulings_unratified` terminal falls to the residual backstop below and parks as `error`.
 
   // Rows 16-17: session_incomplete.
   if (reason === 'session_incomplete') {

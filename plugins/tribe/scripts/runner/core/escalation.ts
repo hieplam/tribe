@@ -23,9 +23,8 @@ export interface EscalationQuestion {
 const REASON_RE = /\*\*Reason:\*\*\s*(.+)/;
 
 /** Extracts the `## <id>` section verbatim: the heading line through the line before the next `## `
- * heading, or end of content. This is the SAME heading partition `core/supervisor/verify.ts`'s
- * `blocksById` and `loop.ts`'s `extractRulingBlockVerbatim` use — one boundary rule for the repo,
- * never a third. A `### ` subheading is not a boundary (`/^##\s+/` requires whitespace after
+ * heading, or end of content. This is the SAME heading partition `core/rulings.ts`'s
+ * `parseRulings` uses — one boundary rule for the repo, never a second. A `### ` subheading is not a boundary (`/^##\s+/` requires whitespace after
  * exactly two hashes). `null` when no such heading exists. */
 function sectionVerbatim(content: string, id: string): string | null {
   const lines = content.split('\n');

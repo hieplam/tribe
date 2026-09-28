@@ -20,7 +20,6 @@ export const CURRENT_SUPERVISOR_STATE_VERSION = 1;
 export function zeroState(): SupervisorState {
   return {
     rulingRounds: {},
-    ratifyRounds: 0,
     spawns: 0,
     watchdogRuns: 0,
     seenEscalations: {},
@@ -39,7 +38,9 @@ export type ParseStateResult =
  * typed refusal, never thrown — see the module doc comment for why this differs from
  * `core/state.ts`'s throw-based `parseState`. A well-formed v1 file is read back field-by-field
  * (no unknown-field passthrough is needed: unlike `campaign-state.json`, nothing else ever
- * hand-authors this file, so there is no forward-compat surface to preserve). */
+ * hand-authors this file, so there is no forward-compat surface to preserve). A key written by
+ * an older supervisor and no longer read — the ratification-round counter, gone with the
+ * ratification session (runner-driver-only spec §4.11) — is dropped here, never an error. */
 export function parseState(raw: unknown): ParseStateResult {
   if (raw === null) return { kind: 'ok', state: zeroState() };
 
@@ -53,7 +54,6 @@ export function parseState(raw: unknown): ParseStateResult {
     kind: 'ok',
     state: {
       rulingRounds: { ...(obj.rulingRounds ?? {}) },
-      ratifyRounds: obj.ratifyRounds ?? 0,
       spawns: obj.spawns ?? 0,
       watchdogRuns: obj.watchdogRuns ?? 0,
       seenEscalations: { ...(obj.seenEscalations ?? {}) },

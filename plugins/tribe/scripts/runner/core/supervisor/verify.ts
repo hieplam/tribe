@@ -1,4 +1,4 @@
-// Postcondition verification (spec §5.2 `ruling`, §5.3 `ratify`, §5.4 `closing`; card guardrail
+// Postcondition verification (spec §5.2 `ruling`, §5.4 `closing`; card guardrail
 // 2: "Trust disk, not the session's word.") Pure predicates over already-read strings — this
 // module reads nothing (no `fs`, no `child_process`, no clock, no throw for external input; the
 // only exception it can raise, `JSON.parse`'s `SyntaxError`, is caught narrowly in
@@ -8,20 +8,19 @@
 // A ruling counts only when a NEW `## ` block exists whose `ratified-as:` value passes the
 // EXISTING `isRulingRatified()` (`../rulings.ts`) — this module does not write a second
 // vocabulary for that. It adds exactly the checks `../rulings.ts` does not already do: history
-// integrity (S-P13), the git-repo-untouched check, the ratify id-scope fence, and the two-value
+// integrity (S-P13), the git-repo-untouched check, and the two-value
 // park-marker vocabulary.
 import { isRulingRatified, parseRulings, unratifiedRulingIds } from '../rulings.ts';
 import type { ParkMarkerKind } from './model.ts';
 
-/** One postcondition verdict, shared by `verifyRuling`, `verifyRatify`, `verifyClosing`.
- * `retryable` is `false` ONLY for the two integrity outcomes (`history_rewritten`,
- * `ratify_out_of_scope`) — every other outcome (including `failed`) is `true`, because an
+/** One postcondition verdict, shared by `verifyRuling` and `verifyClosing`.
+ * `retryable` is `false` ONLY for the integrity outcome (`history_rewritten`) — every other outcome (including `failed`) is `true`, because an
  * ordinary failed attempt is retried once before it parks (guardrail 2). `reason` carries a
  * free-form detail for a `failed` verdict (e.g. `repo_touched`); it is not itself a `ParkReason`
  * — an ordinary failed attempt still goes through the session-kind retry/park mapping in the
  * decision core, not straight to a park reason. */
 export interface VerifyVerdict {
-  outcome: 'ruled' | 'ratified' | 'closed' | 'parked' | 'failed' | 'history_rewritten' | 'ratify_out_of_scope';
+  outcome: 'ruled' | 'closed' | 'parked' | 'failed' | 'history_rewritten';
   retryable: boolean;
   rulingId?: string | null;
   parkMarkerKind?: ParkMarkerKind;
@@ -38,13 +37,6 @@ export interface VerifyRulingInput {
   /** Raw contents of `<home>/supervisor/park/<cardId>.json`, or `null`/absent when the session
    * wrote no marker. */
   marker?: string | null;
-}
-
-export interface VerifyRatifyInput {
-  before: string;
-  after: string;
-  /** `run.unratifiedRulings` — the ONLY ids this ratify session may touch. */
-  named: string[];
 }
 
 /** One shipped card's verify-shipped verdict file (`<home>/supervisor/verdicts/<cardId>.json`),
@@ -136,72 +128,6 @@ export function verifyRuling(input: VerifyRulingInput): VerifyVerdict {
 
   // Neither exit was taken: no new ruling block, no park marker.
   return { outcome: 'failed', retryable: true, reason: 'no_new_block' };
-}
-
-/** Splits `content` into `id -> raw block text` (the `## ` heading line through the line before
- * the next heading, or end of content), using the same heading partition `../rulings.ts`'s
- * `parseRulings` uses. Exists only for `verifyRatify`'s byte-identity fence — `parseRulings`
- * exposes `id`/`ratifiedAs`, not the raw bytes a byte-identical comparison needs. */
-function blocksById(content: string): Map<string, string> {
-  const blocks = new Map<string, string>();
-  let currentId: string | null = null;
-  let currentLines: string[] = [];
-
-  const flush = () => {
-    if (currentId !== null) blocks.set(currentId, currentLines.join('\n'));
-  };
-
-  for (const line of content.split('\n')) {
-    const heading = /^##\s+(.+?)\s*$/.exec(line);
-    if (heading) {
-      flush();
-      currentId = (heading[1] as string).trim();
-      currentLines = [line];
-      continue;
-    }
-    if (currentId !== null) currentLines.push(line);
-  }
-  flush();
-
-  return blocks;
-}
-
-/** §5.3's postcondition table: the fence is by ID, not by prefix (a ratify session legitimately
- * edits the middle of the file). Every block whose id is not in `named` must be byte-identical
- * before/after, and no id may disappear — either violation is `ratify_out_of_scope`, never
- * retried (same class of offence as rewriting ruling history). Only once both hold does the
- * function check the ordinary success condition: zero unratified ids remain. */
-export function verifyRatify(input: VerifyRatifyInput): VerifyVerdict {
-  const { before, after, named } = input;
-  const namedIds = new Set(named);
-  const blocksBefore = blocksById(before);
-  const blocksAfter = blocksById(after);
-
-  for (const [id, rawBefore] of blocksBefore) {
-    const rawAfter = blocksAfter.get(id);
-    if (rawAfter === undefined) {
-      return { outcome: 'ratify_out_of_scope', retryable: false };
-    }
-    if (!namedIds.has(id) && rawAfter !== rawBefore) {
-      return { outcome: 'ratify_out_of_scope', retryable: false };
-    }
-  }
-
-  // A brand-new block: present in `after`, absent from `before`. A ratify session never adds
-  // rulings — an id with no `before` counterpart is trivially "not in unratifiedRulings" and
-  // "not byte-identical" (it did not exist), so it is the same offence as rewriting an existing
-  // block (spec §5.3 check 1).
-  for (const id of blocksAfter.keys()) {
-    if (!blocksBefore.has(id)) {
-      return { outcome: 'ratify_out_of_scope', retryable: false };
-    }
-  }
-
-  if (unratifiedRulingIds(after).length > 0) {
-    return { outcome: 'failed', retryable: true };
-  }
-
-  return { outcome: 'ratified', retryable: true };
 }
 
 /** A closing report that self-declares a blocked/failed status must never close the campaign

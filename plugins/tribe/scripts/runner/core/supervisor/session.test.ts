@@ -1,5 +1,5 @@
 // Tests for session.ts (Task 13, spec §5.1): the one-shot session option block and runner for
-// `ruling`/`ratify`/`closing`. NEVER hits the real SDK — every test drives `runOneShotSession`
+// `ruling`/`closing`. NEVER hits the real SDK — every test drives `runOneShotSession`
 // through a scripted fake seam (`spawnSession`/`onSessionStart`/`appendLog`), mirroring
 // `core/session.test.ts`'s own `recordingIo` pattern.
 import { describe, expect, test } from 'bun:test';
@@ -84,7 +84,7 @@ test('runOneShotSession needs only spawnSession/onSessionStart/appendLog — not
     appendLog: () => {},
   };
   const result = await runOneShotSession(
-    { kind: 'ratify', prompt: 'p', cardId: null, ledgerPath: '/h/supervisor/ledger.jsonl', config: fixtureConfig() },
+    { kind: 'ruling', prompt: 'p', cardId: null, ledgerPath: '/h/supervisor/ledger.jsonl', config: fixtureConfig() },
     io as never,
   );
   expect(result.outcome).toBe('success');
@@ -121,13 +121,13 @@ test('the spawn row lands at init, carrying kind and card — even when the sess
 
 describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () => {
   test('resume is never a property of the built options, for any kind', () => {
-    for (const kind of ['ruling', 'ratify', 'closing'] as SessionKind[]) {
+    for (const kind of ['ruling', 'closing'] as SessionKind[]) {
       const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
       expect('resume' in options).toBe(false);
     }
   });
 
-  test.each(['ruling', 'ratify', 'closing'] as const)('%s starts in the target repo, never the campaign home (card supervisor-sessions-in-repo, G1)', (kind) => {
+  test.each(['ruling', 'closing'] as const)('%s starts in the target repo, never the campaign home (card supervisor-sessions-in-repo, G1)', (kind) => {
     const options = buildOneShotOptions(kind, fixtureConfig({ verifyShippedPluginDir: '/abs/vs' }), new AbortController());
     expect(options.cwd).toBe('/abs/repo');
     // The home must never be an additional directory: MEASURED (spec §3.2) it loads the home's
@@ -138,14 +138,14 @@ describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () =>
   });
 
   test('permissionMode is "default" for every kind — never "bypassPermissions" (decision 4)', () => {
-    for (const kind of ['ruling', 'ratify', 'closing'] as SessionKind[]) {
+    for (const kind of ['ruling', 'closing'] as SessionKind[]) {
       const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
       expect(options.permissionMode).toBe('default');
     }
   });
 
-  test('ruling and ratify carry the disallowedTools wall (no Bash/Task/Agent/network/wait-tools)', () => {
-    for (const kind of ['ruling', 'ratify'] as SessionKind[]) {
+  test('ruling carries the disallowedTools wall (no Bash/Task/Agent/network/wait-tools)', () => {
+    for (const kind of ['ruling'] as SessionKind[]) {
       const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
       expect(options.disallowedTools).toEqual([
         'Bash', 'Task', 'Agent', 'WebFetch', 'WebSearch', 'Monitor', 'ScheduleWakeup',
@@ -179,8 +179,8 @@ describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () =>
     expect(options.plugins).toBeUndefined();
   });
 
-  test('ruling/ratify never carry plugins, even when verifyShippedPluginDir happens to be set', () => {
-    for (const kind of ['ruling', 'ratify'] as SessionKind[]) {
+  test('ruling never carries plugins, even when verifyShippedPluginDir happens to be set', () => {
+    for (const kind of ['ruling'] as SessionKind[]) {
       const options = buildOneShotOptions(
         kind, fixtureConfig({ verifyShippedPluginDir: '/abs/plugins/verify-shipped' }), new AbortController(),
       );
@@ -188,7 +188,7 @@ describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () =>
     }
   });
 
-  for (const kind of ['ruling', 'ratify'] as SessionKind[]) {
+  for (const kind of ['ruling'] as SessionKind[]) {
     test(`${kind} carries a containment hook, and the wired hook actually denies an escape (not merely "present")`, async () => {
       const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
       expect(options.hooks?.PreToolUse).toHaveLength(2);
@@ -219,7 +219,7 @@ describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () =>
   // wired to nothing — `OneShotSessionOptions` carried no `maxTurns` at all, so the SDK's
   // `query()` never received a turn cap. This is the regression guard.
   test('maxTurns carries the configured OneShotSessionConfig.maxTurns value, for every kind', () => {
-    for (const kind of ['ruling', 'ratify', 'closing'] as SessionKind[]) {
+    for (const kind of ['ruling', 'closing'] as SessionKind[]) {
       const options = buildOneShotOptions(kind, fixtureConfig({ maxTurns: 17 }), new AbortController());
       expect(options.maxTurns).toBe(17);
     }
@@ -228,22 +228,22 @@ describe('buildOneShotOptions — spec §5.1 envelope (regression guard)', () =>
   // Card supervisor-session-settings (G3): the executor path's tier list, for every kind — the
   // 'user' tier is what registers ~/.claude/settings.json's enabledPlugins (the C3 plugin).
   test('settingSources is ["user","project","local"] for every kind (parity with core/session.ts)', () => {
-    for (const kind of ['ruling', 'ratify', 'closing'] as SessionKind[]) {
+    for (const kind of ['ruling', 'closing'] as SessionKind[]) {
       const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
       expect(options.settingSources).toEqual(['user', 'project', 'local']);
     }
   });
 
   // Owner ruling R2: JUDGMENT_ALLOWED_TOOLS gains Skill — and ONLY Skill.
-  test('ruling and ratify are granted the old five tools plus Skill, and nothing else', () => {
-    for (const kind of ['ruling', 'ratify'] as SessionKind[]) {
+  test('ruling is granted the old five tools plus Skill, and nothing else', () => {
+    for (const kind of ['ruling'] as SessionKind[]) {
       const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
       expect(options.allowedTools).toEqual(['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Skill']);
       expect(options.disallowedTools).toContain('Bash');
     }
   });
 
-  for (const kind of ['ruling', 'ratify'] as SessionKind[]) {
+  for (const kind of ['ruling'] as SessionKind[]) {
     test(`${kind}: through the WIRED hooks, Skill passes while Bash and an out-of-home Write are refused`, async () => {
       const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());
       const skill = await wiredDecisions(options, { tool_name: 'Skill', tool_input: { skill: 'c3' } });
@@ -283,7 +283,7 @@ describe('runOneShotSession — the message stream, log path, and typed result (
     io.spawnSession = () => messages([INIT_MESSAGE, RESULT_MESSAGE]);
 
     const result = await runOneShotSession(
-      { kind: 'ratify', prompt: 'ratify these ids', cardId: null, ledgerPath: '/h/supervisor/ledger.jsonl', config: fixtureConfig() },
+      { kind: 'ruling', prompt: 'rule on this', cardId: null, ledgerPath: '/h/supervisor/ledger.jsonl', config: fixtureConfig() },
       io,
     );
 
@@ -361,7 +361,7 @@ describe('runOneShotSession — the message stream, log path, and typed result (
       messages([INIT_MESSAGE, { type: 'result', subtype: 'error_max_turns', session_id: 'sess-abc' }]);
 
     const result = await runOneShotSession(
-      { kind: 'ratify', prompt: 'ratify these ids', cardId: null, ledgerPath: '/h/supervisor/ledger.jsonl', config: fixtureConfig() },
+      { kind: 'ruling', prompt: 'rule on this', cardId: null, ledgerPath: '/h/supervisor/ledger.jsonl', config: fixtureConfig() },
       io,
     );
 
@@ -401,7 +401,7 @@ function isScanDenial(d: HookDecision): boolean {
 }
 
 describe('the scan wall is wired into every supervisor envelope (issue #163, G2)', () => {
-  for (const kind of ['ruling', 'ratify', 'closing'] as SessionKind[]) {
+  for (const kind of ['ruling', 'closing'] as SessionKind[]) {
     for (const command of SCAN_VARIANTS) {
       test(`${kind}: the wired hooks refuse ${JSON.stringify(command)} with SCAN_DENIED_REASON`, async () => {
         const options = buildOneShotOptions(kind, fixtureConfig(), new AbortController());

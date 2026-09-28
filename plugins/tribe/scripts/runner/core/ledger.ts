@@ -2,7 +2,7 @@
 // PURE: messages and the clock value come in as arguments; writing a row is the caller's appendLog.
 import type { SessionMessage } from './session.ts';
 
-export type SpawnKind = 'executor' | 'ruling' | 'ratify' | 'closing' | 'subagent';
+export type SpawnKind = 'executor' | 'ruling' | 'closing' | 'subagent';
 export interface SpawnRow {
   at: string; event: 'spawn'; kind: SpawnKind;
   sessionId: string;              // this session's own id: SDK session_id, or a subagent's agent id
@@ -37,7 +37,7 @@ export function emptySpawnTracker(rootSessionId: string, cardId: string | null):
   return { rootSessionId, cardId, callerOfToolUse: {}, agentOfToolUse: {} };
 }
 
-/** The row for a session a PROCESS started (executor, ruling, ratify, closing): it has no parent
+/** The row for a session a PROCESS started (executor, ruling, closing): it has no parent
  * session and is its own root. `resumed` is written only when the caller supplies it, so a
  * first-run row carries no `resumed` key at all. */
 export function rootSpawnRow(params: {

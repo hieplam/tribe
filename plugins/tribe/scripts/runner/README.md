@@ -1131,7 +1131,6 @@ rejected by name (`unknown flag: …`), never silently ignored (`core/supervisor
 | `--home` | none | An explicit campaign home path instead of `--campaign`. Mutually exclusive with `--campaign`. |
 | `--watchdog-model` | the `--model` value | Executor tier passed to `run.ts watchdog --model` when the supervisor launches it. **Verified against `core/supervisor/loop.ts` (`config.watchdogModel ?? config.model`):** it always falls back to `--model` itself — never reads a campaign-configured value, despite `args.ts`'s own doc comment describing that as the intent; no code path enforces `--watchdog-model` as required. |
 | `--max-ruling-rounds` | `2` | Per-card cap on ruling-session rounds (W7). Bounded `0`-`10`. |
-| `--max-ratify-rounds` | `2` | Cap on ratify-session rounds. Bounded `0`-`10`. |
 | `--max-spawns` | `8` | Total one-shot session budget for this invocation. Bounded `0`-`100`. |
 | `--max-watchdog-runs` | `20` | Cap on how many times this invocation may (re)launch the watchdog. Bounded `1`-`500`. |
 | `--session-timeout-seconds` | `1800` | Wall-clock abort for one one-shot session. Bounded `60`-`21600`. |
@@ -1260,20 +1259,19 @@ comments; first match wins)
 | `STOP` file present (P3) | `exit(done:stop_requested)`. |
 | A watchdog is already live (P4) | `await_watchdog` — adopted, never relaunched. |
 | No watchdog has run yet this invocation (row 27) | `run_watchdog` over the whole campaign. |
-| Watchdog terminal `runner_done` (rows 1-3) | `spawn_session(ratify)` if `answers.md` carries unratified rulings, else `spawn_session(closing)` (failing closed to `park(closing_failed)` if the `verify-shipped` plugin dir is missing), else `exit(done:campaign_closed)` once `state.json.closingVerified` is true. |
+| Watchdog terminal `runner_done` (rows 1-3) | `spawn_session(closing)` (failing closed to `park(closing_failed)` if the `verify-shipped` plugin dir is missing); `exit(done:campaign_closed)` once `state.json.closingVerified` is true. The supervisor does no ratification: rulings in `answers.md` never delay the closing session. |
 | Watchdog terminal `stop_requested` (row 4) | `exit(done:stop_requested)`. |
 | Watchdog terminal `escalations_pending` (rows 5-12) | For the next unanswered card: archive a ruling already landed in `answers.md` but not yet archived; else honour that card's own park marker; else `park(owner_only)` if its trigger is on `ownerOnlyEscalations`; else `park(repeat_escalation)` if this exact body was already ruled; else `park(w7_cap)`/`park(spawn_cap)` if a budget is spent; else `spawn_session(ruling)`. Once every escalated card is answered, `run_watchdog` scoped to just the answered + not-reached cards. |
-| Watchdog terminal `rulings_unratified` (rows 13-15) | `spawn_session(ratify)`, gated by `park(ratify_cap)`/`park(spawn_cap)`. |
 | Watchdog terminal `session_incomplete` (rows 16-17) | One bounded watchdog re-trigger, then `park(session_incomplete)`. |
 | Watchdog terminal `quota_cap` / `overloaded` / `stalled` / `lock_conflict` / `error` (rows 18-22) | `park` with the matching reason — never retried automatically. |
 | A one-shot session just returned `failed`/`timeout` (V5/V6) | One bounded retry (`--session-retries`), then `park(<kind>_failed)`. |
-| A one-shot session just returned `history_rewritten`/`ratify_out_of_scope` (V1/V2) | `park` immediately — an integrity violation, never retried. |
-| The watchdog-run cap is spent (row 28), or an unrecognised terminal reason | `park(watchdog_run_cap)` / `park(error)` — fail closed, never guess. |
+| A one-shot session just returned `history_rewritten` (V1) | `park` immediately — an integrity violation, never retried. |
+| The watchdog-run cap is spent (row 28), or an unrecognised terminal reason (including a legacy `rulings_unratified`) | `park(watchdog_run_cap)` / `park(error)` — fail closed, never guess. |
 
 ### What it never does
 
 - **Never decides from an LLM's own words.** `decide()` is a pure function of typed disk facts
-  only — a ruling, a ratify, or a closing verdict is a **postcondition check on disk**
+  only — a ruling or a closing verdict is a **postcondition check on disk**
   (`core/supervisor/verify.ts`), never the session's own claim (guardrail 2, "Trust disk, not
   the session's word").
 - **Never writes `answers.md` or `campaign-state.json`.** A one-shot session may append to
@@ -1285,7 +1283,7 @@ comments; first match wins)
   (P1/P4 above).
 - **Never rules on an owner-only trigger itself.** A card whose escalation reason is on
   `ownerOnlyEscalations` parks with `owner_only` rather than spawning a ruling session.
-- **Never retries an integrity violation.** A `history_rewritten` or `ratify_out_of_scope`
+- **Never retries an integrity violation.** A `history_rewritten`
   verdict parks immediately, with no retry budget consulted at all.
 
 ### Known limitations (supervisor)

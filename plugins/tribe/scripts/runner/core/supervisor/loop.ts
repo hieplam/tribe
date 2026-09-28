@@ -22,24 +22,22 @@
  * with `adapters/session.adapter.ts`'s exports and a `realpath` primitive, the same way any
  * composition root merges capability ports. See the report to the Warchief for this concern.
  *
- * --- V7/V8 (spec §3.4): `decide.ts` implements BOTH rows (task 7 fix) — this loop never
- * re-derives the `ratified`/`closed` action itself. It still performs one piece of bookkeeping
+ * --- V8 (spec §3.4): `decide.ts` implements the row (task 7 fix) — this loop never
+ * re-derives the `closed` action itself. It still performs one piece of bookkeeping
  * `decide()` cannot: durably recording `closingVerified: true` in `state.json` the moment a
  * `closed` verdict is carried out, BEFORE the process exits (§4.3's crash-recovery row for
  * `spawn_session(closing)`). That is a state-persistence side effect of CARRYING OUT the exit
  * decide() already made — the same class of bookkeeping this loop already performs for every
- * other action kind (incrementing `spawns`/`rulingRounds`/`ratifyRounds`/`watchdogRuns`) — never
+ * other action kind (incrementing `spawns`/`rulingRounds`/`watchdogRuns`) — never
  * a re-decision of what to do.
  *
  * --- The one-shot session's PROMPT: rendered by `core/supervisor/brief.ts#renderBrief` from
- * facts this loop gathers off disk at the moment of a `spawn_session` action (spec §5.2/§5.3/
+ * facts this loop gathers off disk at the moment of a `spawn_session` action (spec §5.2/
  * §5.4) — the escalation file's content, the card's spec/plan paths (`campaign-state.json`'s
  * per-card `spec`/`plan` fields, read the same repo-relative way `core/brief.ts`'s executor
  * brief already reads them — Task 16: through `readCampaignState`, `../state.ts`'s own
  * `CampaignStateSchema.safeParse`, imported read-only, never edited),
- * the unratified rulings' own verbatim blocks (`extractRulingBlockVerbatim` below — `../
- * rulings.ts#parseRulings` classifies a block's `ratified-as:` but deliberately never carries
- * its bytes), and the closing session's campaign-report/gap-gate facts (each card's gap-gate JSON
+ * and the closing session's campaign-report/gap-gate facts (each card's gap-gate JSON
  * lives under the CAMPAIGN home — `<campaign-home>/reports/<card>-gap-gate.json` — because the gate
  * writes beside the Tracker reports it consumes, which `core/brief.ts` puts under that same
  * campaign home; the closing reader (`readGapGateOpenIds`) therefore reads `homeDir`, never
@@ -64,17 +62,17 @@ import {
   buildStatus, exitCodeOf, renderNeedsOwner, serializeStatus, type SupervisorTerminalKind,
 } from './status.ts';
 import { terminalContradiction } from './truth.ts';
-import { parseParkMarker, verifyClosing, verifyRatify, verifyRuling, type ShippedVerdict } from './verify.ts';
+import { parseParkMarker, verifyClosing, verifyRuling, type ShippedVerdict } from './verify.ts';
 import {
   buildOneShotOptions as _buildOneShotOptions, runOneShotSession,
   type OneShotSessionConfig, type OneShotSessionSeam,
 } from './session.ts';
 import {
-  CLOSING_TEMPLATE_PATH, RATIFY_TEMPLATE_PATH, RULING_TEMPLATE_PATH, renderBrief,
+  CLOSING_TEMPLATE_PATH, RULING_TEMPLATE_PATH, renderBrief,
   type ClosingBriefFacts, type ClosingOpenIdsFact, type ClosingRulingFact, type ClosingVerdictFact,
-  type RatifyBlockFact, type RatifyBriefFacts, type RulingBriefFacts,
+  type RulingBriefFacts,
 } from './brief.ts';
-import { parseRulings, unratifiedRulingIds } from '../rulings.ts';
+import { parseRulings } from '../rulings.ts';
 import { extractReasonLine, parseEscalationQuestion } from '../escalation.ts';
 import {
   answersPathOf, campaignStatePathOf, escalationPathOf, escalationsDirOf, supervisorLedgerPathOf,
@@ -560,14 +558,6 @@ export function observe(
   const escalations = buildEscalationFacts(io, homeDir, report);
   const ownerOnlyEscalations = readOwnerOnlyEscalations(io, homeDir);
 
-  // Computed FRESH from `answers.md` every tick (never trusted from the stale
-  // `campaign-report.json` snapshot): a ratify session only ever touches `answers.md`, so a
-  // report-sourced value would still show the pre-ratify ids and — since `decide.ts`'s
-  // `rulings_unratified` rows (13-15) are unconditional on this list's CONTENT, only on the
-  // watchdog's terminal REASON — would spawn an unbounded stream of ratify sessions after the
-  // first one already succeeded.
-  const unratifiedRulings = unratifiedRulingIds(io.readFileOrEmpty(paths.answers));
-
   const parkMarkers = readParkMarkers(io, paths.parkDir);
 
   // Task 4 (spec §2.2, card `supervisor-park-truth`): the one new primitive fact — what
@@ -592,7 +582,6 @@ export function observe(
     report,
     escalations,
     ownerOnlyEscalations,
-    unratifiedRulings,
     parkMarkers,
     runs,
     watchdogRunId,
@@ -605,33 +594,6 @@ export function observe(
     // done once in `cli/main.ts`).
     verifyShippedPluginAvailable: config.verifyShippedPluginDir !== null,
   };
-}
-
-/** §5.3's ratify brief needs each named ruling's OWN block, byte-verbatim (the `## ` heading
- * line through the line before the next `## ` heading, or EOF) — `../rulings.ts#parseRulings`
- * classifies a block's `ratified-as:` value but deliberately never carries the block's own
- * bytes (it is a classifier, not an extractor; see that module's own doc comment). Fail-closed
- * (`fail-closed-edges.md`): an id with no matching heading, or empty content, returns `null`
- * rather than guessing at a block boundary — never a throw. Exported for its own unit test. */
-export function extractRulingBlockVerbatim(answersContent: string, id: string): string | null {
-  const lines = answersContent.split('\n');
-  let startLine = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const heading = /^##\s+(.+?)\s*$/.exec(lines[i] as string);
-    if (heading !== null && (heading[1] as string).trim() === id) {
-      startLine = i;
-      break;
-    }
-  }
-  if (startLine === -1) return null;
-  let endLine = lines.length;
-  for (let i = startLine + 1; i < lines.length; i++) {
-    if (/^##\s+/.test(lines[i] as string)) {
-      endLine = i;
-      break;
-    }
-  }
-  return lines.slice(startLine, endLine).join('\n');
 }
 
 /** §5.2's brief needs the card's spec/plan paths, repo-relative — the same convention
@@ -694,7 +656,7 @@ function readShippedVerdicts(
   }));
 }
 
-/** §5.2/§5.3/§5.4: gathers the disk facts for a `spawn_session` action and renders the real
+/** §5.2/§5.4: gathers the disk facts for a `spawn_session` action and renders the real
  * brief (`brief.ts#renderBrief`) — this is the session's initial prompt. `before` is
  * `answers.md`'s content as already read by the caller (the SAME read used for the
  * postcondition check's `before` snapshot — one read, two uses, never a second read that could
@@ -725,22 +687,6 @@ export async function buildOneShotPrompt(
       escalationPath: escalationPathOf(homeDir, cardId),
     };
     return renderBrief('ruling', facts);
-  }
-
-  if (action.session === 'ratify') {
-    const rulingBlocks: RatifyBlockFact[] = observation.unratifiedRulings.map((id) => ({
-      id,
-      content: extractRulingBlockVerbatim(before, id)
-        ?? `(no matching "## ${id}" block found in answers.md — read this as a contract violation)`,
-    }));
-    const facts: RatifyBriefFacts = {
-      kind: 'ratify',
-      template: io.readFileOrEmpty(RATIFY_TEMPLATE_PATH),
-      unratifiedRulingIds: observation.unratifiedRulings,
-      rulingBlocks,
-      answersPath: answersPathOf(homeDir),
-    };
-    return renderBrief('ratify', facts);
   }
 
   // action.session === 'closing'
@@ -790,9 +736,7 @@ function stateLabelFor(action: SupervisorAction): SupervisorStatus['state'] {
     case 'run_watchdog': return 'running_watchdog';
     case 'await_watchdog': return 'awaiting_watchdog';
     case 'spawn_session':
-      return action.session === 'ruling'
-        ? 'session_ruling'
-        : action.session === 'ratify' ? 'session_ratify' : 'session_closing';
+      return action.session === 'ruling' ? 'session_ruling' : 'session_closing';
     case 'archive_escalation': return 'observing';
     case 'park': return 'terminal';
     // Task 8 (card `supervisor-park-truth`): superseding a falsified park is not a terminal —
@@ -859,7 +803,6 @@ export async function runSupervisor(
         watchdogRuns: supState.watchdogRuns,
         spawns: supState.spawns,
         rulingRounds: supState.rulingRounds,
-        ratifyRounds: supState.ratifyRounds,
         failures: 0,
         staleTerminals,
       },
@@ -912,7 +855,7 @@ export async function runSupervisor(
       state: 'terminal', lastAction: 'park:state_unreadable',
       watchdog: { pid: null, lastTerminalReason: null }, currentSession: null,
       counters: {
-        watchdogRuns: 0, spawns: 0, rulingRounds: {}, ratifyRounds: 0, failures: 0, staleTerminals: 0,
+        watchdogRuns: 0, spawns: 0, rulingRounds: {}, failures: 0, staleTerminals: 0,
       },
       terminal: { status: 'needs_owner', reason, exitCode: exitCodeOf('needs_owner') },
     })));
@@ -966,8 +909,8 @@ export async function runSupervisor(
         // watchdog when a NEWER run is alive, bounded by `retriggers['stale_terminal'] < 1`.
         //
         // The DECISION says whether this is that re-trigger; the edge does not work it out for
-        // itself (B-F5). Re-deriving it here was wrong on the post-session V7 (`ratified`) early
-        // return, which also emits `run_watchdog` and can coincide with an independently-true
+        // itself (B-F5). Re-deriving it here was wrong on an early post-session return that also
+        // emitted `run_watchdog` and can coincide with an independently-true
         // contradiction — spending the campaign's one-shot budget on an unrelated action.
         if (action.retrigger === 'stale_terminal') {
           supState = incrementRetrigger(supState, 'stale_terminal');
@@ -1021,9 +964,6 @@ export async function runSupervisor(
           // S-P6: the round increments BEFORE the spawn — a crash can only over-count.
           supState = applyRulingOutcome(supState, action.cardId, escalation?.contentSha256 ?? '');
         }
-        if (action.session === 'ratify') {
-          supState = { ...supState, ratifyRounds: supState.ratifyRounds + 1 };
-        }
         if (isRetryTick) {
           const retryKey = `${action.session}:${String(action.cardId)}`;
           supState = incrementRetrigger(supState, retryKey);
@@ -1040,8 +980,7 @@ export async function runSupervisor(
           model: config.model,
           maxTurns: config.sessionMaxTurns,
           realpath: (p: string) => io.realpath(p),
-          // Card supervisor-sessions-in-repo (spec §4.1): `cwd` for every kind, not only
-          // `ruling`/`closing` — `ratify` now starts in the repo too.
+          // Card supervisor-sessions-in-repo (spec §4.1): `cwd` for every kind.
           repoRoot: config.repoRoot,
           // R11 (Task 20, spec §5.4 item 4): only `closing` ever loads a plugin; `decide()`'s
           // own R11 guard already refused to spawn `closing` when this is `null` (the observation
@@ -1088,9 +1027,6 @@ export async function runSupervisor(
           outcome = verdict.outcome;
           rulingId = verdict.rulingId ?? null;
           parkMarkerKind = verdict.parkMarkerKind;
-        } else if (action.session === 'ratify') {
-          const verdict = verifyRatify({ before, after, named: observation.unratifiedRulings });
-          outcome = verdict.outcome;
         } else {
           const finalReport = entryExists(io, paths.dir, 'final-report.md')
             ? io.readFileOrEmpty(paths.finalReport)
@@ -1104,7 +1040,7 @@ export async function runSupervisor(
 
         loopState.lastSessionOutcome = { kind: action.session, cardId: action.cardId, outcome, rulingId, parkMarkerKind };
 
-        const ledgerVerdict: LedgerVerdict = outcome === 'history_rewritten' || outcome === 'ratify_out_of_scope'
+        const ledgerVerdict: LedgerVerdict = outcome === 'history_rewritten'
           ? 'failed'
           : outcome;
         appendLedgerEntry(io, paths.ledger, {

@@ -108,8 +108,8 @@ function containedPath(homeDir: string, target: string): string {
  * writes, or deletes through it." `readFileOrEmpty` is also the ONLY read primitive
  * `SupervisorIO` exposes, and `core/supervisor/loop.ts#buildOneShotPrompt` legitimately calls it
  * on two paths that are neither a manifest, a config, nor user/session input, and were never
- * meant to be walled to the campaign home: the three committed judgment-session templates
- * (`core/supervisor/brief.ts`'s `RULING_TEMPLATE_PATH`/`RATIFY_TEMPLATE_PATH`/
+ * meant to be walled to the campaign home: the two committed judgment-session templates
+ * (`core/supervisor/brief.ts`'s `RULING_TEMPLATE_PATH`/
  * `CLOSING_TEMPLATE_PATH` — fixed, compile-time constants under the plugin's own source tree)
  * and the gap-gate report under the BASE tribe home (`readGapGateOpenIds`,
  * `orchestrate-campaign/SKILL.md` Stage D step 2: "the BASE tribe home the gate writes to, NOT

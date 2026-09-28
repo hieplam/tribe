@@ -1,8 +1,8 @@
-// Supervisor brief rendering — the three one-shot session kinds (spec §5.2-§5.4, plan Task 9).
+// Supervisor brief rendering — the two one-shot session kinds (spec §5.2-§5.4, plan Task 9).
 //
 // Pure: `renderBrief` reads no file and makes no decision; identical `facts` render a
-// byte-identical string every time. The three committed templates (`brief-ruling.md`,
-// `brief-ratify.md`, `brief-closing.md`, beside this module, same shape as
+// byte-identical string every time. The two committed templates (`brief-ruling.md`,
+// `brief-closing.md`, beside this module, same shape as
 // `core/brief-template.md` + `core/brief.ts`) carry the governing quotes (SKILL.md W3, W7,
 // the Stage C owner-only paragraph, the "durable convention" wall, and Stage D) as literal
 // text — quoted, per `brief-contracts.md` obligation 3, never re-typed or paraphrased here.
@@ -14,7 +14,6 @@ import { dirname, join } from 'node:path';
 import type { SessionKind } from './model.ts';
 
 export const RULING_TEMPLATE_PATH = join(import.meta.dir, 'brief-ruling.md');
-export const RATIFY_TEMPLATE_PATH = join(import.meta.dir, 'brief-ratify.md');
 export const CLOSING_TEMPLATE_PATH = join(import.meta.dir, 'brief-closing.md');
 
 /** §5.2's rendered brief: everything a `ruling` session needs, already read off disk by the
@@ -39,25 +38,6 @@ export interface RulingBriefFacts {
   /** R13.2: the ABSOLUTE on-disk path of `escalations/<cardId>.md` — same reason as
    * `answersPath` above; a bare relative name leaves the session guessing its cwd. */
   escalationPath: string;
-}
-
-/** §5.3: one unratified ruling's own block, verbatim from `answers.md`, keyed by its id — the
- * ratify session's whole job is repairing `ratified-as:` inside exactly these named blocks. */
-export interface RatifyBlockFact {
-  id: string;
-  content: string;
-}
-
-export interface RatifyBriefFacts {
-  kind: 'ratify';
-  /** The committed asset at `RATIFY_TEMPLATE_PATH`, already read by the caller. */
-  template: string;
-  /** `run.unratifiedRulings`, verbatim. */
-  unratifiedRulingIds: string[];
-  rulingBlocks: RatifyBlockFact[];
-  /** R13.2: the ABSOLUTE on-disk path the session must Read/edit `answers.md` at — never a
-   * bare `answers.md`; see `RulingBriefFacts.answersPath` for the measured defect. */
-  answersPath: string;
 }
 
 /** §5.4: one ruling's disposition, for the closing session's context. */
@@ -97,7 +77,7 @@ export interface ClosingBriefFacts {
   shippedVerdicts: ClosingVerdictFact[];
 }
 
-export type BriefFacts = RulingBriefFacts | RatifyBriefFacts | ClosingBriefFacts;
+export type BriefFacts = RulingBriefFacts | ClosingBriefFacts;
 
 function renderTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
@@ -128,17 +108,6 @@ function renderRuling(facts: RulingBriefFacts): string {
     PLAN_PATH: facts.planPath ?? '(missing)',
     ANSWERS_PATH: facts.answersPath,
     ESCALATION_PATH: facts.escalationPath,
-  });
-}
-
-function renderRatify(facts: RatifyBriefFacts): string {
-  const blocks = facts.rulingBlocks
-    .map((block) => `### ${block.id}\n\n${block.content}`)
-    .join('\n\n');
-  return renderTemplate(facts.template, {
-    UNRATIFIED_IDS: bulletList(facts.unratifiedRulingIds, '(none)'),
-    RULING_BLOCKS: blocks.length > 0 ? blocks : '(no ruling blocks supplied)',
-    ANSWERS_PATH: facts.answersPath,
   });
 }
 
@@ -175,7 +144,7 @@ function renderClosing(facts: ClosingBriefFacts): string {
   });
 }
 
-/** §5: renders the committed brief template for one of the three one-shot session kinds.
+/** §5: renders the committed brief template for one of the two one-shot session kinds.
  * Pure — everything it needs arrives in `facts` (including the already-read template text);
  * the same `facts` renders the same string on every call. `kind` and `facts.kind` must
  * agree — a caller that mismatches them made a bug a wrong brief would otherwise hide. */
@@ -186,8 +155,6 @@ export function renderBrief(kind: SessionKind, facts: BriefFacts): string {
   switch (facts.kind) {
     case 'ruling':
       return renderRuling(facts);
-    case 'ratify':
-      return renderRatify(facts);
     case 'closing':
       return renderClosing(facts);
   }

@@ -78,8 +78,8 @@ interface ParkSentence {
   unblock: string;
 }
 
-/** Spec §6.2's frozen `ParkReason` union (22 values, model.ts's own count — spec §6.2: "Twenty-two
- * values... The last two are the integrity parks added by §5.2 and §5.3"), each mapped to exactly
+/** Spec §6.2's `ParkReason` union (19 values since the ratification session went —
+ * runner-driver-only spec §4.11; the last one is the integrity park added by §5.2), each mapped to exactly
  * one `NEEDS_OWNER.md` sentence pair. **A `ParkReason` this table has no entry for is a TYPE
  * ERROR** (`Record<ParkReason, ParkSentence>`) — no generic fallback is added for a missing entry;
  * that is the point (Task 10's adjudication rule, REFUTED in advance). `what`/`unblock` text below
@@ -106,13 +106,6 @@ export const PARK_SENTENCES: Record<ParkReason, ParkSentence> = {
     unblock: "Rule on {card}'s open question yourself, append the ruling to {home}/answers.md, "
       + 'archive {home}/escalations/{card}.md, delete this file, then re-run: {rerun}',
   },
-  ratify_cap: {
-    what: 'The ratify-round budget was spent without every ruling reaching a ratified '
-      + '`ratified-as:` value.',
-    unblock: 'Repair the remaining `ratified-as:` fields in {home}/answers.md by hand (rule '
-      + '<path> | debt <id> | roadmap <ref> | operational | dismissed), delete this file, then '
-      + 're-run: {rerun}',
-  },
   spawn_cap: {
     what: 'The total one-shot session budget for this campaign is spent.',
     unblock: 'Raise --max-spawns for the next run, or finish the remaining judgment by hand in '
@@ -134,11 +127,6 @@ export const PARK_SENTENCES: Record<ParkReason, ParkSentence> = {
     what: 'A ruling session failed or timed out and the retry budget for it is exhausted.',
     unblock: "Rule on {card}'s open question yourself, append the ruling to {home}/answers.md, "
       + 'archive {home}/escalations/{card}.md, delete this file, then re-run: {rerun}',
-  },
-  ratify_failed: {
-    what: 'A ratify session failed or timed out and the retry budget for it is exhausted.',
-    unblock: 'Repair the remaining `ratified-as:` fields in {home}/answers.md by hand, delete '
-      + 'this file, then re-run: {rerun}',
   },
   closing_failed: {
     what: 'The closing session failed or timed out and the retry budget for it is exhausted.',
@@ -204,12 +192,6 @@ export const PARK_SENTENCES: Record<ParkReason, ParkSentence> = {
       + 'is no longer trustworthy. This never retries.',
     unblock: 'Restore {home}/answers.md from version control to the last known-good ruling '
       + 'trail, investigate the session that rewrote it, delete this file, then re-run: {rerun}',
-  },
-  ratify_out_of_scope: {
-    what: 'A ratify session edited a ruling block outside the ids it was asked to ratify. This '
-      + 'never retries.',
-    unblock: 'Review {home}/answers.md by hand for any unintended edit, restore from version '
-      + 'control if needed, delete this file, then re-run: {rerun}',
   },
 };
 

@@ -1,5 +1,5 @@
-// Tests for brief.ts (Task 9, spec §5.2-§5.4): pure rendering of the three one-shot session
-// briefs (`ruling`, `ratify`, `closing`).
+// Tests for brief.ts (Task 9, spec §5.2-§5.4): pure rendering of the two one-shot session
+// briefs (`ruling`, `closing`).
 //
 // Oracle (brief-contracts.md's four obligations, applied to a machine-rendered brief): the
 // spec in the plan/brief is the contract for WHAT a rendered brief must carry. For the
@@ -11,11 +11,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   CLOSING_TEMPLATE_PATH,
-  RATIFY_TEMPLATE_PATH,
   RULING_TEMPLATE_PATH,
   renderBrief,
 } from './brief.ts';
-import type { ClosingBriefFacts, RatifyBriefFacts, RulingBriefFacts } from './brief.ts';
+import type { ClosingBriefFacts, RulingBriefFacts } from './brief.ts';
 
 const SKILL_MD = readFileSync(
   join(import.meta.dir, '../../../../skills/orchestrate-campaign/SKILL.md'),
@@ -23,7 +22,6 @@ const SKILL_MD = readFileSync(
 );
 
 const RULING_TEMPLATE = readFileSync(RULING_TEMPLATE_PATH, 'utf8');
-const RATIFY_TEMPLATE = readFileSync(RATIFY_TEMPLATE_PATH, 'utf8');
 const CLOSING_TEMPLATE = readFileSync(CLOSING_TEMPLATE_PATH, 'utf8');
 
 /** Extracts the exact substring of `SKILL.md` bounded by two literal, unique anchors —
@@ -77,20 +75,6 @@ function fixtureRulingFacts(overrides: Partial<RulingBriefFacts> = {}): RulingBr
     planPath: 'docs/superpowers/plans/2026-01-01-widget-export.md',
     answersPath: '/tmp/campaign-home/answers.md',
     escalationPath: '/tmp/campaign-home/escalations/widget-export.md',
-    ...overrides,
-  };
-}
-
-function fixtureRatifyFacts(overrides: Partial<RatifyBriefFacts> = {}): RatifyBriefFacts {
-  return {
-    kind: 'ratify',
-    template: RATIFY_TEMPLATE,
-    unratifiedRulingIds: ['R3', 'R5'],
-    rulingBlocks: [
-      { id: 'R3', content: '## R3 -- scope\n\nratified-as: pending\n' },
-      { id: 'R5', content: '## R5 -- sequencing\n\nratified-as: pending\n' },
-    ],
-    answersPath: '/tmp/campaign-home/answers.md',
     ...overrides,
   };
 }
@@ -171,26 +155,6 @@ describe('renderBrief — ruling', () => {
   test('is deterministic: two renders of the same facts are byte-identical', () => {
     const facts = fixtureRulingFacts();
     expect(renderBrief('ruling', facts)).toBe(renderBrief('ruling', facts));
-  });
-});
-
-describe('renderBrief — ratify', () => {
-  test('names every unratified id', () => {
-    const rendered = renderBrief('ratify', fixtureRatifyFacts());
-    expect(rendered).toContain('R3');
-    expect(rendered).toContain('R5');
-  });
-
-  test('is deterministic: two renders of the same facts are byte-identical', () => {
-    const facts = fixtureRatifyFacts();
-    expect(renderBrief('ratify', facts)).toBe(renderBrief('ratify', facts));
-  });
-
-  // R13.2: the ratify brief must also name the absolute path of `answers.md` — it is the file
-  // the session is repairing `ratified-as:` fields inside of.
-  test('R13.2: contains the absolute path of answers.md, never a bare name', () => {
-    const rendered = renderBrief('ratify', fixtureRatifyFacts({ answersPath: '/tmp/campaign-home/answers.md' }));
-    expect(rendered).toContain('/tmp/campaign-home/answers.md');
   });
 });
 

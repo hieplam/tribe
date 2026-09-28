@@ -10,11 +10,11 @@ import type { RunFact, SupervisorObservation } from './model.ts';
 const base = (over: Partial<SupervisorObservation> = {}): SupervisorObservation => ({
   nowMs: 1_000_000, stopFilePresent: false, needsOwnerPresent: false,
   supervisorLock: null, watchdogLive: null, lastWatchdog: null, report: null,
-  escalations: [], ownerOnlyEscalations: [], unratifiedRulings: [], parkMarkers: [],
+  escalations: [], ownerOnlyEscalations: [], parkMarkers: [],
   runs: [], watchdogRunId: null, parkedTerminal: null,
-  state: { rulingRounds: {}, ratifyRounds: 0, spawns: 0, watchdogRuns: 0, seenEscalations: {},
+  state: { rulingRounds: {}, spawns: 0, watchdogRuns: 0, seenEscalations: {},
            closingVerified: false, retriggers: {} },
-  limits: { maxRulingRounds: 2, maxRatifyRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20,
+  limits: { maxRulingRounds: 2, maxSpawns: 8, maxWatchdogRuns: 20,
             sessionRetries: 1 },
   lastSessionOutcome: null,
   verifyShippedPluginAvailable: true,
@@ -288,7 +288,7 @@ const stalledParkWithLiveRun = (state: Partial<SupervisorObservation['state']> =
     run({ runId: 'B', pid: 7777, endedAt: null, alive: true }),
   ],
   state: {
-    rulingRounds: {}, ratifyRounds: 0, spawns: 0, watchdogRuns: 0, seenEscalations: {},
+    rulingRounds: {}, spawns: 0, watchdogRuns: 0, seenEscalations: {},
     closingVerified: false, retriggers: {}, ...state,
   },
 });
@@ -321,7 +321,7 @@ test('run_finalised is ALWAYS actionable — it changes the effective terminal r
       }),
     ],
     state: {
-      rulingRounds: {}, ratifyRounds: 0, spawns: 0, watchdogRuns: 20, seenEscalations: {},
+      rulingRounds: {}, spawns: 0, watchdogRuns: 20, seenEscalations: {},
       closingVerified: false, retriggers: { stale_terminal: 1 },
     },
   });

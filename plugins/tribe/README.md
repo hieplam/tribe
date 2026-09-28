@@ -306,7 +306,7 @@ escalation-file *rename* — never `campaign-state.json`, `answers.md`, or anyth
 
 | Subcommand | Own flags (defaults) | Exit codes |
 | --- | --- | --- |
-| `run.ts supervise` | `--campaign` \| `--home`, `--watchdog-model` (`--model`'s value), `--max-ruling-rounds` (2), `--max-ratify-rounds` (2), `--max-spawns` (8), `--max-watchdog-runs` (20), `--session-timeout-seconds` (1800), `--session-max-turns` (60), `--session-retries` (1), `--poll-seconds` (30) | `0` done · `1` usage error · `20` needs_owner (reason in `NEEDS_OWNER.md` and `supervisor/status.json`) · `21` a live supervisor already holds the lock |
+| `run.ts supervise` | `--campaign` \| `--home`, `--watchdog-model` (`--model`'s value), `--max-ruling-rounds` (2), `--max-spawns` (8), `--max-watchdog-runs` (20), `--session-timeout-seconds` (1800), `--session-max-turns` (60), `--session-retries` (1), `--poll-seconds` (30) | `0` done · `1` usage error · `20` needs_owner (reason in `NEEDS_OWNER.md` and `supervisor/status.json`) · `21` a live supervisor already holds the lock |
 
 See
 [`scripts/runner/README.md`](scripts/runner/README.md#supervisor-card-campaign-supervisor) for

@@ -17,7 +17,6 @@ describe('zeroState', () => {
   test('every counter starts at zero/empty', () => {
     expect(zeroState()).toEqual({
       rulingRounds: {},
-      ratifyRounds: 0,
       spawns: 0,
       watchdogRuns: 0,
       seenEscalations: {},
@@ -59,7 +58,6 @@ describe('parseState — a well-formed v1 file loads its counters', () => {
     const raw = {
       v: 1,
       rulingRounds: { c1: 1 },
-      ratifyRounds: 1,
       spawns: 3,
       watchdogRuns: 2,
       seenEscalations: { c1: ['h1'] },
@@ -71,7 +69,6 @@ describe('parseState — a well-formed v1 file loads its counters', () => {
       kind: 'ok',
       state: {
         rulingRounds: { c1: 1 },
-        ratifyRounds: 1,
         spawns: 3,
         watchdogRuns: 2,
         seenEscalations: { c1: ['h1'] },
@@ -79,6 +76,23 @@ describe('parseState — a well-formed v1 file loads its counters', () => {
         retriggers: { 'ruling:c1': 1 },
       },
     });
+  });
+});
+
+describe('parseState — a legacy key is dropped', () => {
+  test('a supervisor state written before this change (with ratifyRounds) still loads, and the field is dropped', () => {
+    const raw = {
+      v: 1, rulingRounds: { c1: 1 }, ratifyRounds: 2, spawns: 3, watchdogRuns: 2,
+      seenEscalations: {}, closingVerified: false, retriggers: {},
+    };
+    const result = parseState(raw);
+    expect(result.kind).toBe('ok');
+    if (result.kind !== 'ok') return;
+    expect(result.state).toEqual({
+      rulingRounds: { c1: 1 }, spawns: 3, watchdogRuns: 2,
+      seenEscalations: {}, closingVerified: false, retriggers: {},
+    });
+    expect('ratifyRounds' in result.state).toBe(false);
   });
 });
 
@@ -115,7 +129,6 @@ describe('serializeState / parseState round-trip — byte-identical', () => {
   test('serialize(parse(x).state) reparsed equals the original state exactly', () => {
     const state: SupervisorState = {
       rulingRounds: { c1: 1, c2: 2 },
-      ratifyRounds: 1,
       spawns: 4,
       watchdogRuns: 3,
       seenEscalations: { c1: ['h1', 'h2'] },
