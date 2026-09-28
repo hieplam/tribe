@@ -1,0 +1,12 @@
+ok - V3: the runner exits 2 (an escalation is pending)
+ok - V3: the escalation reason is done_failed
+ok - V3: the card is escalated, never shipped
+ok - V3: T1 carries no passedSha
+ok - V3: the card carries no doneSha
+ok - V3: three Done runs, all failed
+ok - V3: the failing command ran in the runner's hands and exited non-zero
+ok - V3: the double was asked for T1 three times
+ok - V3: nothing but master reached the origin
+
+9 passed, 0 failed
+V3=PASS
