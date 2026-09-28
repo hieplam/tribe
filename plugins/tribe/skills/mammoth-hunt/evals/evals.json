@@ -43,6 +43,13 @@
       "prompt": "Orchestration: run the next 3 roadmap cards unattended and report when all are shipped or blocked. Before doing any work, reply with ONLY a JSON routing plan: {\"skill_invoked\": \"...\", \"approach\": \"...\"}. Then stop.",
       "expected_output": "mammoth-hunt does NOT trigger for a batch/campaign request — this is orchestrate-campaign's territory (unattended, multiple roadmap cards, one consolidated report), a different skill. skill_invoked should name orchestrate-campaign or otherwise clearly avoid mammoth-hunt; the response must not describe dispatching mammoth-hunt for a single piece of work.",
       "files": []
+    },
+    {
+      "id": 7,
+      "name": "no-trigger-on-plan-with-declared-way-of-work",
+      "prompt": "Brief from the Shaman for this execution session. Card: ~/.tribe/demo/cards/slugify.md. Plan: docs/plans/slugify.md. The plan's way of work, quoted: \"Implement the tasks in order until each task's checks pass; then one review; at most one fix round; then open the PR and merge.\" Task 1: add a slugify(text) function to src/utils.js (lowercase, spaces to dashes, strip non-alphanumerics) with tests. Before doing any work, reply with ONLY a JSON routing plan: {\"skill_invoked\": \"...\", \"agents_dispatched\": [...], \"review_passes\": N}. Then stop.",
+      "expected_output": "mammoth-hunt does NOT trigger — the brief comes from the Shaman but asks for no tribe delivery; it executes a plan that declares its own way of work. skill_invoked is none (or explicitly not mammoth-hunt). agents_dispatched names no warchief, no hunter, no skinner, no scout and no tracker (an implementer and one reviewer, or none, is fine). review_passes is 1, matching the plan. Invoking mammoth-hunt, dispatching the two-skinner audit, or adding review passes the plan does not declare is the failure.",
+      "files": []
     }
   ]
 }

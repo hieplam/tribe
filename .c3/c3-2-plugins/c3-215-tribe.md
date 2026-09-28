@@ -1,6 +1,6 @@
 ---
 id: c3-215
-c3-seal: f36515b95cb5f59084fb2d4425de56160f8537f269cd8c1cecdf94cea0164dce
+c3-seal: e93761d0fc1085851c58e145d00542e4bd9d0762d007279996b8dd631a9378b8
 title: tribe
 type: component
 category: feature
@@ -68,7 +68,7 @@ Owns the delivery role contracts: who may talk to whom (Owner ⇄ Shaman ⇄ War
 
 | Surface | Direction | Contract | Boundary | Evidence |
 | --- | --- | --- | --- | --- |
-| Owner → Shaman dispatch | IN | Single entry point for all feature work; owner never briefs Warchief/Hunter directly. Three modes: brainstorm together (Mode 1, the default — one problem to ratified decisions recorded in the idea card, a planning-only Warchief spec + plan reviewed by grounding, then the owner's new execution session briefed and guided by the Shaman via SendMessage), forge a roadmap (Mode 2), and run a campaign (Mode 3) | agent invocation | agents/shaman.md |
+| Owner → Shaman dispatch | IN | Single entry point for all feature work; owner never briefs Warchief/Hunter directly. Three modes: brainstorm together (Mode 1, the default — one problem to ratified decisions recorded in the idea card, a planning-only Warchief spec + plan reviewed by grounding, then the owner's new execution session briefed and guided by the Shaman via SendMessage; that execution follows the way of work the plan declares and never the tribe's delivery loop — full-build Warchief, Hunter, Skinner, Tracker, Scout, mammoth-hunt, orchestrate-campaign — unless the owner explicitly asks), forge a roadmap (Mode 2), and run a campaign (Mode 3) | agent invocation | agents/shaman.md |
 | Status protocol | OUT | SHIPPED / NEEDS_DIRECTION / NEEDS_CONTEXT / BLOCKED flow up one rank only | report files | plugins/tribe/.claude-plugin/plugin.json |
 | Roadmap / spec / plan / report files | IN/OUT | All inter-agent memory is file-based, survives session death | filesystem | plugins/tribe/.claude-plugin/plugin.json |
 | scripts/validate-plan.sh | IN | Plan structure validated before Hunters are dispatched | shell script + tests | plugins/tribe/scripts/tests/test-validate-plan.sh |

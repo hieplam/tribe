@@ -7,12 +7,15 @@ description: >-
   unwritten conventions, and a tracker checks the diff against written rules before commit.
   Trigger whenever the user invokes the tribe on a single piece of work, in ANY phrasing:
   "Mammoth Hunt", "Grand Hunt", "Tribe workflow", "full tribe", "dispatch the tribe",
-  "implement/build/fix X with the tribe", or a tribe role assignment such as "you are a
-  shaman now" / "you are the warchief now". Use it even when the user names only one of
-  these phrases without explaining the process — this skill IS the definition. NOT for
-  batch campaigns ("orchestration", "run these N roadmap cards" — that is
-  orchestrate-campaign) and NOT for generic parallelism with no tribe reference ("use a
-  workflow", "fan out agents" — that is the Workflow tool).
+  "implement/build/fix X with the tribe", or a tribe role assignment paired with an order to
+  build with the tribe ("you are a shaman now, dispatch your tribe" / "you are the warchief
+  now, build X"). Use it even when the user names only one of these phrases without
+  explaining the process — this skill IS the definition. NOT for batch campaigns
+  ("orchestration", "run these N roadmap cards" — that is orchestrate-campaign), NOT for
+  generic parallelism with no tribe reference ("use a workflow", "fan out agents" — that is
+  the Workflow tool), NOT for a Shaman brainstorm ("let's brainstorm together", a bare "you
+  are the Shaman" with one problem — that is the Shaman's Mode 1), and NOT for executing a
+  plan that declares its own way of work (a Shaman Mode 1 hand-off brief) — follow the plan.
 ---
 
 # The Mammoth Hunt
