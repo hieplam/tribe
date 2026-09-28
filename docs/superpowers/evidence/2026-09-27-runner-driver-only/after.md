@@ -160,6 +160,4 @@ Files (prefix `/Users/hiep/.tribe/-Users-hiep-repo-tribe/evidence/runner-driver-
 `v4-tribe-style-plan.md`, `v5-authored-plan.md`, `v5-authored-plan.run1.md`,
 `v5-authored-state.json`, `v5-authored-state.run1.json`, `v5-end.txt`, `v5-run2-skill-link.txt`,
 `v5-session.json`, `v5-session.run1.json`, `v5-stage-a.run1.txt`, `v5-start.txt`,
-`v6-before-state.json`; and V5 run 1's check output, the one file whose name matches
-`v5-check.run1-*.txt` (its name ends in run 1's uppercase verdict word, which this file does not
-spell — see "How to read the verdicts").
+`v5-check.run1.txt` (V5 run 1's check output), `v6-before-state.json`.
