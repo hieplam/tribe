@@ -1452,10 +1452,30 @@ ESLint, which is deferred until typescript-eslint supports TS >= 7.1 (plan Amend
   declares `dependsOn: ["A"]`) producing `### B — blocked` / `- Blocked on: A` in
   `campaign-report.md`, with `pending: ["A"]` and `Stats: 0 shipped, 1 escalated, 1 blocked, 0
   not reached`, exit code `2`.
+- **What HAS been verified live for the driver-only runner** (card `runner-driver-only`, PR 4,
+  2026-09-28, the real private fixture `hieplam/runner-e2e-go`, `--model sonnet`; closing record and
+  every transcript path: `docs/superpowers/evidence/2026-09-27-runner-driver-only/after.md`). V2,
+  V3b and V5 ran in a sandbox Claude home (`CLAUDE_CONFIG_DIR=/Users/hiep/.claude-sandboxes/runner-driver-only`,
+  `agents/` empty), each followed by both bypass-audit layers (`bypass-audit.ts` scan PASS, an
+  independent auditor `VERDICT: CLEAN`):
+  - **V2** — a plain 4-task plan through `supervise` → watchdog → runner: fixture PR #4 shipped and
+    passed all seven done-check points, the runner ran every task's Done commands (26 rows, T1..T4
+    each passing), 0 Tribe agent dispatches (7 on the previous runner) — `v2-before-after.md`,
+    `v2-after-run-metrics.txt`, `g3-after-v2-replay.txt`.
+  - **V3b** — a task whose Done command can never pass: the session reported `TASK_DONE`, the runner's
+    Done run failed on that command, the card escalated with no `passedSha`/`doneSha`, runner exit 2
+    — `v3b-checks.txt`.
+  - **V5** — `/orchestrate-campaign` Stage A with no style named authored a Tribe-free plan with Done
+    sections and a v2 state `--dry-run` accepts — `v5-check.txt`. Its first run found the skill
+    omitting three required state lists (`--dry-run` refused); the skill now names every required
+    field and dry-runs the state it wrote before Stage A ends.
+  - **V4, the positive control (owner's real home)** — a 1-task Tribe-style plan on the same runner
+    got Tribe agents (`hunter` 1, `skinner` 2, `tracker` 1) and shipped: the plan, not the runner,
+    decides the way of working — `v4-run-metrics.txt`, `v4-tribe-scan.txt`.
 - **What is still UNVERIFIED against reality:** this runner's own mutating git calls —
-  `revert_and_redo`'s worktree/branch deletion and `git push --delete` (`card-actions.ts`) —
-  and therefore a full end-to-end card ship (session → verify → next card). `gh pr create`/
-  `gh pr merge` for a card's own PR are the executor session's responsibility, not this
+  `revert_and_redo`'s worktree/branch deletion and `git push --delete` (`card-actions.ts`).
+  (A full single-card ship — session → Done runs → merge → verify — is verified live above, V2.)
+  `gh pr create`/`gh pr merge` for a card's own PR are the executor session's responsibility, not this
   runner's own code (Global Constraints wall — card-PR handling is out of this capability's
   scope), so verifying them is that session's concern, not this runner's. Also unverified:
   `.runner.lock` contention and the STOP file **under a real, in-flight session** (the STOP

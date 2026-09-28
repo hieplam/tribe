@@ -1,0 +1,15 @@
+claude home: /Users/hiep/.claude; transcripts scanned: 5; sessions without a transcript: 0
+BYPASS_TRIBE_DISPATCHES=4
+BYPASS_MAMMOTH_SKILL=0
+BYPASS_AGENT_FILE_TOUCHES=0
+BYPASS_AGENT_DEFINITION_READS=0
+INFO_ORCHESTRATE_CAMPAIGN_SKILL_CALLS=0
+SANDBOX_AGENTS_EMPTY=n/a
+SANDBOX_SURFACE_CHANGED=n/a 
+SANDBOX_UNKNOWN_NEW_ENTRIES=n/a 
+REPO_CLAUDE_AGENTS=absent
+HIT tribe_dispatch /Users/hiep/.claude/projects/-Users-hiep-repo-runner-e2e-go/d2865f4d-4128-4897-97c2-2757dc5cd56c.jsonl:69 Agent subagent_type=hunter — Hunter implements mathx.Sum task
+HIT tribe_dispatch /Users/hiep/.claude/projects/-Users-hiep-repo-runner-e2e-go/d2865f4d-4128-4897-97c2-2757dc5cd56c.jsonl:82 Agent subagent_type=skinner — Skinner contract-lens audit of Task 1
+HIT tribe_dispatch /Users/hiep/.claude/projects/-Users-hiep-repo-runner-e2e-go/d2865f4d-4128-4897-97c2-2757dc5cd56c.jsonl:83 Agent subagent_type=skinner — Skinner cold-lens audit of Task 1
+HIT tribe_dispatch /Users/hiep/.claude/projects/-Users-hiep-repo-runner-e2e-go/d2865f4d-4128-4897-97c2-2757dc5cd56c.jsonl:84 Agent subagent_type=tracker — Tracker rules-conformance review of Task 1 diff
+BYPASS_AUDIT=FAIL

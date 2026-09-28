@@ -1,0 +1,8 @@
+PASS merged: PR #4 is merged (merge_commit_sha=e9e3adb0ab394aa196ba6b1d1b86e73d619bda01)
+PASS mergeShaAncestorOfMaster: e9e3adb0ab394aa196ba6b1d1b86e73d619bda01 is an ancestor of origin/master
+PASS checksGreen: all 2 check(s) concluded success
+PASS worktreeAndBranchGone: worktree for card/small-helpers-go-after is gone and origin/card/small-helpers-go-after is deleted
+PASS schemaGuard: no schema-lock paths configured; guard is a no-op
+PASS localBaseSynced: local master contains e9e3adb0ab394aa196ba6b1d1b86e73d619bda01 and is not ahead of origin/master
+PASS doneAtHead: the merged head 65efec1c4823582cce68a705f66ad43104e06727 is the commit the Done commands passed on
+SHIPPED=true FAILED_POINTS=(none)

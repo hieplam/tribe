@@ -1,0 +1,15 @@
+ok - V5: the state is v2
+ok - V5: the plan and state carry no Tribe way of working
+ok - V5: every task heading is indexed and resolves with Done commands
+ok - V5: --dry-run accepts the state
+ok - V5: --dry-run names the card
+
+5 passed, 0 failed
+V5=PASS
+
+# Run history (owner ruling R-PR4-V5, 2026-09-28)
+Run 1 (skill at master 6e3274e): 3 passed, 2 failed, V5=FAIL — the authored state omitted the required
+schemaLockPaths/docsOnlyPaths/ownerOnlyEscalations, so --dry-run refused it (exit 4). D10 run 1: scan
+BYPASS_AUDIT=PASS, auditor VERDICT: CLEAN. Raw: $X/v5-check.run1.txt, $X/*.run1.*, home go-v5-stage-a-run1.
+Fix: 9191c80 + f2627e1 (SKILL.md names the required fields; Stage A step 8 dry-runs the state it wrote).
+Run 2 (above; sandbox skill link pointed at this branch for the run, restored after): V5=PASS.

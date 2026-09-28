@@ -1,0 +1,4 @@
+master=e9e3adb0ab394aa196ba6b1d1b86e73d619bda01 origin=e9e3adb0ab394aa196ba6b1d1b86e73d619bda01
+ok  	github.com/hieplam/runner-e2e-go/mathx	(cached)
+ok  	github.com/hieplam/runner-e2e-go/textx	(cached)
+go test exit 0
