@@ -566,5 +566,11 @@ probe "a heading merely containing 'way of work' does not count" way_of_work_dec
 bad_exec_header() { printf '# P\n\n## Global Constraints\n\n- the hunter subagent.\n\n## Way of work\n\nExecutor: single-agent-per-task\n\n'; }
 probe "a longer executor value is not single-agent" way_of_work_declared fail "$TMP/vb.md" bad_exec_header
 
+# --- Review round 2 (gpt-6-sol): owner ruled fix these two, then merge -------------------
+printf '#### Verify\n- Goal: G1.\n- Red: `pytest` -> `1 failed`.\n- Green: `pytest` -> `1 passed`.\n- Stub check: a stub fails.\n' > "$TMP/r2-one-word.md"
+probe "a one-word command counts" tasks_have_verify_block pass "$TMP/r2-one-word.md"
+printf '#### Verify\n- Goal: G1.\n- Red:\n  ```text\n  1 failed\n  ```\n- Green:\n  ```output\n  1 passed\n  ```\n- Stub check: a stub fails.\n' > "$TMP/r2-output-fence.md"
+probe "text/output fences are not commands" tasks_have_verify_block fail "$TMP/r2-output-fence.md"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 exit $((FAIL > 0))

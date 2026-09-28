@@ -253,9 +253,11 @@ checks.append({
 # task, holding four labelled lines outside any fence — Goal (what the task proves), Red (the
 # command run before building and the failure it shows), Green (the command after building
 # and its literal expected output), Stub check (why an empty implementation fails it). Red
-# and Green must each carry a literal command: a fenced block under the label, or an inline
-# code span that reads as a command (a program name followed by an argument, like
-# `bun test x.test.ts`) — an output-only span like `1 fail` is not one. A shared "the suite is
+# and Green must each carry a literal command: a fenced block under the label (not one tagged
+# `text` or `output`), or an inline code span that reads as a command (a program name, alone
+# or with arguments, like `pytest` or `bun test x.test.ts`) — an output-only span like
+# `1 fail` is not one. Telling a command from output this way is a guess, so it only catches a
+# missing or command-less block; whether the command is real stays with the plan reviewer. A shared "the suite is
 # green" line has no command and fails. The one allowed Red with no command is "not
 # applicable" plus the reason, for a task with no code to go red (a baseline measurement).
 # This checks the block's form; whether its oracle is the right one stays with the plan
@@ -265,8 +267,15 @@ VERIFY_LABEL_RE = re.compile(
     r"^\s*(?:(?:[-*+]|\d+[.)])\s+)?(?:\*\*)?(goal|red|green|stub check)\b[^:\n]{0,30}?\s*:",
     re.IGNORECASE)
 # A command: a program name (a letter or path character first, so `1 fail` and `exit=2` don't
-# qualify, and `tribe: unknown option` doesn't either), then whitespace and an argument.
-COMMAND_SPAN_RE = re.compile(r"`\s*(?:\$\s*)?[A-Za-z./~][\w./~+-]*\s+[^`]+`")
+# qualify, and `tribe: unknown option` doesn't either), optionally followed by arguments.
+COMMAND_SPAN_RE = re.compile(r"`\s*(?:\$\s*)?[A-Za-z./~][\w./~+-]*(?:\s+[^`]+)?`")
+# A fence tagged as output holds what a command prints, not the command.
+OUTPUT_FENCE_INFO = {"text", "txt", "plaintext", "output", "log"}
+def opens_command_fence(k):
+    if not fence_opens[k]:
+        return False
+    info = FENCE_RE.match(lines[k]).group(2).strip().split()
+    return not (info and info[0].lower() in OUTPUT_FENCE_INFO)
 RED_NOT_APPLICABLE_RE = re.compile(r"\b(?:not applicable|n/a)\b(.*)$", re.IGNORECASE)
 REQUIRED_VERIFY_LABELS = ("goal", "red", "green", "stub check")
 tasks_missing_verify = []
@@ -293,7 +302,7 @@ for s in task_sections:
     red_not_applicable_with_reason = False
     for j, label in label_at.items():
         end = next(k for k in stops if k > j)
-        carries = any(fence_opens[k] or (not in_fence_flags[k] and COMMAND_SPAN_RE.search(lines[k]))
+        carries = any(opens_command_fence(k) or (not in_fence_flags[k] and COMMAND_SPAN_RE.search(lines[k]))
                       for k in range(j, end))
         has_command[label] = has_command.get(label, False) or carries
         # The reason is at least two words after the phrase ("not applicable." alone is not one).

@@ -364,11 +364,12 @@ When the spec and plan are clear, present them to the owner — the card's goal 
 tasks with their Verify blocks, the declared way of work — and wait for an explicit go before any
 execution starts. A ratified card is not an approved build; never start execution on your own
 reading of "ratified". The one exception is delegation in the owner's own words ("I delegate this
-to you", "drive it from here until done"): then run everything — hand-off, execution, review, PR,
-merge, verified-`SHIPPED` — without stopping for approval, escalating only the irreversible few
-(data shapes, product promises, new permissions, privacy).
+to you", "drive it from here until done"): then drive execution yourself, from your own session,
+with subagents per the plan's way of work — execution, review, PR, merge, verified-`SHIPPED` —
+without stopping for approval, escalating only the irreversible few (data shapes, product
+promises, new permissions, privacy). Step 6 does not apply on this path.
 
-### 6. Hand off by driving, not by checklist
+### 6. Hand off by driving, not by checklist (the approval path)
 
 The owner opens a new named session to run the plan. You brief and guide that session through
 `SendMessage`: the card, spec, plan and board paths, the ratified decisions and rulings, the
@@ -421,8 +422,9 @@ describe how Modes 2–3 ship approved roadmap cards; none of them applies to Mo
 
 **Definition of done (Mode 1):** the card holds every ratified decision and ruling; the spec and
 plan are clear with no open question, and the plan declares its way of work; the owner approved
-execution or delegated it in their own words; the execution session has acknowledged its brief; and you keep guiding it, on the plan's way of work, until its
-result is verified-`SHIPPED`.
+execution or delegated it in their own words; on the approval path the execution session has
+acknowledged its brief and you keep guiding it, on delegation you drive it yourself — either way
+on the plan's way of work, until its result is verified-`SHIPPED`.
 
 ---
 
