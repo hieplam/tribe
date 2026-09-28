@@ -139,8 +139,8 @@ this — a short worked example for this skill's own convenience, not a competin
 
 **Required — the runner refuses the state at load if any is missing:** at the top level `v`,
 `campaign`, `mergePolicy`, `sequence`, `schemaLockPaths`, `docsOnlyPaths`,
-`ownerOnlyEscalations` and `cards`; on every card `status`, `spec`, `plan`, `tasks`, `branch`,
-`baseSha`, `pr`, `mergeSha`, `sessionId` and `updatedAt` (the last seven may be `null`).
+`ownerOnlyEscalations` and `cards`; on every card `status`, `tasks` (at least one entry), and
+`spec`, `plan`, `branch`, `baseSha`, `pr`, `mergeSha`, `sessionId`, `updatedAt` (each may be `null`).
 `schemaLockPaths`, `docsOnlyPaths` and `ownerOnlyEscalations` are written as `[]` when unused —
 never omitted. **Optional** — `planning`, and a card's `dependsOn` and `autoAnswerRounds` — may
 simply be omitted rather than written as `null`/`[]` when unused:
