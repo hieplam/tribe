@@ -19,7 +19,12 @@ die() { printf 'fixture-reset: %s\n' "$*" >&2; exit 1; }
 clone="$1"
 start="$2"
 [[ -d "$clone/.git" ]] || die "$clone is not a git clone"
+# Host git config is off (fail-closed-edges obligation 2). That also drops the credential helper of a
+# git build that keeps it in the system config (Homebrew's; Apple's carries its own), and the fixture
+# remote is private — so the one helper this script needs is named explicitly: `gh`, already required
+# below for `gh pr list`.
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0='!gh auth git-credential'
 g() { bounded git -C "$clone" -c user.name='runner-driver-only fixture' -c user.email='fixture@invalid' "$@"; }
 
 [[ "$(g rev-parse --abbrev-ref HEAD)" == "master" ]] || die "$clone is not on master"

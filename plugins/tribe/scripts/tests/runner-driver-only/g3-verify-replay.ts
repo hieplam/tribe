@@ -20,13 +20,19 @@ function arg(name: string): string | undefined {
 }
 
 /** Every subprocess is bounded (fail-closed-edges obligation 3) and never inherits host git config
- * that could change a verdict (obligation 2). */
+ * that could change a verdict (obligation 2). With host config off, git has no credential helper
+ * unless the git build carries one of its own (Apple's does, Homebrew's keeps it in the system config
+ * turned off here), and the private fixture remote refuses the fetch — so the one helper the replay
+ * needs is named explicitly: `gh`, which the replay already depends on. */
 async function exec(cmd: string[], options?: { cwd?: string }) {
   const proc = Bun.spawn(cmd, {
     cwd: options?.cwd,
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+    env: {
+      ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
+      GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'credential.helper', GIT_CONFIG_VALUE_0: '!gh auth git-credential',
+    },
   });
   const timer = setTimeout(() => proc.kill(), 120_000);
   const [stdout, stderr, exitCode] = await Promise.all([
