@@ -154,6 +154,25 @@ describe('decide — a crash with no exit code to read (W-P6)', () => {
   });
 });
 
+describe('decide — unknown runner exits use the bounded exit-3 rows', () => {
+  test('exit 5 relaunches as a crash while the budget remains', () => {
+    expect(encode(decide(obs({ lastExitCode: 5 })))).toBe('relaunch:crash');
+    expect(decide(obs({ lastExitCode: 5 }))).toEqual(decide(obs({ lastExitCode: 3 })));
+  });
+
+  test('exit 5 parks when the crash budget is spent', () => {
+    const counters = { ...ZERO, crashRelaunches: 1 };
+    expect(encode(decide(obs({ lastExitCode: 5, counters })))).toBe('exit:needs_human:session_incomplete');
+    expect(decide(obs({ lastExitCode: 5, counters }))).toEqual(decide(obs({ lastExitCode: 3, counters })));
+  });
+
+  test('another unknown exit follows the same quota row as exit 3', () => {
+    const quota = { resetsAtEpochS: FUTURE_RESET_S };
+    expect(encode(decide(obs({ lastExitCode: 7, quota })))).toBe(QUOTA_WAIT);
+    expect(decide(obs({ lastExitCode: 7, quota }))).toEqual(decide(obs({ lastExitCode: 3, quota })));
+  });
+});
+
 describe('overloadBackoffSeconds — the frozen schedule (spec section 8)', () => {
   test('30, 60, 120, 240, 480 and then clamped at 480', () => {
     expect([0, 1, 2, 3, 4, 5, 9].map(overloadBackoffSeconds)).toEqual([

@@ -551,7 +551,9 @@ session (it re-verifies and reports; the ratification pass exists only in the Tr
 'Tribe style — Stage C and D additions'). **Verify it, do not repeat it**: read it exactly as you
 would your own draft of this stage, confirm each `shipped` card's `verify-shipped` verdict is
 actually present, and relay it — do not re-run Stage D's steps and produce a second, competing
-report over the same campaign.
+report over the same campaign. In the Tribe style, before relaying that report, also run the
+ratification pass and its `rulings-check.ts` check from 'Tribe style — Stage C and D additions'
+(the closing session does neither), and include their outcome in what you relay.
 
 Once nothing more is answerable or progressable (or no `supervisor/final-report.md` exists —
 you are driving by hand), read the **last** `campaign-report.json` and build the single message
@@ -728,6 +730,10 @@ Copy this section into the plan, verbatim, as its "How to work", and end the pla
 
 The plan's last task, verbatim except its number:
 
+At Stage A, set `gaps_dir="$(dirname "$runner_dir")/gaps"` from the resolved runner directory,
+confirm `gap-gate.ts` exists there, and write that absolute path in place of `<gaps-dir>` in the
+Done command before the runner executes it from a scratch checkout.
+
 ```markdown
 ### Task N: Harness-gap gate
 
@@ -738,7 +744,7 @@ run `debt-backfill.ts`.
 
 #### Done
 
-    T="$(dirname "$(dirname "$(readlink -f ~/.claude/agents/warchief.md)")")/scripts/gaps"; bun "$T/gap-gate.ts" --repo "$PWD" --home "$RUNNER_CAMPAIGN_HOME" --card "$RUNNER_CARD_ID" --base "$RUNNER_BASE_SHA" --head HEAD
+    bun "<gaps-dir>/gap-gate.ts" --repo "$PWD" --home "$RUNNER_CAMPAIGN_HOME" --card "$RUNNER_CARD_ID" --base "$RUNNER_BASE_SHA" --head HEAD
 ```
 
 (In the plan itself, that Done command sits in a fenced `bash` block, as every Done section does.)
@@ -795,8 +801,14 @@ run `debt-backfill.ts`.
   The owner report then also lists **Harness-gap rulings** — every ruling the ratification pass
   closed, each with where it was ratified to (the rule/debt/roadmap reference, or
   `operational`/`dismissed`). The campaign is not done until
-  `bun "$(dirname "$(dirname "$(readlink -f ~/.claude/agents/warchief.md)")")/scripts/gaps/rulings-check.ts" <campaign-home>/answers.md`
-  exits 0.
+  `rulings-check.ts` exits 0. Resolve and check its path before running it:
+
+  ```sh
+  runner_dir="$(bash "<skill-dir>/resolve-runner.sh")" || exit 1
+  gaps_dir="$(dirname "$runner_dir")/gaps"
+  [ -f "$gaps_dir/rulings-check.ts" ] || { printf 'orchestrate-campaign: missing rulings-check.ts at %s\n' "$gaps_dir/rulings-check.ts" >&2; exit 1; }
+  bun "$gaps_dir/rulings-check.ts" <campaign-home>/answers.md
+  ```
 - **Wall:** The diary and `answers.md` are event logs and operational state, never the resting
   place of a durable convention. Durable means a governance surface of the target repo — a rule
   file, an anti-rule, a debt entity, a ROADMAP Decision Log entry — reached through a PR. A

@@ -43,8 +43,8 @@ const JUDGMENT_DISALLOWED_TOOLS = ['Bash', 'Task', 'Agent', 'WebFetch', 'WebSear
 const CLOSING_ALLOWED_TOOLS = ['Read', 'Grep', 'Glob', 'Write', 'Edit', 'Bash', 'Skill'] as const;
 
 /** R11: no subagents, no network, no wait-tool for `closing` either — `Bash` stays granted
- * (above) because `closing` legitimately runs `verify-shipped` and lands the governance PR
- * (§5.4's named exception); this list only removes the tools nothing in Stage D needs. */
+ * (above) because `closing` runs `verify-shipped`; it has no containment hook. This list
+ * only removes the tools nothing in Stage D needs. */
 const CLOSING_DISALLOWED_TOOLS = ['Task', 'Agent', 'WebFetch', 'WebSearch', 'Monitor', 'ScheduleWakeup'] as const;
 
 /** The scan wall (issue #163; card D2/D3): the executor's own `decideScanGuardHook`, reused —
@@ -135,8 +135,7 @@ export function buildOneShotOptions(
     // R11 (Task 20): §5.4's named exception, now an EXPLICIT tool grant rather than "no
     // list at all" — the settings tiers above grant nothing to this envelope, so without this
     // grant the session could not run headless. Still NO containment hook — this session
-    // legitimately lands the governance PR, and `Bash`/repo write are named IN the grant, not
-    // left ungoverned.
+    // runs `verify-shipped`, and `Bash`/repo write are named IN the grant, not left ungoverned.
     options.allowedTools = CLOSING_ALLOWED_TOOLS;
     options.disallowedTools = CLOSING_DISALLOWED_TOOLS;
     // R11 item 4, kept by card supervisor-session-settings (G4): load `verify-shipped` from the

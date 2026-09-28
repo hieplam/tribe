@@ -989,9 +989,9 @@ The watchdog writes **nowhere else** in the campaign home — never `campaign-st
 | Runner exited `0` | `exit(done:runner_done)` — watchdog exit `0` |
 | Runner exited `2` | `exit(needs_human:escalations_pending)` |
 | Runner exited `4` | `exit(needs_human:error)` |
-| Runner exited `3` (or a crash with no exit code to read), newest log's **last** `rate_limit_event` is `rejected` with a **future** `resetsAt` | `wait_until(resetsAt + --quota-grace-seconds)` then `relaunch`; count a quota wait; at `--max-quota-waits` → `exit(needs_human:quota_cap)` |
-| Runner exited `3` (or crash), no quota signal, newest log's **last** `result` line carries an overload/5xx `api_error_status` | backoff-and-`relaunch` (`30s, 60s, 120s, 240s, 480s`, clamped); count an overload backoff; at `--max-overload-backoffs` → one `--fallback-model` relaunch if configured and not yet used, else `exit(needs_human:overloaded)` |
-| Runner exited `3` (or crash), no quota or overload signal | `relaunch` once; a second time → `exit(needs_human:session_incomplete)` |
+| Runner exited `3` or an unrecognized code (or crashed with no exit code to read), newest log's **last** `rate_limit_event` is `rejected` with a **future** `resetsAt` | `wait_until(resetsAt + --quota-grace-seconds)` then `relaunch`; count a quota wait; at `--max-quota-waits` → `exit(needs_human:quota_cap)` |
+| Runner exited `3` or an unrecognized code (or crashed with no exit code to read), no quota signal, newest log's **last** `result` line carries an overload/5xx `api_error_status` | backoff-and-`relaunch` (`30s, 60s, 120s, 240s, 480s`, clamped); count an overload backoff; at `--max-overload-backoffs` → one `--fallback-model` relaunch if configured and not yet used, else `exit(needs_human:overloaded)` |
+| Runner exited `3` or an unrecognized code (or crashed with no exit code to read), no quota or overload signal | `relaunch` once; a second time → `exit(needs_human:session_incomplete)` |
 | Runner exited `1` (single-instance lock held) | `attach` if the lock holder is alive; else `relaunch` once, repeat → `exit(needs_human:lock_conflict)` |
 | Runner alive, newest log mtime unchanged for `> --stall-minutes` | record `stall`; `--follow` → `exit(needs_human:stalled)`; `--once` → `exit(running:stalled)` |
 | `--once`, runner alive, not stalled | `exit(running:runner_alive)` |

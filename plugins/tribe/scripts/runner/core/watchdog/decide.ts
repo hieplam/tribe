@@ -88,8 +88,10 @@ export function decide(o: WatchdogObservation): WatchdogAction {
     }
   }
 
-  // --- 4. Exit 3, or a crash with no code to read (W-P6): the recoverable deaths.
-  if (o.lastExitCode === 3 || (o.lastExitCode === null && o.crashSuspected)) {
+  // --- 4. Exit 3, an unknown runner exit, or a crash with no code to read (W-P6):
+  // the recoverable deaths. Unknown exits must spend the same bounded crash budget as exit 3.
+  const isUnknownExit = o.lastExitCode !== null && ![0, 1, 2, 3, 4].includes(o.lastExitCode);
+  if (o.lastExitCode === 3 || isUnknownExit || (o.lastExitCode === null && o.crashSuspected)) {
     // W-P2: a missing or already-elapsed reset is NOT a quota signal (spec §7).
     // FIX S3: clamp the computed deadline — untrusted log content must never produce an
     // unbounded wait (`MAX_QUOTA_WAIT_MS`, defined above beside `OVERLOAD_BACKOFF_SECONDS`).
