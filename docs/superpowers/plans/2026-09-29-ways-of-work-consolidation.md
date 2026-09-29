@@ -24,7 +24,7 @@ fixtures. No runner, watchdog or supervisor code changes.
   below says — never the `hunter` subagent or any other tribe agent (`hunter`, `warchief`,
   `skinner`). This line names the Hunter only to exclude it: today's `validate-plan.sh` requires the
   words "hunter" and "subagent" in this section of every plan; after Task 4 it requires them only
-  for a `tribe` plan (spec §4.4, open question N1).
+  for a `tribe` plan (spec §4.4, ruling N1).
 - Purity: core logic stays deterministic and side-effect-free; every outside-world dependency
   (database, network, filesystem, clock, random, global state) enters through an abstraction
   injected from the edge — never constructed inside core logic (see `~/.claude/rules/pure-core.md`).
@@ -44,7 +44,8 @@ fixtures. No runner, watchdog or supervisor code changes.
   (`plugins/tribe/scripts/runner/` changes only in `README.md`); the tribe loop's internals
   (dual-Skinner cell, its fix-round count, Tracker, Scout, gap gate) are pointed at, never edited;
   reviewer blinding is #198; historical plans, specs, ADRs and evidence are not rewritten;
-  `~/.claude/CLAUDE.md` is never edited by hand.
+  `~/.claude/CLAUDE.md` is never edited by hand. No file under `.c3/` changes and no `c3x` command
+  runs (owner ruling N5): the C3 side is the follow-up issue written up in `docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md`.
 - Oracles: for the validator, the card's G3 row is the contract and CommonMark is not —
   accepting any G3 mutant, or a plan the runner refuses, is a bug; refusing an ambiguous plan is by
   design. For the drift counter, the card's G1 row — a live restating line it misses is a bug; a
@@ -55,8 +56,10 @@ fixtures. No runner, watchdog or supervisor code changes.
   the fence; (3) the tribe loop's internals — unchanged, `tribe` points at them; (4) inherited
   failures that fail identically on `master` @ `632a039`: `test-input-asymmetry.sh`'s
   `evals-file-has-52-evals` (the file had 56 evals before this card), and
-  `scripts/evals/tests` `test_rejects_symlink_loop`; (5) `c3x check` reporting the 157 historical
-  `BROKEN_SEAL changes/…` lines that `master` already reports; (6) the old style name in two code
+  `scripts/evals/tests` `test_rejects_symlink_loop`; (5) the drift counter listing
+  `.c3/c3-2-plugins/c3-215-tribe.md` — by ruling N5 this card's G1 target in the repo is exactly 2
+  places, the canonical section and `c3-215`, and the follow-up issue brings it to 1; any other
+  `.c3/` finding is the follow-up's too; (6) the old style name in two code
   comments inside the gap-gate scripts (`gaps/rulings-check.ts:2`, `gaps/rulings-check.test.ts:2`)
   — gap-gate internals, out of the fence, and a name, not a rule.
 
@@ -69,22 +72,24 @@ get a committed mechanical oracle (G1 counter; G3 fixtures run through BOTH the 
 runner dry run). No `tribe` signal applies. Its last task is the final review (D4), up to 2 fix
 rounds."
 
-The plan has 11 tasks, above the card's estimate of about 6: one commit per task (crash-safe
-sizing) and governance at the end of each phase (Tasks 7 and 10) add tasks, not risk. The block,
-copied verbatim from the section Task 3 creates:
+Against the rubric as Task 3 words it (ruling S3: it counts build tasks only): 8 build tasks in
+order — Tasks 1–6, 8 and 9; Tasks 7 and 10 are phase-end governance and Task 11 is the final review,
+which the rubric does not count. The block, copied verbatim from the section Task 3 creates:
 
 Executor: subagent-per-task
 
 - One fresh `general-purpose` subagent per task, in order: it runs the task's Red and sees the stated failure, builds, runs the Green and matches the literal expected output, runs the Done commands, and commits. Never dispatch a tribe agent (`hunter`, `warchief`, `skinner`) for a task.
 - The orchestrating session re-runs each task's Green itself before starting the next task; a Green that does not reproduce sends the task back.
-- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, dispatch one fresh fix subagent with the findings, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings).
-- Then open the PR, wait for every check to conclude green, and merge with `gh pr merge --merge`.
+- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, judges the diff against every goal row and the scope fence of the card, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, dispatch one fresh fix subagent with the findings, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings). Keep every round's report.
+- Then open the PR — its body carries a `## Final review` section with every round's `REVIEW:` line and its findings, in order — wait for every check to conclude green, and merge with `gh pr merge --merge`.
 
 Card-specific delivery step, after the merge: run `./install.sh tribe` from the updated `master`
 checkout so the installed `~/.claude/CLAUDE.md` receives the snippet's new wording (it backs the
 previous file up to a `CLAUDE.md.bak.` file first), then run
 `bun plugins/tribe/scripts/ways-of-work/drift.ts --repo . --also "$HOME/.claude/CLAUDE.md"` and expect its last line to read
-`ways-of-work definitions: 1` (open question N3).
+`ways-of-work definitions: 2` — the canonical section and `c3-215`, the installed copy adding no
+place (owner ruling N3). The PR body carries the `## Final review` section Task 11 assembles (ruling
+S2); the Shaman's SHIPPED gate checks it.
 
 **The chicken-and-egg, stated.** This plan must pass today's `validate-plan.sh` (which knows no
 `tribe`, no Done check, no review task, and requires the Hunter line in every plan) and the one this
@@ -103,7 +108,8 @@ Task 5's Done section and Task 11 run the new validator on this plan.
 | `plugins/tribe/agents/shaman.md` | 3 | the "Ways of work" section; Mode 1, anti-goals 1–2, frontmatter |
 | `plugins/tribe/scripts/validate-plan.sh`, `plugins/tribe/scripts/tests/test-validate-plan.sh` | 4, 5 | `tribe`, Hunter line, Done mirror; mode block, final review |
 | `plugins/tribe/scripts/tests/test-ways-of-work-plans.sh` | 6 | create — the two-gate test |
-| `plugins/tribe/README.md`, `README.md`, `.c3/adr/` (new ADR), `.c3/c3-2-plugins/c3-215-tribe.md` | 7, 10 | governance |
+| `plugins/tribe/README.md`, `README.md` | 7, 10 | governance — the READMEs |
+| `docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md` | 10 (re-check) | the C3 follow-up issue body, committed during planning; Task 10 proves its rows still apply |
 | `plugins/tribe/agents/warchief.md`, `plugins/tribe/skills/orchestrate-campaign/SKILL.md`, `plugins/tribe/scripts/runner/README.md` | 8 | pointers |
 | `plugins/tribe/claude-md/shaman-brainstorm-together.md`, `plugins/tribe/install.sh`, `plugins/tribe/scripts/tests/test-install-hook.sh` | 9 | pointer + in-place refresh |
 
@@ -667,7 +673,7 @@ CASES = json.loads(r'''[
     "name": "shaman-mode-1-hands-off-the-recorded-way-of-work",
     "agent": "shaman",
     "prompt": "Brainstorm-together work is at its last step. The idea card cards/viewer-filter.md in your working directory records the way of work `Executor: subagent-per-task` with its rubric reasons, and the planning-only Warchief's plan plans/viewer-filter.md is final with no open questions: four tasks, the last one being the final review, and its Way of work section is the subagent-per-task block copied from your \"Ways of work\" section. The owner says: \"Good. I opened a new session named exec-filter for the build.\" Respond, and do what you would do next.",
-    "expected_output": "Shaman briefs exec-filter itself: it sends (or states it is sending) a SendMessage to exec-filter carrying the card and plan paths and the plan's way of work quoted from the plan — one fresh general-purpose subagent per task in order, the orchestrating session re-running each task's Green, the final review task done by a fresh reviewer, at most 2 fix rounds before escalating to the Shaman, then PR and merge. It keeps the way of work the card recorded: it does NOT upgrade the card to the tribe (no full-build Warchief, Hunters, Skinners, Tracker or Scout, no orchestrate-campaign) and does NOT drop or add review passes. The brief does not open with a tribe role assignment such as 'you are the Warchief'. It stays the What/Why authority and verifies the result (verify-shipped first). Changing the mode at hand-off, omitting the final review task or its 2-round cap from the brief, or routing the build through the Warchief -> Hunter -> two-Skinner loop is the failure.",
+    "expected_output": "Shaman briefs exec-filter itself: it sends (or states it is sending) a SendMessage to exec-filter carrying the card and plan paths and the plan's way of work quoted from the plan — one fresh general-purpose subagent per task in order, the orchestrating session re-running each task's Green, the final review task done by a fresh reviewer who judges the diff against the card's goals and scope fence, at most 2 fix rounds before escalating to the Shaman, then a PR whose body carries a `## Final review` section with every round's REVIEW: line, and merge. It keeps the way of work the card recorded: it does NOT upgrade the card to the tribe (no full-build Warchief, Hunters, Skinners, Tracker or Scout, no orchestrate-campaign) and does NOT drop or add review passes. The brief does not open with a tribe role assignment such as 'you are the Warchief'. It stays the What/Why authority and verifies the result (verify-shipped first). Changing the mode at hand-off, omitting the final review task, its 2-round cap or the PR's `## Final review` section from the brief, or routing the build through the Warchief -> Hunter -> two-Skinner loop is the failure.",
     "files": [
       {
         "path": "cards/viewer-filter.md",
@@ -675,7 +681,7 @@ CASES = json.loads(r'''[
       },
       {
         "path": "plans/viewer-filter.md",
-        "content": "# Plan — viewer filter (card viewer-filter)\n\n## Global Constraints\n\n- Each task goes to one fresh `general-purpose` subagent, as the Way of work block says.\n\n## Way of work\n\nReasons (from the card): the design is settled; four tasks in order; each defect shows in a task's Green.\n\nExecutor: subagent-per-task\n\n- One fresh `general-purpose` subagent per task, in order: it runs the task's Red and sees the stated failure, builds, runs the Green and matches the literal expected output, runs the Done commands, and commits. Never dispatch a tribe agent (`hunter`, `warchief`, `skinner`) for a task.\n- The orchestrating session re-runs each task's Green itself before starting the next task; a Green that does not reproduce sends the task back.\n- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, dispatch one fresh fix subagent with the findings, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings).\n- Then open the PR, wait for every check to conclude green, and merge with `gh pr merge --merge`.\n\n### Task 1: filter core\n\n- [ ] **Step 1: Build**\n\n```bash\n# pure filter over the session list\n```\n\n#### Verify\n\n- Goal: G1.\n- Red: `bun test test/t1.test.ts` -> `1 fail`.\n- Green: `bun test test/t1.test.ts` -> `1 pass`, `0 fail`.\n- Stub check: an empty implementation fails the assertion.\n\n#### Done\n\n```bash\nbun test test/t1.test.ts\n```\n\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m \"task 1\"\n```\n\n### Task 2: filter box\n\n- [ ] **Step 1: Build**\n\n```bash\n# the input box\n```\n\n#### Verify\n\n- Goal: G1.\n- Red: `bun test test/t2.test.ts` -> `1 fail`.\n- Green: `bun test test/t2.test.ts` -> `1 pass`, `0 fail`.\n- Stub check: an empty implementation fails the assertion.\n\n#### Done\n\n```bash\nbun test test/t2.test.ts\n```\n\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m \"task 2\"\n```\n\n### Task 3: wire the box to the list\n\n- [ ] **Step 1: Build**\n\n```bash\n# wiring\n```\n\n#### Verify\n\n- Goal: G1.\n- Red: `bun test test/t3.test.ts` -> `1 fail`.\n- Green: `bun test test/t3.test.ts` -> `1 pass`, `0 fail`.\n- Stub check: an empty implementation fails the assertion.\n\n#### Done\n\n```bash\nbun test test/t3.test.ts\n```\n\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m \"task 3\"\n```\n\n### Task 4: Final review\n\n- [ ] **Step 1: Build**\n\nA fresh `general-purpose` reviewer reviews the branch as the block above says.\n\n```bash\ngit diff master...HEAD\n```\n\n#### Verify\n\n- Goal: G1.\n- Red: `bun test test/t4.test.ts` -> `1 fail`.\n- Green: `bun test test/t4.test.ts` -> `1 pass`, `0 fail`.\n- Stub check: an empty implementation fails the assertion.\n\n#### Done\n\n```bash\nbun test test/t4.test.ts\n```\n\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m \"task 4\"\n```\n"
+        "content": "# Plan — viewer filter (card viewer-filter)\n\n## Global Constraints\n\n- Each task goes to one fresh `general-purpose` subagent, as the Way of work block says.\n\n## Way of work\n\nReasons (from the card): the design is settled; four tasks in order; each defect shows in a task's Green.\n\nExecutor: subagent-per-task\n\n- One fresh `general-purpose` subagent per task, in order: it runs the task's Red and sees the stated failure, builds, runs the Green and matches the literal expected output, runs the Done commands, and commits. Never dispatch a tribe agent (`hunter`, `warchief`, `skinner`) for a task.\n- The orchestrating session re-runs each task's Green itself before starting the next task; a Green that does not reproduce sends the task back.\n- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, judges the diff against every goal row and the scope fence of the card, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, dispatch one fresh fix subagent with the findings, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings). Keep every round's report.\n- Then open the PR — its body carries a `## Final review` section with every round's `REVIEW:` line and its findings, in order — wait for every check to conclude green, and merge with `gh pr merge --merge`.\n\n### Task 1: filter core\n\n- [ ] **Step 1: Build**\n\n```bash\n# pure filter over the session list\n```\n\n#### Verify\n\n- Goal: G1.\n- Red: `bun test test/t1.test.ts` -> `1 fail`.\n- Green: `bun test test/t1.test.ts` -> `1 pass`, `0 fail`.\n- Stub check: an empty implementation fails the assertion.\n\n#### Done\n\n```bash\nbun test test/t1.test.ts\n```\n\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m \"task 1\"\n```\n\n### Task 2: filter box\n\n- [ ] **Step 1: Build**\n\n```bash\n# the input box\n```\n\n#### Verify\n\n- Goal: G1.\n- Red: `bun test test/t2.test.ts` -> `1 fail`.\n- Green: `bun test test/t2.test.ts` -> `1 pass`, `0 fail`.\n- Stub check: an empty implementation fails the assertion.\n\n#### Done\n\n```bash\nbun test test/t2.test.ts\n```\n\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m \"task 2\"\n```\n\n### Task 3: wire the box to the list\n\n- [ ] **Step 1: Build**\n\n```bash\n# wiring\n```\n\n#### Verify\n\n- Goal: G1.\n- Red: `bun test test/t3.test.ts` -> `1 fail`.\n- Green: `bun test test/t3.test.ts` -> `1 pass`, `0 fail`.\n- Stub check: an empty implementation fails the assertion.\n\n#### Done\n\n```bash\nbun test test/t3.test.ts\n```\n\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m \"task 3\"\n```\n\n### Task 4: Final review\n\n- [ ] **Step 1: Build**\n\nA fresh `general-purpose` reviewer reviews the branch as the block above says.\n\n```bash\ngit diff master...HEAD\n```\n\n#### Verify\n\n- Goal: G1.\n- Red: `bun test test/t4.test.ts` -> `1 fail`.\n- Green: `bun test test/t4.test.ts` -> `1 pass`, `0 fail`.\n- Stub check: an empty implementation fails the assertion.\n\n#### Done\n\n```bash\nbun test test/t4.test.ts\n```\n\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m \"task 4\"\n```\n"
       }
     ]
   },
@@ -758,7 +764,7 @@ CASES = json.loads(r'''[
     "files": [
       {
         "path": "plans/hello.md",
-        "content": "# Plan — `hello.sh` (card hello)\n\n## Global Constraints\n\n- Work in this directory; there is no git repository here, so skip every commit step.\n\n## Way of work\n\nReasons (from the card): two tasks, about 10 changed lines, one file, an obvious oracle.\n\nExecutor: single-agent\n\n- The executing session builds every task itself, inline and in order; it dispatches no implementer subagent.\n- Each task: run its Red and see the stated failure, build, run its Green and match the literal expected output, run its Done commands, then commit.\n- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, fix inline, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings).\n- Then open the PR, wait for every check to conclude green, and merge with `gh pr merge --merge`.\n\n### Task 1: `hello.sh` prints hello\n\n- [ ] **Step 1: Build**\n\n```bash\nprintf '#!/usr/bin/env bash\\necho hello\\n' > hello.sh && chmod +x hello.sh\n```\n\n#### Verify\n\n- Goal: G1 (`./hello.sh` prints `hello`).\n- Red: `./hello.sh` before building -> `No such file or directory`.\n- Green: `./hello.sh` -> `hello`, exit 0.\n- Stub check: an empty `hello.sh` prints nothing, so the Green fails.\n\n#### Done\n\n```bash\ntest \"$(./hello.sh)\" = hello\n```\n\n- [ ] **Step 2: Commit** (skipped here: no git repository)\n\n### Task 2: Final review\n\n- [ ] **Step 1: Review**\n\nA fresh `general-purpose` reviewer reviews the change as the block above says.\n\n```bash\n./hello.sh\n```\n\n#### Verify\n\n- Goal: D6 (the final review).\n- Red: not applicable, the review writes no code of its own.\n- Green: `./hello.sh` -> `hello`.\n- Stub check: without Task 1 there is no `hello.sh`, so the Green fails.\n\n#### Done\n\n```bash\ntest \"$(./hello.sh)\" = hello\n```\n\n- [ ] **Step 2: Commit** (skipped here: no git repository)\n"
+        "content": "# Plan — `hello.sh` (card hello)\n\n## Global Constraints\n\n- Work in this directory; there is no git repository here, so skip every commit step.\n\n## Way of work\n\nReasons (from the card): two tasks, about 10 changed lines, one file, an obvious oracle.\n\nExecutor: single-agent\n\n- The executing session builds every task itself, inline and in order; it dispatches no implementer subagent.\n- Each task: run its Red and see the stated failure, build, run its Green and match the literal expected output, run its Done commands, then commit.\n- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, judges the diff against every goal row and the scope fence of the card, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, fix inline, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings). Keep every round's report.\n- Then open the PR — its body carries a `## Final review` section with every round's `REVIEW:` line and its findings, in order — wait for every check to conclude green, and merge with `gh pr merge --merge`.\n\n### Task 1: `hello.sh` prints hello\n\n- [ ] **Step 1: Build**\n\n```bash\nprintf '#!/usr/bin/env bash\\necho hello\\n' > hello.sh && chmod +x hello.sh\n```\n\n#### Verify\n\n- Goal: G1 (`./hello.sh` prints `hello`).\n- Red: `./hello.sh` before building -> `No such file or directory`.\n- Green: `./hello.sh` -> `hello`, exit 0.\n- Stub check: an empty `hello.sh` prints nothing, so the Green fails.\n\n#### Done\n\n```bash\ntest \"$(./hello.sh)\" = hello\n```\n\n- [ ] **Step 2: Commit** (skipped here: no git repository)\n\n### Task 2: Final review\n\n- [ ] **Step 1: Review**\n\nA fresh `general-purpose` reviewer reviews the change as the block above says.\n\n```bash\n./hello.sh\n```\n\n#### Verify\n\n- Goal: D6 (the final review).\n- Red: not applicable, the review writes no code of its own.\n- Green: `./hello.sh` -> `hello`.\n- Stub check: without Task 1 there is no `hello.sh`, so the Green fails.\n\n#### Done\n\n```bash\ntest \"$(./hello.sh)\" = hello\n```\n\n- [ ] **Step 2: Commit** (skipped here: no git repository)\n"
       }
     ],
     "checks": [
@@ -890,7 +896,7 @@ instructions, so that copy is data, not a second definition.
 | Mode (`Executor:` value) | Use it when (the rubric) | How it runs |
 | --- | --- | --- |
 | `single-agent` | At most 2 tasks, roughly 50 changed lines outside tests, one component, and an obvious oracle. | The executing session builds every task itself, inline — no implementer subagent. Then the final review task. |
-| `subagent-per-task` (the default) | The design and requirements are settled (the common case: the owner and the Shaman hold the high-level picture), 3 to about 8 tasks done in order, and every defect would surface in some task's Green or in the plan's end-to-end check. | One fresh `general-purpose` subagent per task, in order; the orchestrating session re-runs each task's Green before the next. The plan's last task is the final review. |
+| `subagent-per-task` (the default) | The design and requirements are settled (the common case: the owner and the Shaman hold the high-level picture), 3 to about 8 build tasks done in order (the final review and phase-end governance tasks do not count), and every defect would surface in some task's Green or in the plan's end-to-end check. | One fresh `general-purpose` subagent per task, in order; the orchestrating session re-runs each task's Green before the next. The plan's last task is the final review. |
 | `tribe` | A bug could pass every Verify block we can write in advance: concurrency, crash/resume, state machines, permission surfaces, parsers of hostile input, data migration, cross-component contracts, multi-PR work, or a past bug that escaped a single review. Very heavy — use it rarely. | The full tribe delivery: a full-build Warchief, a Hunter per task, the two-lens Skinner audit per task, the Warchief adjudicating with its own fix loop, the harness-gap gate, PR, merge (`agents/warchief.md` Method steps 4–8, unchanged). |
 
 **Tie-break.** When two modes fit, pick the lighter mode and write down, next to the choice, what
@@ -912,19 +918,21 @@ block — never at hand-off on a feeling that more review would be safer.
 
 ### The final review (the two light modes)
 
-The plan's last task is headed `Task N: Final review`. A fresh `general-purpose` subagent that
-did not build the code reviews the branch: it gets the card, the plan and the branch diff,
-re-runs every task's Green and the plan's end-to-end check, and ends its report with
-`REVIEW: PASS` or `REVIEW: FAIL` followed by its findings, each with evidence (a `file:line` or a
-command's output). On `REVIEW: FAIL` the executing session runs a fix round — `subagent-per-task`
-dispatches one fresh fix subagent with the findings, `single-agent` fixes inline — re-runs the
-Verify of every task the fix touches, and a fresh reviewer reviews again. At most 2 fix rounds: a
-review still failing after the second goes to the Shaman as a What/Why question (in a campaign
-the executor ends its turn with `NEEDS_DIRECTION:` and the findings). The review task's one
-Commit step commits the fixes, or an empty commit recording `REVIEW: PASS` when there were none.
-This is a plain review for now; a reviewer blinded at chosen spots is hieplam/tribe#198. A
-`tribe` plan has no final review task: the Warchief's own audit and its fix-round cap
-(`agents/warchief.md` Method step 6) apply unchanged.
+The plan's last task is headed `Task N: Final review`. A fresh `general-purpose` subagent that did
+not build the code reviews the branch: it gets the card, the plan and the branch diff, judges the
+diff against every goal row and the scope fence of the card, re-runs every task's Green and the
+plan's end-to-end check, and ends its report with `REVIEW: PASS` or `REVIEW: FAIL` followed by its
+findings, each with evidence (a `file:line` or a command's output). On `REVIEW: FAIL` the executing
+session runs a fix round — `subagent-per-task` dispatches one fresh fix subagent with the findings,
+`single-agent` fixes inline — re-runs the Verify of every task the fix touches, and a fresh reviewer
+reviews again. At most 2 fix rounds: a review still failing after the second goes to the Shaman as a
+What/Why question (in a campaign the executor ends its turn with `NEEDS_DIRECTION:` and the
+findings). The review task's one Commit step commits the fixes, or an empty commit recording
+`REVIEW: PASS` when there were none. That commit alone proves nothing ran, so the PR body carries a
+`## Final review` section: every round's `REVIEW:` line with its findings, in order, the last line
+`REVIEW: PASS`. The Shaman's SHIPPED gate checks that section. This is a plain review for now; a
+reviewer blinded at chosen spots is hieplam/tribe#198. A `tribe` plan has no final review task: the
+Warchief's own audit and its fix-round cap (`agents/warchief.md` Method step 6) apply unchanged.
 
 ### Who executes, on each path
 
@@ -948,8 +956,8 @@ Executor: single-agent
 
 - The executing session builds every task itself, inline and in order; it dispatches no implementer subagent.
 - Each task: run its Red and see the stated failure, build, run its Green and match the literal expected output, run its Done commands, then commit.
-- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, fix inline, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings).
-- Then open the PR, wait for every check to conclude green, and merge with `gh pr merge --merge`.
+- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, judges the diff against every goal row and the scope fence of the card, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, fix inline, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings). Keep every round's report.
+- Then open the PR — its body carries a `## Final review` section with every round's `REVIEW:` line and its findings, in order — wait for every check to conclude green, and merge with `gh pr merge --merge`.
 ```
 
 ```markdown
@@ -957,8 +965,8 @@ Executor: subagent-per-task
 
 - One fresh `general-purpose` subagent per task, in order: it runs the task's Red and sees the stated failure, builds, runs the Green and matches the literal expected output, runs the Done commands, and commits. Never dispatch a tribe agent (`hunter`, `warchief`, `skinner`) for a task.
 - The orchestrating session re-runs each task's Green itself before starting the next task; a Green that does not reproduce sends the task back.
-- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, dispatch one fresh fix subagent with the findings, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings).
-- Then open the PR, wait for every check to conclude green, and merge with `gh pr merge --merge`.
+- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, judges the diff against every goal row and the scope fence of the card, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, dispatch one fresh fix subagent with the findings, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings). Keep every round's report.
+- Then open the PR — its body carries a `## Final review` section with every round's `REVIEW:` line and its findings, in order — wait for every check to conclude green, and merge with `gh pr merge --merge`.
 ```
 
 ```markdown
@@ -1000,7 +1008,7 @@ instructions, so that copy is data, not a second definition.
 | Mode (`Executor:` value) | Use it when (the rubric) | How it runs |
 | --- | --- | --- |
 | `single-agent` | At most 2 tasks, roughly 50 changed lines outside tests, one component, and an obvious oracle. | The executing session builds every task itself, inline — no implementer subagent. Then the final review task. |
-| `subagent-per-task` (the default) | The design and requirements are settled (the common case: the owner and the Shaman hold the high-level picture), 3 to about 8 tasks done in order, and every defect would surface in some task's Green or in the plan's end-to-end check. | One fresh `general-purpose` subagent per task, in order; the orchestrating session re-runs each task's Green before the next. The plan's last task is the final review. |
+| `subagent-per-task` (the default) | The design and requirements are settled (the common case: the owner and the Shaman hold the high-level picture), 3 to about 8 build tasks done in order (the final review and phase-end governance tasks do not count), and every defect would surface in some task's Green or in the plan's end-to-end check. | One fresh `general-purpose` subagent per task, in order; the orchestrating session re-runs each task's Green before the next. The plan's last task is the final review. |
 | `tribe` | A bug could pass every Verify block we can write in advance: concurrency, crash/resume, state machines, permission surfaces, parsers of hostile input, data migration, cross-component contracts, multi-PR work, or a past bug that escaped a single review. Very heavy — use it rarely. | The full tribe delivery: a full-build Warchief, a Hunter per task, the two-lens Skinner audit per task, the Warchief adjudicating with its own fix loop, the harness-gap gate, PR, merge (`agents/warchief.md` Method steps 4–8, unchanged). |
 
 **Tie-break.** When two modes fit, pick the lighter mode and write down, next to the choice, what
@@ -1022,19 +1030,21 @@ block — never at hand-off on a feeling that more review would be safer.
 
 ### The final review (the two light modes)
 
-The plan's last task is headed `Task N: Final review`. A fresh `general-purpose` subagent that
-did not build the code reviews the branch: it gets the card, the plan and the branch diff,
-re-runs every task's Green and the plan's end-to-end check, and ends its report with
-`REVIEW: PASS` or `REVIEW: FAIL` followed by its findings, each with evidence (a `file:line` or a
-command's output). On `REVIEW: FAIL` the executing session runs a fix round — `subagent-per-task`
-dispatches one fresh fix subagent with the findings, `single-agent` fixes inline — re-runs the
-Verify of every task the fix touches, and a fresh reviewer reviews again. At most 2 fix rounds: a
-review still failing after the second goes to the Shaman as a What/Why question (in a campaign
-the executor ends its turn with `NEEDS_DIRECTION:` and the findings). The review task's one
-Commit step commits the fixes, or an empty commit recording `REVIEW: PASS` when there were none.
-This is a plain review for now; a reviewer blinded at chosen spots is hieplam/tribe#198. A
-`tribe` plan has no final review task: the Warchief's own audit and its fix-round cap
-(`agents/warchief.md` Method step 6) apply unchanged.
+The plan's last task is headed `Task N: Final review`. A fresh `general-purpose` subagent that did
+not build the code reviews the branch: it gets the card, the plan and the branch diff, judges the
+diff against every goal row and the scope fence of the card, re-runs every task's Green and the
+plan's end-to-end check, and ends its report with `REVIEW: PASS` or `REVIEW: FAIL` followed by its
+findings, each with evidence (a `file:line` or a command's output). On `REVIEW: FAIL` the executing
+session runs a fix round — `subagent-per-task` dispatches one fresh fix subagent with the findings,
+`single-agent` fixes inline — re-runs the Verify of every task the fix touches, and a fresh reviewer
+reviews again. At most 2 fix rounds: a review still failing after the second goes to the Shaman as a
+What/Why question (in a campaign the executor ends its turn with `NEEDS_DIRECTION:` and the
+findings). The review task's one Commit step commits the fixes, or an empty commit recording
+`REVIEW: PASS` when there were none. That commit alone proves nothing ran, so the PR body carries a
+`## Final review` section: every round's `REVIEW:` line with its findings, in order, the last line
+`REVIEW: PASS`. The Shaman's SHIPPED gate checks that section. This is a plain review for now; a
+reviewer blinded at chosen spots is hieplam/tribe#198. A `tribe` plan has no final review task: the
+Warchief's own audit and its fix-round cap (`agents/warchief.md` Method step 6) apply unchanged.
 
 ### Who executes, on each path
 
@@ -1058,8 +1068,8 @@ Executor: single-agent
 
 - The executing session builds every task itself, inline and in order; it dispatches no implementer subagent.
 - Each task: run its Red and see the stated failure, build, run its Green and match the literal expected output, run its Done commands, then commit.
-- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, fix inline, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings).
-- Then open the PR, wait for every check to conclude green, and merge with `gh pr merge --merge`.
+- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, judges the diff against every goal row and the scope fence of the card, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, fix inline, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings). Keep every round's report.
+- Then open the PR — its body carries a `## Final review` section with every round's `REVIEW:` line and its findings, in order — wait for every check to conclude green, and merge with `gh pr merge --merge`.
 ```
 
 ```markdown
@@ -1067,8 +1077,8 @@ Executor: subagent-per-task
 
 - One fresh `general-purpose` subagent per task, in order: it runs the task's Red and sees the stated failure, builds, runs the Green and matches the literal expected output, runs the Done commands, and commits. Never dispatch a tribe agent (`hunter`, `warchief`, `skinner`) for a task.
 - The orchestrating session re-runs each task's Green itself before starting the next task; a Green that does not reproduce sends the task back.
-- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, dispatch one fresh fix subagent with the findings, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings).
-- Then open the PR, wait for every check to conclude green, and merge with `gh pr merge --merge`.
+- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, judges the diff against every goal row and the scope fence of the card, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, dispatch one fresh fix subagent with the findings, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds; still failing, stop and escalate to the Shaman (in a campaign: end the turn with `NEEDS_DIRECTION:` and the findings). Keep every round's report.
+- Then open the PR — its body carries a `## Final review` section with every round's `REVIEW:` line and its findings, in order — wait for every check to conclude green, and merge with `gh pr merge --merge`.
 ```
 
 ```markdown
@@ -1117,6 +1127,21 @@ only a planning-only Warchief, and its execution follows the plan's own way of w
 roadmap cards run as a campaign, and the full-build Warchief a `tribe` card runs on. Otherwise
 Mode 1 dispatches only a planning-only Warchief, and its execution follows the plan's way of work
 (see "Ways of work").""")
+
+# E3b — the SHIPPED gate checks the light modes' final review record (ruling S2).
+rep("""3. **SHIPPED gate** (Mode 3 rule step). After `verify-shipped` passes, open the evidence for
+   EACH goal row — the ratchet's before → after on the committed tool, and for a visual goal the
+   screenshots next to the reference, looked at by you. An evidence file that exists but was
+   never compared against its reference is not verification. A goal the owner ratified as input
+   goes to the owner for output acceptance before you say `verified-SHIPPED`.""", """3. **SHIPPED gate** (Mode 3 rule step, and every Mode 1 card before `verified-SHIPPED`). After
+   `verify-shipped` passes, open the evidence for EACH goal row — the ratchet's before → after on
+   the committed tool, and for a visual goal the screenshots next to the reference, looked at by
+   you. An evidence file that exists but was never compared against its reference is not
+   verification. A goal the owner ratified as input goes to the owner for output acceptance before
+   you say `verified-SHIPPED`. For a `single-agent` or `subagent-per-task` card, also open the PR
+   body's `## Final review` section: it must exist, carry every review round's `REVIEW:` line with
+   its findings, and end with `REVIEW: PASS` (see "Ways of work"); a missing section, or one that
+   does not end `REVIEW: PASS`, is not shipped.""")
 
 # E4 — the canonical section, before the anti-goals.
 section = SECTION.rstrip("\n")
@@ -2127,18 +2152,14 @@ bash plugins/tribe/scripts/tests/test-ways-of-work-plans.sh
 git add plugins/tribe/scripts/tests/test-ways-of-work-plans.sh && git commit -m "test(tribe): one plan per mode through validate-plan.sh and the runner dry-run"
 ```
 
-### Task 7: Governance for the definition and the format — READMEs, the ADR, `c3-215` part 1
+### Task 7: Governance for the definition and the format — the READMEs
 
-**Files:** Modify `plugins/tribe/README.md`, `README.md`, `.c3/c3-2-plugins/c3-215-tribe.md`;
-Create `.c3/adr/adr-YYYYMMDD-ways-of-work-consolidation.md` (through `c3x add adr`; `YYYYMMDD` is
-the day it runs).
+**Files:** Modify `plugins/tribe/README.md`, `README.md`.
 
-Spec §4.7. Two measured c3x 11.0.0 facts shape this task: `change apply` rejects every `c3-215`
-row patch (`invalid required table`), so the row text is edited directly (open question N5); and
-every successful c3x write deletes the 157 historical `.c3/changes/*.patch.md` files whose seals
-are already broken on `master`, so they are restored from git right after it. `c3x repair` here
-only builds the cache: it reports `check failed: 5 error(s)` (the placeholder words this task and
-Task 10 remove) and changes no file.
+Spec §4.7. The plugin README's Shaman paragraph points to the section, and a new "Ways of work"
+section names the three tools that keep it true; the root README's Development list gains the new
+tests. No `.c3/` file changes in this card (ruling N5): `c3-215` is the follow-up issue written up
+in `docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md`, so the counter keeps listing it.
 
 - [ ] **Step 1: See the Red**
 
@@ -2146,8 +2167,7 @@ Task 10 remove) and changes no file.
 bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
 ```
 
-Expected: the lines `restates   .c3/c3-2-plugins/c3-215-tribe.md (6 lines)` and
-`restates   plugins/tribe/README.md (2 lines)`.
+Expected: the line `restates   plugins/tribe/README.md (2 lines)`.
 
 - [ ] **Step 2: Point the plugin README at the section, and list the new tests** — run exactly:
 
@@ -2179,9 +2199,12 @@ choosing one, and who chooses — is defined in exactly one place: the "Ways of 
 `## Way of work`. Three committed tools keep that true:
 
 - [`scripts/ways-of-work/drift.ts`](scripts/ways-of-work/drift.ts) lists every live file that
-  states a way-of-work rule; the target is one place, the canonical section
-  (`bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .`; `--also ~/.claude/CLAUDE.md` adds
-  the installed global CLAUDE.md).
+  states a way-of-work rule (`bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .`;
+  `--also ~/.claude/CLAUDE.md` adds the installed global CLAUDE.md). The goal is one place, the
+  canonical section. Until the C3 component doc `.c3/c3-2-plugins/c3-215-tribe.md` is updated —
+  the follow-up written up in
+  [`docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md`](../../docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md)
+  — it lists that file too, so the count is 2.
 - [`scripts/validate-plan.sh`](scripts/validate-plan.sh) fails a plan whose mode, block copy,
   Done sections or final review task are missing.
 - [`scripts/tests/test-ways-of-work-plans.sh`](scripts/tests/test-ways-of-work-plans.sh) runs one
@@ -2218,167 +2241,21 @@ open(p, "w", encoding="utf-8").write(s)
 PYEDIT
 ```
 
-- [ ] **Step 3: Create the ADR, then restore the history c3x deletes**
-
-````bash
-for f in "$HOME"/.claude/plugins/cache/c3-skill-marketplace/c3-skill/*/skills/c3/bin/c3x.sh; do C3X="$f"; done; test -f "$C3X" && echo "c3x: $C3X"
-bash "$C3X" repair >/dev/null 2>&1 || true
-body="$(mktemp -d)/adr-body.md"
-cat > "$body" <<'ADR'
-## Goal
-
-Define the tribe's three ways of work — single-agent, subagent-per-task and tribe — the rubric for choosing one, who chooses (the Shaman), the final review task and its 2-round fix cap, and the block each plan copies, in exactly one place: the "Ways of work" section of plugins/tribe/agents/shaman.md. Every other live file points there, and one plan format passes both validate-plan.sh and the campaign runner's --dry-run in any mode (card ways-of-work-consolidation, owner rulings D1–D6 of 2026-09-29).
-
-## Context
-
-Before this change the ways of work were restated in about nine live files that disagreed: Mode 1 of shaman.md knew two executors that both ended in one review and at most one fix round; orchestrate-campaign's Simple style had no review step at all; the heavy tribe loop could only be chosen when the owner asked in their own words; the planning Warchief or the campaign orchestrator picked the mode, never the Shaman. Two plan vocabularies coexisted: Mode 1 plans (Way of work, Executor, Verify blocks) failed the runner's --dry-run with missing_done, and runner plans (How to work, Done sections) failed validate-plan.sh. The committed drift counter measured 9 places defining the ways of work at the start of this card.
-
-## Decision
-
-A "Ways of work" section in agents/shaman.md is the one definition: the three modes with their rubric, the tie-break, who decides (the Shaman, asking the owner only when it judges the call needs the owner), the final review task with at most 2 fix rounds for the two light modes, who executes on each path, and one fenced block per mode that plans copy verbatim. The Shaman's anti-goals 1–2 gain a scoped exception for a delegated single-agent plan. The Executor key keeps its name and gains the value tribe. validate-plan.sh accepts tribe, requires the Hunter line only for tribe, mirrors the runner's Done-section reading, checks that the Way of work carries the declared mode's block verbatim, and checks that a light-mode plan ends with its Final review task. warchief.md, orchestrate-campaign, the runner README, the plugin README, the claude-md snippet and this component point to the section. install.sh refreshes an installed snippet section in place, with a backup, so the pointer reaches every installed CLAUDE.md. c3-215's rows are updated as the Work Breakdown lists.
-
-## Affected Topology
-
-| Entity | Type | Why affected | Evidence | Governance review |
-| --- | --- | --- | --- | --- |
-| c3-215 | component | Contract rows (Owner → Shaman dispatch, validate-plan.sh, Global CLAUDE.md append, orchestrate-campaign, rulings-check.ts, a new drift-counter row), the Unattended-path flow row, two Change Safety rows, a new drift Change Safety row and the brainstorm-together snippet derived-material row describe the ways of work | c3-215#n2319@v1:sha256:f467fd1ec102c55b693524d1b29fda35cba5ac48b31be638a9f6a38cc5b3aef8 "Deliver features through a 5-agent chain of command" | Change Safety rows re-verified: agent evals, test-validate-plan.sh, test-ways-of-work-plans.sh, test-install-hook.sh, the drift counter |
-| c3-2 | container | Parent of c3-215; its responsibilities and boundary do not change (Parent Delta: none) | c3-2#n2304@v1:sha256:56c57d53533b1e3b4b9ff2aead25deff6371ef8809dcfccc7814a045b78da9a9 "Claude Code runtime content" | review only |
-| c3-0 | system | No system-level fact changes | c3-0#n2@v1:sha256:476cc5f8083fd97a5294182fc94b61a08b26120310802a67bb9869380a9ee31a "Package the Tribe agent ecosystem" | review only |
-
-## Compliance Refs
-
-| Ref | Why required | Evidence | Action |
-| --- | --- | --- | --- |
-| ref-evals-fixture | Evals 57–63 are added and eval 56 is rewritten in the fixture shape | ref-evals-fixture#n2514@v1:sha256:6a45601a3dfa6544d9d24b431ead59db2e530db2158f2f706242f30119a20ec8 "One eval fixture format for every role-behavior and skill-trigger eval" | comply |
-| ref-plugin-layout | The drift counter lands under plugins/tribe/scripts/ways-of-work/, inside the standard plugin shape | ref-plugin-layout#n2524@v1:sha256:0282b30a709a0e5b9670cb9130590099375ad4cef2a91521813a7427c3b46c8b "Standardize the directory shape of every plugin" | comply |
-| ref-docs-lifecycle | The card's spec, plan and ratchet evidence land under docs/superpowers/ | ref-docs-lifecycle#n2504@v1:sha256:a163534e4fbc98d69ae8cd12167eedff5b0840b29f305b2a4d73a5784501ec2c "Give feature work a durable, ordered paper trail" | comply |
-
-## Compliance Rules
-
-| Rule | Why required | Evidence | Action |
-| --- | --- | --- | --- |
-| rule-bash-strict-mode | test-ways-of-work-plans.sh is a new shell script; validate-plan.sh and install.sh change | rule-bash-strict-mode#n2533@v1:sha256:18b71fb29fad608a0bc7d57da5c807b50c9aafcc827cda25f43fa49e03fbb745 "Every shell script in the repo fails fast and loud" | comply |
-| rule-marketplace-registration | No plugin is added or removed | rule-marketplace-registration#n2607@v1:sha256:e2cde94bfc6a62a4c1b79caf53a11a2bc563c82338b88e7cb3c80bf00a936899 "Every plugin that exists in the tree is discoverable and installable" | N.A - no plugin registration change |
-| rule-sessions-start-in-target-repo | No session-spawning code changes; the runner, watchdog and supervisor are untouched | rule-sessions-start-in-target-repo#n2682@v1:sha256:cb99b70f92847ea958cc95b99e86f09c6b1c7f40fdcd90cf4fabcc6224e7cf4d "Every session the tribe spawns starts in the target repo" | N.A - no session-spawn change |
-| rule-no-squash-merge | Every mode's block merges with gh pr merge --merge, and this card's PR merges as a regular 2-parent merge | rule-no-squash-merge#n2622@v1:sha256:2f5ff61964fe9551d508719ff31ed7514dbdbd8d296ff884a7e952a5334fab6a "Every capability in this repo that merges a pull request" | comply |
-
-## Work Breakdown
-
-| Area | Detail | Evidence |
-| --- | --- | --- |
-| plugins/tribe/agents/shaman.md | The "Ways of work" section; Mode 1 steps 3–6, its execution section and its definition of done point to it; anti-goals 1–2 and the frontmatter description carry the single-agent exception (D2) | tribe evals 56–63 |
-| plugins/tribe/scripts/validate-plan.sh | tribe value, Hunter line only for tribe, runner Done mirror, mode block copy, final review task | plugins/tribe/scripts/tests/test-validate-plan.sh, plugins/tribe/scripts/tests/test-ways-of-work-plans.sh |
-| plugins/tribe/scripts/ways-of-work/ | The drift counter, pure core plus a thin git-reading edge | plugins/tribe/scripts/ways-of-work/drift.test.ts |
-| plugins/tribe/agents/warchief.md, skills/orchestrate-campaign/SKILL.md, scripts/runner/README.md, plugins/tribe/README.md | Point to the section; the campaign's tribe additions keep only campaign mechanics | the drift counter lists none of them |
-| plugins/tribe/claude-md/shaman-brainstorm-together.md, plugins/tribe/install.sh | The snippet points to the section; the hook refreshes an installed snippet section in place with a backup | plugins/tribe/scripts/tests/test-install-hook.sh |
-
-## Underlay C3 Changes
-
-| Underlay area | Exact C3 change | Verification evidence |
-| --- | --- | --- |
-| c3-215 table rows | Row text only, landed by editing the markdown because c3x 11.0.0 rejects every c3-215 row patch with "invalid required table", a no-op patch included; then c3x repair re-seals c3-215 once no placeholder word is left; no c3x command, validator, hint or schema changes | Measured while planning (spec section 4.7): a byte-identical block patch on the Status protocol row, applied with c3x change apply --dry-run, is rejected with invalid required table: Contract |
-
-## Enforcement Surfaces
-
-| Surface | Behavior | Evidence |
-| --- | --- | --- |
-| plugins/tribe/scripts/ways-of-work/drift.ts | Lists every live file that states a way-of-work rule; the target is exactly one place, the canonical section | docs/superpowers/evidence/2026-09-29-ways-of-work-drift-baseline.txt |
-| plugins/tribe/scripts/validate-plan.sh | Fails a plan whose mode, block copy, Done sections or final review task are missing | plugins/tribe/scripts/tests/test-validate-plan.sh |
-| plugins/tribe/scripts/tests/test-ways-of-work-plans.sh | Runs one plan per mode, and its mutants, through validate-plan.sh and the runner's --dry-run | V-WOW=PASS |
-| plugins/tribe/evals/evals.json | Evals 56–63 grade the Shaman choosing the mode and executing each one | scripts/evals/run_evals.py output recorded in the PR |
-
-## Alternatives Considered
-
-| Alternative | Rejected because |
-| --- | --- |
-| Define the modes in a new shared document outside shaman.md | The owner ruled D1: the Shaman decides the mode, so its own file holds the definition |
-| Teach the runner to read Verify blocks instead of Done sections | The runner, watchdog and supervisor are outside this card's fence; the validator mirrors the runner instead |
-| A new plan key for the mode | Ruling D5 keeps the Executor key; existing plans stay valid |
-| Leave c3-215 stale until c3x can apply row patches | The drift counter would keep listing c3-215, so the one-definition goal could not be met |
-
-## Risks
-
-| Risk | Mitigation | Verification |
-| --- | --- | --- |
-| validate-plan.sh accepts a plan the runner refuses | The Done check mirrors plan-index.ts rule for rule and names the runner's own problems | test-ways-of-work-plans.sh runs every fixture through both gates |
-| The install hook overwrites an owner's hand edit of a snippet section | The previous CLAUDE.md is kept as CLAUDE.md.bak.<epoch> and the hook prints a warning naming it | test-install-hook.sh refresh cases |
-| The Shaman over-uses the tribe | The rubric names tribe's signals, the tie-break prefers the lighter mode, and evals 57–58 pin the light picks | tribe evals 57–59 |
-
-## Verification
-
-| Check | Result |
-| --- | --- |
-| bun plugins/tribe/scripts/ways-of-work/drift.ts --repo . | recorded in the PR |
-| bash plugins/tribe/scripts/tests/test-validate-plan.sh | recorded in the PR |
-| bash plugins/tribe/scripts/tests/test-ways-of-work-plans.sh | recorded in the PR |
-| bash plugins/tribe/scripts/tests/test-install-hook.sh | recorded in the PR |
-| scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 56,57,58,59,60,61,62,63 --runs 3 | recorded in the PR |
-ADR
-bash "$C3X" add adr ways-of-work-consolidation --file "$body"
-git checkout -- .c3/changes
-git status --short .c3/changes | wc -l | tr -d ' '
-````
-
-Expected: `Created: adr ways-of-work-consolidation (id: adr-YYYYMMDD-ways-of-work-consolidation)`,
-then `0` (no historical patch file left deleted).
-
-- [ ] **Step 4: Edit `c3-215`'s rows** — run exactly this:
-
-```bash
-python3 - .c3/c3-2-plugins/c3-215-tribe.md <<'PYEDIT'
-import sys
-p = sys.argv[1]
-s = open(p, encoding="utf-8").read()
-def rep(old, new):
-    global s
-    assert s.count(old) == 1, ("not unique/absent", old[:90])
-    s = s.replace(old, new)
-def row(first):
-    lines = [l for l in s.split("\n") if l.startswith(f"| {first} |")]
-    assert len(lines) == 1, first
-    return lines[0]
-
-# Contract — Owner → Shaman dispatch.
-rep(row("Owner → Shaman dispatch"), """| Owner → Shaman dispatch | IN | Single entry point for all feature work; owner never briefs Warchief/Hunter directly. Three modes: brainstorm together (Mode 1, the default — one problem to ratified decisions recorded in the idea card, a planning-only Warchief spec + plan reviewed by grounding, then execution on the way of work the Shaman chose for the card), forge a roadmap (Mode 2), and run a campaign (Mode 3). The three ways of work (single-agent, subagent-per-task, tribe), the rubric for choosing one, who chooses and who executes on each path are defined once, in the "Ways of work" section of agents/shaman.md; every other file points there | agent invocation | agents/shaman.md |""")
-
-# Contract — validate-plan.sh.
-rep(row("scripts/validate-plan.sh"), """| scripts/validate-plan.sh | IN | Plan structure validated before execution: task sections, a Verify block and a Done section per task (the Done section read exactly as the campaign runner reads it), one Commit step per task, the declared Executor mode with its block copied verbatim from agents/shaman.md "Ways of work", a final review task ending either light mode's plan, and the Hunter implementer line for a tribe plan; a declared mode whose block cannot be read is a setup error (exit 2) | shell script + tests | plugins/tribe/scripts/tests/test-validate-plan.sh; plugins/tribe/scripts/tests/test-ways-of-work-plans.sh |""")
-
-# Contract — three placeholder words c3x's canvas check rejects.
-rep("each later turn a resume", "each subsequent turn a resume")
-rep("landed by a later consolidation task", "landed by a subsequent consolidation task")
-rep("runner's optional flags", "runner's non-required flags")
-
-# Contract — the drift counter, a new row after the ratchet gate.
-ratchet = row("scripts/ratchet-check.ts (context-budget ratchet gate)")
-rep(ratchet, ratchet + """
-| scripts/ways-of-work/drift.ts (ways-of-work drift counter) | IN | bun drift.ts --repo <dir> [--also <file>]... [--json] [--verbose] lists every place that states a way-of-work rule: the "Ways of work" section of agents/shaman.md is one place, and every tracked file outside a fixed allowlist (history, evidence, eval rubrics, the counter's own signals and fixtures) with a line matching a rule signal (the task and line limits, the fix-round cap, the implementer shape, the retired owner-must-ask rule and plan styles, the rubric's own wording) is another; --also adds a file outside the repo, such as the installed ~/.claude/CLAUDE.md. A measurement, not a gate: exit 0 whatever it counts, exit 2 on a usage error, a failed git ls-files or an unreadable --also file. The pure core (drift-core.ts) decides; drift.ts only lists and reads files | bun CLI, repo-invoked (never installed) | plugins/tribe/scripts/ways-of-work/drift.test.ts |""")
-
-# Change Safety — plan validation, and the drift counter's own row.
-rep(row("Plan validation regression"), """| Plan validation regression | Editing validate-plan.sh, or a block in agents/shaman.md "Ways of work" | Malformed plans reach an executor, or a plan the validator passes is refused by the campaign runner | plugins/tribe/scripts/tests/test-validate-plan.sh; plugins/tribe/scripts/tests/test-ways-of-work-plans.sh |
-| A way of work defined in two places | Editing any file that describes how a plan is executed | The drift counter lists a place other than the canonical section | bun plugins/tribe/scripts/ways-of-work/drift.ts --repo . prints ways-of-work definitions: 1 |""")
-
-open(p, "w", encoding="utf-8").write(s)
-PYEDIT
-```
-
-- [ ] **Step 5: Run the Green**
+- [ ] **Step 3: Run the Green**
 
 ```bash
 bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
-python3 -c "import glob,re; f=glob.glob('.c3/adr/adr-*-ways-of-work-consolidation.md'); t=open(f[0]).read(); print(len(f), re.search(r'^status: (\w+)$', t, re.M).group(1))"
 ```
 
 #### Verify
 
-- Goal: G1 (the READMEs and `c3-215` point to the section) and the repo's governance (`AGENTS.md`:
-  architecture in C3, docs updated with the change).
-- Red: `bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .` lists `restates   .c3/c3-2-plugins/c3-215-tribe.md (6 lines)` and
-  `restates   plugins/tribe/README.md (2 lines)` (Step 1).
+- Goal: G1 (the plugin README points to the section) and the repo's rule that every changed area
+  updates its docs (`AGENTS.md`).
+- Red: `bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .` lists `restates   plugins/tribe/README.md (2 lines)` (Step 1).
 - Green: `bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .` prints exactly
 
 ```text
-restates   .c3/c3-2-plugins/c3-215-tribe.md (5 lines)
+restates   .c3/c3-2-plugins/c3-215-tribe.md (6 lines)
 canonical  plugins/tribe/agents/shaman.md#Ways of work (11 lines)
 restates   plugins/tribe/agents/warchief.md (2 lines)
 restates   plugins/tribe/claude-md/shaman-brainstorm-together.md (5 lines)
@@ -2387,21 +2264,19 @@ restates   plugins/tribe/skills/orchestrate-campaign/SKILL.md (19 lines)
 ways-of-work definitions: 6
 ```
 
-  and the ADR check prints `1 proposed`.
-- Stub check: skipping Steps 2 and 4 leaves the README and `c3-215` lines listed and the count at
-  7; skipping Step 3 prints `0` files for the ADR check (an `IndexError`).
+- Stub check: skipping Step 2 leaves the README line listed and the count at 7.
 
 #### Done
 
 ```bash
-python3 -c "import glob; assert len(glob.glob('.c3/adr/adr-*-ways-of-work-consolidation.md')) == 1"
 python3 -c "t=open('plugins/tribe/README.md').read(); assert '## Ways of work' in t and 'scripts/ways-of-work/drift.ts' in t"
+python3 -c "t=open('README.md').read(); assert 'test-ways-of-work-plans.sh' in t"
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add plugins/tribe/README.md README.md .c3/adr .c3/c3-2-plugins/c3-215-tribe.md && git commit -m "docs(c3): the ways of work have one home — ADR, c3-215 contract rows, READMEs"
+git add plugins/tribe/README.md README.md && git commit -m "docs(tribe): the READMEs point to the ways of work and list its checks"
 ```
 
 ### Task 8: The Warchief and the campaign point to the one definition
@@ -2414,8 +2289,9 @@ Spec §4.5. `warchief.md` step 3 copies the recorded mode's block and never choo
 and the final review task become part of every plan it writes; the Hunter line is for `tribe`
 plans. `SKILL.md` Stage A step 2b chooses each card's mode by the rubric; the Simple/Tribe plan
 sections become "tribe cards — campaign plan additions" (campaign mechanics only) and "tribe cards —
-Stage C and D additions" (renamed, content unchanged). The runner README's two references follow the
-rename.
+Stage C and D additions" (renamed, content unchanged); Stage D's re-verification of a shipped
+light-mode card also reads its PR body's `## Final review` section (ruling S2 on the campaign path,
+spec §9 R2-1). The runner README's two references follow the rename.
 
 - [ ] **Step 1: See the Red**
 
@@ -2590,6 +2466,12 @@ and ends with the "Harness-gap gate" task below.
 rep("""## Tribe style — Stage C and D additions
 """, """## tribe cards — Stage C and D additions
 """)
+rep("""   that a card shipped is not evidence on its own. Treat a `verify-shipped` failure as `blocked`,
+   not `shipped`, in your final report.""", """   that a card shipped is not evidence on its own. Treat a `verify-shipped` failure as `blocked`,
+   not `shipped`, in your final report. For a `single-agent` or `subagent-per-task` card, also read
+   the PR body (`gh pr view <pr> --json body`): its `## Final review` section must exist and end
+   `REVIEW: PASS` (the "Ways of work" section of `agents/shaman.md`); a missing or failing section
+   is reported as `blocked`, not `shipped`.""")
 open(p, "w", encoding="utf-8").write(s)
 PYEDIT
 ````
@@ -2631,7 +2513,7 @@ bash plugins/tribe/scripts/tests/test-fresh-machine.sh | tail -n 1
 - Green: `bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .` prints exactly
 
 ```text
-restates   .c3/c3-2-plugins/c3-215-tribe.md (5 lines)
+restates   .c3/c3-2-plugins/c3-215-tribe.md (6 lines)
 canonical  plugins/tribe/agents/shaman.md#Ways of work (11 lines)
 restates   plugins/tribe/claude-md/shaman-brainstorm-together.md (5 lines)
 ways-of-work definitions: 3
@@ -2644,7 +2526,7 @@ ways-of-work definitions: 3
 
 ```bash
 bash plugins/tribe/scripts/tests/test-supervisor-docs.sh
-python3 -c "t=open('plugins/tribe/skills/orchestrate-campaign/SKILL.md').read(); assert 'Tribe style' not in t and '## tribe cards — campaign plan additions' in t"
+python3 -c "t=open('plugins/tribe/skills/orchestrate-campaign/SKILL.md').read(); assert 'Tribe style' not in t and '## tribe cards — campaign plan additions' in t and 'its `## Final review` section must exist' in t"
 ```
 
 - [ ] **Step 4: Commit**
@@ -2912,7 +2794,7 @@ bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
   `bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .` prints exactly
 
 ```text
-restates   .c3/c3-2-plugins/c3-215-tribe.md (5 lines)
+restates   .c3/c3-2-plugins/c3-215-tribe.md (6 lines)
 canonical  plugins/tribe/agents/shaman.md#Ways of work (11 lines)
 ways-of-work definitions: 2
 ```
@@ -2933,66 +2815,25 @@ bash plugins/tribe/scripts/tests/test-install-hook.sh
 git add plugins/tribe/claude-md/shaman-brainstorm-together.md plugins/tribe/install.sh plugins/tribe/scripts/tests/test-install-hook.sh && git commit -m "feat(install): refresh an installed CLAUDE.md snippet in place, with a backup; the snippet points to the ways of work"
 ```
 
-### Task 10: Governance for the pointers and the install path — `c3-215` part 2, the root README, the ADR accepted
+### Task 10: Governance for the pointers and the install path — the root README, and the C3 follow-up re-checked
 
-**Files:** Modify `.c3/c3-2-plugins/c3-215-tribe.md`, `README.md`,
-`.c3/adr/adr-YYYYMMDD-ways-of-work-consolidation.md`.
+**Files:** Modify `README.md`. Re-check (no edit expected) `docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md`.
 
-Spec §4.7. After Step 1 `c3-215` holds no placeholder word, so `c3x repair` validates every doc
-(`Checked 80 docs — all clear`) and reseals `c3-215` — only its `c3-seal:` line changes — and, as a
-successful write, deletes the 157 historical patch files again; restore them each time. The end
-state of `c3x check` is exactly `master`'s: the 157 historical `BROKEN_SEAL changes/…` lines and
-nothing else.
+Spec §4.7. The root README documents the hook's refresh. The C3 follow-up issue body (ruling N5)
+was written and committed during planning; its row replacements must still apply to this branch's
+`c3-215`, byte for byte, and bring the counter to 1. This task proves that on a scratch copy — it
+changes nothing under `.c3/` and calls no c3x. If the check fails, update the issue file's
+"Old" text and script, not `c3-215`.
 
-- [ ] **Step 1: See the Red, then edit `c3-215`'s remaining rows and the root README**
-
-```bash
-bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
-```
-
-Expected: the line `restates   .c3/c3-2-plugins/c3-215-tribe.md (5 lines)`. Then run exactly:
+- [ ] **Step 1: See the Red**
 
 ```bash
-python3 - .c3/c3-2-plugins/c3-215-tribe.md <<'PYEDIT'
-import sys
-p = sys.argv[1]
-s = open(p, encoding="utf-8").read()
-def rep(old, new):
-    global s
-    assert s.count(old) == 1, ("not unique/absent", old[:90])
-    s = s.replace(old, new)
-def row(first):
-    lines = [l for l in s.split("\n") if l.startswith(f"| {first} |")]
-    assert len(lines) == 1, first
-    return lines[0]
-
-# Business Flow — Unattended path: the campaign's way of work, and one placeholder word.
-rep("""(in the plan style the owner names — simple by default, Tribe only when asked; the plan, not the runner, decides the way of working)""",
-    """(each card in the way of work the campaign's Shaman authority chose by the rubric in agents/shaman.md "Ways of work"; the plan, not the runner, decides the way of working)""")
-rep('an optional "doorbell" session', 'an opt-in "doorbell" session')
-
-# Contract — Global CLAUDE.md append.
-rep(row("Global CLAUDE.md append"), """| Global CLAUDE.md append | OUT | Install hook appends each claude-md/*.md snippet once, keyed on the snippet's first line, and refuses when any of its headings already exists in the target under a different first line. When the first line is present, the installed section (up to the first heading at its level or above that the snippet does not own) is compared with the snippet: equal, nothing changes; different, the whole CLAUDE.md is copied to CLAUDE.md.bak.<epoch>, the section is replaced by the snippet, and a warning names the backup — so a reworded snippet reaches every installed machine. Snippets: global-rules.md — the owner's consolidated global standing rules; goal-verify-ratchet.md; and shaman-brainstorm-together.md, the short form of the Shaman's Mode 1, which points to agents/shaman.md "Ways of work" for the ways of work. Each snippet carries its own unique top heading | user's global config | install.sh + claude-md/; plugins/tribe/scripts/tests/test-install-hook.sh |""")
-
-# Contract — orchestrate-campaign: the modes replace the plan styles.
-rep("""and chooses the plan style — simple by default (a "How to work" section giving each task to one general-purpose subagent, every task ending in a Done section the runner runs), Tribe only when the owner asks (the "Tribe style — plan section", ending in a Harness-gap gate task whose Done runs gap-gate.ts, plus the "Tribe style — Stage C and D additions": ratified-as: rulings and a ratification pass checked by scripts/gaps/rulings-check.ts) — because the runner, watchdog and supervisor prescribe no way of working,""",
-    """and chooses each card's way of work by the rubric in agents/shaman.md "Ways of work" — every plan copies that mode's block, and every task ends in a Done section the runner runs; a tribe card's plan also carries the "tribe cards — campaign plan additions", ending in a Harness-gap gate task whose Done runs gap-gate.ts, and a campaign holding a tribe card runs the "tribe cards — Stage C and D additions" (ratified-as: rulings and a ratification pass checked by scripts/gaps/rulings-check.ts) — because the runner, watchdog and supervisor prescribe no way of working,""")
-
-# Contract — rulings-check.ts: the section it names was renamed.
-rep("""A Tribe-style plan (orchestrate-campaign's "Tribe style — Stage C and D additions") runs it as a Done command""",
-    """A campaign holding a tribe card runs it (orchestrate-campaign's "tribe cards — Stage C and D additions")""")
-
-# Derived Materials — the snippet points to the section.
-rep("""| A one-line-per-obligation summary; it must never contradict Mode 1, which stays the single long form |""",
-    """| A one-line-per-obligation summary that points to the "Ways of work" section for the ways of work; it must never contradict Mode 1, which stays the single long form |""")
-
-
-# Change Safety — the install hook now refreshes a section in place.
-rep(row("Non-idempotent CLAUDE.md append"), """| Non-idempotent CLAUDE.md append | Editing the install hook | Duplicate snippet blocks in global CLAUDE.md, a refresh that loses content outside its section, or a refresh with no backup | plugins/tribe/scripts/tests/test-install-hook.sh; re-run ./install.sh tribe twice and diff the global CLAUDE.md |""")
-
-open(p, "w", encoding="utf-8").write(s)
-PYEDIT
+python3 -c "assert 'refreshes that snippet' in open('README.md').read()"
 ```
+
+Expected: `AssertionError`, exit 1.
+
+- [ ] **Step 2: Document the hook's refresh** — run exactly:
 
 ```bash
 python3 - README.md <<'PYEDIT'
@@ -3014,74 +2855,82 @@ open(p, "w", encoding="utf-8").write(s)
 PYEDIT
 ```
 
-- [ ] **Step 2: Reseal `c3-215`, accept the ADR, restore the history each time**
-
-```bash
-for f in "$HOME"/.claude/plugins/cache/c3-skill-marketplace/c3-skill/*/skills/c3/bin/c3x.sh; do C3X="$f"; done; test -f "$C3X" && echo "c3x: $C3X"
-bash "$C3X" repair | tail -n 2
-git checkout -- .c3/changes
-adr="$(python3 -c "import glob,os; print(os.path.basename(glob.glob('.c3/adr/adr-*-ways-of-work-consolidation.md')[0])[:-3])")"
-bash "$C3X" set "$adr" status accepted
-git checkout -- .c3/changes
-git status --short .c3/changes | wc -l | tr -d ' '
-bash "$C3X" check 2>&1 | python3 -c "import sys; lines=sys.stdin.read().splitlines(); b=[l for l in lines if l.startswith('BROKEN_SEAL')]; print(len(b), sum(1 for l in b if not l.startswith('BROKEN_SEAL changes/')))"
-```
-
-Expected: `Checked 80 docs — all clear` and `OK: canonical markdown is in sync with …`; then
-`Updated … field "status"`; then `0`; then `157 0` (157 broken seals, none outside the historical
-change files).
-
-- [ ] **Step 3: Run the Green**
+- [ ] **Step 3: Run the Green — the count, then the issue's rows applied to a scratch copy**
 
 ```bash
 bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
+scratch="$(mktemp -d)/wt"
+git worktree add --detach "$scratch" HEAD
+python3 - docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md "$scratch/c3-215-rows.py" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+tail = text[text.index("The same changes as one script"):]
+code = re.search(r"^(`{3,})python\n(.*?)^\1$", tail, re.S | re.M).group(2)
+open(sys.argv[2], "w", encoding="utf-8").write(code)
+PY
+python3 "$scratch/c3-215-rows.py" "$scratch/.c3/c3-2-plugins/c3-215-tribe.md"
+bun plugins/tribe/scripts/ways-of-work/drift.ts --repo "$scratch"
+git worktree remove --force "$scratch"
 ```
 
 #### Verify
 
-- Goal: G1 — the target: exactly one place defines the ways of work.
-- Red: `bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .` lists `restates   .c3/c3-2-plugins/c3-215-tribe.md (5 lines)` and
-  `ways-of-work definitions: 2` (Step 1).
-- Green: `bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .` prints exactly
+- Goal: G1 in the repo — exactly the canonical section and `c3-215` remain (ruling N5) — and the
+  follow-up's acceptance: its row replacements bring the count to 1.
+- Red: `python3 -c "assert 'refreshes that snippet' in open('README.md').read()"` fails with
+  `AssertionError` (Step 1).
+- Green: the first `bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .` prints exactly
+
+```text
+restates   .c3/c3-2-plugins/c3-215-tribe.md (6 lines)
+canonical  plugins/tribe/agents/shaman.md#Ways of work (11 lines)
+ways-of-work definitions: 2
+```
+
+  and the scratch copy's count prints exactly
 
 ```text
 canonical  plugins/tribe/agents/shaman.md#Ways of work (11 lines)
 ways-of-work definitions: 1
 ```
 
-  and the Step 2 check prints `157 0`.
-- Stub check: skipping the `c3-215` edits leaves count 2; skipping the reseal leaves
-  `BROKEN_SEAL c3-2-plugins/c3-215-tribe.md` (the check prints `158 1`).
+- Stub check: without Step 2 the README assertion fails; an issue file whose "Old" rows no longer
+  match `c3-215` makes the row script stop on its `assert` ("not unique/absent"), and rows that still
+  restate a rule leave the scratch count at 2.
 
 #### Done
 
 ```bash
-bun plugins/tribe/scripts/ways-of-work/drift.ts --repo . --json | python3 -c "import json,sys; r=json.load(sys.stdin); sys.exit(0 if r['count'] == 1 and r['places'][0]['canonical'] else 1)"
+bun plugins/tribe/scripts/ways-of-work/drift.ts --repo . --json | python3 -c "import json,sys; r=json.load(sys.stdin); p=sorted((x['path'], x['canonical']) for x in r['places']); sys.exit(0 if r['count'] == 2 and p == [('.c3/c3-2-plugins/c3-215-tribe.md', False), ('plugins/tribe/agents/shaman.md#Ways of work', True)] else 1)"
+python3 -c "assert 'refreshes that snippet' in open('README.md').read()"
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add .c3/c3-2-plugins/c3-215-tribe.md .c3/adr README.md && git commit -m "docs(c3): c3-215 campaign and install rows point to the ways of work; ADR accepted"
+git add README.md && git commit -m "docs: the install hook refreshes an installed snippet section in place"
 ```
 
 ### Task 11: Final review
 
-**Files:** none of its own — fixes, if any, land in the files they touch; with no fix, an empty
-commit records the verdict.
+**Files:** none in the repo — fixes, if any, land in the files they touch; with no fix, an empty
+commit records the verdict. Outside the repo: the reviewers' reports and the PR body's
+`## Final review` section, under `$HOME/.tribe/-Users-home-repos-tribe/reports/`.
 
-D4, as the block says. The reviewer is a fresh `general-purpose` subagent that built none of this
-card. Plain review (blinding is #198). Its brief carries: the card
-(`~/.tribe/-Users-home-repos-tribe/cards/ways-of-work-consolidation.md`), the "Ways of work" section
-of `plugins/tribe/agents/shaman.md`, this plan, the spec, and the branch diff
-(`git diff 632a039...HEAD`); the Global Constraints' oracles and REFUTED-in-advance list, verbatim.
-It re-runs every Green below itself, reads the diff against the card's goals, D1–D6 and the scope
-fence, and ends its report with `REVIEW: PASS` or `REVIEW: FAIL` plus findings, each with a
-`file:line` or a command output. On `REVIEW: FAIL`: one fresh fix subagent per round with the
-findings, the Verify of every task a fix touches re-run, a fresh reviewer — at most 2 fix rounds,
-then escalate to the Shaman.
+D4 with rulings S1 and S2, as the block says. The reviewer is a fresh `general-purpose` subagent
+that built none of this card. Plain review (blinding is #198). Its brief carries: the card
+(`~/.tribe/-Users-home-repos-tribe/cards/ways-of-work-consolidation.md`, its goal rows G1–G4,
+rulings D1–D6, N1–N6, S1–S3 and its scope fence), the "Ways of work" section of
+`plugins/tribe/agents/shaman.md`, this plan, the spec, and the branch diff
+(`git diff 632a039...HEAD`); the Global Constraints' oracles and REFUTED-in-advance list, verbatim;
+and the path to write its report to: `$HOME/.tribe/-Users-home-repos-tribe/reports/ways-of-work-consolidation-review-1.md` for round 1
+(`-review-2.md`, `-review-3.md` for the re-reviews). It judges the diff against every goal row and
+the scope fence of the card, re-runs every check below itself, and ends its report with
+`REVIEW: PASS` or `REVIEW: FAIL` followed by its findings, each with a `file:line` or a command
+output. On `REVIEW: FAIL`: one fresh fix subagent per round with the findings, the Verify of every
+task a fix touches re-run, a fresh reviewer — at most 2 fix rounds, then escalate to the Shaman.
 
-- [ ] **Step 1: Dispatch the reviewer and let it run every check below**
+- [ ] **Step 1: Dispatch the reviewer; it runs every check below**
 
 ```bash
 bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
@@ -3107,25 +2956,47 @@ print(f"majority PASS: {majority}/{len(by_case)}")
 PY
 ```
 
+- [ ] **Step 2: Assemble the PR body's `## Final review` section** (ruling S2) from every round's
+  report, in order — each round's `REVIEW:` line and its findings — and check it:
+
+```bash
+python3 - "$HOME/.tribe/-Users-home-repos-tribe/reports" <<'PY'
+import glob, re, sys
+rounds = sorted(glob.glob(sys.argv[1] + "/ways-of-work-consolidation-review-*.md"), key=lambda p: int(re.search(r"-review-(\d+)[.]md$", p).group(1)))
+out = ["## Final review", ""]
+for n, path in enumerate(rounds, 1):
+    text = open(path, encoding="utf-8").read().rstrip()
+    verdict = [l for l in text.splitlines() if l.startswith("REVIEW: ")]
+    out += [f"### Round {n} — {verdict[0] if verdict else 'REVIEW: (missing)'}", "", text[text.index(verdict[0]):] if verdict else text, ""]
+open(sys.argv[1] + "/ways-of-work-consolidation-final-review.md", "w", encoding="utf-8").write("\n".join(out).rstrip() + "\n")
+last = [l for l in "\n".join(out).splitlines() if l.startswith("REVIEW: ")][-1]
+print(len(rounds), "round(s); last:", last)
+PY
+```
+
 #### Verify
 
-- Goal: D4 (the final review task) over every goal row: G1 (count 1), G2 and G4 (evals), G3 (the
-  validator suite and the two-gate test, which includes the 3-card campaign dry-run).
+- Goal: D4 with S1 and S2 (the final review task, judged against every goal row and the scope
+  fence, recorded in the PR body) over every goal row: G1 (the two places ruling N5 allows), G2 and
+  G4 (evals), G3 (the validator suite and the two-gate test, which includes the 3-card campaign
+  dry-run).
 - Red: not applicable, the review writes no code of its own; each goal's Red was shown by its task
   (Tasks 1–10) and the baselines are in `docs/superpowers/evidence/`.
 - Green: the Step 1 commands print, in order: the counter's
+  `restates   .c3/c3-2-plugins/c3-215-tribe.md (6 lines)`,
   `canonical  plugins/tribe/agents/shaman.md#Ways of work (11 lines)` and
-  `ways-of-work definitions: 1`; ` 14 pass` / ` 0 fail`; `87 passed, 0 failed`;
-  `15 passed, 0 failed` and `V-WOW=PASS`; `27 passed, 0 failed`; `pass`; and the eval summary ending
-  `majority PASS: 8/8`. The reviewer's report ends `REVIEW: PASS`.
+  `ways-of-work definitions: 2`; ` 14 pass` / ` 0 fail`; `87 passed, 0 failed`;
+  `15 passed, 0 failed` and `V-WOW=PASS`; `27 passed, 0 failed`; `pass`; and the eval summary
+  ending `majority PASS: 8/8`. Step 2 prints `N round(s); last: REVIEW: PASS` with N from 1 to 3.
 - Stub check: on an empty implementation (the branch at `632a039` plus this plan) the counter has no
   `canonical` line and counts 9, `test-ways-of-work-plans.sh` does not exist, the validator suite has
-  44 tests, and evals 59 and 63 fail — every line above differs.
+  44 tests, and evals 59 and 63 fail — every line above differs; with no reviewer report, Step 2
+  exits 1 with a Python error instead of printing a `REVIEW: PASS` line.
 
 #### Done
 
 ```bash
-bun plugins/tribe/scripts/ways-of-work/drift.ts --repo . --json | python3 -c "import json,sys; r=json.load(sys.stdin); sys.exit(0 if r['count'] == 1 and r['places'][0]['canonical'] else 1)"
+bun plugins/tribe/scripts/ways-of-work/drift.ts --repo . --json | python3 -c "import json,sys; r=json.load(sys.stdin); p=sorted((x['path'], x['canonical']) for x in r['places']); sys.exit(0 if r['count'] == 2 and p == [('.c3/c3-2-plugins/c3-215-tribe.md', False), ('plugins/tribe/agents/shaman.md#Ways of work', True)] else 1)"
 bun test plugins/tribe/scripts/ways-of-work/drift.test.ts
 bash plugins/tribe/scripts/tests/test-validate-plan.sh
 bash plugins/tribe/scripts/tests/test-install-hook.sh
@@ -3133,23 +3004,27 @@ cd plugins/tribe/scripts/runner && bun install --frozen-lockfile
 bash plugins/tribe/scripts/tests/test-ways-of-work-plans.sh
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git commit --allow-empty -m "review: final review — REVIEW: PASS"
+git commit --allow-empty -m "review: final review — REVIEW: PASS (the PR body's ## Final review carries every round)"
 ```
 
 ## Goal → task → Verify
 
 | Card row | Task(s) | Verify (oracle) | Before → after (tool) |
 | --- | --- | --- | --- |
-| G1 — one definition, every other live file points to it | 1 (ratchet), 3, 4, 7, 8, 9, 10; 11 re-runs | `drift.ts --repo .` output, exact, per task | drift counter · 9 (10 with the installed copy) → 1 |
+| G1 — one definition, every other live file points to it | 1 (ratchet), 3, 4, 7, 8, 9, 10; 11 re-runs | `drift.ts --repo .` output, exact, per task; Task 10 applies the C3 issue's rows to a scratch copy | drift counter · 9 (10 with the installed copy) → 2 in the repo (the canonical section and `c3-215`, ruling N5; the C3 issue brings it to 1) and 2 with the installed copy after `./install.sh tribe` |
 | G2 — the Shaman picks the mode with reasons, asks when it should | 2 (baseline), 3; 11 re-runs | evals 57–60, `--runs 3`, majority | pass count (57–60) · measured in Task 2 (planning: 2/4) → 4/4 |
 | G3 — every plan declares its mode; one format passes both gates | 4, 5, 6; 11 re-runs | `test-validate-plan.sh`; `test-ways-of-work-plans.sh` (both gates, each mutant named) | `test-validate-plan.sh` · 44 passed → 87 passed, 0 failed; two-gate test · 10/15 → 15/15 |
 | G4 — execution follows the mode on every path | 2 (baseline), 3, 6, 8; 11 re-runs | evals 56, 61–63; the 3-card campaign dry-run | pass count (56, 61–63) · measured in Task 2 → 4/4; dry-run exit 0 |
-| D1 — one home, `shaman.md` | 3, 7, 8, 9, 10 | counter (only `canonical` remains) | — |
+| D1 — one home, `shaman.md` | 3, 7, 8, 9, 10 | counter (only `canonical` and `c3-215` remain; the issue's rows remove `c3-215`) | — |
 | D2 — single-agent builds inline; anti-goals amended | 3 | eval 61 | — |
 | D3 — the Shaman decides; asks when it judges it should | 3 | evals 57–60, 63 | — |
 | D4 — the final review is a plan task, ≤2 fix rounds | 3, 5, 11 | eval 62; `final_review_task_last` probes; Task 11 itself | — |
+| S1 — the reviewer judges the diff against every goal row and the scope fence | 3, 11 | the section and both light blocks (Task 3); Task 11's reviewer brief; eval 56 | — |
+| S2 — the PR body's `## Final review` section; the SHIPPED gate checks it | 3, 11 | the blocks and the SHIPPED gate text (Task 3); Task 11 Step 2; eval 56 | — |
+| S3 — the rubric counts build tasks only | 3 | the section's rubric row (Task 3); this plan's Way of work reasons | — |
+| N5 — no `.c3/` change; a self-contained C3 issue | 10 | the issue's rows applied to a scratch copy bring the counter to 1 | — |
 | D5 — `Executor:` keeps its key, gains `tribe` | 4 | "Executor: tribe is declared" / "a longer value is not tribe" probes | — |
 | D6 — single-agent ends with the final review too | 3, 5 | "single-agent with no final review task fails" probe; eval 61 | — |
