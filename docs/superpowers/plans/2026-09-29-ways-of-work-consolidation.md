@@ -91,6 +91,12 @@ previous file up to a `CLAUDE.md.bak.` file first), then run
 place (owner ruling N3). The PR body carries the `## Final review` section Task 11 assembles (ruling
 S2); the Shaman's SHIPPED gate checks it.
 
+C3 follow-up issue sync, after the merge: the C3 work lives in hieplam/tribe#199 (owner ruling N5),
+created from `docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md` at `db3d20c` — body =
+everything before `## 6.`, first comment = `## 6.` onward. If `git diff --quiet db3d20c master -- <that file>`
+exits non-zero, update the issue body (`gh issue edit 199 --body-file`) and that first comment from the
+merged file the same way, so the issue matches `master`.
+
 **The chicken-and-egg, stated.** This plan must pass today's `validate-plan.sh` (which knows no
 `tribe`, no Done check, no review task, and requires the Hunter line in every plan) and the one this
 card builds. It passes both: the Global Constraints line above satisfies today's Hunter check, and
