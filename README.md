@@ -70,6 +70,9 @@ name. Install them from there:
 /plugin install <name>@agent-plugins
 ```
 
+Retired content that is kept for reference but never installed lives in
+[`archive/`](archive/README.md) — for example the `mammoth-hunt` skill.
+
 ## The campaign runner (not installed — run it from a checkout)
 
 `tribe` also ships the **campaign runner**: a stateless CLI that executes staged roadmap cards
