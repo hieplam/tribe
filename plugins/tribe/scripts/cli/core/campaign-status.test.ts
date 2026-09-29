@@ -93,6 +93,19 @@ test('parsers refuse wrong shapes with a reason (G3)', () => {
   expect(parseSupervisorStatus({ ...RUNNING, updatedAt: 'yesterday' })).toEqual({ ok: false, reason: 'updatedAt must be an ISO timestamp' });
 });
 
+test('sequence refuses an id without an own card', () => {
+  expect(parseCampaignState({ campaign: 'x', sequence: ['toString'], cards: {} }))
+    .toEqual({ ok: false, reason: 'sequence.toString has no card' });
+});
+
+test('inherited card names do not satisfy dependencies', () => {
+  const s = ok<StatusState>(parseCampaignState({ campaign: 'x', sequence: ['a'], cards: {
+    a: { status: 'staged', dependsOn: ['toString'] },
+  } }));
+  expect(renderStatus({ name: 'x', state: s, supervisor: null, nowMs: NOW })[2])
+    .toBe('  a  staged  tasks 0/0  PR —  waiting on: toString');
+});
+
 test('pickLatest (Q2): newest wins, tie by name ascending, empty → null', () => {
   expect(pickLatest([{ name: 'b', updatedMs: 1 }, { name: 'a', updatedMs: 2 }])).toBe('a');
   expect(pickLatest([{ name: 'b', updatedMs: 2 }, { name: 'a', updatedMs: 2 }])).toBe('a');

@@ -86,7 +86,8 @@ Line by line:
 
 With no name, the campaign whose state files were touched most recently is the one shown — the
 one you are working on. Cards appear in the campaign's planned order, then any card the plan does
-not mention, sorted.
+not mention, sorted. Every id in the planned order must name a card in the state file; otherwise
+the command refuses it. A dependency with no card remains visible in `waiting on:`.
 
 **The stuck warning.** A campaign that has not finished and whose supervisor has been quiet for
 more than 10 minutes gets a last line:
@@ -105,6 +106,9 @@ Exit codes:
 | `0` | the status was printed |
 | `1` | it could not be: you are not inside a git repository, this repo has no campaigns, the name does not exist, or a state file is missing, unreadable or not the shape this command expects — always one line on stderr, never a stack trace |
 | `2` | the command line itself is wrong: an unknown flag, a second name, or a name that is not a plain campaign id |
+
+If `campaigns` is a file instead of a directory, or either JSON path is not a regular file, the
+command refuses with one stderr line and exit `1`.
 
 ## Layout
 

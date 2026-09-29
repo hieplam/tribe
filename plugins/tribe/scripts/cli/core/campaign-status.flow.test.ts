@@ -12,7 +12,7 @@ function fakeIo(o: { home?: CampaignStatusIo['home']; campaigns?: { name: string
   const out: string[][] = []; const err: string[] = []; let clears = 0; let sleeps = 0;
   const io: CampaignStatusIo = {
     home: o.home ?? (() => ({ ok: true, value: HOME })),
-    listCampaigns: () => o.campaigns ?? [],
+    listCampaigns: () => ({ ok: true, value: o.campaigns ?? [] }),
     readJson: (p) => o.files?.[p] ?? { kind: 'missing' },
     now: () => NOW,
     print: (lines) => { out.push(lines); },

@@ -47,18 +47,19 @@ function resolveHome(cwd: string): Parsed<string> {
 /** Campaign directories, newest first is the caller's business — this only reports each one's
  * mtime: the later of its two state files, so a campaign whose supervisor just wrote counts as
  * updated. A campaign with neither file readable sorts last with 0. */
-function listCampaigns(home: string): { name: string; updatedMs: number }[] {
+function listCampaigns(home: string): Parsed<{ name: string; updatedMs: number }[]> {
   const campaignsDir = join(home, 'campaigns');
   let entries;
   try {
     entries = readdirSync(campaignsDir, { withFileTypes: true });
   } catch (error) {
     // No campaigns directory yet is not a failure: this repo has simply never run a campaign.
-    if (isErrnoCode(error, 'ENOENT')) return [];
+    if (isErrnoCode(error, 'ENOENT')) return { ok: true, value: [] };
+    if (isErrnoCode(error, 'ENOTDIR')) return { ok: false, reason: `tribe: ${campaignsDir} is not a directory` };
     throw error;
   }
 
-  return entries
+  return { ok: true, value: entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => ({
       name: entry.name,
@@ -66,7 +67,7 @@ function listCampaigns(home: string): { name: string; updatedMs: number }[] {
         mtimeMs(join(campaignsDir, entry.name, 'campaign-state.json')),
         mtimeMs(join(campaignsDir, entry.name, 'supervisor', 'status.json')),
       ),
-    }));
+    })) };
 }
 
 /** 0 when the file is not there — an absent file is simply no evidence of an update. */
@@ -79,11 +80,12 @@ function mtimeMs(path: string): number {
   }
 }
 
-/** Reads and decodes one JSON file. Only the four things that happen to real campaign files are
- * converted; anything else rethrows rather than being reported as a well-understood refusal. */
+/** Reads and decodes one regular JSON file. Known filesystem and syntax failures become typed
+ * refusals; unexpected errors rethrow rather than being reported as understood. */
 function readJson(path: string): ReadJson {
   let text: string;
   try {
+    if (!statSync(path).isFile()) return { kind: 'unreadable', reason: 'is not a regular file' };
     text = readFileSync(path, 'utf8');
   } catch (error) {
     if (isErrnoCode(error, 'ENOENT')) return { kind: 'missing' };
