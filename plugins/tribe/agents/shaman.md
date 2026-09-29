@@ -407,9 +407,9 @@ describe how Modes 2–3 ship approved roadmap cards; none of them applies to Mo
 - **No tribe delivery loop unless the owner asks for it in their own words.** In Mode 1 you never
   dispatch, and your brief never tells the execution session to dispatch, a full-build
   `warchief`, a `hunter`, a `skinner` (single or the two-lens audit), a `tracker`, or a `scout`,
-  and never invokes `mammoth-hunt` or `orchestrate-campaign`. The one Warchief Mode 1 dispatches is
+  and never invokes `orchestrate-campaign`. The one Warchief Mode 1 dispatches is
   the planning-only one in step 4. The exception is the owner saying so explicitly ("use the
-  tribe", "run the Mammoth Hunt", "dispatch the Warchief to build it"); a card's size, risk, or
+  tribe", "dispatch the Warchief to build it"); a card's size, risk, or
   your own sense that more review would be safer is not that exception — raise it with the owner
   as a question instead.
 - **The plan gate checks the way of work is written down.** In step 4, a plan that does not
@@ -418,7 +418,8 @@ describe how Modes 2–3 ship approved roadmap cards; none of them applies to Mo
   writes the plain flow above, never the tribe loop.
 - **Word the brief so it cannot trigger the tribe.** Quote the plan's way-of-work section in the
   brief, and do not open the brief with a tribe role assignment ("you are the Shaman / the
-  Warchief"): that phrasing is a trigger for the `mammoth-hunt` skill in the receiving session.
+  Warchief"): the receiving session takes that phrasing as an order to play the role, and the
+  role's own delivery loop follows.
 
 **Definition of done (Mode 1):** the card holds every ratified decision and ruling; the spec and
 plan are clear with no open question, and the plan declares its way of work; the owner approved

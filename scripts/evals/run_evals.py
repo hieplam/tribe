@@ -69,7 +69,7 @@ This script only reads skill/agent files and shells out to `claude -p` in a
 scratch working directory — it never edits a skill's or agent's runtime files.
 
 Usage:
-    scripts/evals/run_evals.py --evals plugins/tribe/skills/mammoth-hunt/evals/evals.json
+    scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json
     scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --eval-id 3,6
     scripts/evals/run_evals.py --all                      # every evals.json under plugins/
     scripts/evals/run_evals.py --all --mode with_skill     # skip the baseline, just prove it runs

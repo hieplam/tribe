@@ -33,7 +33,10 @@ class SubjectResolution(unittest.TestCase):
 
     def test_every_evals_json_resolves_to_a_real_subject(self):
         paths = run_evals.discover_evals_json()
-        self.assertGreaterEqual(len(paths), 2, "fixture discovery found suspiciously few files")
+        # A known fixture must be found, or discovery itself is broken and the loop below
+        # passes over nothing.
+        self.assertIn(REPO_ROOT / "plugins" / "tribe" / "evals" / "evals.json", paths,
+                      "fixture discovery missed the tribe agent fixture")
         for evals_path in paths:
             with self.subTest(evals=str(evals_path.relative_to(REPO_ROOT))):
                 data = json.loads(evals_path.read_text())
