@@ -49,7 +49,7 @@ export function parseCampaignState(raw: unknown): Parsed<StatusState> {
   const rawCards = asObject(root.cards);
   if (rawCards === null) return refuse('cards must be an object');
 
-  const cards: Record<string, StatusCard> = {};
+  const cards: Record<string, StatusCard> = Object.create(null);
   for (const [id, rawCard] of Object.entries(rawCards)) {
     const card = asObject(rawCard);
     if (card === null) return refuse(`cards.${id} must be an object`);
@@ -71,6 +71,10 @@ export function parseCampaignState(raw: unknown): Parsed<StatusState> {
       tasksPassed: tasks.filter(isPassedTask).length,
       tasksTotal: tasks.length,
     };
+  }
+
+  for (const id of root.sequence) {
+    if (!Object.hasOwn(cards, id)) return refuse(`sequence.${id} has no card`);
   }
 
   return { ok: true, value: { campaign: root.campaign, sequence: root.sequence, cards } };
@@ -144,16 +148,16 @@ export function renderStatus(input: {
 }): string[] {
   const { name, state, supervisor, nowMs } = input;
   const ids = cardOrder(state);
-  const shipped = ids.filter((id) => state.cards[id]?.status === 'shipped').length;
+  const shipped = ids.filter((id) => Object.hasOwn(state.cards, id) && state.cards[id]?.status === 'shipped').length;
 
   const lines = [header(name, supervisor), `cards: ${shipped}/${ids.length} shipped`];
   for (const id of ids) {
-    const card = state.cards[id];
+    const card = Object.hasOwn(state.cards, id) ? state.cards[id] : undefined;
     if (card === undefined) continue;
     const pr = card.pr === null ? `PR ${EM_DASH}` : `PR #${card.pr}`;
     // Waiting on the dependencies that have NOT shipped; a dependency this file never declares
     // as a card has not shipped either, so it is listed too.
-    const waitingOn = card.dependsOn.filter((dep) => state.cards[dep]?.status !== 'shipped');
+    const waitingOn = card.dependsOn.filter((dep) => !Object.hasOwn(state.cards, dep) || state.cards[dep]?.status !== 'shipped');
     const waiting = waitingOn.length === 0 ? EM_DASH : waitingOn.join(', ');
     lines.push(`  ${id}  ${card.status}  tasks ${card.tasksPassed}/${card.tasksTotal}  ${pr}  waiting on: ${waiting}`);
   }
@@ -187,7 +191,7 @@ function header(name: string, supervisor: StatusSupervisor | null): string {
 /** The planned order first, then every card the sequence does not mention, sorted, so a card
  * added out of band is still shown and the order never depends on JSON key order. */
 function cardOrder(state: StatusState): string[] {
-  const inSequence = state.sequence.filter((id) => id in state.cards);
+  const inSequence = state.sequence.filter((id) => Object.hasOwn(state.cards, id));
   const rest = Object.keys(state.cards).filter((id) => !inSequence.includes(id)).sort();
   return [...inSequence, ...rest];
 }
@@ -217,7 +221,7 @@ export interface CampaignStatusIo {
   home(): Parsed<string>;
   /** Campaign directories under `<home>/campaigns`, each with the mtime of its state files.
    * An absent `campaigns` directory is not an error here: it lists as no campaigns. */
-  listCampaigns(home: string): { name: string; updatedMs: number }[];
+  listCampaigns(home: string): Parsed<{ name: string; updatedMs: number }[]>;
   readJson(path: string): ReadJson;
   now(): number;
   print(lines: string[]): void;
@@ -241,7 +245,12 @@ export async function runCampaignStatus(
   }
 
   const campaignsDir = `${home.value}/campaigns`;
-  const chosen = chooseCampaign(cmd.name, io.listCampaigns(home.value), campaignsDir);
+  const campaigns = io.listCampaigns(home.value);
+  if (!campaigns.ok) {
+    io.printErr(campaigns.reason);
+    return 1;
+  }
+  const chosen = chooseCampaign(cmd.name, campaigns.value, campaignsDir);
   if (!chosen.ok) {
     io.printErr(chosen.reason);
     return 1;

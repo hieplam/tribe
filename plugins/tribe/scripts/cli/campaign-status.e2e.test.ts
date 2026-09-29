@@ -42,6 +42,16 @@ test('bare ~/.tribe: one-line refusal, exit 1, no stack trace (G3, empty fixture
   expect(r.err).toBe(`tribe: no campaigns under ${join(root, 'home', '.tribe', repo.replaceAll('/', '-'))}/campaigns\n`);
 });
 
+test('campaigns path is a file: one-line refusal, exit 1', () => {
+  mkdirSync(join(campaigns, '..'), { recursive: true });
+  writeFileSync(campaigns, 'not a directory');
+  try {
+    const r = run([]);
+    expect(r.code).toBe(1); expect(r.out).toBe('');
+    expect(r.err).toBe(`tribe: ${campaigns} is not a directory\n`);
+  } finally { rmSync(campaigns); }
+});
+
 test('outside a git repo: refusal, exit 1', () => {
   const r = run([], root);
   expect(r.code).toBe(1); expect(r.err).toBe(`tribe: not inside a git repository (${root})\n`);
@@ -86,6 +96,20 @@ test('corrupt status.json: refusal, exit 1 (Q4)', () => {
   expect(r.err).toBe(`tribe: ${join(campaigns, 'badsup', 'supervisor', 'status.json')} is not a supervisor status: expected a JSON object\n`);
 });
 
+test('FIFO state and supervisor files refuse without blocking', () => {
+  for (const target of ['campaign-state.json', 'supervisor/status.json']) {
+    const name = target.startsWith('supervisor') ? 'fifo-supervisor' : 'fifo-state';
+    campaign(name, STATE(['a']), STATUS(0, false), 1_000);
+    const path = join(campaigns, name, target);
+    rmSync(path);
+    const made = Bun.spawnSync(['mkfifo', path], { timeout: 2_000 });
+    expect(made.exitCode).toBe(0);
+    const r = run([name]);
+    expect(r.code).toBe(1); expect(r.out).toBe('');
+    expect(r.err).toBe(`tribe: cannot read ${path}: is not a regular file\n`);
+  }
+});
+
 test('stale non-terminal: stuck warning (G4, D4)', () => {
   campaign('stuck', STATE(['a']), STATUS(11 * 60_000 + 5_000, false), 1_000);
   const r = run(['stuck']);
@@ -97,8 +121,12 @@ test('--watch re-renders and Ctrl-C stops it (D3)', async () => {
   const p = Bun.spawn(['tribe', 'campaign', 'status', 'live', '--watch'], { cwd: repo, env, stdout: 'pipe' });
   await Bun.sleep(4_500);
   p.kill('SIGINT');
+  let timedOut = false;
+  const fallback = setTimeout(() => { timedOut = true; p.kill('SIGKILL'); }, 2_000);
   const code = await p.exited;
+  clearTimeout(fallback);
   const out = await new Response(p.stdout).text();
   expect((out.match(/^cards: 1\/2 shipped$/gm) ?? []).length).toBeGreaterThanOrEqual(2);
+  expect(timedOut).toBe(false);
   expect(code === 130 || p.signalCode === 'SIGINT').toBe(true);
 }, 10_000);
