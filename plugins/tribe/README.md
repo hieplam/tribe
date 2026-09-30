@@ -222,17 +222,23 @@ How an approved plan is executed — the campaign harness, `single-agent`, `suba
 `tribe`, the rubric for choosing one, who chooses and who executes — is
 defined in exactly one place: the "Ways of work" section of
 [`agents/shaman.md`](agents/shaman.md). A plan copies its mode's block from there into its
-`## Way of work`. Three committed tools keep that true:
+`## Way of work`. Four committed tools keep that true:
 
 - [`scripts/ways-of-work/drift.ts`](scripts/ways-of-work/drift.ts) lists every live file that
-  states a way-of-work rule (`bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .`;
+  states a way-of-work rule — a mode's rules, the campaign harness, who executes on each path,
+  the final review's verdict rule — reading each line together with the next, so a sentence
+  wrapped across two lines still counts (`bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .`;
   `--also ~/.claude/CLAUDE.md` adds the installed global CLAUDE.md). The goal is one place, the
   canonical section. Until the C3 component doc `.c3/c3-2-plugins/c3-215-tribe.md` is updated —
   the follow-up written up in
   [`docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md`](../../docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md)
   — it lists that file too, so the count is 2.
+- [`scripts/ways-of-work/pointers.test.ts`](scripts/ways-of-work/pointers.test.ts) checks that
+  each file that must point here — the Warchief, orchestrate-campaign, the global CLAUDE.md
+  snippet, this README and the runner's README — names this section.
 - [`scripts/validate-plan.sh`](scripts/validate-plan.sh) fails a plan whose mode, block copy,
-  Done sections or final review task are missing.
+  Done sections or final review task are missing, a plan the campaign runner would refuse (two
+  identical task headings included), and a `single-agent` plan over its build-task limit.
 - [`scripts/tests/test-ways-of-work-plans.sh`](scripts/tests/test-ways-of-work-plans.sh) runs one
   plan per mode, and each mutant, through both `validate-plan.sh` and the campaign runner's
   `--dry-run`.
