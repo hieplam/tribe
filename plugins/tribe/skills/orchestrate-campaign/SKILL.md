@@ -581,8 +581,8 @@ the owner reads:
    that a card shipped is not evidence on its own. Treat a `verify-shipped` failure as `blocked`,
    not `shipped`, in your final report. For a `single-agent` or `subagent-per-task` card, also read
    the PR body (`gh pr view <pr> --json body`): its `## Final review` section must exist and end
-   `REVIEW: PASS` (the "Ways of work" section of `agents/shaman.md`); a missing or failing section
-   is reported as `blocked`, not `shipped`.
+   `REVIEW: PASS` under the verdict rule of the card's own plan (its `## Way of work`); a missing
+   or failing section is reported as `blocked`, not `shipped`.
 2. **You can also recover which commits belong to this campaign directly from git.** Every
    commit a card's executor session made should carry a `Campaign: <campaign-slug>` git trailer
    — the runner's executor brief instructs it (see the runner README's "Campaign commit
