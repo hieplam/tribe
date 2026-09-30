@@ -1133,7 +1133,7 @@ Executor: tribe
 
 ```bash
 bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
-python3 -c "t=open('plugins/tribe/agents/shaman.md', encoding='utf-8').read(); print(t.count(chr(10) + '## Ways of work' + chr(10)), '### The campaign harness (the default for every mode)' in t, 'never invokes `orchestrate-campaign`' in t)"
+python3 -c "t=open('plugins/tribe/agents/shaman.md', encoding='utf-8').read(); print(t.count(chr(10) + '## Ways of work' + chr(10)), '### The campaign harness (the default for every mode)' in t, 'never invokes ' + chr(96) + 'orchestrate-campaign' + chr(96) in t)"
 ```
 
 Expected: the line `restates   plugins/tribe/agents/shaman.md (6 lines)` and no `canonical` line;
@@ -1476,7 +1476,7 @@ PYEDIT
 
 ```bash
 bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
-python3 -c "t=open('plugins/tribe/agents/shaman.md', encoding='utf-8').read(); print(t.count(chr(10) + '## Ways of work' + chr(10)), '### The campaign harness (the default for every mode)' in t, 'never invokes `orchestrate-campaign`' in t)"
+python3 -c "t=open('plugins/tribe/agents/shaman.md', encoding='utf-8').read(); print(t.count(chr(10) + '## Ways of work' + chr(10)), '### The campaign harness (the default for every mode)' in t, 'never invokes ' + chr(96) + 'orchestrate-campaign' + chr(96) in t)"
 ```
 
 #### Verify
@@ -1512,7 +1512,7 @@ ways-of-work definitions: 9
 
 ```bash
 bun plugins/tribe/scripts/ways-of-work/drift.ts --repo . --json | python3 -c "import json,sys; p=[x['path'] for x in json.load(sys.stdin)['places']]; sys.exit(0 if 'plugins/tribe/agents/shaman.md#Ways of work' in p and 'plugins/tribe/agents/shaman.md' not in p else 1)"
-python3 -c "t=open('plugins/tribe/agents/shaman.md', encoding='utf-8').read(); print(t.count(chr(10) + '## Ways of work' + chr(10)), '### The campaign harness (the default for every mode)' in t, 'never invokes `orchestrate-campaign`' in t)" | grep -qx '1 True False'
+python3 -c "t=open('plugins/tribe/agents/shaman.md', encoding='utf-8').read(); print(t.count(chr(10) + '## Ways of work' + chr(10)), '### The campaign harness (the default for every mode)' in t, 'never invokes ' + chr(96) + 'orchestrate-campaign' + chr(96) in t)" | grep -qx '1 True False'
 ```
 
 - [ ] **Step 4: Commit**
@@ -2778,7 +2778,7 @@ ways-of-work definitions: 3
 
 ```bash
 bash plugins/tribe/scripts/tests/test-supervisor-docs.sh
-python3 -c "t=open('plugins/tribe/skills/orchestrate-campaign/SKILL.md').read(); assert 'Tribe style' not in t and '## tribe cards — campaign plan additions' in t and 'its `## Final review` section must exist' in t and 'build this one card' not in t and 'A card whose spec and plan are already approved' in t"
+python3 -c "t=open('plugins/tribe/skills/orchestrate-campaign/SKILL.md').read(); assert 'Tribe style' not in t and '## tribe cards — campaign plan additions' in t and 'its ' + chr(96) + '## Final review' + chr(96) + ' section must exist' in t and 'build this one card' not in t and 'A card whose spec and plan are already approved' in t"
 ```
 
 - [ ] **Step 4: Commit**
