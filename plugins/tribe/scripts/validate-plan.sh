@@ -35,6 +35,9 @@
 #     its task limit (SINGLE_AGENT_MAX_TASKS below)
 #   - each task section carries the campaign runner's Done section, read exactly the way
 #     runner/core/plan-index.ts reads it, so the same plan also passes the runner's --dry-run
+#   - the Way of work section carries the declared mode's block, copied verbatim from the
+#     "Ways of work" section of ../agents/shaman.md (the one definition), and a plan in either
+#     light mode (single-agent, subagent-per-task) ends with its "Task N: Final review" task
 #   - each task section carries exactly one "Commit" step (a checkbox step whose title
 #     is "Commit", counted outside fences), enforcing the single-unit-of-work sizing
 #     rule from the atomic-resume spec
@@ -67,7 +70,9 @@
 # Output: prints a JSON summary on stdout (only). Logs go to stderr.
 # Exit codes: 0 = ran successfully (regardless of pass/fail on the structural checks);
 #   1 = --schema-lock-paths was given and a locked-path change was scheduled undeclared;
-#   2 = setup error.
+#   2 = setup error — including a plan that declares a mode whose block cannot be read from
+#       ../agents/shaman.md (a missing or unreadable file, or no such block in its
+#       "Ways of work" section): a check that silently read nothing must never pass.
 #
 # Usage:
 #   validate-plan.sh [--schema-lock-paths <comma-separated-paths>] <plan-file-path>
@@ -97,12 +102,16 @@ done
 [[ -r "$PLAN_FILE" ]] || DIE "plan file not readable (permission denied?): $PLAN_FILE"
 [[ -s "$PLAN_FILE" ]] || DIE "plan file is empty: $PLAN_FILE"
 command -v python3 >/dev/null 2>&1 || DIE "python3 is required but not on PATH"
+# The one definition of the ways of work, beside this script in the plugin tree (a symlink
+# install resolves back to the repo; a plugin-cache install copies the whole tree).
+WAYS_OF_WORK_SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/../agents/shaman.md"
 
-python3 - "$PLAN_FILE" "$SCHEMA_LOCK_PATHS" <<'PY'
+python3 - "$PLAN_FILE" "$SCHEMA_LOCK_PATHS" "$WAYS_OF_WORK_SOURCE" <<'PY'
 import json, re, sys
 
 plan_file = sys.argv[1]
 schema_lock_paths_raw = sys.argv[2] if len(sys.argv) > 2 else ""
+ways_of_work_source = sys.argv[3]
 # The bash wrapper already checked -f/-r, but that's a TOCTOU-prone check, not a guarantee
 # (the file can vanish or become unreadable between the check and this open()). Treat any
 # I/O failure here as a setup error (exit 2), matching this script family's documented
@@ -459,6 +468,84 @@ checks.append({
               else f"the campaign runner would refuse: {tasks_bad_done}",
 })
 
+# 4f. the Way of work carries the declared mode's block, copied verbatim from the "Ways of
+# work" section of shaman.md — the one definition; a plan's copy is data for its executor. A
+# block there is a fenced code block whose first line is "Executor: <mode>". The copy is compared
+# line by line (trailing spaces and blank lines ignored) against the Way of work section's lines
+# outside fences, as one contiguous run. Any wording drift fails: the fix is to re-copy the block,
+# never to edit the copy.
+def read_canonical_block(mode):
+    try:
+        with open(ways_of_work_source, encoding="utf-8") as f:
+            source_lines = f.read().splitlines()
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"[validate-plan] ERROR: cannot read the ways-of-work definition {ways_of_work_source}: {e}",
+              file=sys.stderr)
+        sys.exit(2)
+    heading = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
+    fence_line = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+    in_section, section_level, fence, body = False, 0, None, None
+    for line in source_lines:
+        m = fence_line.match(line)
+        if fence is not None:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and m.group(2).strip() == "":
+                if in_section and body and body[0] == f"Executor: {mode}":
+                    return body
+                fence, body = None, None
+            elif body is not None:
+                if body or line.strip():
+                    body.append(line.rstrip())
+            continue
+        if m:
+            fence, body = m.group(1), []
+            continue
+        h = heading.match(line)
+        if h:
+            if in_section and len(h.group(1)) <= section_level:
+                break
+            if h.group(2) == "Ways of work":
+                in_section, section_level = True, len(h.group(1))
+    print(f"[validate-plan] ERROR: no 'Executor: {mode}' block in the 'Ways of work' section of "
+          f"{ways_of_work_source}", file=sys.stderr)
+    sys.exit(2)
+
+if executor:
+    canonical = [l for l in read_canonical_block(executor) if l.strip()]
+    wow = next(s for s in wow_sections
+               if any(EXECUTOR_RE.match(lines[j]) and not in_fence_flags[j] for j in range(s["line"], s["end"] - 1)))
+    copy = [lines[j].rstrip() for j in range(wow["line"], wow["end"] - 1)
+            if not in_fence_flags[j] and lines[j].strip()]
+    copied = any(copy[k:k + len(canonical)] == canonical for k in range(len(copy) - len(canonical) + 1))
+    checks.append({
+        "name": "mode_block_copied",
+        "status": "pass" if copied else "fail",
+        "detail": f"the Way of work carries the '{executor}' block of shaman.md \"Ways of work\" verbatim"
+                  if copied else
+                  f"the Way of work does not carry the '{executor}' block of shaman.md \"Ways of work\" "
+                  "verbatim — copy it again from that section",
+    })
+else:
+    checks.append({"name": "mode_block_copied", "status": "fail",
+                   "detail": "cannot check — no Executor declared"})
+
+# 4g. a plan in either light mode ends with its final review task (shaman.md "Ways of work",
+# "The final review"): the LAST task section's title is "Task N: Final review". A tribe plan has
+# no such task — the Warchief's own audit reviews it.
+FINAL_REVIEW_RE = re.compile(r"^task\s+\d+\s*[:.\u2013\u2014-]\s*final review\b", re.IGNORECASE)
+if executor in ("single-agent", "subagent-per-task"):
+    last_title = task_sections[-1]["title"] if task_sections else ""
+    ends_in_review = bool(FINAL_REVIEW_RE.match(last_title))
+    checks.append({
+        "name": "final_review_task_last",
+        "status": "pass" if ends_in_review else "fail",
+        "detail": f"the last task is '{last_title}'" if ends_in_review
+                  else f"Executor: {executor} needs its last task to be 'Task N: Final review'; "
+                       f"the last task is '{last_title or '(none)'}'",
+    })
+else:
+    checks.append({"name": "final_review_task_last", "status": "pass",
+                   "detail": f"not required: Executor {executor or 'undeclared'}"})
+
 # 5. each task is a single unit of work: exactly one "Commit" step per task section.
 # The step title must BE "Commit" (writing-plans template: "- [ ] **Step N: Commit**") —
 # a step title merely containing the word commit does not count, and quoted steps
@@ -540,6 +627,7 @@ verdict = "pass" if all(c["status"] == "pass" for c in checks) else "fail"
 
 print(json.dumps({
     "plan_file": plan_file,
+    "executor": executor,
     "task_count": len(task_sections),
     "task_titles": [s["title"] for s in task_sections],
     "checks": checks,

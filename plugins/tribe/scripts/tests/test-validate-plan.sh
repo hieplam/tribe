@@ -35,19 +35,35 @@ else:
 EOF
 }
 
-good_plan_header() {
-  cat <<'EOF'
-# Fixture Plan
-
-## Global Constraints
-
-- Implementer: dispatch each implementation/fix task to the hunter subagent.
-
-## Way of work
-
-Executor: subagent-per-task
-
+# block_of MODE — the mode's block, read from the one definition (shaman.md "Ways of work"),
+# the way a plan author copies it. Fixtures copy it rather than restating it.
+block_of() {
+  python3 - "$HERE/../../agents/shaman.md" "$1" <<'EOF'
+import re, sys
+lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+start = next(i for i, l in enumerate(lines) if l == "## Ways of work")
+end = next((i for i in range(start + 1, len(lines)) if re.match(r"^#{1,2} ", lines[i])), len(lines))
+text = "\n".join(lines[start:end])
+for body in re.findall(r"^```markdown\n(.*?)^```$", text, re.S | re.M):
+    if body.startswith(f"Executor: {sys.argv[2]}\n"):
+        print(body.rstrip("\n"))
+        break
+else:
+    sys.exit(f"no block for {sys.argv[2]}")
 EOF
+}
+
+good_plan_header() {
+  printf '# Fixture Plan\n\n## Global Constraints\n\n- Implementer: dispatch each implementation/fix task to the hunter subagent.\n\n## Way of work\n\n'
+  block_of subagent-per-task
+  printf '\n'
+}
+
+# tribe_plan_header — the one mode with no final review task: its plans may hold a single task.
+tribe_plan_header() {
+  printf '# Fixture Plan\n\n## Global Constraints\n\n- Implementer: dispatch each implementation/fix task to the hunter subagent.\n\n## Way of work\n\n'
+  block_of tribe
+  printf '\n'
 }
 
 # A complete Verify block: the goal it proves, a Red and a Green that each carry a
@@ -63,10 +79,16 @@ verify_block() {
 EOF
 }
 
+# review_task N — the light modes' last task, "Task N: Final review", complete.
+review_task() {
+  printf '### Task %s: Final review\n\n' "$1"; verify_block
+  printf '#### Done\n\n```bash\ntrue\n```\n\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit --allow-empty -m "review: pass"\n```\n\n'
+}
+
 # fixture: a task that QUOTES a whole file containing a fenced plan — the quoted
 # heading, inner fences, and angle tokens are content, not plan structure
 F0="$TMP/fenced.md"
-{ good_plan_header; cat <<'EOF'
+{ tribe_plan_header; cat <<'EOF'
 ### Task 1: Real task quoting a whole test file
 
 - [ ] **Step 1: Write the failing test**
@@ -467,7 +489,7 @@ task_with() { # task_with N BODY-FILE — one task section whose body is the fil
 verify_block > "$TMP/vb.md"
 
 VF1="$TMP/verify-ok.md"
-{ good_plan_header; task_with 1 "$TMP/vb.md"; } > "$VF1"
+{ good_plan_header; task_with 1 "$TMP/vb.md"; review_task 2; } > "$VF1"
 bash "$SCRIPT" "$VF1" > "$TMP/vo1.json"
 check "complete Verify block passes" "$(find_check "$TMP/vo1.json" tasks_have_verify_block)" "pass"
 check "complete plan verdict is pass" "$(jget "$TMP/vo1.json" verdict)" "pass"
@@ -621,6 +643,63 @@ done_tail_probe() { # done_tail_probe NAME WANT-PROBLEM DONE-PART — Done after
 done_tail_probe "a Done heading with no fenced block fails" missing_done_block $'#### Done\n\nRun the tests.'
 done_tail_probe "a Done fence that never closes fails" unclosed_done_block $'#### Done\n\n```bash\ntrue'
 done_tail_probe "a Done fence indented four spaces is not a fence to the runner" missing_done_block $'#### Done\n\n    ```bash\n    true\n    ```'
+
+# --- The mode's block, copied from shaman.md "Ways of work" -------------------------------
+wow_plan() { # wow_plan MODE HUNTER-LINE BLOCK-FILTER — a plan header whose Way of work copies MODE's block through BLOCK-FILTER
+  printf '# P\n\n## Global Constraints\n\n- %s\n\n## Way of work\n\nReasons: the card records this mode.\n\n' "$2"
+  block_of "$1" | eval "$3"; printf '\n'
+}
+HUNTER='Implementer: dispatch each implementation/fix task to the `hunter` subagent — never a generic implementer.'
+block_probe() { # block_probe NAME CHECK WANT PLAN-HEADER-ARGS...
+  local f="$TMP/block-$RANDOM.md" name="$1" chk="$2" want="$3"; shift 3
+  { wow_plan "$@"; task_with 1 "$TMP/vb.md"; review_task 2; } > "$f"
+  bash "$SCRIPT" "$f" > "$f.json"
+  check "$name" "$(find_check "$f.json" "$chk")" "$want"
+}
+block_probe "the subagent-per-task block copied verbatim passes" mode_block_copied pass subagent-per-task "$HUNTER" cat
+block_probe "one changed word in the copied block fails" mode_block_copied fail subagent-per-task "$HUNTER" "sed 's/in order/in any order/'"
+block_probe "the Executor line alone, with no block, fails" mode_block_copied fail subagent-per-task "$HUNTER" "head -n 1"
+block_probe "the single-agent block copied verbatim passes" mode_block_copied pass single-agent "$HUNTER" cat
+block_probe "the tribe block copied verbatim passes" mode_block_copied pass tribe "$HUNTER" cat
+block_probe "a tribe plan without its audit block fails" mode_block_copied fail tribe "$HUNTER" "head -n 1"
+block_probe "another mode's block under this Executor line does not count" mode_block_copied fail single-agent "$HUNTER" "{ head -n 1; block_of subagent-per-task | tail -n +2; }"
+
+# --- The light modes end with their final review task ---------------------------------------
+review_probe() { # review_probe NAME WANT MODE TASKS... — TASKS are "u" (a unit task) or "r" (the final review)
+  local f="$TMP/review-$RANDOM.md" name="$1" want="$2" mode="$3" n=0; shift 3
+  { wow_plan "$mode" "$HUNTER" cat
+    for kind in "$@"; do n=$((n+1)); if [[ "$kind" == r ]]; then review_task "$n"; else task_with "$n" "$TMP/vb.md"; fi; done; } > "$f"
+  bash "$SCRIPT" "$f" > "$f.json"
+  check "$name" "$(find_check "$f.json" final_review_task_last)" "$want"
+}
+review_probe "subagent-per-task ending in its final review passes" pass subagent-per-task u u r
+review_probe "subagent-per-task with no final review task fails" fail subagent-per-task u u u
+review_probe "a final review that is not the last task fails" fail subagent-per-task u r u
+review_probe "single-agent: one task and the final review passes" pass single-agent u r
+review_probe "single-agent with no final review task fails" fail single-agent u u
+review_probe "a tribe plan needs no final review task" pass tribe u u
+
+# --- A whole plan in each mode passes -------------------------------------------------------
+whole_probe() { # whole_probe MODE TASKS...
+  local f="$TMP/whole-$RANDOM.md" mode="$1" n=0; shift
+  { wow_plan "$mode" "$HUNTER" cat
+    for kind in "$@"; do n=$((n+1)); if [[ "$kind" == r ]]; then review_task "$n"; else task_with "$n" "$TMP/vb.md"; fi; done; } > "$f"
+  bash "$SCRIPT" "$f" > "$f.json"
+  check "a whole $mode plan passes" "$(jget "$f.json" verdict)" "pass"
+}
+whole_probe single-agent u r
+whole_probe subagent-per-task u u r
+whole_probe tribe u u
+
+# --- The one definition must be readable: a declared mode with no source is a setup error ---
+ISO="$TMP/iso/scripts"; mkdir -p "$ISO"; cp "$SCRIPT" "$ISO/validate-plan.sh"
+set +e; bash "$ISO/validate-plan.sh" "$VF1" > "$TMP/iso.out" 2> "$TMP/iso.err"; code=$?; set -e
+check "no ../agents/shaman.md beside the script: exit 2" "$code" "2"
+check "no ../agents/shaman.md: stderr names the missing file" "$(grep -c 'agents/shaman.md' "$TMP/iso.err")" "1"
+mkdir -p "$TMP/iso/agents"; printf '# Shaman\n\n## Ways of work\n\nNo blocks here.\n' > "$TMP/iso/agents/shaman.md"
+set +e; bash "$ISO/validate-plan.sh" "$VF1" > "$TMP/iso2.out" 2> "$TMP/iso2.err"; code=$?; set -e
+check "a Ways of work section with no block for the mode: exit 2" "$code" "2"
+check "no block for the mode: stderr names the mode" "$(grep -c "Executor: subagent-per-task" "$TMP/iso2.err")" "1"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 exit $((FAIL > 0))
