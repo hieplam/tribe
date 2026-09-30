@@ -13,9 +13,15 @@
 #    resolve the canvas file at a stable machine-global path.
 #
 # 3. Appends each guidance snippet in claude-md/ to the global CLAUDE.md if not
-#    already present. Idempotent: a snippet's first line (its section heading) is
-#    the presence marker — if that exact line exists in CLAUDE.md, the snippet is
-#    skipped.
+#    already present, and refreshes it in place when it is. A snippet's first line
+#    (its section heading) is the presence marker. When that exact line exists in
+#    CLAUDE.md, the installed section — from the marker up to the first heading at
+#    the marker's level or above that the snippet does not own — is compared with
+#    the snippet: equal, it is skipped; different, the whole CLAUDE.md is copied to
+#    CLAUDE.md.bak.<epoch>, the section is replaced by the snippet, and a warning
+#    names the backup. So a reworded snippet reaches every installed machine, and
+#    an owner's hand edit of that section is kept in the backup, never lost.
+#    Idempotent: a second run finds the section equal and changes nothing.
 #
 # 4. Links the `tribe` command (scripts/cli/bin/tribe) into $TRIBE_BIN_DIR (default
 #    ~/.local/bin) so a bare `tribe` starts the session viewer from any directory.
@@ -120,7 +126,73 @@ for snippet in "$PLUGIN_DIR/claude-md"/*.md; do
     continue
   fi
   if grep -qxF "$marker" "$TARGET"; then
-    printf '  ok      CLAUDE.md %s (already present)\n' "$(basename "$snippet")"
+    # Installed already: refresh the section in place when the snippet changed since.
+    if ! command -v python3 >/dev/null 2>&1; then
+      printf 'WARN: %s: python3 not found — cannot compare the installed section with the snippet; left as is\n' "$(basename "$snippet")" >&2
+      continue
+    fi
+    refreshed="$(mktemp "$CLAUDE_DIR/.CLAUDE.md.refresh.XXXXXX")"
+    set +e
+    python3 - "$snippet" "$TARGET" "$refreshed" <<'PY'
+import sys
+
+def heading_level(line):
+    """The heading level of a Markdown ATX heading line (1-6), or 0 when it is not one."""
+    level = len(line) - len(line.lstrip("#"))
+    return level if 1 <= level <= 6 and line[level:level + 1] == " " else 0
+
+def section_end(target, start, marker_level, own_headings):
+    """The installed section runs from its marker line up to the first heading at the marker's
+    level or above that the snippet does not own, or the end of the file. A line inside a fenced
+    code block is never a heading."""
+    fence = None
+    for i in range(start + 1, len(target)):
+        opener = target[i].lstrip()[:3]
+        if opener in ("```", "~~~"):
+            fence = None if fence == opener else (fence or opener)
+            continue
+        if fence is None and 0 < heading_level(target[i]) <= marker_level and target[i] not in own_headings:
+            return i
+    return len(target)
+
+snippet_path, target_path, out_path = sys.argv[1:4]
+try:
+    with open(snippet_path, encoding="utf-8") as f:
+        snippet = f.read().splitlines()
+    with open(target_path, encoding="utf-8") as f:
+        target = f.read().splitlines()
+except (OSError, UnicodeDecodeError) as exc:
+    print(f"cannot read: {exc}", file=sys.stderr)
+    sys.exit(3)
+while snippet and not snippet[-1].strip():
+    snippet.pop()
+own_headings = {line for line in snippet if heading_level(line)}
+start = target.index(snippet[0])
+end = section_end(target, start, heading_level(snippet[0]), own_headings)
+while end > start + 1 and not target[end - 1].strip():
+    end -= 1                      # the blank lines after the section belong to what follows
+if target[start:end] == snippet:
+    sys.exit(0)                   # the installed section is current
+with open(out_path, "w", encoding="utf-8") as f:
+    f.write("\n".join(target[:start] + snippet + target[end:]) + "\n")
+sys.exit(10)                      # the refreshed CLAUDE.md is at out_path
+PY
+    rc=$?
+    set -e
+    case "$rc" in
+      0)
+        rm -f "$refreshed"
+        printf '  ok      CLAUDE.md %s (already present)\n' "$(basename "$snippet")" ;;
+      10)
+        bak="$TARGET.bak.$(date +%s)"
+        cp "$TARGET" "$bak"
+        mv "$refreshed" "$TARGET"
+        printf '  updated CLAUDE.md %s (installed section refreshed)\n' "$(basename "$snippet")"
+        printf 'WARN: %s: the installed section differed from the snippet and was replaced; the previous CLAUDE.md is at %s\n' "$(basename "$snippet")" "$bak" >&2 ;;
+      *)
+        rm -f "$refreshed"
+        printf 'WARN: %s: could not compare the installed section (exit %s); left as is\n' "$(basename "$snippet")" "$rc" >&2 ;;
+    esac
     continue
   fi
 
