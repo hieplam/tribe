@@ -12,9 +12,9 @@ plan carries its mode in one format that both `validate-plan.sh` and the campaig
 
 **Architecture:** prompt text (the canonical section and pointers to it), one validator extended to
 mirror the runner's plan reading, one new pure-core drift counter, one install-hook behaviour, eval
-fixtures. No runner, watchdog or supervisor code changes.
+fixtures committed but not run (owner ruling E1). No runner, watchdog or supervisor code changes.
 
-**Card:** `~/.tribe/-Users-home-repos-tribe/cards/ways-of-work-consolidation.md` (G1–G4, D1–D6) ·
+**Card:** `~/.tribe/-Users-home-repos-tribe/cards/ways-of-work-consolidation.md` (G1–G4; rulings D1–D9, N1–N6, S1–S3, R2-1, R3-1, E1) ·
 **Spec:** `docs/superpowers/specs/2026-09-29-ways-of-work-consolidation-design.md` · **Base:**
 `master` @ `632a039` · **Branch:** `feat/ways-of-work-consolidation`
 
@@ -43,12 +43,10 @@ fixtures. No runner, watchdog or supervisor code changes.
 - Shell: this machine's interactive shell wraps `grep`, `ls` and `find`; the plan's commands avoid
   them where a literal output matters, and the test scripts run under `bash`, where `grep` is the
   system one.
-- Evals spend real model calls (`claude -p`, the Shaman's `model: inherit`): each `--runs 3` pass
-  over the 9 cases is 54 calls. Under the harness one Bash call is capped at 10 minutes in the
-  foreground, so each pass is three separate calls of 3 cases (9 jobs, one wave each); run each
-  line as its own call. A case counts as passing when it passes the majority of its graded
-  runs (the summary command in Tasks 2, 3 and 11); an `UNGRADED` run is a harness failure, not a
-  sample — re-run it.
+- Evals — owner ruling E1 (2026-09-30), verbatim: "stop eval, that's enough. commit plan measured
+  then implement." No task runs an eval (no `run_evals.py` call in any Red, Green or Done); the
+  cases 56–64 are committed in `plugins/tribe/evals/evals.json` for a later run, and Task 2
+  commits what was measured while planning. Every Verify block below is mechanical.
 - Scope fence (card, binding): no change to runner, watchdog or supervisor code
   (`plugins/tribe/scripts/runner/` changes only in `README.md`); the tribe loop's internals
   (dual-Skinner cell, its fix-round count, Tracker, Scout, gap gate) are pointed at, never edited;
@@ -124,7 +122,7 @@ Task 5's Done section and Task 11 run the new validator on this plan.
 | `plugins/tribe/scripts/ways-of-work/drift-core.ts`, `drift.ts`, `drift.test.ts` | 1 | create — the G1 counter (pure core + thin edge) |
 | `docs/superpowers/evidence/2026-09-29-ways-of-work-drift-baseline.txt` | 1 | create — the G1 baseline |
 | `plugins/tribe/evals/evals.json` | 2 | eval 56 rewritten, 57–64 added |
-| `docs/superpowers/evidence/2026-09-29-ways-of-work-evals-baseline.txt` | 2 | create — the G2/G4 baseline |
+| `docs/superpowers/evidence/2026-09-29-ways-of-work-evals-measured.md` | 2 | create — the eval measurements taken while planning (E1: none during execution) |
 | `plugins/tribe/agents/shaman.md` | 3 | the "Ways of work" section; Mode 1, anti-goals 1–2, frontmatter |
 | `plugins/tribe/scripts/validate-plan.sh`, `plugins/tribe/scripts/tests/test-validate-plan.sh` | 4, 5 | `tribe`, Hunter line, Done mirror; mode block, final review |
 | `plugins/tribe/scripts/tests/test-ways-of-work-plans.sh` | 6 | create — the two-gate test |
@@ -661,25 +659,23 @@ bun test plugins/tribe/scripts/ways-of-work/drift.test.ts
 git add plugins/tribe/scripts/ways-of-work docs/superpowers/evidence/2026-09-29-ways-of-work-drift-baseline.txt && git commit -m "feat(tribe): ways-of-work drift counter, baseline 9 places"
 ```
 
-### Task 2: The G2/G4 baseline — evals 56–64, measured on today's Shaman
+### Task 2: The G2/G4 planning measurement — evals 56–64 committed, not run (owner ruling E1)
 
-**Files:** Modify `plugins/tribe/evals/evals.json`; Create
-`docs/superpowers/evidence/2026-09-29-ways-of-work-evals-baseline.txt`.
+**Files:** Modify `plugins/tribe/evals/evals.json`; Create `docs/superpowers/evidence/2026-09-29-ways-of-work-evals-measured.md`.
 
-Eval 56 is rewritten (rulings D3, D7, D9) and evals 57–64 are added, in the existing agent-fixture
-shape (`ref-evals-fixture`); spec §4.8 lists what each one grades — 56, 61, 62 and 63 the campaign
-harness (D7, D9), 64 its one exception. Machine checks run through `shlex`
-with no shell (`scripts/evals/run_evals.py:618-626`), which is why eval 61's check is `bash -c`.
-Fixture cards and plans are real files in the eval's working directory. `shaman.md` is not touched
-in this task: this run is the "before".
+Eval 56 is rewritten (rulings D3, D7, D9, S1, S2) and evals 57–64 are added, in the existing
+agent-fixture shape (`ref-evals-fixture`); spec §4.8 lists what each one grades — 57–60 the mode
+choice (G2), 56, 61, 62 and 63 the campaign harness (D7, D9), 64 its one exception. Owner ruling
+E1: nothing here runs an eval. The file this task creates is the whole measurement, taken while the
+card was planned, and states for every cell which text it measured and how many runs it had.
 
-- [ ] **Step 1: See that the cases do not exist yet**
+- [ ] **Step 1: See the Red** — the cases and the evidence file are not there yet:
 
 ```bash
-python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 57 --dry-run; echo "exit=$?"
+python3 -c "import json,os; d=json.load(open('plugins/tribe/evals/evals.json')); print(max(e['id'] for e in d['evals']), os.path.exists('docs/superpowers/evidence/2026-09-29-ways-of-work-evals-measured.md'))"
 ```
 
-Expected on stderr: `ERROR: no eval cases matched (bad --eval-id, --evals path, or empty evals.json?)`; then `exit=2`.
+Expected: `56 False`.
 
 - [ ] **Step 2: Add the cases** — run exactly this:
 
@@ -884,61 +880,100 @@ with open(path, "w", encoding="utf-8") as f:
 PYEDIT
 ````
 
-- [ ] **Step 3: Measure the baseline** (54 model calls; each of the first three lines is its own foreground call):
+- [ ] **Step 3: Commit the planning measurement** — create `docs/superpowers/evidence/2026-09-29-ways-of-work-evals-measured.md` with exactly this
+  content:
 
-```bash
-python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 56,57,58 --runs 3 --jobs 9 --out-dir scripts/evals/runs/wow-baseline-a
-python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 59,60,61 --runs 3 --jobs 9 --out-dir scripts/evals/runs/wow-baseline-b
-python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 62,63,64 --runs 3 --jobs 9 --out-dir scripts/evals/runs/wow-baseline-c
-python3 - scripts/evals/runs/wow-baseline-a/benchmark.json scripts/evals/runs/wow-baseline-b/benchmark.json scripts/evals/runs/wow-baseline-c/benchmark.json <<'PY' | tee docs/superpowers/evidence/2026-09-29-ways-of-work-evals-baseline.txt
-import collections, json, sys
-by_case = collections.defaultdict(list)
-for path in sys.argv[1:]:
-    for run in json.load(open(path))["runs"]:
-        if not run["result"].get("ungraded"):
-            by_case[run["eval_id"]].append(bool(run["result"]["passed"]))
-majority = 0
-for case in sorted(by_case):
-    passed = sum(by_case[case])
-    verdict = "PASS" if passed * 2 > len(by_case[case]) else "FAIL"
-    majority += verdict == "PASS"
-    print(f"eval {case}: {passed}/{len(by_case[case])} majority {verdict}")
-print(f"majority PASS: {majority}/{len(by_case)}")
-PY
+```markdown
+# Evals 56–64 — what was measured while planning (card ways-of-work-consolidation)
+
+Owner ruling E1 (2026-09-30): "stop eval, that's enough. commit plan measured then implement." No
+eval is run during execution. The cases stay committed in `plugins/tribe/evals/evals.json` for a
+later run; this file is the whole measurement, taken while the card was planned (2026-09-29/30).
+
+How it was measured: `scripts/evals/run_evals.py --mode with_skill` on the default model (the
+Shaman's `model: inherit`); a case passes when it passes the majority of its graded runs. A run
+the account's session limit cut off is a harness failure (UNGRADED or an executor that never
+finished) and is not counted. "Today" is `plugins/tribe/agents/shaman.md` at `632a039`. The
+"prototype" is the planning prototype of the new `shaman.md`: round 1 = the first draft of the
+"Ways of work" section, round 2 = with S1–S3, round 3 = with the campaign harness (D7, D9) and
+R3-1, byte-identical to what plan Task 3 writes.
+
+## The committed case versions
+
+| Case | Grades | Today (`632a039`) | Prototype | Text the prototype cell measured |
+| --- | --- | --- | --- | --- |
+| 56 — an approved subagent-per-task card: the Shaman runs orchestrate-campaign itself | G4, D7, D9, S1, S2 | FAIL 0/1 | PASS 3/3 | round 3 (the three executor runs were first graded against a rubric that demanded a launched harness, which no eval directory can host — 1/3; re-graded against the committed rubric, which accepts the blocked outcome R3-1 requires: 3/3; no executor run was repeated) |
+| 57 — picks single-agent | G2 | PASS 1/1 | PASS 1/1 | round 1 |
+| 58 — picks subagent-per-task | G2 | PASS 1/1 | PASS 1/1 | round 1 |
+| 59 — picks tribe | G2 | FAIL 0/1 | PASS 1/1 | round 1 |
+| 60 — asks the owner when the rubric contradicts the owner's wish | G2 | FAIL 0/1 | PASS 1/1 | round 1 |
+| 61 — a delegated single-agent card runs through the harness, not an inline build | G4, D7, D9, R3-1 | FAIL 0/3 | PASS 3/3 | round 3 |
+| 62 — the Shaman rules a harness escalation after two fix rounds | G4, D9 | PASS 2/2 (1 run cut by the session limit) | PASS 3/3 | round 3 |
+| 63 — an approved tribe card becomes a campaign card whose executor acts as the Warchief | G4, D7, D9 | FAIL 0/3 | PASS 3/3 | round 3 |
+| 64 — the owner says "don't use the harness": the Shaman builds a delegated single-agent card inline | D7's exception, D2 | PASS 3/3 | PASS 3/3 | round 3 before the R3-1 sentence (the case does not touch it) |
+
+Totals by majority: today 4/9 (57, 58, 62, 64); prototype 9/9 — 56, 61, 62, 63 and 64 on the
+round-3 text, 57–60 on the round-1 text.
+
+## Never measured, because of E1
+
+- Cases 57–60 on the round-2 or round-3 text (the rounds after round 1 did not change the rubric
+  those cases grade).
+- Three runs on today's text for cases 56–60 (each had one run).
+- Every case on the text as it will actually be merged, after Task 3 — Task 3 writes the round-3
+  prototype byte for byte, so the prototype cells above are that text, but no run happens after the
+  build.
+
+## Superseded case versions (history, not the committed cases)
+
+- Round 1 (case 56 as a hand-off to an owner-opened session; 61 as an inline build on delegation;
+  62 with no harness; 63 as a Shaman-dispatched full-build Warchief), each fixture fix listed in
+  order. Today: 56 FAIL 0/1 (no fixture files), FAIL 0/1 (a card with no goal table), then PASS
+  2/2 once the card had one;
+  61 FAIL 0/1 (its machine check ran without a shell), then PASS 1/1 through `bash -c`; 62 PASS 1/1;
+  63 FAIL 0/1, 0/1, 0/2, 0/2. Round-1 prototype: 56 FAIL 0/1 (no fixture files), then PASS 1/1 and 2/2;
+  61 FAIL 0/1 (the same check), then PASS 1/1; 62 PASS 1/1; 63 FAIL 0/1 (no fixture files), FAIL
+  0/1 (a card with no goal table, stopped at the plan gate), 1/2, then PASS 2/2 once the fixture
+  said the plan review was complete.
+- Round 2 (the same case shapes, blocks with S1–S2): round-2 prototype 56 PASS 3/3, 61 PASS 3/3,
+  62 PASS 3/3.
+- Round 3, first run (cut by the session limit): round-3 prototype before R3-1 — 61 FAIL 0/3 (it
+  built inline because the eval directory is no git repository: the gap R3-1 closed), 62 1/2.
 ```
 
 #### Verify
 
-- Goal: G2's and G4's ratchet — the eval pass count measured before `shaman.md` changes.
-- Red: `python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 57 --dry-run`
-  prints `ERROR: no eval cases matched (…)` and exits 2 (Step 1).
-- Green: the Step 3 commands. Expected, the card's stub checks (measured in planning: today's
-  Shaman refuses to record or run `tribe`, never runs a Mode 1 card through the harness, and
-  builds a delegated single-agent plan in its own session):
+- Goal: G2 and G4 as measured while planning (owner ruling E1: no eval runs during execution) —
+  today's `shaman.md` 4/9 by majority, the prototype of Task 3's text 9/9.
+- Red: `python3 -c "import json,os; d=json.load(open('plugins/tribe/evals/evals.json')); print(max(e['id'] for e in d['evals']), os.path.exists('docs/superpowers/evidence/2026-09-29-ways-of-work-evals-measured.md'))"`
+  prints `56 False` (Step 1).
+- Green:
 
-```text
-eval 59: N/3 majority FAIL
-eval 61: N/3 majority FAIL
-eval 63: N/3 majority FAIL
+```bash
+python3 - <<'PY'
+import json, re
+ids = [e["id"] for e in json.load(open("plugins/tribe/evals/evals.json"))["evals"]]
+text = open("docs/superpowers/evidence/2026-09-29-ways-of-work-evals-measured.md", encoding="utf-8").read()
+rows = sorted(int(n) for n in re.findall(r"^[|] (\d\d) — ", text, re.M))
+print("cases", ids[-9:] == list(range(56, 65)), "| rows", rows == list(range(56, 65)), "| E1", "stop eval, that's enough" in text)
+PY
 ```
 
-  with N at most 1 on each line. Every other line is recorded as measured (spec §4.8 has the
-  planning table; the summary line was `majority PASS: 4/9` there). If 59, 61 or 63 pass by
-  majority, stop: the case does not discriminate — escalate to the Shaman instead of continuing.
-- Stub check: without Step 2 there are no cases 57–64 to run (Step 1's error), so no baseline line
-  exists for G2 or G4.
+  prints `cases True | rows True | E1 True`.
+- Stub check: without Step 2 the cases check prints `False`; an evidence file missing a case's row,
+  or not quoting ruling E1, prints `False` in its column.
 
 #### Done
 
 ```bash
-python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 56,57,58,59,60,61,62,63,64 --dry-run
 python3 -c "import json; d=json.load(open('plugins/tribe/evals/evals.json')); assert [e['id'] for e in d['evals']][-9:] == list(range(56, 65))"
+python3 -c "t=open('docs/superpowers/evidence/2026-09-29-ways-of-work-evals-measured.md', encoding='utf-8').read(); assert 'stop eval, that' in t and 'Never measured, because of E1' in t"
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add plugins/tribe/evals/evals.json docs/superpowers/evidence/2026-09-29-ways-of-work-evals-baseline.txt && git commit -m "test(tribe): evals 56-64 for choosing and running the ways of work, baseline measured"
+git add plugins/tribe/evals/evals.json docs/superpowers/evidence/2026-09-29-ways-of-work-evals-measured.md && git commit -m "test(tribe): evals 56-64 committed with the measurement taken while planning (owner ruling E1)"
 ```
 
 ### Task 3: The one definition — the "Ways of work" section and the Shaman's amendments
@@ -1093,14 +1128,16 @@ Executor: tribe
 ```
 ````
 
-- [ ] **Step 1: See the Red** — the counter lists `shaman.md` as restating, and Task 2's baseline
-  shows evals 59 and 63 failing:
+- [ ] **Step 1: See the Red** — the counter lists `shaman.md` as restating, and the section is not
+  there:
 
 ```bash
 bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
+python3 -c "t=open('plugins/tribe/agents/shaman.md', encoding='utf-8').read(); print(t.count(chr(10) + '## Ways of work' + chr(10)), '### The campaign harness (the default for every mode)' in t, 'never invokes `orchestrate-campaign`' in t)"
 ```
 
-Expected: the line `restates   plugins/tribe/agents/shaman.md (6 lines)` and no `canonical` line.
+Expected: the line `restates   plugins/tribe/agents/shaman.md (6 lines)` and no `canonical` line;
+then `0 False True`.
 
 - [ ] **Step 2: Apply the section and the amendments** — run exactly this:
 
@@ -1435,28 +1472,11 @@ open(path, "w", encoding="utf-8").write(s)
 PYEDIT
 ````
 
-- [ ] **Step 3: Run the Green** — the counter, then the evals (54 model calls; one foreground call per line):
+- [ ] **Step 3: Run the Green**
 
 ```bash
 bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
-python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 56,57,58 --runs 3 --jobs 9 --out-dir scripts/evals/runs/wow-after-shaman-a
-python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 59,60,61 --runs 3 --jobs 9 --out-dir scripts/evals/runs/wow-after-shaman-b
-python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 62,63,64 --runs 3 --jobs 9 --out-dir scripts/evals/runs/wow-after-shaman-c
-python3 - scripts/evals/runs/wow-after-shaman-a/benchmark.json scripts/evals/runs/wow-after-shaman-b/benchmark.json scripts/evals/runs/wow-after-shaman-c/benchmark.json <<'PY'
-import collections, json, sys
-by_case = collections.defaultdict(list)
-for path in sys.argv[1:]:
-    for run in json.load(open(path))["runs"]:
-        if not run["result"].get("ungraded"):
-            by_case[run["eval_id"]].append(bool(run["result"]["passed"]))
-majority = 0
-for case in sorted(by_case):
-    passed = sum(by_case[case])
-    verdict = "PASS" if passed * 2 > len(by_case[case]) else "FAIL"
-    majority += verdict == "PASS"
-    print(f"eval {case}: {passed}/{len(by_case[case])} majority {verdict}")
-print(f"majority PASS: {majority}/{len(by_case)}")
-PY
+python3 -c "t=open('plugins/tribe/agents/shaman.md', encoding='utf-8').read(); print(t.count(chr(10) + '## Ways of work' + chr(10)), '### The campaign harness (the default for every mode)' in t, 'never invokes `orchestrate-campaign`' in t)"
 ```
 
 #### Verify
@@ -1465,7 +1485,7 @@ PY
   G4 as amended (it runs every approved card through the campaign harness, and each mode on its
   path); rulings D1–D9, S1–S3.
 - Red: `bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .` prints `restates   plugins/tribe/agents/shaman.md (6 lines)` and no `canonical`
-  line; Task 2's baseline file shows the `eval 59` and `eval 63` lines ending in `majority FAIL`.
+  line, and the section check prints `0 False True` (Step 1).
 - Green: the counter prints exactly
 
 ```text
@@ -1481,14 +1501,18 @@ restates   plugins/tribe/skills/orchestrate-campaign/SKILL.md (19 lines)
 ways-of-work definitions: 9
 ```
 
-  and the eval summary ends with `majority PASS: 9/9`.
-- Stub check: without the section there is no `canonical` line; without the anti-goal and Mode 1
-  amendments, evals 59, 60 and 63 keep failing (measured in planning on today's text).
+  and the section check prints `1 True False` — one "Ways of work" section, its campaign-harness
+  part present, the old "never invokes `orchestrate-campaign`" ban gone. (Owner ruling E1: the
+  behaviour this text drives is measured only by Task 2's planning record, on this exact text.)
+- Stub check: without the section there is no `canonical` line and the check prints `0 False …`;
+  leaving Mode 1's old execution section in place keeps the ban (`… True`) and the
+  `restates … shaman.md` line.
 
 #### Done
 
 ```bash
 bun plugins/tribe/scripts/ways-of-work/drift.ts --repo . --json | python3 -c "import json,sys; p=[x['path'] for x in json.load(sys.stdin)['places']]; sys.exit(0 if 'plugins/tribe/agents/shaman.md#Ways of work' in p and 'plugins/tribe/agents/shaman.md' not in p else 1)"
+python3 -c "t=open('plugins/tribe/agents/shaman.md', encoding='utf-8').read(); print(t.count(chr(10) + '## Ways of work' + chr(10)), '### The campaign harness (the default for every mode)' in t, 'never invokes `orchestrate-campaign`' in t)" | grep -qx '1 True False'
 ```
 
 - [ ] **Step 4: Commit**
@@ -3171,24 +3195,20 @@ bash plugins/tribe/scripts/tests/test-validate-plan.sh | tail -n 1
 bash plugins/tribe/scripts/tests/test-ways-of-work-plans.sh | tail -n 2
 bash plugins/tribe/scripts/tests/test-install-hook.sh 2>/dev/null | tail -n 1
 bash plugins/tribe/scripts/validate-plan.sh docs/superpowers/plans/2026-09-29-ways-of-work-consolidation.md | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['verdict'])"
-python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 56,57,58 --runs 3 --jobs 9 --out-dir scripts/evals/runs/wow-final-a
-python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 59,60,61 --runs 3 --jobs 9 --out-dir scripts/evals/runs/wow-final-b
-python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json --mode with_skill --eval-id 62,63,64 --runs 3 --jobs 9 --out-dir scripts/evals/runs/wow-final-c
-python3 - scripts/evals/runs/wow-final-a/benchmark.json scripts/evals/runs/wow-final-b/benchmark.json scripts/evals/runs/wow-final-c/benchmark.json <<'PY'
-import collections, json, sys
-by_case = collections.defaultdict(list)
-for path in sys.argv[1:]:
-    for run in json.load(open(path))["runs"]:
-        if not run["result"].get("ungraded"):
-            by_case[run["eval_id"]].append(bool(run["result"]["passed"]))
-majority = 0
-for case in sorted(by_case):
-    passed = sum(by_case[case])
-    verdict = "PASS" if passed * 2 > len(by_case[case]) else "FAIL"
-    majority += verdict == "PASS"
-    print(f"eval {case}: {passed}/{len(by_case[case])} majority {verdict}")
-print(f"majority PASS: {majority}/{len(by_case)}")
+python3 -c "import json,re; ids=[e['id'] for e in json.load(open('plugins/tribe/evals/evals.json'))['evals']]; t=open('docs/superpowers/evidence/2026-09-29-ways-of-work-evals-measured.md', encoding='utf-8').read(); rows=sorted(int(n) for n in re.findall(r'^[|] (\d\d) — ', t, re.M)); print('cases', ids[-9:] == list(range(56, 65)), '| rows', rows == list(range(56, 65)), '| E1', 'stop eval, that' in t)"
+home="$(mktemp -d)"; : > "$home/answers.md"
+python3 - "$home" <<'PY'
+import json, re, sys
+plan = "docs/superpowers/plans/2026-09-29-ways-of-work-consolidation.md"
+heads = re.findall(r"^### (Task \d+: .*)$", open(plan, encoding="utf-8").read(), re.M)
+card = {"status": "staged", "spec": "docs/superpowers/specs/2026-09-29-ways-of-work-consolidation-design.md", "plan": plan,
+        "branch": None, "baseSha": None, "pr": None, "mergeSha": None, "sessionId": None, "updatedAt": None,
+        "tasks": [{"id": f"T{i + 1}", "heading": h} for i, h in enumerate(heads)]}
+state = {"v": 2, "campaign": "ways-of-work-consolidation", "planning": {"mode": "self"}, "mergePolicy": "regular", "sequence": ["ways-of-work-consolidation"],
+         "schemaLockPaths": [], "docsOnlyPaths": [], "ownerOnlyEscalations": [], "cards": {"ways-of-work-consolidation": card}}
+json.dump(state, open(sys.argv[1] + "/campaign-state.json", "w"), indent=2)
 PY
+bun plugins/tribe/scripts/runner/run.ts --repo "$PWD" --model fixture --home "$home" --no-viewer --dry-run < /dev/null | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['cardId'], d['phase']['kind'])"; echo "exit=${PIPESTATUS[0]}"
 ```
 
 - [ ] **Step 2: Assemble the PR body's `## Final review` section** (ruling S2) from every round's
@@ -3212,20 +3232,25 @@ PY
 #### Verify
 
 - Goal: D4 with S1 and S2 (the final review task, judged against every goal row and the scope
-  fence, recorded in the PR body) over every goal row: G1 (the two places ruling N5 allows), G2 and
-  G4 (evals), G3 (the validator suite and the two-gate test, which includes the 3-card campaign
-  dry-run).
+  fence, recorded in the PR body) over every goal row: G1 (the two places ruling N5 allows), G3 (the
+  validator suite and the two-gate test, which includes the 3-card campaign dry-run), G4 (this
+  plan's own one-card dry run; the card itself is running through the harness), and G2/G4's
+  planning eval record (Task 2's file — owner ruling E1: no eval runs here).
 - Red: not applicable, the review writes no code of its own; each goal's Red was shown by its task
   (Tasks 1–10) and the baselines are in `docs/superpowers/evidence/`.
 - Green: the Step 1 commands print, in order: the counter's
   `restates   .c3/c3-2-plugins/c3-215-tribe.md (6 lines)`,
   `canonical  plugins/tribe/agents/shaman.md#Ways of work (11 lines)` and
   `ways-of-work definitions: 2`; ` 14 pass` / ` 0 fail`; `87 passed, 0 failed`;
-  `15 passed, 0 failed` and `V-WOW=PASS`; `27 passed, 0 failed`; `pass`; and the eval summary
-  ending `majority PASS: 9/9`. Step 2 prints `N round(s); last: REVIEW: PASS` with N from 1 to 3.
+  `15 passed, 0 failed` and `V-WOW=PASS`; `27 passed, 0 failed`; `pass`;
+  `cases True | rows True | E1 True`; and `ways-of-work-consolidation fresh` then `exit=0`. Step 2
+  prints `N round(s); last: REVIEW: PASS` with N from 1 to 3.
 - Stub check: on an empty implementation (the branch at `632a039` plus this plan) the counter has no
   `canonical` line and counts 9, `test-ways-of-work-plans.sh` does not exist, the validator suite has
-  44 tests, and evals 59 and 63 fail — every line above differs; with no reviewer report, Step 2
+  44 tests, and Task 2's evidence file does not exist (the evidence check exits 1 with a Python
+  error) — those lines differ. The plan's own validator verdict and its dry run print the same on
+  an empty implementation, by design: they prove this plan is runnable, not that it was built. With
+  no reviewer report, Step 2
   exits 1 with a Python error instead of printing a `REVIEW: PASS` line.
 
 #### Done
@@ -3250,19 +3275,26 @@ git commit --allow-empty -m "review: final review — REVIEW: PASS (the PR body'
 | Card row | Task(s) | Verify (oracle) | Before → after (tool) |
 | --- | --- | --- | --- |
 | G1 — one definition, every other live file points to it | 1 (ratchet), 3, 4, 7, 8, 9, 10; 11 re-runs | `drift.ts --repo .` output, exact, per task; Task 10 applies the C3 issue's rows to a scratch copy | drift counter · 9 (10 with the installed copy) → 2 in the repo (the canonical section and `c3-215`, ruling N5; the C3 issue brings it to 1) and 2 with the installed copy after `./install.sh tribe` |
-| G2 — the Shaman picks the mode with reasons, asks when it should | 2 (baseline), 3; 11 re-runs | evals 57–60, `--runs 3`, majority | pass count (57–60) · measured in Task 2 (planning: 2/4) → 4/4 |
+| G2 — the Shaman picks the mode with reasons, asks when it should | 2 (the committed measurement), 3 | the planning measurement committed by Task 2 (owner ruling E1: no eval runs during execution): evals 57–60, one run each | evals 57–60 by majority · today 2/4 → the round-1 prototype 4/4 (not re-measured on the round-2 or round-3 text) |
 | G3 — every plan declares its mode; one format passes both gates | 4, 5, 6; 11 re-runs | `test-validate-plan.sh`; `test-ways-of-work-plans.sh` (both gates, each mutant named) | `test-validate-plan.sh` · 44 passed → 87 passed, 0 failed; two-gate test · 10/15 → 15/15 |
-| G4 (amended) — execution follows the mode on every path and runs through the campaign harness by default | 2 (baseline), 3, 6, 8; 11 re-runs; the card itself runs as a one-card campaign | evals 56, 61–64; the 3-card campaign dry-run; this plan's own dry-run over its 11 headings | pass count (56, 61–63) · measured in Task 2 → 4/4; dry-run exit 0 |
+| G4 (amended) — execution follows the mode on every path and runs through the campaign harness by default | 3, 6, 8, 9, 11; the card itself | the real end-to-end run: this card executes as a one-card campaign through orchestrate-campaign (D7, D9) and ships through it; the runner dry-run tests — the two-gate test's 3-card campaign (Task 6) and Task 11's dry run over this plan's 11 headings. Round-3 harness behaviour has no eval run during execution (owner ruling E1): its only eval measurement is the planning record in Task 2's file — evals 56, 61–64 on the prototype of Task 3's exact text | evals 56, 61–64 by majority, planning record · today 2/5 → prototype 5/5; dry runs exit 0 |
 | D1 — one home, `shaman.md` | 3, 7, 8, 9, 10 | counter (only `canonical` and `c3-215` remain; the issue's rows remove `c3-215`) | — |
-| D2 — single-agent builds inline; anti-goals amended | 3 | eval 61 | — |
-| D3 — the Shaman decides; asks when it judges it should | 3 | evals 57–60, 63 | — |
-| D4 — the final review is a plan task, ≤2 fix rounds | 3, 5, 11 | eval 62; `final_review_task_last` probes; Task 11 itself | — |
-| S1 — the reviewer judges the diff against every goal row and the scope fence | 3, 11 | the section and both light blocks (Task 3); Task 11's reviewer brief; eval 56 | — |
-| S2 — the PR body's `## Final review` section; the SHIPPED gate checks it | 3, 11 | the blocks and the SHIPPED gate text (Task 3); Task 11 Step 2; eval 56 | — |
+| D2 — single-agent builds inline (no-harness path since D7); anti-goals amended | 3 | the anti-goal text (Task 3); eval 64 in Task 2's planning record | — |
+| D3 — the Shaman decides; asks when it judges it should | 3 | the section's "Who decides" (Task 3); evals 57–60 in Task 2's planning record | — |
+| D4 — the final review is a plan task, ≤2 fix rounds | 3, 5, 11 | `final_review_task_last` probes (Task 5); Task 11 itself; eval 62 in Task 2's planning record | — |
+| S1 — the reviewer judges the diff against every goal row and the scope fence | 3, 11 | the section and both light blocks (Task 3); Task 11's reviewer brief | — |
+| S2 — the PR body's `## Final review` section; the SHIPPED gate checks it | 3, 11 | the blocks and the SHIPPED gate text (Task 3); Task 11 Step 2 | — |
 | S3 — the rubric counts build tasks only | 3 | the section's rubric row (Task 3); this plan's Way of work reasons | — |
 | N5 — no `.c3/` change; a self-contained C3 issue | 10 | the issue's rows applied to a scratch copy bring the counter to 1 | — |
-| D7 — the campaign harness for every mode, unless the owner explicitly says no | 3, 8, 9 | the section's harness part (Task 3); evals 56, 61, 63 (harness) and 64 (the exception) | — |
-| D9 — in Mode 1 the Shaman runs orchestrate-campaign on the approved card | 3, 8, 9 | Mode 1 steps 5–6 (Task 3), SKILL.md Stage A step 0 (Task 8), the snippet's step 6 (Task 9); evals 56, 61, 62 | — |
+| D7 — the campaign harness for every mode, unless the owner explicitly says no | 3, 8, 9 | the section's harness part (Task 3); the card's own run through the harness; evals 56, 61, 63 and 64 in Task 2's planning record | — |
+| D9 — in Mode 1 the Shaman runs orchestrate-campaign on the approved card | 3, 8, 9 | Mode 1 steps 5–6 (Task 3), SKILL.md Stage A step 0 (Task 8), the snippet's step 6 (Task 9); the card's own run; evals 56, 61, 62 in Task 2's planning record | — |
 | Round-3 item 4 — post-merge steps run by the orchestrating Shaman session | Way of work | the delivery paragraph above the File map | — |
 | D5 — `Executor:` keeps its key, gains `tribe` | 4 | "Executor: tribe is declared" / "a longer value is not tribe" probes | — |
-| D6 — single-agent ends with the final review too | 3, 5 | "single-agent with no final review task fails" probe; eval 61 | — |
+| D6 — single-agent ends with the final review too | 3, 5 | "single-agent with no final review task fails" probe (Task 5); eval 61 in Task 2's planning record | — |
+
+Plainly, per owner ruling E1: no eval runs while this plan executes, and nothing measures the
+harness behaviour of round 3 by eval after the build. The only eval numbers for G2 and G4 are the
+ones taken while planning, committed by Task 2 with the text and run count behind every cell —
+including which cells were never measured. During execution G4 is proved end to end instead: this
+card runs as a one-card campaign through orchestrate-campaign and ships through it, and the runner
+dry runs (Task 6's 3-card campaign, Task 11's run over this plan) exit 0.

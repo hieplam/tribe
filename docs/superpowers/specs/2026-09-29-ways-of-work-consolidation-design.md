@@ -1,6 +1,6 @@
 # Spec — Ways of work: one definition, owned by the Shaman (card `ways-of-work-consolidation`)
 
-Status: spec for review, round 3 (planning-only Warchief, 2026-09-30) · base `master` @ `632a039`
+Status: spec for review, round 3 with owner ruling E1 (planning-only Warchief, 2026-09-30) · base `master` @ `632a039`
 Card: `~/.tribe/-Users-home-repos-tribe/cards/ways-of-work-consolidation.md` (goals G1–G4 with the
 G4 amendment, rulings D1–D9, scope fence; round-1 rulings N1–N6, amendments S1–S3, R2-1) · Plan:
 `docs/superpowers/plans/2026-09-29-ways-of-work-consolidation.md` · C3 follow-up issue body:
@@ -21,6 +21,14 @@ G4 amendment, rulings D1–D9, scope fence; round-1 rulings N1–N6, amendments 
 > Shaman dispatching a full-build Warchief) remain only as the no-harness path. Every block was
 > re-grounded against the runner (§4.9), and this card itself runs as a one-card campaign (§4.10).
 > The Workflow tool as a mode (D8, #200) and any runner, watchdog or supervisor code change are out.
+
+> Owner ruling E1 (2026-09-30), verbatim: "stop eval, that's enough. commit plan measured then
+> implement." No eval runs while the plan executes — no `run_evals.py` call in any Red, Green or
+> Done. Task 2 commits the measurement taken while planning (§4.8) as
+> `docs/superpowers/evidence/2026-09-29-ways-of-work-evals-measured.md`, naming for every cell the
+> text it measured, its run count, and what was never measured; the cases stay committed in
+> `evals.json`, not run. G2's evidence is that record; G4 is proved by the real end-to-end run
+> (this card ships as a one-card campaign) and the runner dry runs (§7).
 
 > Base note: the card was grounded at `dbb0124`; `master` has since moved to `632a039` (PR #196,
 > "archive the mammoth-hunt skill"), which edited `shaman.md`, the brainstorm-together snippet and
@@ -71,7 +79,7 @@ sections) dry-runs clean and fails `validate-plan.sh` (no Way of work, no Hunter
 | C5 | A committed drift counter measures G1 before anything else is edited. | G1 ratchet |
 | C6 | Every other live file points to the section by name: `warchief.md`, orchestrate-campaign `SKILL.md`, the runner README, the plugin README, the claude-md snippet (and through `install.sh`, the installed `~/.claude/CLAUDE.md`). `c3-215` is left as it is (N5): the follow-up issue carries its exact rows. | G1, G4, N5 |
 | C7 | `install.sh` refreshes an already-installed snippet section in place (with a backup), so the snippet's new wording reaches the installed `CLAUDE.md` — today it never can. | G1 (installed copy) |
-| C8 | Evals 57–64 are added and eval 56 is rewritten (D3, S1–S2, D7, D9); round 3 reworks 56, 61, 62, 63 to the harness and adds 64 for the no-harness exception. | G2, G4 |
+| C8 | Evals 57–64 are added and eval 56 is rewritten (D3, S1–S2, D7, D9); round 3 reworks 56, 61, 62, 63 to the harness and adds 64 for the no-harness exception; committed, not run (E1), with the planning measurement beside them. | G2, G4 |
 | C10 | Mode 1 runs the approved card through the harness (D9): the Shaman runs `orchestrate-campaign` itself (Stage A without authorship: land the approved spec and plan, state, scaffold, dry run, launch), answers escalations, re-verifies, and runs the card's post-merge steps; step 6 (the owner's new session) is only the no-harness path. `orchestrate-campaign` drops its "not build this one card" exclusion and gains a Stage A step 0 for an approved card. | G4 (amended), D7, D9 |
 | C9 | A self-contained C3 follow-up issue body, committed at `docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md`: context, the c3x 11.0.0 defects with exact reproduction and output, the ADR body, the exact `c3-215` row replacements, acceptance. | N5 |
 
@@ -429,9 +437,17 @@ re-graded (grader calls only, no new executor runs): prototype 3/3 PASS, today 0
 The discriminating cases are 59, 60, 61, 63 and 56 — the card's stub checks (today's Mode 1 cannot
 pick or run `tribe`, never asks, briefs a session instead of running the harness, and builds a
 delegated card itself). 57, 58, 62 and 64 already pass today; they are regression guards, not
-ratchet movement. Today's summary over 56–64 is therefore `majority PASS: 4/9`; the target is 9/9. The plan's Red/Green use
-`--runs 3` and a majority rule per case (one sample cannot separate a regression from model variance,
-`scripts/evals/README.md`).
+ratchet movement. Today's summary over 56–64 is therefore `majority PASS: 4/9`; the prototype's is
+9/9 — 56 and 61–64 on the round-3 text (which plan Task 3 writes byte for byte), 57–60 on the
+round-1 text.
+
+**Owner ruling E1 — this is the whole eval measurement.** No eval runs while the plan executes.
+Task 2 commits the numbers above as
+`docs/superpowers/evidence/2026-09-29-ways-of-work-evals-measured.md`, one row per committed case
+with the text each cell measured and its run count, and names what was never measured: 57–60 on
+the round-2 or round-3 text; three runs on today's text for 56–60 (each had one); any case after
+the build. The plan's Verify blocks are all mechanical (the drift counter, the section check, both
+validators, the two-gate test, the install test, the runner dry runs).
 
 ### 4.9 The runner, grounded (round 3, D7) — what each block must be true under
 
@@ -441,7 +457,7 @@ Read from the runner's code and README at `632a039`, not assumed:
 | --- | --- | --- |
 | One executor session per card, one turn per plan task, ended by `TASK_DONE <task-id> <branch>`; the runner then runs the Done commands of tasks 1..k from a clean checkout | README "Turns and the Done run"; `core/done.ts` | each light block: "under the campaign harness … one turn per task, each turn ended with `TASK_DONE`"; Done sections stay mandatory (G3) |
 | No limit on tool calls or subagents in a turn: the executor's SDK options set no `maxTurns` (only the supervisor's own sessions have `--session-max-turns`, default 60); one turn's wall clock is `--session-timeout`, default 3 h | `core/session.ts` `buildSessionOptions`; `cli/main.ts:51` | the final review's reviewers and fix rounds all run inside the review task's turn |
-| A Bash call is capped at 10 minutes and must run in the foreground; a background call is denied by a hook | `core/brief-template.md` "Session liveness"; `decideBackgroundingHook` | the plan splits each eval pass into three calls of 9 jobs (one wave each) |
+| A Bash call is capped at 10 minutes and must run in the foreground; a background call is denied by a hook | `core/brief-template.md` "Session liveness"; `decideBackgroundingHook` | no plan command approaches the cap (E1 removed the eval passes, the only long commands); the two-gate test bounds its own runner calls |
 | At most 3 unaccepted turns per task (`MAX_STEP_ATTEMPTS = 3`: a failed Done run or a protocol error), then the card escalates `done_failed` | `core/done.ts:8`; README "The 3-attempt budget" | the review's 2-fix-round cap is separate from, and inside, the runner's budget |
 | `NEEDS_DIRECTION: <q>` at any step → a `needs_direction` escalation; the card parks; the ruling in `answers.md` reaches only a freshly spawned session, and a card whose session ended is re-spawned fresh, at the first task without `passedSha` | README "The step order"; `SKILL.md` Stage C | a review still failing after 2 fix rounds ends the turn with `NEEDS_DIRECTION:`; the ruling starts the review task over |
 | After a quota pause or a failed resume the next turn can be a fresh session with no memory; the brief names the campaign home, whose `reports/` directory is the executor's to use | README "Resume semantics"; brief template "Notes for your plan" | every review round's report is written to the campaign home's `reports/`; the deliver turn writes the PR's `## Final review` from them |
@@ -454,7 +470,8 @@ splitting long commands, as the brief already instructs.
 Measured on this prototype: a `claude -p` executor that could not run the harness (the eval's
 scratch directory is no git repository) fell back to building a delegated `single-agent` card in
 its own session, reading "no harness" into "cannot run the harness". The section now says a
-harness that cannot run blocks the card and falling back is the owner's call (eval 61 pins it).
+harness that cannot run blocks the card and falling back is the owner's call (eval 61 pinned it
+while planning: 3/3 on the corrected text).
 
 ### 4.10 This card through the harness (G4 end-to-end)
 
@@ -466,7 +483,8 @@ with a state built from the current headings: exit 0, `{"cardId":"ways-of-work-c
 "phase":{"kind":"fresh"}}` — then launches. The plan says so in its Global Constraints (the executor
 works on its own card branch; reports under the campaign home's `reports/`) and its Way of work
 (the harness drives it). Task 11's review runs inside its turn and writes its reports there; the
-deliver turn pastes the `## Final review` section. The card's post-merge steps — `./install.sh
+deliver turn pastes the `## Final review` section; Task 11's own Green repeats that dry run over the
+plan's headings with a scratch campaign home. The card's post-merge steps — `./install.sh
 tribe` with the `--also` count, and the #199 issue sync — are run by the orchestrating Shaman
 session after the runner reports the card shipped and it re-verified it (round-3 item 4), never by
 the headless executor. Measured today on this machine: `doctor.sh` (Stage B's preflight) reports
@@ -502,9 +520,9 @@ remedy, `bun install` in `plugins/tribe/scripts/runner`, runs before the launch.
 | Goal | Before (measured by the committed tool) | After (target) |
 | --- | --- | --- |
 | G1 | drift counter: 9 (10 with `--also ~/.claude/CLAUDE.md`) — `docs/superpowers/evidence/2026-09-29-ways-of-work-drift-baseline.txt` (Task 1) | 2 in the repo — the canonical section and `c3-215`, nothing else (ruling N5); 2 with `--also` on the installed copy after `./install.sh tribe`; 1 once the C3 follow-up lands (Task 10 proves it on a scratch copy) |
-| G2 | evals 57–60 majority pass count — `docs/superpowers/evidence/2026-09-29-ways-of-work-evals-baseline.txt` (Task 2) | 4/4 |
+| G2 | evals 57–60 by majority, measured while planning and committed by Task 2 (`docs/superpowers/evidence/2026-09-29-ways-of-work-evals-measured.md`): today 2/4 | the round-1 prototype 4/4 — the planning record; E1: no eval runs during execution |
 | G3 | `test-validate-plan.sh` 44 passed; the two-gate test 10/15 on the Task 3 tree | 87 passed, 0 failed; 15 passed, `V-WOW=PASS` |
-| G4 (amended: follows the mode and runs through the campaign harness by default) | evals 56, 61–64 majority pass count (Task 2); the 3-card campaign dry-run (in the two-gate test); this card's own one-card campaign dry-run | 5/5; exit 0; exit 0, then the card itself ships through the harness |
+| G4 (amended: follows the mode and runs through the campaign harness by default) | evals 56, 61–64 by majority, the planning record (Task 2): today 2/5; the 3-card campaign dry-run (in the two-gate test); this card's own one-card campaign dry-run (Task 11) | the round-3 prototype 5/5 — the planning record, no eval run after the build (E1); exit 0; exit 0; then the real end-to-end run: the card itself ships through the harness |
 
 The PR body carries each before → after with the command that measured it.
 
@@ -516,7 +534,7 @@ The PR body carries each before → after with the command that measured it.
 | A block's wording is edited in `shaman.md` and every open plan fails `mode_block_copied` | By design (a plan copies the current block); the fix is re-copying, the failure names it |
 | The hook overwrites the owner's hand edit of a snippet section | Backup + warning naming it; covered by the refresh tests |
 | The Shaman over-picks `tribe` | Rubric + tie-break to the lighter mode; evals 57–58 pin the light picks |
-| LLM eval variance flips a case | `--runs 3`, majority rule; a flip below majority is investigated, not waved through |
+| The eval numbers describe the prototype text, not a run on the merged text (E1) | Task 3 writes the round-3 prototype byte for byte and its Green checks the section; the evidence file names every unmeasured cell; the cases stay committed for a later run |
 
 Rollback: every change is prompt text, one script, two tests and docs — `git revert` of the merge
 commit restores today's behaviour; the installed `CLAUDE.md` is restored from its
@@ -532,7 +550,7 @@ calls remain for the Shaman to confirm or overturn:
   a Shaman whose harness could not run (no git repository) read D7's "unless the user explicitly
   says don't" as licence to fall back to building in its own session. Options: (a) the section
   says a harness that cannot run is not the exception — the card is blocked and the owner decides
-  (what the plan does; eval 61 pins it); (b) let the Shaman fall back on its own judgment.
+  (what the plan does; eval 61 pinned it while planning); (b) let the Shaman fall back on its own judgment.
   Recommendation: (a) — D7 names one exception, the owner's words; a silent fallback would make the
   heavy harness optional in exactly the cases nobody checks.
 - **R3-2 — D9's Stage A still lands the approved spec and plan first.** Context: the runner reads
