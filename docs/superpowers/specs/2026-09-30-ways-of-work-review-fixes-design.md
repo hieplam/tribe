@@ -372,3 +372,35 @@ round's `REVIEW:` line and findings). No screenshot applies: every goal is text 
   harness's 10-minute foreground limit.
 - **Rollback:** one PR, regular merge; `git revert -m 1 <merge>` restores every file, and
   `./install.sh tribe` then restores the installed snippet (it refreshes the section again).
+
+## 9. Open questions for the Shaman (none blocks the plan; each has a recommendation)
+
+- **Q1 — F6 needs one more text edit than A1 named.** A plain copy of `SKILL.md`'s step 1 into the
+  template turns the Tribe-free test red (the word "shaman"). Options: (a) reword step 1's pointer to
+  "the verdict rule of the card's own plan (its `## Way of work`)", then copy (planned, Task 6);
+  (b) exempt the word from the Tribe-free lexicon (changes the runner-driver-only D6 oracle);
+  (c) drop the Final review check from the closing brief (loses PR #202's R2-1 for supervisor-run
+  campaigns). Recommendation: (a) — text only, both tests green, the check kept.
+- **Q2 — no documented whole-suite command.** Options: (a) this plan's final review runs its own
+  41-suite list (planned, Task 9, kept under `$REPORTS`, not committed); (b) commit a `test-all`
+  script and name it in the README's "Development" block, so D-F7's "the repo's documented check
+  command" exists for every later card. Recommendation: (a) now, (b) as a follow-up paired with the
+  owner's test-CI decision (A1).
+- **Q3 — slow and unbounded suites.** On `master`, `test-review-cell-v3.sh` ran over 16 minutes
+  without finishing (its pass case re-sweeps every shell suite through `pre-gate.sh`), and
+  `test-runner-done-negative.sh` took 953 s and failed 3 checks; in both runs `timeout` did not stop
+  them at its bound on this machine. The final review's whole-suite step may therefore take long, and
+  a suite may outlive its bound. Options: (a) accept, treat both as inherited (Adjudication item 4),
+  file a follow-up to make them bounded; (b) exclude them from the whole suite by ruling.
+  Recommendation: (a).
+- **Q4 — a naming convention for governance tasks.** "Build tasks" is mechanical only if a governance
+  task can be recognised; the plan adds "headed `Task N: Governance …`" to the section (the form PR
+  #202's plan used). Options: (a) adopt (planned); (b) let `single-agent` exclude only the final
+  review. Recommendation: (a).
+- **Q5 — inherited failures on `master`, outside this card's fence.** `watchdog-integration.test.ts`
+  "G2 — skip when alive" (2 tests), `test-input-asymmetry.sh`, `test-runner-done-negative.sh`,
+  `test-review-cell-v3.sh` (Q3). Recommendation: one follow-up issue listing them with their repro
+  commands; watchdog and runner code are out of this card.
+- **Q6 — signal wording calls made here** (the card gives signal wording to the Shaman): the
+  `review-verdict` signal, the two-line join, and `task-limit`'s "build tasks". Recommendation: keep
+  all three; the join alone found anti-goal 1's restatement.
