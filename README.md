@@ -44,6 +44,11 @@ Behaviour: `agents/*.md` link into `~/.claude/agents/`, `skills/<name>/` into
 file is backed up to `<name>.bak.<epoch>` first, and a plugin's own `install.sh` runs as a
 post-install hook. `CLAUDE_DIR` overrides the target root (used by the tests).
 
+The `tribe` plugin's hook appends each `claude-md/` snippet to `~/.claude/CLAUDE.md` once. When a
+snippet changes, re-running `./install.sh tribe` refreshes that snippet's installed section in
+place and keeps the previous file as `~/.claude/CLAUDE.md.bak.<epoch>`, so an edit you made to
+that section by hand is never lost.
+
 The `tribe` plugin's hook also puts the **`tribe` command** on your PATH — a symlink at
 `~/.local/bin/tribe` (`TRIBE_BIN_DIR` overrides the directory; the hook warns if it is not on
 PATH). Type `tribe` anywhere to start the session viewer and open it in the browser; `tribe
