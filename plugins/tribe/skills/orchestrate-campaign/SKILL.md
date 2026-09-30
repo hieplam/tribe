@@ -5,7 +5,7 @@ description: >-
   in between except the irreversible few. Trigger on "orchestration", "orchestrate these ideas",
   "run these N cards", "do these tasks in orchestration", or any request to run approved
   cards unattended end-to-end from any session — the main chat, a Shaman, or a Warchief. It is
-  the campaign harness every approved plan runs through by default, including ONE approved card:
+  the campaign harness of the "Ways of work" section of `agents/shaman.md`, for ONE approved card too:
   a Shaman runs it after the owner approves (or delegates) a Mode 1 card. Use this whenever the
   ask is "run these approved cards — one or N — and tell me when they're shipped or blocked",
   not "what should we build" (that's roadmap authorship, What/Why — a different job). This skill
@@ -59,7 +59,7 @@ value belongs in the campaign's own docs, not here.
 ### Stage A — Planning (you author the handoff)
 
 0. **A card whose spec and plan are already approved** — a Shaman's Mode 1 card, run through this
-   harness by default ("The campaign harness" in `agents/shaman.md` "Ways of work") — skips
+   harness as "The campaign harness" in `agents/shaman.md` "Ways of work" says — skips
    authorship: skip steps 1, 2, 2b and 5 (its plan already carries its mode's block and a Done
    section per task). Do step 6 — the planning branch that holds the approved spec and plan is
    that PR, merged to the base branch, because the runner reads the plan there and every executor
@@ -581,8 +581,8 @@ the owner reads:
    that a card shipped is not evidence on its own. Treat a `verify-shipped` failure as `blocked`,
    not `shipped`, in your final report. For a `single-agent` or `subagent-per-task` card, also read
    the PR body (`gh pr view <pr> --json body`): its `## Final review` section must exist and end
-   `REVIEW: PASS` (the "Ways of work" section of `agents/shaman.md`); a missing or failing section
-   is reported as `blocked`, not `shipped`.
+   `REVIEW: PASS` under the verdict rule of the card's own plan (its `## Way of work`); a missing
+   or failing section is reported as `blocked`, not `shipped`.
 2. **You can also recover which commits belong to this campaign directly from git.** Every
    commit a card's executor session made should carry a `Campaign: <campaign-slug>` git trailer
    — the runner's executor brief instructs it (see the runner README's "Campaign commit
@@ -725,9 +725,8 @@ A `tribe` card's plan copies the `tribe` block from the "Ways of work" section o
 and ends with the "Harness-gap gate" task below.
 
 ```markdown
-- In this campaign the executor session is the Warchief the block names. The runner still drives
-  the tasks in order and runs each task's Done commands itself; end a task's turn only after its
-  audit closed.
+- The runner still drives the tasks in order and runs each task's Done commands itself; end a
+  task's turn only after its audit closed.
 - Every dispatched worker (Hunter, Skinner) writes its report under the campaign home's `reports/`
   directory (the brief names the campaign home), with the gate output it relied on pasted
   verbatim.

@@ -174,3 +174,69 @@ test('an unreadable --also file refuses with exit 2', () => {
   expect(main(['--repo', repo, '--also', join(dir, 'missing.md')])).toBe(2);
   expect(errors.join('\n')).toContain('--also');
 });
+
+// --- Card ways-of-work-review-fixes (G1): the harness default, who executes, the verdict rule ---
+// Oracle: that card's G1 row. Every restating sentence below was live on master @ b90f1c4 and went
+// uncounted; every pointer below is the rewording that replaces one of them.
+
+test('the harness, who-executes and verdict signals catch the rule sentences they name', () => {
+  const cases: [string, string][] = [
+    ['Every approved plan, in every mode, runs through the campaign harness', 'harness-default'],
+    ['the campaign harness every approved plan runs through by default, including ONE approved card', 'harness-default'],
+    ['a one-card campaign, the default for every way of work', 'harness-default'],
+    ['one consolidated report; the default harness for every approved plan', 'harness-default'],
+    ['execution follows the block exactly, driven by the campaign harness unless the owner said not to', 'harness-off'],
+    ['only when the owner says not to use the harness does it brief', 'harness-off'],
+    ['a harness that cannot run blocks the card — never fall back on your own', 'harness-off'],
+    ["| No harness, the owner's explicit words only — Mode 1, the owner delegates |", 'harness-off'],
+    ["it brief the owner's new session via SendMessage", 'who-executes'],
+    ['drive the work from its own session on delegation', 'who-executes'],
+    ['or dispatch a full-build Warchief for `tribe`', 'who-executes'],
+    ["| the runner's executor session builds inline |", 'who-executes'],
+    ['building a `single-agent` plan inline when the owner delegated it', 'who-executes'],
+    ['- In this campaign the executor session is the Warchief the block names.', 'who-executes'],
+    ["then run the card's own post-merge steps yourself", 'who-executes'],
+    ['beyond a delegated no-harness `single-agent` plan', 'who-executes'],
+    ['and a Mode 1 `tribe` card run without the campaign harness', 'who-executes'],
+    ['| `single-agent` | At most 2 build tasks, roughly 50 changed lines |', 'task-limit'],
+    ['3 to about 8 build tasks done in order', 'task-limit'],
+    ['ends with `REVIEW: FAIL` when any finding is Should-fix or worse', 'review-verdict'],
+    ['a `REVIEW: PASS` that lists a Should-fix finding counts as `REVIEW: FAIL`', 'review-verdict'],
+    ['a failure the base branch does not have is at least Should-fix', 'review-verdict'],
+  ];
+  for (const [line, signal] of cases) expect([line, signalOf(line)]).toEqual([line, expect.arrayContaining([signal])]);
+});
+
+test('a pointer to "Ways of work", and a harness that is not the campaign harness, state no rule', () => {
+  const pointers = [
+    'execute the approved card on the path "Who executes, on each path" in "Ways of work" names, as "The campaign harness" there describes',
+    'This step is the no-harness path of "Who executes, on each path" in "Ways of work".',
+    'Where that table names a full-build `warchief` instead, it runs under the Shaman ⇄ Warchief contract',
+    'the campaign harness of the "Ways of work" section of `agents/shaman.md`, for ONE approved card too',
+    '**Scope: Modes 2–3, and every full-build Warchief "Ways of work" has you dispatch in Mode 1.**',
+    'on the one path where "Who executes, on each path" in "Ways of work" names your own session as a `single-agent` plan\'s builder',
+    'the harness-gap gate runs by default on every PR',
+    'resolves to the eval harness default (no `--model` flag passed)',
+    'One file that renders correctly with no local build step: inline the CSS and JS',
+    '**Should-fix** — the validator does not mirror the runner',
+    'D18 is a settled decision that outranks any Should-fix to the contrary',
+  ];
+  for (const line of pointers) expect([line, signalOf(line)]).toEqual([line, []]);
+});
+
+test('a rule sentence wrapped across two lines is caught, on the line it starts on', () => {
+  const text = ['intro', 'when the owner delegated the plan and said not to', 'use the campaign harness, you write it', 'end'].join('\n');
+  const report = findPlaces([{ path: 'README.md', text }], POLICY);
+  expect(report.places[0]?.hits.map((h) => [h.line, h.signal])).toEqual([[2, 'harness-off']]);
+});
+
+test('a rule sentence wholly on the next line is that line\'s hit, never counted twice', () => {
+  const report = findPlaces([{ path: 'README.md', text: 'intro\na harness that cannot run blocks the card\n' }], POLICY);
+  expect(report.places[0]?.hits.map((h) => [h.line, h.signal])).toEqual([[2, 'harness-off']]);
+});
+
+test('the join never crosses the canonical section boundary', () => {
+  const text = ['## Ways of work', 'this applies to every approved plan', '## The harness', 'nothing'].join('\n');
+  const report = findPlaces([{ path: 'agents/shaman.md', text }], POLICY);
+  expect(report).toEqual({ count: 0, places: [] });
+});

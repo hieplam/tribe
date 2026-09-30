@@ -372,9 +372,9 @@ a plan. A `## Way of work` section gives the card's reasons for its mode and the
 mode's block from that section, verbatim. A full-build dispatch — you orchestrate Hunters and the
 Skinner audit — is the `tribe` block. A planning-only dispatch copies the block of the mode the
 card records; a card that records none is a `NEEDS_DIRECTION` (the mode is the Shaman's call).
-Every approved plan runs through the campaign harness unless the owner said not to, so a planned
-`tribe` plan also copies orchestrate-campaign's "tribe cards — campaign plan additions" after its
-block and ends with the Harness-gap gate task given there.
+A planned `tribe` plan also copies orchestrate-campaign's "tribe cards — campaign plan additions"
+after its block and ends with the Harness-gap gate task given there, as "The campaign harness" in
+that section requires.
 Every task also ends in a **Done** section — a `Done` heading one level below the task heading,
 then one fenced block of shell commands, one per line, before the task's Commit step — so the
 campaign runner can run the same plan; and a plan in either light mode ends with its
