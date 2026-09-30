@@ -64,7 +64,8 @@ plan single-agent cat 'Build' 'Final review' > "$P/single-agent.md"
 plan subagent-per-task cat 'Build one' 'Build two' 'Final review' > "$P/subagent-per-task.md"
 plan tribe cat 'Build one' 'Build two' > "$P/tribe.md"
 plan subagent-per-task cat 'Build one' 'Build two' 'Build three' > "$P/m-no-review.md"
-plan single-agent cat 'Build one' 'Build two' 'Final review' > "$P/m-single-three.md"
+plan single-agent cat 'Build one' 'Build two' 'Final review' > "$P/single-agent-two.md"
+plan single-agent cat 'Build one' 'Build two' 'Build three' 'Final review' > "$P/m-single-three.md"
 plan tribe 'head -n 1' 'Build one' 'Build two' > "$P/m-tribe-no-block.md"
 plan subagent-per-task 'grep -v "^Executor:"' 'Build one' 'Final review' > "$P/m-undeclared.md"
 plan subagent-per-task cat 'Build one' 'Final review' | python3 -c "
@@ -124,9 +125,14 @@ for mode in single-agent subagent-per-task tribe; do
   check "$mode plan: runner --dry-run exit" "$(dry_run "$TMP/h-$mode")" "0"
 done
 
+# --- single-agent's limit counts build tasks: 2 of them and the final review pass both gates --
+check "single-agent plan, 2 build tasks and its final review: validate-plan.sh verdict" "$(verdict single-agent-two)" "pass"
+home "$TMP/h-single-agent-two" "C1=single-agent-two"
+check "single-agent plan, 2 build tasks and its final review: runner --dry-run exit" "$(dry_run "$TMP/h-single-agent-two")" "0"
+
 # --- Each mutant fails with a named reason --------------------------------------------------
 check "subagent-per-task without a final review task: named check" "$(failing m-no-review)" "final_review_task_last"
-check "single-agent with 3 tasks: named check" "$(failing m-single-three)" "single_agent_within_limit"
+check "single-agent with 3 build tasks and its final review: named check" "$(failing m-single-three)" "single_agent_within_limit"
 check "tribe without its audit block: named check" "$(failing m-tribe-no-block)" "mode_block_copied"
 check "an undeclared mode: named checks" "$(failing m-undeclared)" "way_of_work_declared,mode_block_copied"
 check "a task without the runner's Done section: named check" "$(failing m-no-done)" "tasks_have_done_block"

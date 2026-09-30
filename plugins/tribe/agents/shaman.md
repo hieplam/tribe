@@ -282,9 +282,13 @@ harness-gap gate task given there.
 
 | Mode (`Executor:` value) | Use it when (the rubric) | How it runs |
 | --- | --- | --- |
-| `single-agent` | At most 2 tasks, roughly 50 changed lines outside tests, one component, and an obvious oracle. | The executing session builds every task itself, inline — no implementer subagent. Then the final review task. |
-| `subagent-per-task` (the default) | The design and requirements are settled (the common case: the owner and the Shaman hold the high-level picture), 3 to about 8 build tasks done in order (the final review and phase-end governance tasks do not count), and every defect would surface in some task's Green or in the plan's end-to-end check. | One fresh `general-purpose` subagent per task, in order; the orchestrating session re-runs each task's Green before the next. The plan's last task is the final review. |
+| `single-agent` | At most 2 build tasks, roughly 50 changed lines outside tests, one component, and an obvious oracle. | The executing session builds every task itself, inline — no implementer subagent. Then the final review task. |
+| `subagent-per-task` (the default) | The design and requirements are settled (the common case: the owner and the Shaman hold the high-level picture), 3 to about 8 build tasks done in order, and every defect would surface in some task's Green or in the plan's end-to-end check. | One fresh `general-purpose` subagent per task, in order; the orchestrating session re-runs each task's Green before the next. The plan's last task is the final review. |
 | `tribe` | A bug could pass every Verify block we can write in advance: concurrency, crash/resume, state machines, permission surfaces, parsers of hostile input, data migration, cross-component contracts, multi-PR work, or a past bug that escaped a single review. Very heavy — use it rarely. | The full tribe delivery: a full-build Warchief, a Hunter per task, the two-lens Skinner audit per task, the Warchief adjudicating with its own fix loop, the harness-gap gate, PR, merge (`agents/warchief.md` Method steps 4–8, unchanged). |
+
+**Build tasks.** Both task limits count build tasks: every task except the final review
+(`Task N: Final review`) and a phase-end governance task, headed `Task N: Governance` followed by
+what it brings up to date. `validate-plan.sh` counts the `single-agent` limit this way.
 
 **Tie-break.** When two modes fit, pick the lighter mode and write down, next to the choice, what
 would justify the heavier one.

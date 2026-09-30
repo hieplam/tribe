@@ -691,6 +691,27 @@ whole_probe single-agent u r
 whole_probe subagent-per-task u u r
 whole_probe tribe u u
 
+# --- single-agent counts build tasks: the final review and governance tasks do not count -------
+# gov_task N — a phase-end governance task, complete: its heading starts "Task N: Governance".
+gov_task() {
+  printf '### Task %s: Governance — the READMEs\n\n' "$1"; verify_block
+  printf '#### Done\n\n```bash\ntrue\n```\n\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m "docs: %s"\n```\n\n' "$1"
+}
+limit_probe() { # limit_probe NAME WANT TASKS... — a single-agent plan; TASKS are u (build), g (governance), r (final review)
+  local f="$TMP/limit-$RANDOM.md" name="$1" want="$2" n=0; shift 2
+  { wow_plan single-agent "$HUNTER" cat
+    for kind in "$@"; do n=$((n+1))
+      case "$kind" in r) review_task "$n" ;; g) gov_task "$n" ;; *) task_with "$n" "$TMP/vb.md" ;; esac
+    done; } > "$f"
+  bash "$SCRIPT" "$f" > "$f.json"
+  check "$name" "$(find_check "$f.json" single_agent_within_limit)" "$want"
+  check "$name — verdict" "$(jget "$f.json" verdict)" "$want"
+}
+limit_probe "single-agent: 2 build tasks and the final review pass" pass u u r
+limit_probe "single-agent: 3 build tasks and the final review fail" fail u u u r
+limit_probe "single-agent: 2 build tasks, a governance task and the final review pass" pass u u g r
+limit_probe "single-agent: 3 build tasks, a governance task and the final review fail" fail u u u g r
+
 # --- The runner's duplicate_heading refusal (plan-index.ts resolveOne), mirrored ------------
 # The runner resolves a task by its heading text and refuses a text that matches two headings;
 # accepting such a plan is the under-read the Done mirror's oracle calls a bug.

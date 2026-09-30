@@ -32,7 +32,8 @@
 #     with no code)
 #   - a "Way of work" section declares "Executor: single-agent", "Executor: subagent-per-task"
 #     or "Executor: tribe" (the modes of shaman.md "Ways of work"), and single-agent stays within
-#     its task limit (SINGLE_AGENT_MAX_TASKS below)
+#     its build-task limit (SINGLE_AGENT_MAX_BUILD_TASKS below; the final review and phase-end
+#     governance tasks do not count)
 #   - each task section resolves the way the campaign runner resolves it (runner/core/plan-index.ts):
 #     its heading matches no other heading in the file, and its Done section is read exactly the
 #     way the runner reads it, so the same plan also passes the runner's --dry-run
@@ -330,12 +331,15 @@ checks.append({
 # 4c. the plan declares how it is executed, in a "Way of work" section, on a line
 # "Executor: <mode>" naming one of the three modes defined in shaman.md "Ways of work" (the one
 # definition of the modes and their rubric — this check reads only the declaration). The
-# single-agent task limit below mirrors that section's rubric; the change-size half of the
-# rubric is judged by the plan reviewer, not here.
+# single-agent limit below mirrors that section's rubric, which counts build tasks: every task
+# except the final review ("Task N: Final review") and a phase-end governance task ("Task N:
+# Governance ..."). The change-size half of the rubric is judged by the plan reviewer, not here.
 EXECUTOR_RE = re.compile(
     r"^\s*(?:(?:[-*+]|\d+[.)])\s+)?(?:\*\*)?executor(?:\*\*)?\s*:(?:\*\*)?\s*`?(single-agent|subagent-per-task|tribe)(?![\w-])",
     re.IGNORECASE)
-SINGLE_AGENT_MAX_TASKS = 2
+SINGLE_AGENT_MAX_BUILD_TASKS = 2
+FINAL_REVIEW_RE = re.compile(r"^task\s+\d+\s*[:.\u2013\u2014-]\s*final review\b", re.IGNORECASE)
+GOVERNANCE_TASK_RE = re.compile(r"^task\s+\d+\s*[:.\u2013\u2014-]\s*governance\b", re.IGNORECASE)
 wow_sections = [s for s in sections if re.match(r"^(?:\d+[.)]\s*)?way of work\b", s["title"], re.IGNORECASE)]
 executor = None
 for s in wow_sections:
@@ -358,13 +362,16 @@ checks.append({
     "status": "pass" if executor else "fail",
     "detail": wow_detail,
 })
-single_agent_over_limit = executor == "single-agent" and len(task_sections) > SINGLE_AGENT_MAX_TASKS
+build_tasks = [s for s in task_sections
+               if not FINAL_REVIEW_RE.match(s["title"]) and not GOVERNANCE_TASK_RE.match(s["title"])]
+single_agent_over_limit = executor == "single-agent" and len(build_tasks) > SINGLE_AGENT_MAX_BUILD_TASKS
 checks.append({
     "name": "single_agent_within_limit",
     "status": "fail" if single_agent_over_limit else "pass",
-    "detail": f"single-agent allows at most {SINGLE_AGENT_MAX_TASKS} tasks; this plan has "
-              f"{len(task_sections)}" if single_agent_over_limit
-              else f"executor {executor or 'undeclared'}, {len(task_sections)} task(s)",
+    "detail": f"single-agent allows at most {SINGLE_AGENT_MAX_BUILD_TASKS} build tasks (the final review "
+              f"and governance tasks do not count); this plan has {len(build_tasks)}" if single_agent_over_limit
+              else f"executor {executor or 'undeclared'}, {len(build_tasks)} build task(s) of "
+                   f"{len(task_sections)} task(s)",
 })
 
 # 4d. a `tribe` plan names the Hunter as its implementer in Global Constraints (warchief.md
@@ -536,8 +543,8 @@ else:
 
 # 4g. a plan in either light mode ends with its final review task (shaman.md "Ways of work",
 # "The final review"): the LAST task section's title is "Task N: Final review". A tribe plan has
-# no such task — the Warchief's own audit reviews it.
-FINAL_REVIEW_RE = re.compile(r"^task\s+\d+\s*[:.\u2013\u2014-]\s*final review\b", re.IGNORECASE)
+# no such task — the Warchief's own audit reviews it. FINAL_REVIEW_RE is defined with the
+# single-agent limit (4c).
 if executor in ("single-agent", "subagent-per-task"):
     last_title = task_sections[-1]["title"] if task_sections else ""
     ends_in_review = bool(FINAL_REVIEW_RE.match(last_title))
