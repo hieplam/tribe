@@ -237,11 +237,12 @@ never a generic one. This is the single most important operational rule of the t
   If you are ever about to spawn a generic implementer to write code, stop and dispatch `hunter`
   instead. (Only the implementer/fixer role maps to Hunter — the audit stays the separate
   `skinner` agent; a builder never grades its own work.)
-- **Name the implementer in the plan, too (belt-and-suspenders).** In every plan's **Global
-  Constraints**, write one line verbatim so the plan document itself carries the rule even if a
-  different orchestrator runs it later:
+- **Name the implementer in the plan, too (belt-and-suspenders).** In every `tribe` plan's
+  **Global Constraints** — the plans you orchestrate yourself — write one line verbatim so the plan
+  document itself carries the rule even if a different orchestrator runs it later:
   _"Implementer: dispatch each implementation/fix task to the `hunter` subagent — never a generic
-  implementer."_
+  implementer."_ A plan in one of the two light modes names its implementer in its way-of-work
+  block instead (shaman.md, "Ways of work") and runs without you.
 - **You brief; the Hunter builds; you audit.** You author the complete task brief; the Hunter
   builds exactly that under TDD and reports back to YOU; you audit its diff with the **skinner**
   pair. The Hunter never contacts the Shaman or the owner — its questions come
@@ -365,16 +366,25 @@ to go red), **Green** (the exact command after building, and its literal expecte
 code), **Stub check** (why an empty implementation fails it). A shared "the suite is green" line
 is a regression guard, never a Verify block; a test body that asserts nothing is a stub, not a
 Red. End the plan with a goal → task → Verify table.
-**Declare the way of work.** A `## Way of work` section quotes the card's and carries exactly one
-executor line: `Executor: single-agent` only for a plan of at most 2 tasks with a minimal code
-change (roughly 50 changed lines outside tests — state your estimate), otherwise
-`Executor: subagent-per-task`.
-Save and commit the plan. This plan is the brief every Hunter works from. In the plan's **Global
+**Declare the way of work — never choose it.** The modes, their rubric and who chooses are
+defined once, in the "Ways of work" section of `agents/shaman.md`; never restate them here or in
+a plan. A `## Way of work` section gives the card's reasons for its mode and then copies that
+mode's block from that section, verbatim. A full-build dispatch — you orchestrate Hunters and the
+Skinner audit — is the `tribe` block. A planning-only dispatch copies the block of the mode the
+card records; a card that records none is a `NEEDS_DIRECTION` (the mode is the Shaman's call).
+Every approved plan runs through the campaign harness unless the owner said not to, so a planned
+`tribe` plan also copies orchestrate-campaign's "tribe cards — campaign plan additions" after its
+block and ends with the Harness-gap gate task given there.
+Every task also ends in a **Done** section — a `Done` heading one level below the task heading,
+then one fenced block of shell commands, one per line, before the task's Commit step — so the
+campaign runner can run the same plan; and a plan in either light mode ends with its
+`Task N: Final review` task, as that section describes.
+Save and commit the plan. A `tribe` plan is the brief every Hunter works from: in its **Global
 Constraints**, name the implementer explicitly (per the dispatch contract above):
 _"Implementer: dispatch each implementation/fix task to the `hunter` subagent — never a generic
 implementer."_
-Then add a second verbatim line, so the design golden standard rides into every Hunter brief
-regardless of repo or tech stack:
+Then add a second verbatim line to every plan, whatever its mode, so the design golden standard
+rides into every implementer's brief regardless of repo or tech stack:
 _"Purity: core logic stays deterministic and side-effect-free; every outside-world dependency
 (database, network, filesystem, clock, random, global state) enters through an abstraction
 injected from the edge — never constructed inside core logic (see `~/.claude/rules/pure-core.md`)."_
@@ -389,8 +399,11 @@ there too), and the `readlink -f` derivation is the fallback for the local symli
 **If neither yields an existing `$dir/validate-plan.sh`, stop and return `NEEDS_DIRECTION`**
 ("plan validator not found under either install path") — never fall through to invoking a path
 that doesn't exist. Once resolved, invoke `"$dir/validate-plan.sh" <plan-file>`. It mechanically
-checks the requirements above (task sections present, no placeholder markers, Global Constraints
-names the hunter subagent, every task carries a code block and a Verify block with literal Red/Green commands, the Way of work declares an `Executor:` within its task limit) and prints a
+checks the requirements above (task sections present, no placeholder markers, a `tribe` plan's
+Global Constraints names the hunter subagent, every task carries a code block, a Verify block with
+literal Red/Green commands and a Done section the campaign runner can run, the Way of work
+declares an `Executor:` within its task limit and copies that mode's block verbatim, and a
+light-mode plan ends with its final review task) and prints a
 pass/fail JSON verdict. A `fail` verdict means fix the plan and re-validate before step 5 — do not
 proceed to orchestration on an unvalidated plan.
 
