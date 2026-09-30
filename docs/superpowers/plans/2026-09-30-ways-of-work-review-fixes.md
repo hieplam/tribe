@@ -63,6 +63,22 @@ D-F7, Amendment A1) · **Spec:** `docs/superpowers/specs/2026-09-30-ways-of-work
   `single-agent`, the rubric row and the validator agree: build tasks exclude the final review and
   phase-end governance tasks (`Task N: Governance …`).
 
+## Adjudication (REFUTED in advance, for the final reviewer)
+
+1. Historical files the counter allowlists restating old rules — including the old block copies in
+   `plugins/tribe/evals/evals.json` (frozen by owner ruling E1) and PR #202's own plan.
+2. `.c3/c3-2-plugins/c3-215-tribe.md` still restating the rules (#199) — G1's target is 2 because of it.
+3. A finding that asks for a runner, watchdog or supervisor logic change: out of the fence; it goes to
+   the Shaman as `NEEDS_DIRECTION`, never into a fix round.
+4. A suite failure that fails the same way on the base branch — D-F7 counts only failures the base
+   branch does not have. Measured on `master` @ `b90f1c4` while planning: `watchdog-integration.test.ts`
+   "G2 — skip when alive" (2 tests, runner `bun test`); `test-input-asymmetry.sh` (its
+   `evals-file-has-52-evals` count); `test-review-cell-v3.sh` does not finish within the 540-second
+   bound (its pass case sweeps every shell suite through `pre-gate.sh`). The whole-suite step re-checks
+   every failure against the base branch itself; this list only saves time.
+5. The two-gate test's `m-single-three` fixture gaining a third build task (Task 5, spec §4.4).
+6. `SKILL.md` Stage D step 1 no longer naming `agents/shaman.md` (Task 6, spec §4.5).
+
 ## Way of work
 
 Quoted from the card: "`Executor: subagent-per-task` — design settled here, about 5 build tasks in
