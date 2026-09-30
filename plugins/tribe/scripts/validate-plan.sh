@@ -33,8 +33,9 @@
 #   - a "Way of work" section declares "Executor: single-agent", "Executor: subagent-per-task"
 #     or "Executor: tribe" (the modes of shaman.md "Ways of work"), and single-agent stays within
 #     its task limit (SINGLE_AGENT_MAX_TASKS below)
-#   - each task section carries the campaign runner's Done section, read exactly the way
-#     runner/core/plan-index.ts reads it, so the same plan also passes the runner's --dry-run
+#   - each task section resolves the way the campaign runner resolves it (runner/core/plan-index.ts):
+#     its heading matches no other heading in the file, and its Done section is read exactly the
+#     way the runner reads it, so the same plan also passes the runner's --dry-run
 #   - the Way of work section carries the declared mode's block, copied verbatim from the
 #     "Ways of work" section of ../agents/shaman.md (the one definition), and a plan in either
 #     light mode (single-agent, subagent-per-task) ends with its "Task N: Final review" task
@@ -391,7 +392,10 @@ else:
 # CommonMark and not this script's own section scan above. Under-reading (accepting a plan the
 # runner refuses) is a bug; refusing a plan the runner would accept is by design. The problem
 # names are the runner's own, so a failure here reads the same as the runner's refusal:
-#   - the task's heading must be a heading to the runner too (else dangling_heading);
+#   - the task's heading must be a heading to the runner too (else dangling_heading), and its
+#     text — the runner's text, closing #s stripped — must match no other heading in the file,
+#     at any level, outside the runner's fences (else duplicate_heading: the runner cannot tell
+#     which of the two sections is the task);
 #   - exactly one heading inside the task section whose text is "Done" (case-insensitive), at
 #     a deeper level (missing_done / ambiguous_done);
 #   - the first fenced block after it, before the next heading of any level
@@ -429,6 +433,8 @@ def runner_done_problem(task_line):
     task = next((h for h in runner_headings if h["line"] == task_line), None)
     if task is None:
         return "dangling_heading"
+    if sum(1 for h in runner_headings if h["text"] == task["text"]) > 1:
+        return "duplicate_heading"
     section_end = next((h["line"] for h in runner_headings
                         if h["line"] > task_line and h["level"] <= task["level"]), len(lines))
     in_section = [h for h in runner_headings if task_line < h["line"] < section_end]

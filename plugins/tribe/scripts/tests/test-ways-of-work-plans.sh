@@ -5,7 +5,8 @@
 # block read from that section, never restated here — committed into a hermetic git world, and
 # run through BOTH gates a plan must pass: validate-plan.sh and the campaign runner's --dry-run.
 # Each mutant must fail with a NAMED reason: the validator's failing check, and for a task with
-# no Done section also the runner's own refusal. A three-card campaign, one card per mode, must
+# no Done section, or two identical task headings, also the runner's own refusal. A three-card
+# campaign, one card per mode, must
 # dry-run clean (orchestrate-campaign Stage A step 8). Offline: no card reaches a PR, so no `gh`
 # call is made. Needs bun and the runner's node_modules (`bun install` in scripts/runner).
 set -euo pipefail
@@ -71,6 +72,18 @@ import sys
 t = sys.stdin.read()
 i = t.index('#### Done'); j = t.index('- [ ] **Step 2: Commit**', i)
 sys.stdout.write(t[:i] + t[j:])" > "$P/m-no-done.md"
+# Two identical task headings, the shapes a copy-paste produces: a task pasted right after itself,
+# and an earlier task pasted again further down.
+plan subagent-per-task cat 'Build one' 'Build two' 'Final review' | python3 -c "
+import sys
+t = sys.stdin.read()
+i = t.index('### Task 2: '); j = t.index('### Task 3: ', i)
+sys.stdout.write(t[:j] + t[i:j] + t[j:])" > "$P/m-dup-adjacent.md"
+plan subagent-per-task cat 'Build one' 'Build two' 'Final review' | python3 -c "
+import sys
+t = sys.stdin.read()
+i = t.index('### Task 1: '); j = t.index('### Task 2: ', i); k = t.index('### Task 3: ', j)
+sys.stdout.write(t[:k] + t[i:j] + t[k:])" > "$P/m-dup-far-apart.md"
 for f in "$P"/*.md; do printf '# Spec\n\nSee the plan.\n' > "$TMP/repo/docs/specs/$(basename "$f")"; done
 g=(git -C "$TMP/repo" -c user.name=fixture -c user.email=fixture@invalid)
 "${g[@]}" add -A; "${g[@]}" commit -q -m fixtures; "${g[@]}" push -q origin master; "${g[@]}" remote set-head origin master
@@ -120,6 +133,13 @@ check "a task without the runner's Done section: named check" "$(failing m-no-do
 home "$TMP/h-no-done" "C1=m-no-done"
 check "a task without the runner's Done section: runner --dry-run exit" "$(dry_run "$TMP/h-no-done")" "4"
 check "a task without the runner's Done section: the runner names missing_done" "$(grep -c 'missing_done' "$TMP/h-no-done.err")" "1"
+for shape in adjacent far-apart; do
+  check "two identical task headings ($shape): named check" "$(failing "m-dup-$shape")" "tasks_have_done_block"
+  check "two identical task headings ($shape): the validator names duplicate_heading" "$(bash "$VALIDATE" "$P/m-dup-$shape.md" | grep -c 'duplicate_heading')" "1"
+  home "$TMP/h-dup-$shape" "C1=m-dup-$shape"
+  check "two identical task headings ($shape): runner --dry-run exit" "$(dry_run "$TMP/h-dup-$shape")" "4"
+  check "two identical task headings ($shape): the runner names duplicate_heading" "$(grep -c 'duplicate_heading' "$TMP/h-dup-$shape.err")" "1"
+done
 
 # --- A three-card campaign, one card per mode, dry-runs clean -------------------------------
 home "$TMP/h-campaign" "C1=single-agent" "C2=subagent-per-task" "C3=tribe"

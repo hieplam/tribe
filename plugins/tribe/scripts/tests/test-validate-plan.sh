@@ -691,6 +691,27 @@ whole_probe single-agent u r
 whole_probe subagent-per-task u u r
 whole_probe tribe u u
 
+# --- The runner's duplicate_heading refusal (plan-index.ts resolveOne), mirrored ------------
+# The runner resolves a task by its heading text and refuses a text that matches two headings;
+# accepting such a plan is the under-read the Done mirror's oracle calls a bug.
+dup_probe() { # dup_probe NAME WANT-STATUS TASKS-FN — a subagent-per-task plan whose tasks TASKS-FN prints
+  local f="$TMP/dup-$RANDOM.md"
+  { wow_plan subagent-per-task "$HUNTER" cat; "$3"; } > "$f"
+  bash "$SCRIPT" "$f" > "$f.json"
+  check "$1" "$(find_check "$f.json" tasks_have_done_block)" "$2"
+  if [[ "$2" == fail ]]; then
+    check "$1 — names duplicate_heading" "$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print('duplicate_heading' in [c['detail'] for c in d['checks'] if c['name']=='tasks_have_done_block'][0])" "$f.json")" "True"
+  fi
+}
+dup_adjacent() { task_with 1 "$TMP/vb.md"; task_with 2 "$TMP/vb.md"; task_with 2 "$TMP/vb.md"; review_task 4; }
+dup_far_apart() { task_with 1 "$TMP/vb.md"; task_with 2 "$TMP/vb.md"; task_with 3 "$TMP/vb.md"; task_with 1 "$TMP/vb.md"; review_task 5; }
+dup_closing_hashes() { task_with 1 "$TMP/vb.md" | sed '1s/$/ ##/'; task_with 1 "$TMP/vb.md"; review_task 3; }
+dup_none() { task_with 1 "$TMP/vb.md"; task_with 2 "$TMP/vb.md"; review_task 3; }
+dup_probe "two identical task headings side by side fail, as the runner refuses them" fail dup_adjacent
+dup_probe "two identical task headings far apart fail too" fail dup_far_apart
+dup_probe "a heading that differs only by closing #s is the same heading to the runner" fail dup_closing_hashes
+dup_probe "distinct task headings pass" pass dup_none
+
 # --- The one definition must be readable: a declared mode with no source is a setup error ---
 ISO="$TMP/iso/scripts"; mkdir -p "$ISO"; cp "$SCRIPT" "$ISO/validate-plan.sh"
 set +e; bash "$ISO/validate-plan.sh" "$VF1" > "$TMP/iso.out" 2> "$TMP/iso.err"; code=$?; set -e
