@@ -91,4 +91,82 @@ check "real snippets: global rules are not duplicated" \
 dupes="$(cat "$REAL_MD"/*.md | grep -E '^#{1,6} ' | sort | uniq -d)"
 check "real snippets: no heading is shared between two snippets" "$dupes" ""
 
+# --- 6. a changed snippet refreshes its installed section in place, with a backup ----------
+d="$(setup_case refresh "# Section A
+
+the new wording
+" "# Before
+
+keep me
+
+# Section A
+
+the old wording
+
+# After
+
+keep me too
+")"
+set +e; out="$(run_hook "$d" 2>&1)"; rc=$?; set -e
+check "refresh: hook exits 0" "$rc" "0"
+check "refresh: the section carries the new wording" "$(count_in "$d" "the new wording")" "1"
+check "refresh: the old wording is gone" "$(count_in "$d" "the old wording")" "0"
+check "refresh: the section is not duplicated" "$(count_in "$d" "# Section A")" "1"
+check "refresh: content before and after the section is kept" "$(count_in "$d" "keep me")$(count_in "$d" "keep me too")" "11"
+check "refresh: one backup of the previous CLAUDE.md" "$(find "$d/claude" -name 'CLAUDE.md.bak.*' | wc -l | tr -d ' ')" "1"
+check "refresh: the backup holds the old wording" "$(grep -cxF "the old wording" "$d"/claude/CLAUDE.md.bak.*)" "1"
+if grep -q 'CLAUDE.md.bak' <<<"$out"; then ok "refresh: the warning names the backup"
+else bad "refresh: the warning names the backup (got: $out)"; fi
+run_hook "$d" >/dev/null 2>&1
+check "refresh: a second run changes nothing and makes no second backup" "$(find "$d/claude" -name 'CLAUDE.md.bak.*' | wc -l | tr -d ' ')" "1"
+
+# --- 7. a snippet with several top headings refreshes all of them, and nothing past them ------
+d="$(setup_case multi "# A
+
+a body
+
+# B
+
+b, new
+" "
+# A
+
+a body
+
+# B
+
+b, old
+
+# C
+
+c body
+")"
+run_hook "$d" >/dev/null 2>&1
+check "multi-heading refresh: the owned heading's body is replaced" "$(count_in "$d" "b, new")$(count_in "$d" "b, old")" "10"
+check "multi-heading refresh: the next foreign section is kept" "$(count_in "$d" "c body")" "1"
+
+# --- 8. the REAL snippets, from nothing and over today's installed CLAUDE.md -----------------
+# (a) an empty CLAUDE_DIR receives every snippet exactly as shipped.
+d="$TMP/real-empty"; mkdir -p "$d/plugin/claude-md" "$d/claude"
+cp "$HOOK_SRC" "$d/plugin/install.sh"; cp "$REAL_MD"/*.md "$d/plugin/claude-md/"
+run_hook "$d" >/dev/null 2>&1
+expected="$(for f in "$REAL_MD"/*.md; do printf '\n'; cat "$f"; done)"
+check "real snippets, empty CLAUDE_DIR: CLAUDE.md is the snippets, in order" "$(cat "$d/claude/CLAUDE.md")" "$expected"
+# (b) the CLAUDE.md a machine carries today: the three sections as installed from commit
+# 632a039, the brainstorm-together section in its old shape. Only that section changes.
+d="$TMP/real-installed"; mkdir -p "$d/plugin/claude-md" "$d/claude"
+cp "$HOOK_SRC" "$d/plugin/install.sh"; cp "$REAL_MD"/*.md "$d/plugin/claude-md/"
+for f in global-rules goal-verify-ratchet shaman-brainstorm-together; do
+  printf '\n'; git -C "$HERE" show "632a039:plugins/tribe/claude-md/$f.md"
+done > "$d/claude/CLAUDE.md"
+old_rules="$(sed -n '/^# NON-NEGOTIABLE RULES$/,/^# Brainstorm together/p' "$d/claude/CLAUDE.md")"
+run_hook "$d" >/dev/null 2>&1
+check "real snippets, today's CLAUDE.md: the brainstorm section now equals the snippet" \
+  "$(sed -n '/^# Brainstorm together/,$p' "$d/claude/CLAUDE.md")" "$(cat "$REAL_MD/shaman-brainstorm-together.md")"
+check "real snippets, today's CLAUDE.md: the sections before it are untouched" \
+  "$(sed -n '/^# NON-NEGOTIABLE RULES$/,/^# Brainstorm together/p' "$d/claude/CLAUDE.md")" "$old_rules"
+check "real snippets, today's CLAUDE.md: one backup" "$(find "$d/claude" -name 'CLAUDE.md.bak.*' | wc -l | tr -d ' ')" "1"
+run_hook "$d" >/dev/null 2>&1
+check "real snippets, today's CLAUDE.md: a second run makes no second backup" "$(find "$d/claude" -name 'CLAUDE.md.bak.*' | wc -l | tr -d ' ')" "1"
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; [[ "$FAIL" -eq 0 ]]

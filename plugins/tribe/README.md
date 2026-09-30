@@ -48,7 +48,7 @@ Shaman  ──(vision: what/why)──▶  Warchief
 
 **What it actually does:** Generates ideas, sets the direction and the meaning for the whole tribe. The Shaman does **not** pick up a weapon and hunt (no writing code, no detailed tactics). It sees far, interprets "why this is worth doing" and "what needs to be achieved," then hands it off to the Warchief. When a PR is merged, the Warchief reports back up to the Shaman to close the vision → outcome loop. Each approved unit is delegated to the tribe's closed loop (Warchief → Hunter → dual-Skinner audit → PR + merge) as ONE deterministic unit — the Shaman launches it, waits, and verifies SHIPPED; it never reviews diffs, commits, or merges inside the loop.
 
-It works in three modes: **brainstorm together** (Mode 1, the default), **forge a roadmap** of many idea cards (Mode 2), and **run a campaign** over approved cards (Mode 3). In brainstorm together the owner brings ONE problem ("let's brainstorm together"), the Shaman grounds the owner's claims first, agrees a high-level solution (guardrails, ratchet, ledger, how to verify, do / don't), records the ratified decisions in the idea card, has a planning-only Warchief write the spec and plan and reviews them by grounding, then briefs and guides the owner's new execution session itself. That session runs on the way of work its plan declares (for small and medium cards: implement, one review, at most one fix round, PR, merge), never the tribe's Warchief → Hunter → two-Skinner loop unless the owner explicitly asks for it. The long form is Mode 1 of `agents/shaman.md`; the short form ships as the global CLAUDE.md snippet `claude-md/shaman-brainstorm-together.md`, so it applies in every session in every project. Across all three modes the Shaman enforces the **Goal · Verify · Ratchet gate** (`agents/shaman.md`): every outcome and every artifact the owner ratified is a goal row with an oracle of the claim's kind that an empty implementation would fail, and a baseline measured before building — checked when the card is approved, when the plan is reviewed, and before `verified-SHIPPED`. Its global checklist ships as `claude-md/goal-verify-ratchet.md`.
+It works in three modes: **brainstorm together** (Mode 1, the default), **forge a roadmap** of many idea cards (Mode 2), and **run a campaign** over approved cards (Mode 3). In brainstorm together the owner brings ONE problem ("let's brainstorm together"), the Shaman grounds the owner's claims first, agrees a high-level solution (guardrails, ratchet, ledger, how to verify, do / don't), records the ratified decisions in the idea card, has a planning-only Warchief write the spec and plan and reviews them by grounding, then runs the approved card itself through the `orchestrate-campaign` harness — a one-card campaign, the default for every way of work — answers the runner's escalations and re-verifies the result; only when the owner says not to use the harness does it brief the owner's new execution session, drive the execution itself, or dispatch a full-build Warchief. The three ways of work — `single-agent`, `subagent-per-task` and `tribe` — the rubric for choosing one and who chooses are defined once, in the "Ways of work" section of `agents/shaman.md`; every other file, this one included, points there (see [Ways of work](#ways-of-work) below). The long form is Mode 1 of `agents/shaman.md`; the short form ships as the global CLAUDE.md snippet `claude-md/shaman-brainstorm-together.md`, so it applies in every session in every project. Across all three modes the Shaman enforces the **Goal · Verify · Ratchet gate** (`agents/shaman.md`): every outcome and every artifact the owner ratified is a goal row with an oracle of the claim's kind that an empty implementation would fail, and a baseline measured before building — checked when the card is approved, when the plan is reviewed, and before `verified-SHIPPED`. Its global checklist ships as `claude-md/goal-verify-ratchet.md`.
 
 **Why the name Shaman:** In a tribe, the Shaman (medicine man / seer) is the one who "reads the omens" — interpreting the *meaning* (why) and pointing out the *direction* (what) for the whole tribe, without personally going on the hunt. This fits the role of generating ideas + vision, without touching the *how*.
 
@@ -206,13 +206,36 @@ The agents above define *roles*; one skill defines an *invocation* — a phrase 
 say in any session and get a deterministic dispatch, because a skill's description is
 always in the model's context (an eval-backed property: a bare codename with no binding
 routes to nothing, see the archived [`mammoth-hunt` evals](../../archive/skills/mammoth-hunt/evals/)).
-One piece of work has no skill: a single agent completes it, or it runs the way of work its
-plan declares (the `mammoth-hunt` skill that once bound it to the full tribe chain is retired
-to [`archive/`](../../archive/README.md)).
+One approved piece of work runs through `orchestrate-campaign` as a one-card campaign, on the way
+of work the Shaman chose for it (the `mammoth-hunt` skill that once bound it to the full tribe
+chain is retired to [`archive/`](../../archive/README.md)).
 
 | Skill | Invocation | What it runs |
 |---|---|---|
-| [`orchestrate-campaign`](skills/orchestrate-campaign/SKILL.md) | "orchestration", "run these N cards" | A **batch** of roadmap cards unattended via the campaign runner, one consolidated report |
+| [`orchestrate-campaign`](skills/orchestrate-campaign/SKILL.md) | "orchestration", "run these N cards"; a Shaman after approving a Mode 1 card | Approved cards — one or a **batch** — unattended via the campaign runner, one consolidated report; the default harness for every approved plan |
+
+---
+
+## Ways of work
+
+How an approved plan is executed — the campaign harness every plan runs through by default,
+`single-agent`, `subagent-per-task` or `tribe`, the rubric for choosing one, and who chooses — is
+defined in exactly one place: the "Ways of work" section of
+[`agents/shaman.md`](agents/shaman.md). A plan copies its mode's block from there into its
+`## Way of work`. Three committed tools keep that true:
+
+- [`scripts/ways-of-work/drift.ts`](scripts/ways-of-work/drift.ts) lists every live file that
+  states a way-of-work rule (`bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .`;
+  `--also ~/.claude/CLAUDE.md` adds the installed global CLAUDE.md). The goal is one place, the
+  canonical section. Until the C3 component doc `.c3/c3-2-plugins/c3-215-tribe.md` is updated —
+  the follow-up written up in
+  [`docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md`](../../docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md)
+  — it lists that file too, so the count is 2.
+- [`scripts/validate-plan.sh`](scripts/validate-plan.sh) fails a plan whose mode, block copy,
+  Done sections or final review task are missing.
+- [`scripts/tests/test-ways-of-work-plans.sh`](scripts/tests/test-ways-of-work-plans.sh) runs one
+  plan per mode, and each mutant, through both `validate-plan.sh` and the campaign runner's
+  `--dry-run`.
 
 ---
 

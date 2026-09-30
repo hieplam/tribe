@@ -3,11 +3,12 @@ name: orchestrate-campaign
 description: >-
   Turns one owner directive into ONE final consolidated report, with zero owner intervention
   in between except the irreversible few. Trigger on "orchestration", "orchestrate these ideas",
-  "run these N cards", "do these tasks in orchestration", or any request to run a batch of
-  roadmap cards unattended end-to-end from any session — the main chat, a Shaman, or a
-  Warchief. Use this whenever the ask is "kick off N cards and tell me when they're all
-  shipped or blocked", not "build this one card" (that is a single-card session) and not
-  "what should we build" (that's roadmap authorship, What/Why — a different job). This skill
+  "run these N cards", "do these tasks in orchestration", or any request to run approved
+  cards unattended end-to-end from any session — the main chat, a Shaman, or a Warchief. It is
+  the campaign harness every approved plan runs through by default, including ONE approved card:
+  a Shaman runs it after the owner approves (or delegates) a Mode 1 card. Use this whenever the
+  ask is "run these approved cards — one or N — and tell me when they're shipped or blocked",
+  not "what should we build" (that's roadmap authorship, What/Why — a different job). This skill
   assumes the campaign's decision authority, authors the campaign state file the campaign
   runner requires as input, triggers the runner's CLI in the background, answers its
   escalations into answers.md within the campaign's authority (never touching what only the owner may
@@ -29,8 +30,8 @@ exit codes below — never by reading its source) does the deterministic, zero-t
 For the duration of this campaign you make the ordinary calls yourself and escalate to the owner
 only the register (irreversible data shapes, product-promise changes, new permissions/trust surface,
 privacy-surface changes). You never write source code and never design How yourself — cards go
-through whatever way of working their plan prescribes (see "Choose the plan style" in Stage A);
-your job is running the campaign's outer loop around that. (In the Tribe style this is the
+through the way of work their plan copies (see "Choose each card's way of work" in Stage A);
+your job is running the campaign's outer loop around that. (For a `tribe` card this is the
 authority `agents/shaman.md` describes as Mode 3.)
 
 ## Inputs — nothing here is ever hardcoded (wall W1)
@@ -57,6 +58,12 @@ value belongs in the campaign's own docs, not here.
 
 ### Stage A — Planning (you author the handoff)
 
+0. **A card whose spec and plan are already approved** — a Shaman's Mode 1 card, run through this
+   harness by default ("The campaign harness" in `agents/shaman.md` "Ways of work") — skips
+   authorship: skip steps 1, 2, 2b and 5 (its plan already carries its mode's block and a Done
+   section per task). Do step 6 — the planning branch that holds the approved spec and plan is
+   that PR, merged to the base branch, because the runner reads the plan there and every executor
+   branches from it — then steps 3, 4, 7 and 8. A one-card campaign is normal.
 1. **Confirm/ideate the cards** (What/Why) with the owner if anything is unclear — this is the
    one part of the loop where the owner may still be present; the zero-intervention objective
    starts at the trigger below, not before.
@@ -64,33 +71,22 @@ value belongs in the campaign's own docs, not here.
    - **Few cards (≲3) or genuinely complex work** → you author the specs+plans yourself. Dispatch
      overhead isn't worth it when the thinking itself is the value.
    - **Many trivial cards (~10–20)** → dispatch one planning subagent per card (`general-purpose`
-     in the simple style; a planning-Warchief in the Tribe style) whose job is "author this one
-     card's spec+plan and return them — no implementation", then review and stage what comes back.
+     for a `single-agent` or `subagent-per-task` card; a planning-Warchief for a `tribe` card) whose
+     job is "author this one card's spec+plan and return them — no implementation", then review and
+     stage what comes back.
    - Record which mode you used as `planning.mode` inside the state file (see schema below; the
-     values per plan style are in step 2b) — a resuming session needs to know how the docs were
-     produced without re-deriving it.
-2b. **Choose the plan style — the plan, not the runner, decides the way of working.** The runner,
-   its watchdog and its supervisor drive whatever the plan says and prescribe nothing themselves.
-   - **Simple (the default: the owner named no style).** Every plan opens with this section,
-     verbatim, and every task ends with a Done section:
-
-     ```markdown
-     ## How to work
-
-     - Do the tasks in order. Give each task to one `general-purpose` subagent; the subagent
-       writes the test, writes the code, runs the task's Done commands, and commits.
-     - Every task ends with a **Done** section: shell commands, one per line. The task is done
-       when every command exits 0 when run from a clean checkout of the task's commit — the
-       runner runs them itself.
-     - Work on a branch in a separate git worktree.
-     ```
-
-     Name `general-purpose`: other agents stay installed on this machine, and an executor told only
-     "one subagent per task" could pick one of them by its description. Record `planning.mode` as
-     `"self"` (you authored the plans) or `"subagent-fanout"` (one planning subagent per card).
-   - **Tribe (only when the owner asks for it).** The plan opens with "Tribe style — plan section"
-     below instead, verbatim, and ends with the "Harness-gap gate" task it describes. Record
-     `planning.mode` as `"shaman"` or `"warchief-fanout"`.
+     values are in step 2b) — a resuming session needs to know how the docs were produced without
+     re-deriving it.
+2b. **Choose each card's way of work — the plan, not the runner, decides it.** The runner, its
+   watchdog and its supervisor drive whatever the plan says and prescribe nothing themselves. You
+   hold the Shaman's authority for this campaign, so you choose each card's mode — `single-agent`,
+   `subagent-per-task` or `tribe` — by the rubric in the "Ways of work" section of
+   `agents/shaman.md`, the one definition of the modes. Every plan's `## Way of work` gives the
+   card's rubric reasons, then copies that mode's block from that section verbatim, and every task
+   ends with a Done section (step 7). A `tribe` card's plan also carries "tribe cards — campaign
+   plan additions" below. Record `planning.mode` as `"self"` when you authored every plan
+   yourself, `"subagent-fanout"` when `general-purpose` planning subagents authored them, or
+   `"warchief-fanout"` when planning-Warchiefs did.
 3. **Author `campaign-state.json` yourself, under the campaign home** (`--home`, computed above —
    never inside `<target-repo>`). Nothing else in the system creates this file — the runner
    requires it as an input but never authors it, and Stage A owns planning artifacts. See "The
@@ -121,13 +117,16 @@ value belongs in the campaign's own docs, not here.
    runs them itself from a clean checkout of the task's commit, so list any bootstrap
    (`bun install`) first. For every task, add `{ "id", "heading" }` to the card's `tasks` in
    `campaign-state.json` — the heading text exactly as written. `--dry-run` refuses a state whose
-   headings do not resolve (`campaign runner: refused: … dangling_heading`).
+   headings do not resolve (`campaign runner: refused: … dangling_heading`). `validate-plan.sh`
+   reads the Done section the same way the runner does.
 8. **Validate the state you wrote before Stage A ends.** Resolve `$runner_dir` and run the
    `--dry-run` command exactly as Stage B shows them ("First, resolve the runner's own location"
    and step 1, "Always `--dry-run` first"). A dry run has zero side effects — no lock, nothing
    written, no session — so it is a check, not a launch. Fix `campaign-state.json` (or the plan)
    and re-run until it exits 0; a `refused:` line or any non-zero exit means the state is not
-   done.
+   done. Also run `validate-plan.sh` (resolved as Stage B shows) on every card's plan: its JSON
+   `verdict` must be `pass` — a `fail` names the missing piece (the mode's block, a Done section,
+   the final review task).
 
 #### The campaign state file (`campaign-state.json`, under `--home`)
 
@@ -503,8 +502,8 @@ On every exit notification where the report shows `pending` cards:
      product promises, new permissions, privacy) **or genuinely too hard to call** — leave it
      parked (escalation file untouched, unanswered). Never rule on an owner-only trigger
      yourself, no matter how confident you are.
-   - **Tribe style only:** every ruling you append carries a `ratified-as:` field — see 'Tribe
-     style — Stage C and D additions'.
+   - **When the campaign holds a `tribe` card:** every ruling you append carries a `ratified-as:`
+     field — see 'tribe cards — Stage C and D additions'.
 
    `answers.md` is read once, at the START of a runner invocation (`resolveRunContext`,
    `core/loop/run-loop.ts`) — that single read serves every card the invocation touches, so a
@@ -560,12 +559,13 @@ On every exit notification where the report shows `pending` cards:
 **If the supervisor ran this campaign to `0` (done), a closing session may already have run.**
 Check `<campaign-home>/supervisor/final-report.md` before doing anything below — its existence
 means the `verify-shipped` re-checks and the owner report were already produced by that closing
-session (it re-verifies and reports; the ratification pass exists only in the Tribe style, see
-'Tribe style — Stage C and D additions'). **Verify it, do not repeat it**: read it exactly as you
-would your own draft of this stage, confirm each `shipped` card's `verify-shipped` verdict is
-actually present, and relay it — do not re-run Stage D's steps and produce a second, competing
-report over the same campaign. In the Tribe style, before relaying that report, also run both
-Stage D additions in 'Tribe style — Stage C and D additions': re-verify every shipped card with
+session (it re-verifies and reports; the ratification pass exists only for a campaign holding a
+`tribe` card, see 'tribe cards — Stage C and D additions'). **Verify it, do not repeat it**: read
+it exactly as you would your own draft of this stage, confirm each `shipped` card's
+`verify-shipped` verdict is actually present, and relay it — do not re-run Stage D's steps and
+produce a second, competing report over the same campaign. When the campaign holds a `tribe`
+card, before relaying that report, also run both Stage D additions in 'tribe cards — Stage C and
+D additions': re-verify every shipped card with
 `verify-shipped` without `--skip-gap-gate` (report any failed verdict as not shipped, naming the
 failing check), then run the ratification pass and its `rulings-check.ts` check. Include both
 outcomes in what you relay.
@@ -579,7 +579,10 @@ the owner reads:
    path directly — depend on its contract, not its implementation) with `--skip-gap-gate`, that
    card's `pr` and its worktree path. This is the design's no-cascade read: the runner's own claim
    that a card shipped is not evidence on its own. Treat a `verify-shipped` failure as `blocked`,
-   not `shipped`, in your final report.
+   not `shipped`, in your final report. For a `single-agent` or `subagent-per-task` card, also read
+   the PR body (`gh pr view <pr> --json body`): its `## Final review` section must exist and end
+   `REVIEW: PASS` (the "Ways of work" section of `agents/shaman.md`); a missing or failing section
+   is reported as `blocked`, not `shipped`.
 2. **You can also recover which commits belong to this campaign directly from git.** Every
    commit a card's executor session made should carry a `Campaign: <campaign-slug>` git trailer
    — the runner's executor brief instructs it (see the runner README's "Campaign commit
@@ -596,8 +599,8 @@ the owner reads:
      report files and escalation files, so the owner can go deeper without you re-deriving
      anything.
 
-**Tribe style only:** also run both Stage D additions in 'Tribe style — Stage C and D additions'
-below: re-verify every shipped card with `verify-shipped` without `--skip-gap-gate` (report any
+**When the campaign holds a `tribe` card:** also run both Stage D additions in 'tribe cards — Stage
+C and D additions' below: re-verify every shipped card with `verify-shipped` without `--skip-gap-gate` (report any
 failed verdict as not shipped, naming the failing check), then run the ratification pass and its
 `rulings-check.ts` check. Include both outcomes in the owner report.
 
@@ -658,8 +661,8 @@ it, verbatim** — it is a transcriber, never a judge:
    <the owner's decision, verbatim>
    ```
 
-   (Tribe style only: the ruling also carries a `ratified-as:` line — see 'Tribe style — Stage C
-   and D additions'.) The same append-only rule as every other `answers.md` write applies: every
+   (When the campaign holds a `tribe` card, the ruling also carries a `ratified-as:` line — see
+   'tribe cards — Stage C and D additions'.) The same append-only rule as every other `answers.md` write applies: every
    prior byte stays.
 4. **Archive** `escalations/<cardId>.md` to `.resolved-R<n>` — same as the hand-driven Stage C
    round-trip above.
@@ -715,25 +718,19 @@ as that file's `lastAction` and as a `park` line in `supervisor/events.jsonl`. S
 sequence — you restart, it refuses, and only later does the run finish or a newer one go live —
 still supersedes the park on the restart after that.
 
-## Tribe style — plan section (use only when the owner asks for the Tribe style)
+## tribe cards — campaign plan additions
 
-Copy this section into the plan, verbatim, as its "How to work", and end the plan with the
-"Harness-gap gate" task below.
+A `tribe` card's plan copies the `tribe` block from the "Ways of work" section of
+`agents/shaman.md` into its `## Way of work`, adds these campaign lines after the block, verbatim,
+and ends with the "Harness-gap gate" task below.
 
 ```markdown
-## How to work (Tribe style)
-
-- The executor acts as the Warchief (`agents/warchief.md`) for this card. For each task it dispatches
-  one Hunter (`subagent_type: hunter`) and audits the result with the dual-Skinner cell (two
-  `skinner` instances — the contract lens and the cold lens — dispatched in one message), running
-  the fix loop up to three rounds. The runner still drives the tasks in order and runs each task's
-  Done commands itself; end a task's turn only after its audit closed.
-- Every task is test-first: a failing test before the code, gates (formatter/linter/type-checker/
-  tests) green before commit, and a real commit carrying the code, its test, and the plan's ticked
-  checkboxes together. Claims of done are worthless without the gate output that proves them —
-  paste gate output verbatim into worker reports.
+- In this campaign the executor session is the Warchief the block names. The runner still drives
+  the tasks in order and runs each task's Done commands itself; end a task's turn only after its
+  audit closed.
 - Every dispatched worker (Hunter, Skinner) writes its report under the campaign home's `reports/`
-  directory (the brief names the campaign home).
+  directory (the brief names the campaign home), with the gate output it relied on pasted
+  verbatim.
 - Dispatch the Tracker at every audit round (Warchief Method step 6.0b), each with its own report file
   `<campaign home>/reports/tracker-<card id>-<round>.md` (`<round>` = `task-3`, `wave-2`, `fix-1`,
   `final`). Use the runner's card id as your card slug — in these file names, in `gap-gate.ts --card`,
@@ -766,7 +763,7 @@ run `debt-backfill.ts`.
 
 (In the plan itself, that Done command sits in a fenced `bash` block, as every Done section does.)
 
-## Tribe style — Stage C and D additions
+## tribe cards — Stage C and D additions
 
 - **Stage C:** every ruling you append to `answers.md` carries a `ratified-as:` field — this
   applies whether the ruling answers an `escalated` card's ordinary question or adjudicates a

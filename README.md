@@ -44,6 +44,11 @@ Behaviour: `agents/*.md` link into `~/.claude/agents/`, `skills/<name>/` into
 file is backed up to `<name>.bak.<epoch>` first, and a plugin's own `install.sh` runs as a
 post-install hook. `CLAUDE_DIR` overrides the target root (used by the tests).
 
+The `tribe` plugin's hook appends each `claude-md/` snippet to `~/.claude/CLAUDE.md` once. When a
+snippet changes, re-running `./install.sh tribe` refreshes that snippet's installed section in
+place and keeps the previous file as `~/.claude/CLAUDE.md.bak.<epoch>`, so an edit you made to
+that section by hand is never lost.
+
 The `tribe` plugin's hook also puts the **`tribe` command** on your PATH — a symlink at
 `~/.local/bin/tribe` (`TRIBE_BIN_DIR` overrides the directory; the hook warns if it is not on
 PATH). Type `tribe` anywhere to start the session viewer and open it in the browser; `tribe
@@ -109,6 +114,11 @@ cd plugins/tribe/scripts/cli && bun install && bun test && bunx tsc --noEmit
 
 # shell script tests (per plugin)
 plugins/tribe/scripts/tests/test-validate-plan.sh
+plugins/tribe/scripts/tests/test-ways-of-work-plans.sh   # needs the runner's node_modules
+
+# the ways-of-work drift counter: its tests, then the count (the target is 1)
+bun test plugins/tribe/scripts/ways-of-work/
+bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
 
 # agent/skill evals
 python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json
