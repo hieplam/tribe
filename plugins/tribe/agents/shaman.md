@@ -312,9 +312,15 @@ block — never at hand-off on a feeling that more review would be safer.
 The plan's last task is headed `Task N: Final review`. A fresh `general-purpose` subagent that did
 not build the code reviews the branch: it gets the card, the plan and the branch diff, judges the
 diff against every goal row and the scope fence of the card, re-runs every task's Green and the
-plan's end-to-end check, and ends its report with `REVIEW: PASS` or `REVIEW: FAIL` followed by its
-findings, each with evidence (a `file:line` or a command's output). On `REVIEW: FAIL` the executing
-session runs a fix round — `subagent-per-task` dispatches one fresh fix subagent with the findings,
+plan's end-to-end check, runs the repo's whole test suite — its documented check command, or the
+list the plan names — and runs any failing test again on the base branch, rates each finding
+Blocker, Should-fix or Optional (a failure the base branch does not have is at least Should-fix),
+and ends its report with `REVIEW: FAIL` when any finding is Should-fix or worse, else
+`REVIEW: PASS`, followed by its findings, each with its rating and evidence (a `file:line` or a
+command's output). The ratings decide the verdict, never the reviewer's discretion: a
+`REVIEW: PASS` that lists a Should-fix or Blocker finding counts as `REVIEW: FAIL`. On
+`REVIEW: FAIL` the executing session runs a fix round — `subagent-per-task` dispatches one
+fresh fix subagent with the findings,
 `single-agent` fixes inline — re-runs the Verify of every task the fix touches, and a fresh reviewer
 reviews again. At most 2 fix rounds: a review still failing after the second goes to the Shaman as a
 What/Why question (under the harness the executor ends the review task's turn with
@@ -348,7 +354,7 @@ Executor: single-agent
 
 - The executing session builds every task itself, inline and in order; it dispatches no implementer subagent. Under the campaign harness that is the runner's executor session, one turn per task, each turn ended with `TASK_DONE <task-id> <branch>`.
 - Each task: run its Red and see the stated failure, build, run its Green and match the literal expected output, run its Done commands, then commit.
-- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, judges the diff against every goal row and the scope fence of the card, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, fix inline, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds, all inside the review task's turn; still failing, stop and escalate to the Shaman (under the harness: end the turn with `NEEDS_DIRECTION:` and the findings). Write every round's report to disk — under the harness, the campaign home's `reports/` directory.
+- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, judges the diff against every goal row and the scope fence of the card, re-runs every task's Green and the end-to-end check, runs the repo's whole test suite — its documented check command, or the list this plan names — and runs any failing test again on the base branch, rates each finding Blocker, Should-fix or Optional (a failure the base branch does not have is at least Should-fix), and ends with `REVIEW: FAIL` when any finding is Should-fix or worse, else `REVIEW: PASS`, plus the findings with their ratings and evidence; a `REVIEW: PASS` that lists a Should-fix or Blocker finding counts as `REVIEW: FAIL`. On `REVIEW: FAIL`, fix inline, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds, all inside the review task's turn; still failing, stop and escalate to the Shaman (under the harness: end the turn with `NEEDS_DIRECTION:` and the findings). Write every round's report to disk — under the harness, the campaign home's `reports/` directory.
 - Then open the PR (under the harness, on the runner's deliver turn) — its body carries a `## Final review` section with every round's `REVIEW:` line and its findings, in order, read from those reports — wait for every check to conclude green, and merge with `gh pr merge --merge`.
 ```
 
@@ -357,7 +363,7 @@ Executor: subagent-per-task
 
 - One fresh `general-purpose` subagent per task, in order: it runs the task's Red and sees the stated failure, builds, runs the Green and matches the literal expected output, runs the Done commands, and commits. Never dispatch a tribe agent (`hunter`, `warchief`, `skinner`) for a task. Under the campaign harness the runner's executor session is the orchestrating session, one turn per task, each turn ended with `TASK_DONE <task-id> <branch>`.
 - The orchestrating session re-runs each task's Green itself before starting the next task; a Green that does not reproduce sends the task back.
-- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, judges the diff against every goal row and the scope fence of the card, re-runs every task's Green and the end-to-end check, and ends with `REVIEW: PASS` or `REVIEW: FAIL` plus findings with evidence. On `REVIEW: FAIL`, dispatch one fresh fix subagent with the findings, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds, all inside the review task's turn; still failing, stop and escalate to the Shaman (under the harness: end the turn with `NEEDS_DIRECTION:` and the findings). Write every round's report to disk — under the harness, the campaign home's `reports/` directory.
+- The last task is the final review: a fresh `general-purpose` reviewer gets the card, this plan and the branch diff, judges the diff against every goal row and the scope fence of the card, re-runs every task's Green and the end-to-end check, runs the repo's whole test suite — its documented check command, or the list this plan names — and runs any failing test again on the base branch, rates each finding Blocker, Should-fix or Optional (a failure the base branch does not have is at least Should-fix), and ends with `REVIEW: FAIL` when any finding is Should-fix or worse, else `REVIEW: PASS`, plus the findings with their ratings and evidence; a `REVIEW: PASS` that lists a Should-fix or Blocker finding counts as `REVIEW: FAIL`. On `REVIEW: FAIL`, dispatch one fresh fix subagent with the findings, re-run the Verify of every task the fix touches, and review again with a fresh reviewer — at most 2 fix rounds, all inside the review task's turn; still failing, stop and escalate to the Shaman (under the harness: end the turn with `NEEDS_DIRECTION:` and the findings). Write every round's report to disk — under the harness, the campaign home's `reports/` directory.
 - Then open the PR (under the harness, on the runner's deliver turn) — its body carries a `## Final review` section with every round's `REVIEW:` line and its findings, in order, read from those reports — wait for every check to conclude green, and merge with `gh pr merge --merge`.
 ```
 
