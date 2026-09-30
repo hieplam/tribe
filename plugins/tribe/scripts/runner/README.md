@@ -481,6 +481,11 @@ first a `resume: <sessionId>` of it (`driveCardTurns`, `core/loop/turns.ts`, cal
 `actOnCard`). The session keeps its own context across turns, so the next task knows what the
 previous one did.
 
+How the session works inside those turns — the plan's mode, who builds and who reviews — is the
+plan's own `## Way of work`, defined in the "Ways of work" section of
+[`agents/shaman.md`](../../agents/shaman.md). The runner reads only the task headings and the
+Done sections below.
+
 ### The plan format the runner reads (`core/plan-index.ts`)
 
 Spec §4.3 is the contract — **CommonMark is not**. Under-reading a Done command is a bug; refusing
