@@ -403,9 +403,33 @@ could flip, against the round-2 prototype of `shaman.md`, `--runs 3`: **56 PASS 
 62 PASS 3/3**. 57–60 and 63 grade the mode choice and the `tribe` dispatch, which S1–S3 did not
 touch; they were not re-run.
 
-The discriminating cases are 59, 60 and 63 — exactly the card's stub checks (today's Mode 1 cannot
-pick or run `tribe`, and never asks). 56, 57, 58, 61 and 62 already pass today; they are kept as
-regression guards for the rewrite, not counted as ratchet movement. The plan's Red/Green use
+**Round 3** reworked 56, 61, 62 and 63 to the campaign harness and added 64 (the no-harness
+exception). Measured with the default model, majority of graded runs; runs cut by the account's
+session limit are UNGRADED harness failures and are not counted:
+
+| Eval | Today's `shaman.md` (Red) | Round-3 prototype (Green) |
+| --- | --- | --- |
+| 56 | FAIL 0/1 — briefs an execution session via SendMessage | PASS 3/3 |
+| 61 | FAIL 0/3 — builds `hello.sh` in its own session | PASS 3/3 |
+| 62 | PASS 2/2 (1 run UNGRADED) — rules into `answers.md` | PASS 3/3 |
+| 63 | FAIL 0/3 — refuses the tribe, offers a downgrade | PASS 3/3 |
+| 64 | PASS 3/3 — builds inline when told not to use the harness | PASS 3/3 |
+| 57–60 | not re-run in round 3 (mode choice; round 1: 57 PASS, 58 PASS, 59 FAIL, 60 FAIL) | not re-run (round 1 prototype: all PASS) |
+
+Two corrections were made on evidence, not taste. (1) A first Green run of 61 found a real gap: in
+a scratch directory with no git repository the prototype read "cannot run the harness" as licence
+to build in its own session; the section now says a harness that cannot run blocks the card
+(ruling R3-1), and the re-run passed 3/3. (2) Eval 56's first rubric required the Stage A steps to
+be carried out, which no Shaman can do in an eval directory with no git repository: all three
+prototype runs chose the harness, briefed nobody, built nothing and correctly reported the card
+blocked with what was missing (R3-1), yet two were graded FAIL. The rubric now accepts that
+blocked outcome, exactly as eval 61's already did; the same three transcripts and today's one were
+re-graded (grader calls only, no new executor runs): prototype 3/3 PASS, today 0/1.
+
+The discriminating cases are 59, 60, 61, 63 and 56 — the card's stub checks (today's Mode 1 cannot
+pick or run `tribe`, never asks, briefs a session instead of running the harness, and builds a
+delegated card itself). 57, 58, 62 and 64 already pass today; they are regression guards, not
+ratchet movement. Today's summary over 56–64 is therefore `majority PASS: 4/9`; the target is 9/9. The plan's Red/Green use
 `--runs 3` and a majority rule per case (one sample cannot separate a regression from model variance,
 `scripts/evals/README.md`).
 
@@ -445,7 +469,9 @@ works on its own card branch; reports under the campaign home's `reports/`) and 
 deliver turn pastes the `## Final review` section. The card's post-merge steps — `./install.sh
 tribe` with the `--also` count, and the #199 issue sync — are run by the orchestrating Shaman
 session after the runner reports the card shipped and it re-verified it (round-3 item 4), never by
-the headless executor.
+the headless executor. Measured today on this machine: `doctor.sh` (Stage B's preflight) reports
+one gap in the main checkout — the runner's `node_modules` are missing — so the preflight's own
+remedy, `bun install` in `plugins/tribe/scripts/runner`, runs before the launch.
 
 ## 5. Purity (the golden standard)
 
@@ -499,10 +525,10 @@ commit restores today's behaviour; the installed `CLAUDE.md` is restored from it
 ## 9. Rulings and open questions
 
 Round 1's questions N1–N6 are ruled in the card, with S1–S3; round 2's R2-1 is accepted (a); round
-3 applies D7–D9 and the G4 amendment. Three How-level calls made in round 3, for the Shaman to
-confirm or overturn:
+3 applies D7–D9 and the G4 amendment. R3-1 is accepted by the Shaman (2026-09-30). Two How-level
+calls remain for the Shaman to confirm or overturn:
 
-- **R3-1 — a harness that cannot run blocks the card.** Context: measured on the prototype (§4.9),
+- **R3-1 (accepted) — a harness that cannot run blocks the card.** Context: measured on the prototype (§4.9),
   a Shaman whose harness could not run (no git repository) read D7's "unless the user explicitly
   says don't" as licence to fall back to building in its own session. Options: (a) the section
   says a harness that cannot run is not the exception — the card is blocked and the owner decides
