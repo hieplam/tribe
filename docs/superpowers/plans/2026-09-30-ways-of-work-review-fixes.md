@@ -1445,3 +1445,163 @@ bun plugins/tribe/scripts/ways-of-work/drift.ts --repo . --json | python3 -c "im
 git add plugins/tribe/README.md
 git commit -m "docs(tribe): the README describes the ways-of-work tools as they now are"
 ```
+
+### Task 9: Final review
+
+**Files:** none in the repo — fixes, if any, land in the files they touch; with no fix, an empty
+commit records the verdict. Outside the repo, under `$REPORTS/`: each round's review report, the
+whole-suite results, and the PR body's `## Final review` section.
+
+The block's final review, with this card's rules applied to itself (card, "Way of work for THIS
+card"): a fresh `general-purpose` reviewer that built none of this card gets the card
+(`~/.tribe/-Users-home-repos-tribe/cards/ways-of-work-review-fixes.md`: goal rows G1–G7, rulings
+D-F5 and D-F7, Amendment A1, the scope fence), the spec, this plan (its Global Constraints'
+oracles and the Adjudication section, verbatim), the "Ways of work" section of
+`plugins/tribe/agents/shaman.md` as Task 7 left it, the branch diff (`git diff origin/master...HEAD`),
+and its report path: `$REPORTS/ways-of-work-review-fixes-review-1.md` (`-review-2.md`, `-review-3.md`
+for re-reviews). It judges the diff against every goal row and the scope fence, runs Steps 1 and 2,
+rates each finding Blocker, Should-fix or Optional, and ends its report with `REVIEW: FAIL` when any
+finding is Should-fix or worse, else `REVIEW: PASS`, followed by its findings with their ratings and
+evidence. A `REVIEW: PASS` that lists a Should-fix or Blocker finding counts as `REVIEW: FAIL`. On
+`REVIEW: FAIL`: one fresh fix subagent per round with the findings, the Verify of every task a fix
+touches re-run, a fresh reviewer — at most 2 fix rounds, all inside this task's turn; still failing,
+end the turn with `NEEDS_DIRECTION:` and the findings.
+
+- [ ] **Step 1: Every task's Green and the end-to-end check** — the reviewer runs:
+
+```bash
+(cd plugins/tribe/scripts/runner && bun install --frozen-lockfile)
+bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
+bun test plugins/tribe/scripts/ways-of-work/ 2>&1 | tail -n 5
+bash plugins/tribe/scripts/tests/test-validate-plan.sh | tail -n 1
+bash plugins/tribe/scripts/tests/test-ways-of-work-plans.sh | tail -n 2
+bun test plugins/tribe/scripts/runner/core/supervisor/brief.test.ts 2>&1 | tail -n 5
+bash plugins/tribe/scripts/tests/test-install-hook.sh 2>/dev/null | tail -n 1
+bash plugins/tribe/scripts/validate-plan.sh docs/superpowers/plans/2026-09-30-ways-of-work-review-fixes.md | python3 -c "import json,sys; print(json.load(sys.stdin)['verdict'])"
+home="$(mktemp -d)"; : > "$home/answers.md"; python3 -c "import json,re,sys; plan='docs/superpowers/plans/2026-09-30-ways-of-work-review-fixes.md'; heads=re.findall(r'^### (Task \d+: .*)$', open(plan, encoding='utf-8').read(), re.M); card={'status':'staged','spec':'docs/superpowers/specs/2026-09-30-ways-of-work-review-fixes-design.md','plan':plan,'branch':None,'baseSha':None,'pr':None,'mergeSha':None,'sessionId':None,'updatedAt':None,'tasks':[{'id':f'T{i+1}','heading':h} for i,h in enumerate(heads)]}; json.dump({'v':2,'campaign':'wowrf','planning':{'mode':'self'},'mergePolicy':'regular','sequence':['wowrf'],'schemaLockPaths':[],'docsOnlyPaths':[],'ownerOnlyEscalations':[],'cards':{'wowrf':card}}, open(sys.argv[1]+'/campaign-state.json','w'))" "$home"
+bun plugins/tribe/scripts/runner/run.ts --repo "$PWD" --model fixture --home "$home" --no-viewer --dry-run < /dev/null > "$home/dry-run.json"; echo "exit=$?"
+python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d['cardId'], d['phase']['kind'])" "$home/dry-run.json"
+```
+
+Expected, in order: the counter's `restates   .c3/c3-2-plugins/c3-215-tribe.md (7 lines)`, a
+`canonical  plugins/tribe/agents/shaman.md#Ways of work (…)` line and `ways-of-work definitions: 2`;
+` 24 pass` / ` 0 fail`; `102 passed, 0 failed`; `25 passed, 0 failed` and `V-WOW=PASS`; ` 19 pass` /
+` 0 fail`; `27 passed, 0 failed`; `pass`; `exit=0` and `wowrf fresh`.
+
+- [ ] **Step 2: The whole suite (D-F7)** — save the script, then run it once per suite, one Bash call
+  each (every call stays under the harness's 10-minute limit):
+
+```bash
+cat > "$REPORTS/wowrf-suite.sh" <<'SH'
+#!/usr/bin/env bash
+# wowrf-suite.sh — this repo's whole test suite, one suite per call (spec §4.6, card rule D-F7).
+#   wowrf-suite.sh list          print every suite's name, one per line
+#   wowrf-suite.sh run NAME      run that one suite from ROOT (default: the current directory),
+#                                bounded by 540 s (KILL 10 s later); print "NAME rc=N" (124/137 =
+#                                the bound was hit). Its output goes to $LOGS/NAME.log.
+# Excluded by ruling: scripts/evals/ and plugins/tribe/evals/ (owner ruling E1); the billed opt-in
+# tests skip themselves unless TRIBE_REAL_E2E=1, which this script never sets.
+set -uo pipefail
+ROOT="${ROOT:-.}"
+cd "$ROOT" || exit 2
+suites() {
+  printf '%s\n' runner-bun viewer-bun gaps-bun cli-bun misc-bun
+  for t in plugins/*/scripts/tests/test-*.sh; do printf '%s\n' "$t"; done
+}
+case "${1:-}" in
+  list) suites ;;
+  run)
+    name="${2:?usage: wowrf-suite.sh run NAME}"
+    : "${LOGS:?set LOGS to a log directory}"
+    mkdir -p "$LOGS"
+    log="$LOGS/$(basename "$name").log"
+    case "$name" in
+      runner-bun) cmd=(bash -c 'cd plugins/tribe/scripts/runner && bun install --frozen-lockfile && bun test') ;;
+      viewer-bun) cmd=(bash -c 'cd plugins/tribe/scripts/viewer && bun install --frozen-lockfile && bun test') ;;
+      gaps-bun)   cmd=(bash -c 'cd plugins/tribe/scripts/gaps && bun install --frozen-lockfile && bun test') ;;
+      cli-bun)    cmd=(bash -c 'cd plugins/tribe/scripts/viewer && bun install --frozen-lockfile && bun run build && cd ../cli && bun install --frozen-lockfile && bun test') ;;
+      misc-bun)   cmd=(bun test plugins/tribe/scripts/ways-of-work/ plugins/tribe/scripts/tests/ plugins/tribe/scripts/session-hygiene.test.ts) ;;
+      plugins/*/scripts/tests/test-*.sh) cmd=(bash "$name") ;;
+      *) echo "wowrf-suite: unknown suite: $name" >&2; exit 2 ;;
+    esac
+    timeout -k 10 540 "${cmd[@]}" > "$log" 2>&1
+    echo "$name rc=$?" ;;
+  *) echo "usage: wowrf-suite.sh list | run NAME" >&2; exit 2 ;;
+esac
+SH
+export LOGS="$REPORTS/wowrf-suite-logs"
+bash "$REPORTS/wowrf-suite.sh" list
+```
+
+For each name `list` prints, run `bash "$REPORTS/wowrf-suite.sh" run NAME` and append its line to
+`$REPORTS/ways-of-work-review-fixes-suite.txt`. For every line whose `rc` is not 0, run the same suite
+on the base branch — `git worktree add "$REPORTS/wowrf-base" origin/master` once, then
+`ROOT="$REPORTS/wowrf-base" LOGS="$REPORTS/wowrf-base-logs" bash "$REPORTS/wowrf-suite.sh" run NAME` —
+and append its line with the prefix `base: `. A suite that is non-zero on the branch and 0 on the base
+is a new failure: at least Should-fix. The same non-zero on both is inherited (Adjudication item 4):
+list it, rated Optional. Remove the base worktree afterwards (`git worktree remove --force "$REPORTS/wowrf-base"`).
+
+- [ ] **Step 3: Assemble the PR body's `## Final review` section** from every round's report, in
+  order — each round's `REVIEW:` line and its findings — and check it:
+
+```bash
+python3 - "$REPORTS" <<'PY'
+import glob, re, sys
+rounds = sorted(glob.glob(sys.argv[1] + "/ways-of-work-review-fixes-review-*.md"), key=lambda p: int(re.search(r"-review-(\d+)[.]md$", p).group(1)))
+out = ["## Final review", ""]
+for n, path in enumerate(rounds, 1):
+    text = open(path, encoding="utf-8").read().rstrip()
+    verdict = [l for l in text.splitlines() if l.startswith("REVIEW: ")]
+    out += [f"### Round {n} — {verdict[0] if verdict else 'REVIEW: (missing)'}", "", text[text.index(verdict[0]):] if verdict else text, ""]
+open(sys.argv[1] + "/ways-of-work-review-fixes-final-review.md", "w", encoding="utf-8").write("\n".join(out).rstrip() + "\n")
+last = [l for l in "\n".join(out).splitlines() if l.startswith("REVIEW: ")][-1]
+print(len(rounds), "round(s); last:", last)
+PY
+```
+
+#### Verify
+
+- Goal: D-F5 and D-F7 applied to this card's own review (G5, G7), over every goal row: G1 (the two
+  places), G2 and G3 (both plan suites), G4 (the pointer test), G6 (`brief.test.ts`), and this plan's
+  own validator verdict and dry run.
+- Red: not applicable, the review writes no code of its own; each goal's Red was shown by its task
+  (Tasks 1–8), and the G1 baseline is Task 1's evidence file.
+- Green: Step 1 prints the lines listed under it; Step 2 leaves no suite that is non-zero on the
+  branch and 0 on the base (`$REPORTS/ways-of-work-review-fixes-suite.txt`); Step 3 prints
+  `N round(s); last: REVIEW: PASS` with N from 1 to 3.
+- Stub check: on an empty implementation (the branch at `b90f1c4` plus this plan) the counter counts 7,
+  the validator suite has 87 tests, the two-gate test 15 and `brief.test.ts` prints ` 1 fail`; with no
+  reviewer report, Step 3 exits 1 with a Python error instead of printing a `REVIEW: PASS` line.
+
+#### Done
+
+```bash
+bun plugins/tribe/scripts/ways-of-work/drift.ts --repo . --json | python3 -c "import json,sys; r=json.load(sys.stdin); p=sorted((x['path'], x['canonical']) for x in r['places']); sys.exit(0 if r['count'] == 2 and p == [('.c3/c3-2-plugins/c3-215-tribe.md', False), ('plugins/tribe/agents/shaman.md#Ways of work', True)] else 1)"
+bun test plugins/tribe/scripts/ways-of-work/
+bash plugins/tribe/scripts/tests/test-validate-plan.sh
+cd plugins/tribe/scripts/runner && bun install --frozen-lockfile
+bash plugins/tribe/scripts/tests/test-ways-of-work-plans.sh
+bun test plugins/tribe/scripts/runner/core/supervisor/brief.test.ts
+bash plugins/tribe/scripts/tests/test-install-hook.sh
+bash plugins/tribe/scripts/validate-plan.sh docs/superpowers/plans/2026-09-30-ways-of-work-review-fixes.md | python3 -c "import json,sys; sys.exit(0 if json.load(sys.stdin)['verdict'] == 'pass' else 1)"
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git commit --allow-empty -m "review: final review — REVIEW: PASS (the PR body's ## Final review carries every round)"
+```
+
+## Goal → task → Verify
+
+| Card row | Task(s) | Verify (oracle) | Before → after (tool) |
+| --- | --- | --- | --- |
+| G1 — the counter lists every live restatement; after the fix only the section and `c3-215` | 1 (ratchet), 2, 3, 8; 9 re-runs | `drift.ts --repo .` exact output per task; the signal and pointer tests in `drift.test.ts`; after merge, `--also "$HOME/.claude/CLAUDE.md"` before and after `./install.sh tribe` (Shaman) | counter · 7 (8 with the installed copy) → 2 (2 with the installed copy after install) |
+| G2 — the validator refuses duplicate task headings, naming `duplicate_heading`, like the runner | 4; 9 re-runs | the validator probes; the two-gate mutants: validator names `duplicate_heading` AND runner `--dry-run` exit 4 | two-gate test · 15 → 25 passed, 0 failed |
+| G3 — `single-agent`: 2 build tasks + review pass, 3 + review fail; the rubric row says build tasks | 5; 9 re-runs | `limit_probe` in `test-validate-plan.sh`; the two-gate single-agent pair; the rubric text | `test-validate-plan.sh` · 87 → 102 passed, 0 failed |
+| G4 — the runner README points to the section | 3; 9 re-runs | `pointers.test.ts` plus the counter | pointer test · 4/5 → 5/5 |
+| G5 — any Should-fix or worse finding ends `REVIEW: FAIL` and opens a fix round | 7; 9 applies it | the section's paragraph and both blocks (`3 3 3`); `mode_block_copied` on this plan; this card's own review | — |
+| G6 — the closing brief quotes Stage D as `SKILL.md` says it | 6; 9 re-runs | `brief.test.ts` | `brief.test.ts` · 18/1 → 19/0 |
+| G7 — the final review catches a regression anywhere in the repo | 7; 9 applies it | the section and both blocks name the whole-suite run; Task 9 Step 2 runs all 41 suites and compares failures with the base branch | — |
+| D-F5, D-F7, A1 | 6, 7 | as G5, G6, G7 | — |
+| Governance | 8 | the tribe README section check (`True True True`) and the counter | — |
