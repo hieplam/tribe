@@ -398,8 +398,10 @@ round's `REVIEW:` line and findings). No screenshot applies: every goal is text 
   #202's plan used). Options: (a) adopt (planned); (b) let `single-agent` exclude only the final
   review. Recommendation: (a).
 - **Q5 — inherited failures on `master`, outside this card's fence.** `watchdog-integration.test.ts`
-  "G2 — skip when alive" (2 tests), `test-input-asymmetry.sh`, `test-runner-done-negative.sh`,
-  `test-review-cell-v3.sh` (Q3). Recommendation: one follow-up issue listing them with their repro
+  "G2 — skip when alive" (2 tests), the viewer's `bun test` (6 fail), `test-input-asymmetry.sh`,
+  `test-runner-done-negative.sh` (3 checks), `test-supervisor-park-truth.sh` (3 checks, 2765 s),
+  `test-review-cell-v3.sh` (Q3) — measured on a clone of `b90f1c4` while other suites ran, so some may
+  be load-dependent. Recommendation: one follow-up issue listing them with their repro
   commands; watchdog and runner code are out of this card.
 - **Q6 — signal wording calls made here** (the card gives signal wording to the Shaman): the
   `review-verdict` signal, the two-line join, and `task-limit`'s "build tasks". Recommendation: keep

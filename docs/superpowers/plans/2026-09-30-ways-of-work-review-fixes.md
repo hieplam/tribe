@@ -72,9 +72,13 @@ D-F7, Amendment A1) · **Spec:** `docs/superpowers/specs/2026-09-30-ways-of-work
    the Shaman as `NEEDS_DIRECTION`, never into a fix round.
 4. A suite failure that fails the same way on the base branch — D-F7 counts only failures the base
    branch does not have. Measured on `master` @ `b90f1c4` while planning: `watchdog-integration.test.ts`
-   "G2 — skip when alive" (2 tests, runner `bun test`); `test-input-asymmetry.sh` (its
-   `evals-file-has-52-evals` count); `test-review-cell-v3.sh` does not finish within the 540-second
-   bound (its pass case sweeps every shell suite through `pre-gate.sh`). The whole-suite step re-checks
+   "G2 — skip when alive" (2 tests, runner `bun test`); the viewer's `bun test` (879 pass, 6 fail);
+   `test-input-asymmetry.sh` (its `evals-file-has-52-evals` count); `test-runner-done-negative.sh`
+   (3 checks, 953 s); `test-supervisor-park-truth.sh` (3 G2 checks, 2765 s); `test-review-cell-v3.sh`
+   did not finish in over 16 minutes (its pass case sweeps every shell suite through `pre-gate.sh`).
+   Several ran while other suites loaded the machine, and `timeout` did not stop the long ones at their
+   bound; a suite still running when its bound should have fired is recorded as not finished, on both
+   branches alike. The whole-suite step re-checks
    every failure against the base branch itself; this list only saves time.
 5. The two-gate test's `m-single-three` fixture gaining a third build task (Task 5, spec §4.4).
 6. `SKILL.md` Stage D step 1 no longer naming `agents/shaman.md` (Task 6, spec §4.5).
