@@ -109,6 +109,11 @@ cd plugins/tribe/scripts/cli && bun install && bun test && bunx tsc --noEmit
 
 # shell script tests (per plugin)
 plugins/tribe/scripts/tests/test-validate-plan.sh
+plugins/tribe/scripts/tests/test-ways-of-work-plans.sh   # needs the runner's node_modules
+
+# the ways-of-work drift counter: its tests, then the count (the target is 1)
+bun test plugins/tribe/scripts/ways-of-work/
+bun plugins/tribe/scripts/ways-of-work/drift.ts --repo .
 
 # agent/skill evals
 python3 scripts/evals/run_evals.py --evals plugins/tribe/evals/evals.json
