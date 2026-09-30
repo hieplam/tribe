@@ -1,8 +1,8 @@
 # Spec — Ways of work: one definition, owned by the Shaman (card `ways-of-work-consolidation`)
 
-Status: spec for review, round 2 (planning-only Warchief, 2026-09-30) · base `master` @ `632a039`
-Card: `~/.tribe/-Users-home-repos-tribe/cards/ways-of-work-consolidation.md` (goals G1–G4,
-rulings D1–D6, scope fence; round-1 rulings N1–N6 and amendments S1–S3) · Plan:
+Status: spec for review, round 3 (planning-only Warchief, 2026-09-30) · base `master` @ `632a039`
+Card: `~/.tribe/-Users-home-repos-tribe/cards/ways-of-work-consolidation.md` (goals G1–G4 with the
+G4 amendment, rulings D1–D9, scope fence; round-1 rulings N1–N6, amendments S1–S3, R2-1) · Plan:
 `docs/superpowers/plans/2026-09-29-ways-of-work-consolidation.md` · C3 follow-up issue body:
 `docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md`
 
@@ -12,6 +12,15 @@ rulings D1–D6, scope fence; round-1 rulings N1–N6 and amendments S1–S3) ·
 > G1's in-repo target becomes 2 places (the canonical section and `c3-215`); S1 — the reviewer
 > judges the diff against every goal row and the scope fence; S2 — the PR body carries a
 > `## Final review` section and the SHIPPED gate checks it; S3 — the rubric counts build tasks only.
+
+> Round 3 applies D7–D9 and the G4 amendment: the ways of work gain a second layer, the **campaign
+> harness** — every approved plan, in every mode, runs through `orchestrate-campaign` (the campaign
+> runner, its watchdog and its supervisor) as an N-card campaign, one card being normal, unless the
+> owner explicitly says not to use it (D7); in Mode 1 the Shaman runs it itself after approval or
+> delegation (D9); the in-session paths (the owner's new session, the Shaman building inline, the
+> Shaman dispatching a full-build Warchief) remain only as the no-harness path. Every block was
+> re-grounded against the runner (§4.9), and this card itself runs as a one-card campaign (§4.10).
+> The Workflow tool as a mode (D8, #200) and any runner, watchdog or supervisor code change are out.
 
 > Base note: the card was grounded at `dbb0124`; `master` has since moved to `632a039` (PR #196,
 > "archive the mammoth-hunt skill"), which edited `shaman.md`, the brainstorm-together snippet and
@@ -55,14 +64,15 @@ sections) dry-runs clean and fails `validate-plan.sh` (no Way of work, no Hunter
 
 | # | Change | Card row |
 | --- | --- | --- |
-| C1 | A `## Ways of work` section in `shaman.md` is the one definition: the three modes with the rubric (build tasks only, S3), the tie-break, who decides, the final review (judged against every goal row and the scope fence, S1; recorded in the PR body's `## Final review`, S2) and its 2-round fix cap, who executes on each path, and one fenced block per mode that plans copy verbatim. | G1, D1, D3, D4, D6, S1–S3 |
+| C1 | A `## Ways of work` section in `shaman.md` is the one definition: the campaign harness every approved plan runs through by default and its one exception (D7), the three modes with the rubric (build tasks only, S3), the tie-break, who decides, the final review (judged against every goal row and the scope fence, S1; recorded in the PR body's `## Final review`, S2) and its 2-round fix cap, who executes on each path, and one fenced block per mode that plans copy verbatim. | G1, D1, D3, D4, D6, S1–S3 |
 | C2 | `shaman.md` Mode 1 points to it: step 3 records the mode and its rubric reasons in the card; the plan gate checks the plan carries that mode's block; delegation and hand-off follow the "who executes" table; anti-goals 1–2 and the frontmatter description carry a scoped exception for a delegated `single-agent` plan; the SHIPPED gate checks the PR body's `## Final review` section (S2). | G2, G4, D2, D3, S2 |
 | C3 | `Executor:` keeps its key and gains the value `tribe`. | D5 |
 | C4 | One plan format, accepted by both gates: `## Way of work` (the card's reasons, then the mode's block) + per task a Verify block, a **Done** section (the runner's format), exactly one Commit step + for the two light modes a last `Task N: Final review`. `validate-plan.sh` checks all of it; the runner is untouched. | G3, D4, D5 |
 | C5 | A committed drift counter measures G1 before anything else is edited. | G1 ratchet |
 | C6 | Every other live file points to the section by name: `warchief.md`, orchestrate-campaign `SKILL.md`, the runner README, the plugin README, the claude-md snippet (and through `install.sh`, the installed `~/.claude/CLAUDE.md`). `c3-215` is left as it is (N5): the follow-up issue carries its exact rows. | G1, G4, N5 |
 | C7 | `install.sh` refreshes an already-installed snippet section in place (with a backup), so the snippet's new wording reaches the installed `CLAUDE.md` — today it never can. | G1 (installed copy) |
-| C8 | Evals 57–63 are added and eval 56 is rewritten to D3 (and S1–S2). | G2, G4 |
+| C8 | Evals 57–64 are added and eval 56 is rewritten (D3, S1–S2, D7, D9); round 3 reworks 56, 61, 62, 63 to the harness and adds 64 for the no-harness exception. | G2, G4 |
+| C10 | Mode 1 runs the approved card through the harness (D9): the Shaman runs `orchestrate-campaign` itself (Stage A without authorship: land the approved spec and plan, state, scaffold, dry run, launch), answers escalations, re-verifies, and runs the card's post-merge steps; step 6 (the owner's new session) is only the no-harness path. `orchestrate-campaign` drops its "not build this one card" exclusion and gains a Stage A step 0 for an approved card. | G4 (amended), D7, D9 |
 | C9 | A self-contained C3 follow-up issue body, committed at `docs/superpowers/evidence/2026-09-29-ways-of-work-c3-issue.md`: context, the c3x 11.0.0 defects with exact reproduction and output, the ADR body, the exact `c3-215` row replacements, acceptance. | N5 |
 
 ## 3. The gating experiment (brief item 2) — what each gate accepts
@@ -99,6 +109,14 @@ command, and the runner accepts it.
 anti-goals, so it sits outside every mode's section and every mode can point to it. Its full text
 is Task 3 of the plan (verbatim). Its parts:
 
+- **Two layers and the campaign harness** (D7, D9): the harness runs the plan — mechanical, the
+  same for every mode — and the mode decides who builds and reviews inside the executor session.
+  Every approved plan, in every mode, runs through `orchestrate-campaign` → campaign runner +
+  watchdog + supervisor as an N-card campaign (one card is normal); the owner's words are quoted
+  once, and only the owner's explicit words turn it off. A bulleted list states what the harness
+  does, as measured against the runner (§4.9), so every block can be true under it. In Mode 1 the
+  Shaman runs the harness itself (D9). Under the harness a `tribe` plan also carries
+  orchestrate-campaign's campaign plan additions and ends with its Harness-gap gate task.
 - **The three modes** table — mode (`Executor:` value), the rubric (the card's draft, refined:
   single-agent "at most 2 tasks, roughly 50 changed lines outside tests, one component, and an
   obvious oracle"; subagent-per-task "the design and requirements are settled …, 3 to about 8 build
@@ -130,28 +148,43 @@ is Task 3 of the plan (verbatim). Its parts:
 
   | Path | `single-agent` | `subagent-per-task` | `tribe` |
   | --- | --- | --- | --- |
-  | Mode 1, owner approves | the owner's new session, briefed by the Shaman | same | the Shaman dispatches one full-build `warchief` — no execution session |
-  | Mode 1, owner delegates | the Shaman's own session builds inline | the Shaman's session orchestrates | the Shaman dispatches one full-build `warchief` |
-  | Campaign | the runner's executor session builds inline | the executor session orchestrates | the executor session acts as the Warchief |
+  | **The campaign harness — the default** (Mode 1: the Shaman runs orchestrate-campaign) | the runner's executor session builds inline | the executor session orchestrates the subagents the block names | the executor session acts as the Warchief |
+  | No harness (owner's explicit words) — Mode 1, owner approves | the owner's new session, briefed by the Shaman | same | the Shaman dispatches one full-build `warchief` — no execution session |
+  | No harness (owner's explicit words) — Mode 1, owner delegates | the Shaman's own session builds inline (D2) | the Shaman's session orchestrates | the Shaman dispatches one full-build `warchief` (N2) |
 
-  The `tribe` column keeps the chain of command intact: a full-build Warchief reports only to the
-  Shaman (`warchief.md`, contract), so the Shaman dispatches it; an owner-opened session briefed to
-  dispatch a Warchief would become an unranked relay between them. (Ruling N2.)
-- **The blocks**: three fenced ` ```markdown ` blocks whose first line is `Executor: <mode>`. A plan
+  D2 and N2 now apply only on the no-harness rows (D7). On those rows the `tribe` column keeps the
+  chain of command intact: a full-build Warchief reports only to the Shaman (`warchief.md`,
+  contract), so the Shaman dispatches it; an owner-opened session briefed to dispatch a Warchief
+  would become an unranked relay between them. (Ruling N2.)
+- **The blocks** — true under the runner (§4.9): each light block says the executing session is
+  the runner's executor session under the harness, one turn per task ended with `TASK_DONE`; the
+  review's fix rounds all run inside the review task's turn; a review still failing ends the turn
+  with `NEEDS_DIRECTION:`; every round's report is written to the campaign home's `reports/`
+  directory, because the deliver turn — possibly a fresh session — writes the PR's
+  `## Final review` from them; the PR opens on the runner's deliver turn. The tribe block says the
+  executor acts as the Warchief under the harness, and the Shaman dispatches it only without the
+  harness. Three fenced ` ```markdown ` blocks whose first line is `Executor: <mode>`. A plan
   copies one into its `## Way of work`, after the card's reasons. `general-purpose` is named in the
   light blocks for the reason `SKILL.md` 2b gives today (other installed agents could otherwise be
   picked by description), kept as a note in the section.
 
 ### 4.2 The Shaman's amendments (C2)
 
-Exact replacements are plan Task 3. Summary: frontmatter description (never code, except a
-delegated single-agent plan; execution on the chosen mode); the opening paragraph; the
-Shaman ⇄ Warchief contract's scope gains "a Mode 1 card whose way of work is `tribe`"; anti-goals 1
-and 2 each gain the D2 scoped exception; Mode 1 step 3 records the mode; step 4's gate checks the
-block; step 5 drives on the chosen mode; step 6 notes `tribe` has no session to brief; the section
-"Mode 1 executes the plan's way of work — never the tribe's delivery loop" becomes "Mode 1 executes
-the plan's way of work" and keeps only pointers plus the still-true brief-wording rule; Mode 1's
-definition of done; campaign Stage A chooses each card's mode by the same rubric; and the
+Exact replacements are plan Task 3. Summary: frontmatter description (the Shaman runs the approved
+card through the harness; never code, except a delegated no-harness single-agent plan); the
+opening paragraph; the Shaman ⇄ Warchief contract's scope gains "a Mode 1 `tribe` card run without
+the campaign harness"; anti-goals 1 and 2 each gain the D2 scoped exception, limited to the
+no-harness path (D7); the path line Mode 1 opens with ends "you run it through the
+orchestrate-campaign harness"; Mode 1 step 3 records the mode; step 4's gate checks the block;
+step 5 — on the owner's go or delegation the Shaman runs the approved card through the harness
+itself (D9: Stage A without authorship, answer escalations, re-verify, run the post-merge steps);
+step 6 becomes "Without the harness: hand off by driving", only for the owner's explicit
+no-harness words, where a `tribe` plan has no session to brief; the section "Mode 1 executes the
+plan's way of work — never the tribe's delivery loop" becomes "Mode 1 executes the plan's way of
+work" — it no longer bans orchestrate-campaign (D7 supersedes `shaman.md:410`), says "run the
+harness; dispatch nothing else", and keeps the brief-wording rule for no-harness briefs; Mode 1's
+definition of done; campaign Stage A chooses each card's mode by the same rubric, and a Mode 1
+card arrives with its spec and plan approved (Stage A skips authorship); and the
 "Goal · Verify · Ratchet" SHIPPED gate (item 3) now also applies before every Mode 1
 `verified-SHIPPED` and, for a light-mode card, opens the PR body's `## Final review` section: it
 must exist, carry every round, and end `REVIEW: PASS` (S2).
@@ -243,7 +276,15 @@ validator on this plan. By S3 it has 8 build tasks (1–6, 8, 9), two phase-end 
 
 ### 4.5 Pointers (C6)
 
-Exact replacements: plan Tasks 7–10 (no `.c3/` file, ruling N5). `warchief.md` step 3 copies the recorded mode's block and
+Exact replacements: plan Tasks 7–10 (no `.c3/` file, ruling N5). Round 3 (D7, D9):
+`orchestrate-campaign`'s description drops "not 'build this one card' (that is a single-card
+session)" — it is the campaign harness every approved plan runs through, one card included — and
+Stage A gains a step 0 for a card whose spec and plan are already approved (skip steps 1, 2, 2b and
+5; land the approved planning branch — the runner reads the plan on the base branch and every
+executor branches from it — then state, scaffold, Done-heading index, dry run). `warchief.md` step 3
+also has a planned `tribe` plan carry the campaign plan additions and end with the Harness-gap gate
+task. The snippet's step 6 becomes "Run it through the campaign harness"; the plugin README's
+Shaman paragraph, skills table and "Ways of work" section name the harness. `warchief.md` step 3 copies the recorded mode's block and
 never chooses (a full-build dispatch is the `tribe` block; a card with no mode is
 `NEEDS_DIRECTION`), and every plan gains Done sections; the Hunter line is required only in `tribe`
 plans. `SKILL.md` Stage A step 2b becomes "Choose each card's way of work" by the rubric; the
@@ -307,8 +348,11 @@ line must read `ways-of-work definitions: 2` (measured on a scratch copy of toda
   context — what this card changed and where the canonical section lives; (b) D1–D3 with the exact
   reproduction script and its exact output, captured on a clone equal to merged `master` (fileable
   upstream); (c) the full ADR body; (d) the 14 exact `c3-215` row changes (12 replacements, 2 new
-  rows), old text as on `master` and new text in the final wording (S1–S3 included — the Owner →
-  Shaman row names the `## Final review` record), plus one script applying them; (e) acceptance —
+  rows), old text as on `master` and new text in the final wording (S1–S3 and round 3 included —
+  the Owner → Shaman row names the campaign harness and the `## Final review` record, the
+  orchestrate-campaign row names the default harness and one-card campaigns with Stage A skipping
+  authorship, the Unattended-path row names a Mode 1 approval as a trigger), plus one script
+  applying them; (e) acceptance —
   the counter prints `ways-of-work definitions: 1` and `c3x check` reports only `master`'s 157
   historical broken seals. It gives two ways to land the change: a change unit once c3x no longer
   has D1, or the path verified with c3x 11.0.0 on a merged-`master` clone (ADR via `c3x add adr`,
@@ -325,14 +369,15 @@ In `plugins/tribe/evals/evals.json`, the existing agent-fixture shape (`ref-eval
 
 | Id | Goal | Case | Machine check |
 | --- | --- | --- | --- |
-| 56 (rewritten) | G4 approval path, S1, S2 | hand-off of a `subagent-per-task` card: brief quotes the block — the final review judged against the goals and scope fence, ≤2 fix rounds, the PR's `## Final review` section — and never changes the mode | — |
+| 56 (rewritten) | G4, D7, D9, S1, S2 | "Approved, go" on a `subagent-per-task` card → the Shaman runs orchestrate-campaign itself (Stage A without authorship, state, scaffold, dry run, launch), briefs no session, builds nothing, and will check the PR's `## Final review` | — |
 | 57 | G2 | picks `single-agent` for a 2-task, ~20-line card | `grep -Eq 'Executor: *`?single-agent' cards/tribe-version.md` |
 | 58 | G2 | picks `subagent-per-task` for a settled 6-task card | `grep … subagent-per-task …` |
 | 59 | G2 | picks `tribe` for a crash/resume state machine with a past escaped bug | `grep … tribe …` |
 | 60 | G2 (ask) | the owner asked for a light mode, the rubric says tribe (data migration) → asks for ratification with options + recommendation | — |
-| 61 | G4 delegation | a delegated `single-agent` plan: the Shaman builds Task 1 inline, no implementer dispatch | `bash -c 'test "$(bash hello.sh)" = hello'` |
-| 62 | G4 delegation | `subagent-per-task`, the review failed after fix round 2 → no third round | — |
-| 63 | G4 | an approved `tribe` card → the Shaman dispatches one full-build `warchief` | — |
+| 61 (reworked) | G4, D7, D9, R3-1 | a delegated `single-agent` card → the harness, not an inline build; where the harness cannot run, blocked, not a fallback | `bash -c '! test -e hello.sh'` |
+| 62 (reworked) | G4, D9 | the runner escalates a review still failing after 2 fix rounds → the Shaman rules in `answers.md`, archives the escalation, re-triggers the card | `bash -c 'grep -qi closed campaign/answers.md'` |
+| 63 (reworked) | G4, D7, D9 | an approved `tribe` card → a campaign card whose executor acts as the Warchief; the Shaman dispatches no Warchief itself | — |
+| 64 (new) | D7's exception, D2 | the owner says "don't use the orchestrate-campaign harness" and delegates a `single-agent` card → the Shaman builds Task 1 inline | `bash -c 'test "$(bash hello.sh)" = hello'` |
 
 Checks run with `shlex` and **no shell** (`run_evals.py:618-626`), hence `bash -c` in eval 61.
 Fixture cards/plans are real files in the eval's working directory: an early draft that pointed at
@@ -363,6 +408,44 @@ pick or run `tribe`, and never asks). 56, 57, 58, 61 and 62 already pass today; 
 regression guards for the rewrite, not counted as ratchet movement. The plan's Red/Green use
 `--runs 3` and a majority rule per case (one sample cannot separate a regression from model variance,
 `scripts/evals/README.md`).
+
+### 4.9 The runner, grounded (round 3, D7) — what each block must be true under
+
+Read from the runner's code and README at `632a039`, not assumed:
+
+| Runner fact | Where | What the blocks and the section say because of it |
+| --- | --- | --- |
+| One executor session per card, one turn per plan task, ended by `TASK_DONE <task-id> <branch>`; the runner then runs the Done commands of tasks 1..k from a clean checkout | README "Turns and the Done run"; `core/done.ts` | each light block: "under the campaign harness … one turn per task, each turn ended with `TASK_DONE`"; Done sections stay mandatory (G3) |
+| No limit on tool calls or subagents in a turn: the executor's SDK options set no `maxTurns` (only the supervisor's own sessions have `--session-max-turns`, default 60); one turn's wall clock is `--session-timeout`, default 3 h | `core/session.ts` `buildSessionOptions`; `cli/main.ts:51` | the final review's reviewers and fix rounds all run inside the review task's turn |
+| A Bash call is capped at 10 minutes and must run in the foreground; a background call is denied by a hook | `core/brief-template.md` "Session liveness"; `decideBackgroundingHook` | the plan splits each eval pass into three calls of 9 jobs (one wave each) |
+| At most 3 unaccepted turns per task (`MAX_STEP_ATTEMPTS = 3`: a failed Done run or a protocol error), then the card escalates `done_failed` | `core/done.ts:8`; README "The 3-attempt budget" | the review's 2-fix-round cap is separate from, and inside, the runner's budget |
+| `NEEDS_DIRECTION: <q>` at any step → a `needs_direction` escalation; the card parks; the ruling in `answers.md` reaches only a freshly spawned session, and a card whose session ended is re-spawned fresh, at the first task without `passedSha` | README "The step order"; `SKILL.md` Stage C | a review still failing after 2 fix rounds ends the turn with `NEEDS_DIRECTION:`; the ruling starts the review task over |
+| After a quota pause or a failed resume the next turn can be a fresh session with no memory; the brief names the campaign home, whose `reports/` directory is the executor's to use | README "Resume semantics"; brief template "Notes for your plan" | every review round's report is written to the campaign home's `reports/`; the deliver turn writes the PR's `## Final review` from them |
+| The deliver turn pushes, opens the PR, waits for every check, merges with `gh pr merge --merge` behind the merge-gate hook (head = `doneSha`), cleans up | README; `core/merge-gate.ts` | "then open the PR (under the harness, on the runner's deliver turn)" |
+| The runner reads the plan from the `--repo` checkout (the base branch) and the executor reads spec and plan from it | `core/loop/run-loop.ts` `resolveTaskIndexes`; brief template "Spec (target repo, master)" | D9's Stage A still lands the approved spec and plan (step 6) — only authorship is skipped |
+
+No block needed a runner change: the one limit that bites — 10 minutes per Bash call — is met by
+splitting long commands, as the brief already instructs.
+
+Measured on this prototype: a `claude -p` executor that could not run the harness (the eval's
+scratch directory is no git repository) fell back to building a delegated `single-agent` card in
+its own session, reading "no harness" into "cannot run the harness". The section now says a
+harness that cannot run blocks the card and falling back is the owner's call (eval 61 pins it).
+
+### 4.10 This card through the harness (G4 end-to-end)
+
+The card itself runs as a one-card campaign once the owner approves. The orchestrating (Shaman)
+session: lands the planning branch `feat/ways-of-work-consolidation` (spec, plan, the C3 issue
+body) on `master` as Stage A step 6; writes a `campaign-state.json` whose one card lists the plan's
+11 task headings, and an `answers.md` scaffold; runs the dry run — measured on the planning branch
+with a state built from the current headings: exit 0, `{"cardId":"ways-of-work-consolidation",
+"phase":{"kind":"fresh"}}` — then launches. The plan says so in its Global Constraints (the executor
+works on its own card branch; reports under the campaign home's `reports/`) and its Way of work
+(the harness drives it). Task 11's review runs inside its turn and writes its reports there; the
+deliver turn pastes the `## Final review` section. The card's post-merge steps — `./install.sh
+tribe` with the `--also` count, and the #199 issue sync — are run by the orchestrating Shaman
+session after the runner reports the card shipped and it re-verified it (round-3 item 4), never by
+the headless executor.
 
 ## 5. Purity (the golden standard)
 
@@ -395,7 +478,7 @@ regression guards for the rewrite, not counted as ratchet movement. The plan's R
 | G1 | drift counter: 9 (10 with `--also ~/.claude/CLAUDE.md`) — `docs/superpowers/evidence/2026-09-29-ways-of-work-drift-baseline.txt` (Task 1) | 2 in the repo — the canonical section and `c3-215`, nothing else (ruling N5); 2 with `--also` on the installed copy after `./install.sh tribe`; 1 once the C3 follow-up lands (Task 10 proves it on a scratch copy) |
 | G2 | evals 57–60 majority pass count — `docs/superpowers/evidence/2026-09-29-ways-of-work-evals-baseline.txt` (Task 2) | 4/4 |
 | G3 | `test-validate-plan.sh` 44 passed; the two-gate test 10/15 on the Task 3 tree | 87 passed, 0 failed; 15 passed, `V-WOW=PASS` |
-| G4 | evals 56, 61–63 majority pass count (Task 2); the 3-card campaign dry-run (in the two-gate test) | 4/4; exit 0 |
+| G4 (amended: follows the mode and runs through the campaign harness by default) | evals 56, 61–64 majority pass count (Task 2); the 3-card campaign dry-run (in the two-gate test); this card's own one-card campaign dry-run | 5/5; exit 0; exit 0, then the card itself ships through the harness |
 
 The PR body carries each before → after with the command that measured it.
 
@@ -415,15 +498,26 @@ commit restores today's behaviour; the installed `CLAUDE.md` is restored from it
 
 ## 9. Rulings and open questions
 
-Round 1's questions N1–N6 are ruled in the card ("Spec amendments … and rulings on the planning
-round-1 questions (2026-09-29)"), with S1–S3; this round applies them. One How-level call made in
-round 2, for the Shaman to confirm or overturn:
+Round 1's questions N1–N6 are ruled in the card, with S1–S3; round 2's R2-1 is accepted (a); round
+3 applies D7–D9 and the G4 amendment. Three How-level calls made in round 3, for the Shaman to
+confirm or overturn:
 
-- **R2-1 — S2 on the campaign path.** Context: S2 says the Shaman's SHIPPED gate checks the PR
-  body's `## Final review` section. Mode 1 goes through `shaman.md`'s gate (Task 3); a campaign's
-  shipped cards are re-verified in orchestrate-campaign Stage D, by the session holding the
-  Shaman's authority, which did not look at the PR body. Options: (a) Stage D step 1 also reads the
-  section for a light-mode card and reports a missing or failing one as `blocked` (one sentence,
-  Task 8 — what the plan does); (b) leave campaigns out, so a campaign card could ship with no
-  review record. Recommendation: (a) — G4 says the mode is followed on every path, and S2's reason
-  (an empty `REVIEW: PASS` commit proves nothing) holds for a runner-driven card too.
+- **R3-1 — a harness that cannot run blocks the card.** Context: measured on the prototype (§4.9),
+  a Shaman whose harness could not run (no git repository) read D7's "unless the user explicitly
+  says don't" as licence to fall back to building in its own session. Options: (a) the section
+  says a harness that cannot run is not the exception — the card is blocked and the owner decides
+  (what the plan does; eval 61 pins it); (b) let the Shaman fall back on its own judgment.
+  Recommendation: (a) — D7 names one exception, the owner's words; a silent fallback would make the
+  heavy harness optional in exactly the cases nobody checks.
+- **R3-2 — D9's Stage A still lands the approved spec and plan first.** Context: the runner reads
+  the plan from the `--repo` checkout (the base branch) and every executor branches from it
+  (§4.9), so "Stage A skips authorship" cannot skip step 6. Options: (a) the planning branch —
+  spec, plan, and here the C3 issue body — merges to the base branch as a docs PR before the build
+  starts (what the plan and `SKILL.md` step 0 say); (b) change the runner to read plans from a
+  branch — out of the fence. Recommendation: (a).
+- **R3-3 — Mode 3 is left as it is.** Context: Mode 3 runs roadmap cards as full-build Warchief
+  loops through "two dispatch mechanisms" — an in-session dynamic workflow, or the campaign runner.
+  D7 is about how an approved plan is executed; a Mode 3 card has no approved plan before its
+  Warchief writes one, and the in-session mechanism is the Workflow tool that D8 moved to #200.
+  Options: (a) leave Mode 3 untouched here and let #200 settle the Workflow tool (what the plan
+  does); (b) make the campaign runner Mode 3's only default now. Recommendation: (a).
