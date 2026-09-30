@@ -87,6 +87,12 @@ Expected: the quoted file is written verbatim
 - Green: `bun test fenced.test.ts` -> `1 pass`.
 - Stub check: an empty file fails the verbatim comparison.
 
+#### Done
+
+```bash
+bun test fenced.test.ts
+```
+
 - [ ] **Step 2: Commit**
 
 ```bash
@@ -455,6 +461,7 @@ check "exact-path rule: ports.test.ts does not trip ports.ts lock (zero exit)" "
 # allowed for a task with no code to go red (a baseline measurement).
 task_with() { # task_with N BODY-FILE — one task section whose body is the file's content
   printf '### Task %s: Unit %s\n\n' "$1" "$1"; cat "$2"
+  printf '\n#### Done\n\n```bash\ntrue\n```\n'
   printf '\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m "feat: %s"\n```\n\n' "$1"
 }
 verify_block > "$TMP/vb.md"
@@ -516,7 +523,7 @@ bash "$SCRIPT" "$VF6" > "$TMP/vo6.json"
 check "one bare task fails the plan" "$(find_check "$TMP/vo6.json" tasks_have_verify_block)" "fail"
 check "the bare task is named" "$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print([c['detail'] for c in d['checks'] if c['name']=='tasks_have_verify_block'][0].count('Unit 2'))" "$TMP/vo6.json")" "1"
 
-# --- Way of work: Executor line, single-agent only for at most 2 tasks ------------------
+# --- Way of work: the Executor line, and the single-agent task limit -----------------------
 bare_header() { printf '# Fixture Plan\n\n## Global Constraints\n\n- Implementer: the hunter subagent.\n\n'; }
 
 WF1="$TMP/wow-missing.md"
@@ -571,6 +578,49 @@ printf '#### Verify\n- Goal: G1.\n- Red: `pytest` -> `1 failed`.\n- Green: `pyte
 probe "a one-word command counts" tasks_have_verify_block pass "$TMP/r2-one-word.md"
 printf '#### Verify\n- Goal: G1.\n- Red:\n  ```text\n  1 failed\n  ```\n- Green:\n  ```output\n  1 passed\n  ```\n- Stub check: a stub fails.\n' > "$TMP/r2-output-fence.md"
 probe "text/output fences are not commands" tasks_have_verify_block fail "$TMP/r2-output-fence.md"
+
+# --- The third mode, and the Hunter line only a tribe plan needs --------------------------
+tribe_header() { printf '# P\n\n## Global Constraints\n\n- Implementer: dispatch each implementation/fix task to the `hunter` subagent.\n\n## Way of work\n\nExecutor: tribe\n\n'; }
+probe "Executor: tribe is declared" way_of_work_declared pass "$TMP/vb.md" tribe_header
+tribe_lite_header() { printf '# P\n\n## Global Constraints\n\n- the hunter subagent.\n\n## Way of work\n\nExecutor: tribe-lite\n\n'; }
+probe "a longer value is not tribe" way_of_work_declared fail "$TMP/vb.md" tribe_lite_header
+no_hunter_subagent_header() { printf '# P\n\n## Global Constraints\n\n- Each task goes to one fresh general-purpose subagent.\n\n## Way of work\n\nExecutor: subagent-per-task\n\n'; }
+probe "a subagent-per-task plan need not name the Hunter" hunter_named_as_implementer pass "$TMP/vb.md" no_hunter_subagent_header
+no_hunter_tribe_header() { printf '# P\n\n## Global Constraints\n\n- Each task goes to one fresh general-purpose subagent.\n\n## Way of work\n\nExecutor: tribe\n\n'; }
+probe "a tribe plan must name the Hunter" hunter_named_as_implementer fail "$TMP/vb.md" no_hunter_tribe_header
+
+# --- The campaign runner's Done section (runner/core/plan-index.ts is the oracle) ----------
+done_probe() { # done_probe NAME WANT-STATUS WANT-PROBLEM DONE-PART — one task: Verify block, then DONE-PART, then Commit
+  local f="$TMP/done-$RANDOM.md"
+  { good_plan_header; printf '### Task 1: Unit 1\n\n'; cat "$TMP/vb.md"; printf '%s\n' "$4"
+    printf '\n- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m "feat: 1"\n```\n'; } > "$f"
+  bash "$SCRIPT" "$f" > "$f.json"
+  check "$1" "$(find_check "$f.json" tasks_have_done_block)" "$2"
+  if [[ -n "$3" ]]; then
+    check "$1 — names $3" "$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print([c['detail'] for c in d['checks'] if c['name']=='tasks_have_done_block'][0].count(sys.argv[2]))" "$f.json" "$3")" "1"
+  fi
+}
+done_probe "a Done section with one command passes" pass "" $'#### Done\n\n```bash\ntrue\n```'
+done_probe "a task with no Done section fails" fail missing_done ''
+done_probe "a Done block holding only comments fails" fail empty_done $'#### Done\n\n```bash\n# nothing to run\n```'
+done_probe "a Done command continued with a backslash fails" fail continuation_not_supported $'#### Done\n\n```bash\nbun test \\\n  x.test.ts\n```'
+done_probe "two Done headings in one task fail" fail ambiguous_done $'#### Done\n\n```bash\ntrue\n```\n\n#### Done\n\n```bash\ntrue\n```'
+done_probe "a Done heading at the task's own level is not the task's Done" fail missing_done $'### Done\n\n```bash\ntrue\n```'
+# Stricter than the runner, by design: a Done heading with no fence of its own would hand the
+# runner the Commit step's `git commit` fence as the task's Done commands.
+done_probe "a Done heading whose first fence is the Commit step's fails" fail done_block_after_a_step $'#### Done\n\nRun the tests.'
+# The runner's own refusals, with the Done section last in the task so no later fence is near.
+done_tail_probe() { # done_tail_probe NAME WANT-PROBLEM DONE-PART — Done after the Commit step, at the end of the file
+  local f="$TMP/done-tail-$RANDOM.md"
+  { good_plan_header; printf '### Task 1: Unit 1\n\n'; cat "$TMP/vb.md"
+    printf -- '- [ ] **Step 2: Commit**\n\n```bash\ngit commit -m "feat: 1"\n```\n\n%s\n' "$3"; } > "$f"
+  bash "$SCRIPT" "$f" > "$f.json"
+  check "$1" "$(find_check "$f.json" tasks_have_done_block)" "fail"
+  check "$1 — names $2" "$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print([c['detail'] for c in d['checks'] if c['name']=='tasks_have_done_block'][0].count(sys.argv[2]))" "$f.json" "$2")" "1"
+}
+done_tail_probe "a Done heading with no fenced block fails" missing_done_block $'#### Done\n\nRun the tests.'
+done_tail_probe "a Done fence that never closes fails" unclosed_done_block $'#### Done\n\n```bash\ntrue'
+done_tail_probe "a Done fence indented four spaces is not a fence to the runner" missing_done_block $'#### Done\n\n    ```bash\n    true\n    ```'
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 exit $((FAIL > 0))
