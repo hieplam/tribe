@@ -52,6 +52,9 @@ export type CardOutcome =
       cardId: string;
       reason: string;
       retryable: boolean;
+      /** Set when the session ended on a permanent API error (`core/api-error.ts`): never
+       * retryable, and the pass starts no further card (`run-loop.ts`). */
+      permanentApiErrorCode?: string;
     };
 
 /** The per-card working set threaded through every card-scoped function. `card` is
@@ -612,7 +615,9 @@ function turnDepsFor(ctx: CardCtx, phase: CardPhase): TurnDeps {
       }
       if (phase.kind === 'resume') {
         const resumed = await runSession({ brief: prompt, resume: phase.sessionId }, sessionConfig, buildSessionIOForCard(ctx));
-        if (resumed.outcome !== 'error') return resumed;
+        // A permanent API error fails every session alike, so a fresh fallback would only spend a
+        // second spawn on the same refusal.
+        if (resumed.outcome !== 'error' || resumed.permanentApiError !== undefined) return resumed;
         const digest = buildStateDigest(cardId, state.cards[cardId], resumed.finalText);
         return runSession({ brief: freshBrief(`${digest}\n\n---\n\n${resolved.answersContent}`, prompt) }, sessionConfig, buildSessionIOForCard(ctx));
       }

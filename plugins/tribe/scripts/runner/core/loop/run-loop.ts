@@ -82,6 +82,12 @@ export interface LoopResult {
  * shipped cleanly (design note: an escalation is the thing needing a human; session-incomplete
  * merely resumes next run). `EXIT_OK` only when every attempted card shipped, or none were
  * attempted at all (e.g. the campaign was already fully `done`). */
+/** A card stopped on a permanent API error: the same model refuses every card alike, so the pass
+ * starts no further card (card runner-model-support, G3 — "spawns nothing more"). */
+function stoppedOnPermanentApiError(outcome: CardOutcome): boolean {
+  return outcome.kind === 'stopped' && outcome.permanentApiErrorCode !== undefined;
+}
+
 function computeExitCode(processed: CardOutcome[]): number {
   if (processed.some((o) => o.kind === 'escalated' || o.kind === 'escalation_pending')) {
     return EXIT_ESCALATED;
@@ -331,6 +337,7 @@ async function runPass(
     attempted.add(nc.cardId);
     processed.push(outcome);
     if (didWork) worked += 1;
+    if (stoppedOnPermanentApiError(outcome)) break;
     // D5′: `escalated`/`stopped` no longer `break` the pass — the next tick naturally
     // re-derives the next progressable card (excluding this one, now `attempted`) via
     // `filteredNextCard`/`nextCard`'s own blocked-cascade reconciliation (W6).
@@ -423,6 +430,9 @@ async function runPassPool(
   let worked = 0;
   const limit = resolved.maxCards ?? Infinity;
   const active = new Set<Promise<void>>();
+  // Set once any card stops on a permanent API error: the cards already in flight finish, and no
+  // further card is launched (the serial pass breaks on the same fact).
+  let permanentApiErrorSeen = false;
 
   const launch = (nc: CardResult): void => {
     const ctx: CardCtx = { cardId: nc.cardId, state, resolved, io };
@@ -448,6 +458,7 @@ async function runPassPool(
       .then((result) => {
         processed.push(result.outcome);
         if (result.worked) worked += 1;
+        if (stoppedOnPermanentApiError(result.outcome)) permanentApiErrorSeen = true;
       })
       // ALWAYS runs, whether the turn shipped, escalated, parked, or (now) threw — a card can
       // never wedge a permanent slot in `active` and starve the pool of capacity.
@@ -458,7 +469,7 @@ async function runPassPool(
   };
 
   for (;;) {
-    if (!isStopRequested(stopFilePathOf(resolved), io)) {
+    if (!permanentApiErrorSeen && !isStopRequested(stopFilePathOf(resolved), io)) {
       // Top up to `maxConcurrent` in-flight workers, never claiming past the (optimistic)
       // --max-cards budget — see this function's own doc comment.
       while (active.size < maxConcurrent && worked + active.size < limit) {

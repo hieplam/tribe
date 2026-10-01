@@ -7,6 +7,7 @@ import type { HookDecision, PinnedSessionOptions, SessionIO, SessionMessage, Spa
 import { emptySpawnTracker, observeSpawns, rootSpawnRow, type SpawnRow, type SpawnTracker } from './ledger.ts';
 import { isFilesystemWideScan } from './metrics/session-hygiene.ts';
 import { buildMergeGateDecision, parseMergeCommand } from './merge-gate.ts';
+import { permanentApiErrorOf, type PermanentApiError } from './api-error.ts';
 
 export type { HookDecision, PinnedSessionOptions, SessionIO, SessionMessage, SpawnSessionParams };
 
@@ -22,6 +23,8 @@ export interface SessionResult {
   /** Set only on `task_done`: the task the session claims and the branch it committed on. */
   taskId?: string;
   branch?: string;
+  /** Set only on `error`: the session ended on an API error no retry can fix (`api-error.ts`). */
+  permanentApiError?: PermanentApiError;
 }
 
 export interface RunSessionInput {
@@ -261,6 +264,13 @@ const TERMINAL_LINE_RE =
  * never raw process stdout (spec §D3). */
 function parseResultMessage(message: SessionMessage): SessionResult {
   const finalText = typeof message.result === 'string' ? message.result : '';
+
+  // A permanent API error arrives with subtype `success` and `is_error: true` (the real 2026-10-01
+  // line); it is checked first so it can never be read as an ordinary missing-terminal-line error.
+  const permanentApiError = permanentApiErrorOf(message);
+  if (permanentApiError !== null) {
+    return { outcome: 'error', finalText, permanentApiError };
+  }
 
   if (message.subtype !== 'success') {
     return {

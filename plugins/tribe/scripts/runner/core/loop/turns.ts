@@ -81,6 +81,15 @@ export async function driveCardTurns(input: DriveInput, deps: TurnDeps): Promise
     const result = await deps.runTurn(prompt, first);
     first = false;
 
+    if (result.permanentApiError !== undefined) {
+      const { code } = result.permanentApiError;
+      return {
+        kind: 'stopped', cardId: input.cardId,
+        reason: `session ended on the permanent API error ${code}: ${result.finalText}`,
+        retryable: false,
+        permanentApiErrorCode: code,
+      };
+    }
     if (result.outcome === 'error' || result.outcome === 'timeout') {
       return {
         kind: 'stopped', cardId: input.cardId,
