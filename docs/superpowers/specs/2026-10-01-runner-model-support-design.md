@@ -89,7 +89,7 @@ out — a follow-up issue.
   sessions point at `/usr/bin/false` and `--max-spawns 0`, so no real model is ever called.
 - The baseline is committed: `docs/superpowers/evidence/2026-10-01-runner-model-support-g3-baseline.txt`.
 
-### 3.2 The model probe (Task 2) and `doctor.sh --model` (Task 4) — G2, D2
+### 3.2 The model probe and `doctor.sh --model` (Task 2) — G2, D2
 
 - **Pure core** `core/model-probe.ts`: `buildProbeOptions` (the probe's own option block: one
   turn, no tools, no settings, a one-line system prompt — not the executor's pinned block),
@@ -116,7 +116,7 @@ touches only `session.adapter.ts`). The full runner suite after the bump was mea
 1368 pass / 2 fail — the 2 are the inherited `watchdog-integration.test.ts` "G2 — skip when alive"
 failures, present on master.
 
-### 3.4 The runner stops on a permanent API error (Task 5) — G3
+### 3.4 The runner stops on a permanent API error (Task 4) — G3
 
 - **Pure core** `core/api-error.ts`: `PERMANENT_API_ERROR_CODES` (the allowlist, ruling D3) and
   `permanentApiErrorOf(message)` — the ONE parser of that question
@@ -133,7 +133,7 @@ an unknown model returns no code (§1). Treating a transient error as permanent 
 (card D3), so an unknown model stays on the ordinary path and `doctor.sh --model` refuses it before
 launch. (This is the open question in §7.)
 
-### 3.5 The watchdog (Task 6) and the supervisor (Task 7) park on the first occurrence — G3
+### 3.5 The watchdog (Task 5) and the supervisor (Task 6) park on the first occurrence — G3
 
 - `watchdog/signals.ts`: `permanentApiError` — present only when the LAST result in the tail is
   permanent (absent otherwise, so every existing `toEqual` assertion stays as written).
@@ -151,7 +151,7 @@ launch. (This is the open question in §7.)
   frozen sentence pair and renders `**Park reason:** permanent_api_error (<code>)` plus
   ``API error code: `<code>` `` — a typed fact, never prose.
 
-### 3.6 The documented recovery resumes the campaign (Task 8) — G4, D4
+### 3.6 The documented recovery resumes the campaign (Task 7) — G4, D4
 
 - At start, `loop.ts` already snapshots the previous run's park (`priorParkedTerminal`). If
   `NEEDS_OWNER.md` is already gone at that moment, the snapshot becomes `acknowledgedPark` — the
@@ -168,7 +168,7 @@ launch. (This is the open question in §7.)
   retries); the acknowledgement is cleared so it decides at most one tick.
 - A `NEEDS_OWNER.md` still present is refused exactly as before (P2).
 
-### 3.7 Docs (Task 9 — G5) and governance (Task 10)
+### 3.7 Docs (Task 8 — G5) and governance (Task 9)
 
 - `orchestrate-campaign/SKILL.md`: the preflight runs `doctor.sh --model <executor> --model
   <watchdog>`; the watchdog reason list names `permanent_api_error`; doorbell step 6 says deleting
