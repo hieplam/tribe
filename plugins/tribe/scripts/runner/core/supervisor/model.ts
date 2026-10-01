@@ -53,7 +53,10 @@ export type ParkReason =
   | 'watchdog_no_terminal'
   | 'watchdog_usage'
   | 'resume_blocked'
-  | 'history_rewritten';
+  | 'history_rewritten'
+  /** Card runner-model-support (G3): the executor session ended on a permanent API error
+   * (the watchdog's `permanent_api_error` terminal) — parked on the first occurrence, no retrigger. */
+  | 'permanent_api_error';
 
 /** §3.2: the typed subset of `campaign-report.json` the observation carries — `run.reason`,
  * `pending[]`, `cards[].outcome`, `cards[].escalationFile`, `cards[].question`, `stats` (§1.2's
@@ -142,7 +145,8 @@ export interface SupervisorObservation {
    * `fixtures-mirror-reality.md`), so the in-flight spawn is an equally valid liveness source. */
   watchdogLive: { pid: number; alive: boolean } | null;
   lastWatchdog: {
-    terminal: { status: string; reason: string; exitCode: number } | null;
+    /** `apiErrorCode` is present only on a `permanent_api_error` terminal. */
+    terminal: { status: string; reason: string; exitCode: number; apiErrorCode?: string } | null;
     /** The child's real exit when THIS invocation spawned it. */
     ownedExitCode: number | null;
   } | null;

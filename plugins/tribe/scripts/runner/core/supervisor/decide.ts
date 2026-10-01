@@ -158,7 +158,13 @@ export function decide(o: SupervisorObservation): SupervisorAction {
       // the rows below are keyed on the watchdog's terminal vocabulary (success = `runner_done`).
       // `null` means "no substitution": an unrecognised run reason leaves the watchdog's own
       // terminal in force rather than falling past every row into the residual backstop.
-      reason = terminalReasonForRunReason(contradiction.reason) ?? reason;
+      //
+      // Except a `permanent_api_error` terminal about that SAME run: it is the watchdog's verdict on
+      // how that run ended, read from the session's own result line — a fact run.json's reason
+      // (`session_incomplete`) cannot express — so it is never replaced by it (card
+      // runner-model-support, G3).
+      const ownRunVerdict = reason === 'permanent_api_error' && contradiction.runId === o.watchdogRunId;
+      if (!ownRunVerdict) reason = terminalReasonForRunReason(contradiction.reason) ?? reason;
     } else {
       // G2: a newer run is alive. Re-run/attach the watchdog rather than park — bounded by the
       // same run cap and one-shot retrigger rows 16/24 already use, spelled ONCE in
@@ -257,6 +263,12 @@ export function decide(o: SupervisorObservation): SupervisorAction {
   if (reason === 'stalled') return park('stalled', 'the watchdog observed a stalled runner');
   if (reason === 'lock_conflict') return park('lock_conflict', 'the watchdog could not resolve a lock conflict');
   if (reason === 'error') return park('error', 'the watchdog reported an unrecoverable error');
+  // Card runner-model-support (G3): a permanent API error parks on the FIRST occurrence — no
+  // retrigger, because no new session can succeed until the owner fixes the cause.
+  if (reason === 'permanent_api_error') {
+    return park('permanent_api_error', 'the executor session ended on the permanent API error '
+      + `${w.terminal?.apiErrorCode ?? '(no api_error_code recorded)'}; no retry can succeed`);
+  }
 
   // Row 23: a `--once`-only reason is a contract violation by the layer below — fail closed.
   if (reason !== null && ONCE_ONLY_REASONS.has(reason)) {

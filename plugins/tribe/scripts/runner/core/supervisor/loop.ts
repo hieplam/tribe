@@ -242,7 +242,7 @@ interface WatchdogStatusFacts {
   /** Task 4 (spec §2.2): which run the terminal is ABOUT — `null` on a malformed/absent field,
    * never a throw. */
   runId: string | null;
-  terminal: { status: string; reason: string; exitCode: number } | null;
+  terminal: { status: string; reason: string; exitCode: number; apiErrorCode?: string } | null;
 }
 
 function parseWatchdogStatusFacts(raw: string): WatchdogStatusFacts | null {
@@ -263,6 +263,8 @@ function parseWatchdogStatusFacts(raw: string): WatchdogStatusFacts | null {
     const t = terminalRaw as Record<string, unknown>;
     if (typeof t['status'] === 'string' && typeof t['reason'] === 'string' && typeof t['exitCode'] === 'number') {
       terminal = { status: t['status'], reason: t['reason'], exitCode: t['exitCode'] };
+      // Only a string code is read; anything else leaves the field absent (fail closed).
+      if (typeof t['apiErrorCode'] === 'string') terminal.apiErrorCode = t['apiErrorCode'];
     }
   }
   return { pid, runId, terminal };
@@ -1086,6 +1088,9 @@ export async function runSupervisor(
           rulingsLandedThisRun: loopState.landedThisRun,
           watchdogRuns: supState.watchdogRuns,
           lastWatchdogTerminalReason: observation.lastWatchdog?.terminal?.reason ?? null,
+          apiErrorCode: action.reason === 'permanent_api_error'
+            ? observation.lastWatchdog?.terminal?.apiErrorCode ?? null
+            : null,
           ledgerLines: io.readFileOrEmpty(paths.ledger).split('\n').filter((l) => l.length > 0),
           rerunCommand: config.rerunCommand,
         });

@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { decide } from './decide.ts';
 import type { EscalationFact, ParkReason, SupervisorObservation } from './model.ts';
 
@@ -621,4 +621,32 @@ test('the function is pure: the same observation decides the same action every t
   const o = base({ lastWatchdog: terminal('quota_cap') });
   expect(decide(o)).toEqual(decide(o));
   expect(decide(o)).toEqual(decide(structuredClone(o)));
+});
+
+describe('decide — a permanent API error parks on the first occurrence (card runner-model-support, G3)', () => {
+  const RUN = '2026-10-01T14-36-20-603Z-059b';
+  const permanent = (over: Partial<SupervisorObservation> = {}) => base({
+    lastWatchdog: { terminal: { status: 'needs_human', reason: 'permanent_api_error', exitCode: 10, apiErrorCode: 'claude_code_version_too_old' }, ownedExitCode: 10 },
+    watchdogRunId: RUN,
+    runs: [{ runId: RUN, pid: 9, alive: false, endedAt: '2026-10-01T14:36:35.265Z', exitCode: 3, reason: 'session_incomplete' }],
+    ...over,
+  });
+  test('parks permanent_api_error at once, naming the code — no retrigger', () => {
+    expect(decide(permanent())).toEqual({
+      kind: 'park', reason: 'permanent_api_error',
+      detail: 'the executor session ended on the permanent API error claude_code_version_too_old; no retry can succeed',
+    });
+  });
+  test('the run\'s own finalised reason (session_incomplete) never replaces the verdict about that same run', () => {
+    expect(decide(permanent({ state: { ...base().state, watchdogRuns: 1 } })).kind).toBe('park');
+  });
+  test('a NEWER run that finalised after the terminal still decides from its own reason, as before', () => {
+    const newer = permanent({
+      runs: [
+        { runId: RUN, pid: 9, alive: false, endedAt: '2026-10-01T14:36:35.265Z', exitCode: 3, reason: 'session_incomplete' },
+        { runId: '2026-10-01T15-00-00-000Z-aaaa', pid: 10, alive: false, endedAt: '2026-10-01T15:01:00.000Z', exitCode: 0, reason: 'done' },
+      ],
+    });
+    expect(decide(newer)).toEqual({ kind: 'spawn_session', session: 'closing', cardId: null });
+  });
 });

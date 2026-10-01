@@ -27,6 +27,7 @@ const ALL_PARK_REASONS: ParkReason[] = [
   'repeat_escalation', 'ruling_failed', 'closing_failed', 'session_incomplete',
   'quota_cap', 'overloaded', 'stalled', 'lock_conflict', 'error', 'unexpected_running',
   'watchdog_no_terminal', 'watchdog_usage', 'resume_blocked', 'history_rewritten',
+  'permanent_api_error',
 ];
 
 describe('exitCodeOf — the frozen exit codes (spec §10), all four terminal shapes', () => {
@@ -217,8 +218,24 @@ describe('renderNeedsOwner — the format (spec §11)', () => {
       });
     }
 
-    test('all 19 values are covered by this table (model.ts is the source of truth)', () => {
-      expect(ALL_PARK_REASONS.length).toBe(19);
+    test('all 20 values are covered by this table (model.ts is the source of truth)', () => {
+      expect(ALL_PARK_REASONS.length).toBe(20);
     });
+  });
+});
+
+describe('renderNeedsOwner — a permanent API error names its code (card runner-model-support, G3)', () => {
+  test('the park reason line and "What happened" both carry the api_error_code', () => {
+    const doc = renderNeedsOwner(needsOwnerInput({
+      reason: 'permanent_api_error', cardId: null, question: null, apiErrorCode: 'claude_code_version_too_old',
+    }));
+    expect(doc).toContain('**Park reason:** permanent_api_error (claude_code_version_too_old)');
+    expect(doc).toContain('API error code: `claude_code_version_too_old`');
+    expect(doc).toContain('doctor.sh --model');
+  });
+  test('every other park renders exactly as before (no code line)', () => {
+    const doc = renderNeedsOwner(needsOwnerInput());
+    expect(doc).toContain('**Park reason:** owner_only\n');
+    expect(doc).not.toContain('API error code');
   });
 });
