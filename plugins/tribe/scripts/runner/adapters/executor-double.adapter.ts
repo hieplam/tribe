@@ -17,7 +17,11 @@ export function executorDoubleScriptPath(): string | null {
 }
 
 export async function* spawnExecutorDouble(
-  scriptPath: string, homeDir: string, cardId: string, params: SpawnSessionParams, timeoutMs: number = DOUBLE_TIMEOUT_MS,
+  scriptPath: string, homeDir: string, cardId: string,
+  // Only the prompt and a resumed session id are read, so the model probe (`run.ts probe-model`,
+  // whose options are not the executor's pinned block) can use this double too.
+  params: Pick<SpawnSessionParams, 'prompt'> & { options: { resume?: string } },
+  timeoutMs: number = DOUBLE_TIMEOUT_MS,
 ): AsyncGenerator<SessionMessage> {
   const sessionId = params.options.resume ?? `double-exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const dir = mkdtempSync(join(tmpdir(), 'rdo-double-'));
