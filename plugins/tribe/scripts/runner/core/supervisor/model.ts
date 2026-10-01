@@ -168,6 +168,11 @@ export interface SupervisorObservation {
    * `supervisor/status.json`'s `terminal`. The park's stated condition, as a typed fact —
    * never parsed out of NEEDS_OWNER.md's prose (spec §2.2). */
   parkedTerminal: { reason: string; atMs: number } | null;
+  /** Card runner-model-support (G4): the park a PREVIOUS invocation recorded, when
+   * `NEEDS_OWNER.md` was already gone at THIS invocation's start — the owner deleted it, which is
+   * the documented "I have handled it" signal. Captured once at startup and cleared once acted on,
+   * so it is set on at most one tick. Optional so every existing fixture stays as written. */
+  acknowledgedPark?: { reason: string; atMs: number } | null;
   /** The supervisor's own persisted counters. */
   state: SupervisorState;
   limits: SupervisorLimits;
@@ -221,7 +226,7 @@ export type SupervisorAction =
      * `retriggers['stale_terminal']` budget for an unrelated action (`pure-core.md`: "an adapter
      * accumulating business decisions"). Additive: `ParkReason` gains nothing, and no persisted
      * artifact's shape changes. */
-    retrigger: 'stale_terminal' | null;
+    retrigger: 'stale_terminal' | 'owner_resume' | null;
   }
   | { kind: 'await_watchdog'; pid: number }
   | { kind: 'spawn_session'; session: SessionKind; cardId: string | null }

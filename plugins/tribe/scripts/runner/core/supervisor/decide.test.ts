@@ -650,3 +650,35 @@ describe('decide — a permanent API error parks on the first occurrence (card r
     expect(decide(newer)).toEqual({ kind: 'spawn_session', session: 'closing', cardId: null });
   });
 });
+
+describe('decide — P5: the owner acknowledged a watchdog-terminal park (card runner-model-support, G4)', () => {
+  const acked = (reason: string, over: Partial<SupervisorObservation> = {}) => base({
+    acknowledgedPark: { reason, atMs: 900_000 },
+    lastWatchdog: terminal(reason),
+    state: { ...base().state, watchdogRuns: 2, retriggers: { session_incomplete: 1 } },
+    ...over,
+  });
+  test('the 2026-10-01 shape: a spent session_incomplete terminal runs a fresh watchdog, not a re-park', () => {
+    expect(decide(acked('session_incomplete')))
+      .toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: 'owner_resume' });
+  });
+  test.each(['permanent_api_error', 'quota_cap', 'overloaded', 'stalled', 'error'])('%s resumes the same way', (reason) => {
+    expect(decide(acked(reason))).toMatchObject({ kind: 'run_watchdog', retrigger: 'owner_resume' });
+  });
+  test('an escalation park (owner_only) is NOT resumed this way — its own rows re-read the edited files', () => {
+    expect(decide(acked('owner_only', { lastWatchdog: terminal('session_incomplete') })))
+      .toEqual({ kind: 'park', reason: 'session_incomplete', detail: expect.any(String) });
+  });
+  test('the watchdog-run cap still holds', () => {
+    expect(decide(acked('session_incomplete', { state: { ...base().state, watchdogRuns: 20 } })))
+      .toMatchObject({ kind: 'park', reason: 'watchdog_run_cap' });
+  });
+  test('a live watchdog is still adopted first (P4)', () => {
+    expect(decide(acked('session_incomplete', { watchdogLive: { pid: 7, alive: true } })))
+      .toEqual({ kind: 'await_watchdog', pid: 7 });
+  });
+  test('without an acknowledgement the old terminal parks exactly as before (the reproduced defect, now scoped)', () => {
+    expect(decide(acked('session_incomplete', { acknowledgedPark: null })))
+      .toMatchObject({ kind: 'park', reason: 'session_incomplete' });
+  });
+});

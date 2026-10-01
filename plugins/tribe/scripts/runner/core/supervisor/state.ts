@@ -28,6 +28,18 @@ export function zeroState(): SupervisorState {
   };
 }
 
+/** The one-shot retrigger budgets that belong to a watchdog terminal (decide.ts rows 16, 24 and the
+ * G2 stale-terminal row). The owner acknowledging a park starts a new episode, so these budgets
+ * start over (card runner-model-support, G4); every other counter — spawns, ruling rounds, the
+ * repeat-escalation breaker, a session's own retry key — is kept. */
+export const WATCHDOG_RETRIGGER_KEYS = ['session_incomplete', 'watchdog_no_terminal', 'stale_terminal'] as const;
+
+export function clearWatchdogRetriggers(state: SupervisorState): SupervisorState {
+  const retriggers = { ...state.retriggers };
+  for (const key of WATCHDOG_RETRIGGER_KEYS) delete retriggers[key];
+  return { ...state, retriggers };
+}
+
 export type ParseStateResult =
   | { kind: 'ok'; state: SupervisorState }
   | { kind: 'unsupported_version'; version: unknown };

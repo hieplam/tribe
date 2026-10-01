@@ -51,7 +51,7 @@ import type {
 } from './model.ts';
 import { decide } from './decide.ts';
 import {
-  applyRulingOutcome, parseState as parseSupervisorState, serializeState, zeroState,
+  applyRulingOutcome, clearWatchdogRetriggers, parseState as parseSupervisorState, serializeState, zeroState,
   type ParseStateResult,
 } from './state.ts';
 import {
@@ -508,6 +508,11 @@ interface LoopState {
    * park decided in THIS run returns from the loop immediately — so one read at startup is the
    * whole truth, and it is order-independent: no later publish can erase it. */
   priorParkedTerminal: { reason: string; atMs: number } | null;
+  /** Card runner-model-support (G4): `priorParkedTerminal`, when `NEEDS_OWNER.md` was already gone
+   * at startup — the owner's acknowledgement. Cleared the moment the `owner_resume` watchdog run
+   * it causes is performed, so it decides at most one tick. Optional (absent = none) so a test that
+   * builds a LoopState by hand stays as written. */
+  acknowledgedPark?: { reason: string; atMs: number } | null;
 }
 
 // Exported for its own unit test (Task 4, spec §2.2), so the fake seam can drive it directly.
@@ -580,6 +585,7 @@ export function observe(
     runs,
     watchdogRunId,
     parkedTerminal,
+    acknowledgedPark: loopState.acknowledgedPark ?? null,
     state: supState,
     limits: config.limits,
     lastSessionOutcome,
@@ -731,7 +737,11 @@ export async function runSupervisor(
     // Read HERE, before the `publish('observing', 'start', null)` below — see the field's own
     // contract. This is the only moment `status.json` still carries a previous run's park.
     priorParkedTerminal: readParkedTerminal(io, paths.status),
+    acknowledgedPark: null,
   };
+  // Both read before the first publish, like `priorParkedTerminal` itself: a park recorded by a
+  // previous run whose NEEDS_OWNER.md is already gone is one the owner has acknowledged.
+  if (!entryExists(io, homeDir, 'NEEDS_OWNER.md')) loopState.acknowledgedPark = loopState.priorParkedTerminal;
 
   let watchdogLastPid: number | null = null;
   let watchdogLastTerminalReason: string | null = null;
@@ -852,7 +862,12 @@ export async function runSupervisor(
         // Retrigger bookkeeping for rows 16/24 (§3.4): credited only when THIS run_watchdog was
         // actually caused by one of those two rows — derived from the SAME typed fact decide()
         // itself read (`observation.lastWatchdog`), never a new decision.
-        if (observation.lastWatchdog !== null) {
+        if (action.retrigger === 'owner_resume') {
+          // G4: a new episode — the old terminal's one-shot budgets start over, and the
+          // acknowledgement is spent so it can never fire twice.
+          supState = clearWatchdogRetriggers(supState);
+          loopState.acknowledgedPark = null;
+        } else if (observation.lastWatchdog !== null) {
           const priorReason = observation.lastWatchdog.terminal?.reason ?? null;
           if (priorReason === 'session_incomplete') {
             supState = incrementRetrigger(supState, 'session_incomplete');
