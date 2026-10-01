@@ -105,3 +105,24 @@ describe('parseSessionSignals — against real captured logs', () => {
     expect(parseSessionSignals(line429).overload).toBe(null);
   });
 });
+
+describe('parseSessionSignals — a permanent API error (card runner-model-support, G3)', () => {
+  const EXECUTOR_FIXTURES = join(import.meta.dir, '..', '..', 'fixtures', 'executor');
+  const tooOld = readFileSync(join(EXECUTOR_FIXTURES, 'result-claude-code-version-too-old.json'), 'utf8');
+  const notFound = readFileSync(join(EXECUTOR_FIXTURES, 'result-model-not-found-404.json'), 'utf8');
+
+  test('the real 2026-10-01 result line is a permanent API error, and neither quota nor overload', () => {
+    const got = parseSessionSignals(tooOld);
+    expect(got.permanentApiError).toEqual({ status: 400, code: 'claude_code_version_too_old' });
+    expect(got.quota).toBe(null);
+    expect(got.overload).toBe(null);
+    expect(got.lastResultIsError).toBe(true);
+  });
+  test('an unknown-model 404 carries no code, so no permanent API error', () => {
+    expect(parseSessionSignals(notFound).permanentApiError).toBeUndefined();
+  });
+  test('last result wins: a permanent error followed by a clean result is no longer permanent', () => {
+    const clean = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'TASK_DONE T1 b' });
+    expect(parseSessionSignals(`${tooOld.trim()}\n${clean}\n`).permanentApiError).toBeUndefined();
+  });
+});

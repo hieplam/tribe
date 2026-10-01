@@ -36,7 +36,7 @@ export interface BuildStatusInput {
   counters: WatchdogCounters;
   nextWakeAtMs: number | null;
   stall: { logPath: string; lastMtimeMs: number } | null;
-  terminal: { status: string; reason: string; exitCode: number } | null;
+  terminal: { status: string; reason: string; exitCode: number; apiErrorCode?: string } | null;
 }
 
 export function buildStatus(input: BuildStatusInput): WatchdogStatus {
