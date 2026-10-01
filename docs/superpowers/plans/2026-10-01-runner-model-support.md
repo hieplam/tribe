@@ -2278,80 +2278,47 @@ git add plugins/tribe/skills/orchestrate-campaign/SKILL.md plugins/tribe/scripts
 git commit -m "docs(tribe): the preflight probes every campaign model; the runner README documents permanent API errors (G5)"
 ```
 
-### Task 9: Governance — the C3 model matches the runner
+### Task 9: Governance — the C3 reconciliation is deferred to #211 (ruling R4)
 
-**Files:** `.c3/adr/adr-20261001-runner-model-support.md` (created by `c3x add adr`), the change-unit
-`.c3/changes/adr-20261001-runner-model-support/*.patch.md`, and — through `c3x change apply` only —
-`.c3/c3-2-plugins/c3-215-tribe.md`.
+**Amended 2026-10-02 by the Shaman (campaign ruling R4).** The original Task 9 — a change-unit
+updating `c3-215` — cannot land with the installed c3x 11.0.0: its canvas gate checks each `scope: block`
+patch against the original entity plus that one patch, so `c3-215`'s five inherited rows that trip the
+placeholder regex can never be fixed one at a time, and even a byte-identical no-op block patch is
+rejected with `invalid required table`. `scope: whole` with a base is forbidden by `change.md`. The
+reconciliation, with the executor's ready ADR and nine patches, moves to hieplam/tribe#211. This task
+proves only that the card leaves the C3 model no worse: no new broken seal, and `.c3/**` untouched.
 
-C3 facts are frozen: they move only through a change-unit, never by hand
-(`$C3/references/change.md`). Four rows of `c3-215-tribe.md` are made stale by Tasks 2–7: the
-`scripts/doctor.sh` Contract row (no `--model`), the `scripts/runner/run.ts watchdog` Contract row
-(its exit list lacks `exit(needs_human:permanent_api_error)`), the `scripts/runner/run.ts supervise`
-Contract row (no permanent-error park, no owner-acknowledged resume), and the Change-safety rows for
-`core/watchdog/*` and `core/supervisor/**` (they should name `tests/test-runner-permanent-api-error.sh`
-among their proofs). The new `probe-model` subcommand belongs in the doctor row (doctor is its only
-caller).
+**Files:** none.
 
-- [ ] **Step 1: Red** — the model does not know the change:
+- [ ] **Step 1: Red** — not applicable: this task builds nothing; it records the deferral.
 
-```bash
-python3 -c "t=open('.c3/c3-2-plugins/c3-215-tribe.md').read(); print('permanent_api_error' in t, 'probe-model' in t, 'test-runner-permanent-api-error.sh' in t)"
-```
-
-Expected: `False False False`.
-
-- [ ] **Step 2: The change-unit.** Resolve the c3 tooling once:
-  `C3=$(ls -d ~/.claude/plugins/cache/c3-skill-marketplace/c3-skill/*/skills/c3 | tail -1)`, then
-  `alias c3x='C3X_MODE=agent bash "$C3/bin/c3x.sh"'`. Read `$C3/references/change.md` first and follow
-  its flow exactly: `c3x schema adr`; write the ADR body (Context: spec §1 of this card; Decision:
-  spec §3; Consequences: spec §6) and `c3x add adr runner-model-support --file <body>`; for each of
-  the rows named above get its cite handle with `c3x read c3-215 --section <section> --cite`, author
-  one `scope: block` patch per row under `.c3/changes/adr-20261001-runner-model-support/` carrying
-  the row's new text (state what the code now does, in the row's existing voice: the doctor row adds
-  "`--model <id>` (repeatable) proves the runner's own SDK can run each model through `run.ts
-  probe-model` — one tiny bounded real session, never via ANTHROPIC_API_KEY — and refuses one it
-  cannot with the model, the API's reason and the fix"; the watchdog row adds the
-  `exit(needs_human:permanent_api_error)` action for an allowlisted `api_error_code` on a run this
-  invocation tracked; the supervise row adds the immediate `permanent_api_error` park naming the code
-  and the P5 owner-acknowledged resume; the two Change-safety rows add
-  `plugins/tribe/scripts/tests/test-runner-permanent-api-error.sh`); then `c3x change accept` and
-  `c3x change apply` on the unit, and latch the ADR to `done` as the reference says. If `apply`
-  refuses for any reason other than a drifted anchor of your own patch, stop and end the turn with
-  `NEEDS_DIRECTION:` and its message.
-
-- [ ] **Step 3: Green**:
+- [ ] **Step 2: Green** — `.c3/**` is unchanged on the card branch and no seal broke:
 
 ```bash
-python3 -c "t=open('.c3/c3-2-plugins/c3-215-tribe.md').read(); print('permanent_api_error' in t, 'probe-model' in t, 'test-runner-permanent-api-error.sh' in t)"
-C3=$(ls -d ~/.claude/plugins/cache/c3-skill-marketplace/c3-skill/*/skills/c3 | tail -1) && C3X_MODE=agent bash "$C3/bin/c3x.sh" check 2>&1 | python3 -c "import sys; l=sys.stdin.read().splitlines(); seals=[x for x in l if x.startswith('BROKEN_SEAL')]; other=[x for x in l if not x.startswith(('BROKEN_SEAL','verify failed','hint:'))]; print('broken_seals', len(seals), 'own', sum('runner-model-support' in x for x in seals), 'other', len(other))"
+git diff --quiet origin/master...HEAD -- .c3 && echo "c3 unchanged"
 ```
 
-Expected: `True True True`; `broken_seals 157 own 0 other 0` (the 157 are inherited — Adjudication
-item 1; this unit adds none, and no other error appears).
+Expected: `c3 unchanged`, and the Done command below exits 0.
+
+Stub check: an implementation that edited `.c3/**` by hand (breaking a seal) fails both commands.
 
 #### Verify
 
-- Goal: governance — the C3 rows Tasks 2–7 made stale state what the code now does, through a
-  change-unit (`rule-change-unit-ships-with-code`).
-- Red: Step 1 → `False False False`.
-- Green: Step 3 → `True True True` and `own 0` (no broken seal from this card's own unit).
-- Stub check: an empty task leaves Step 1's three facts `False`; a hand-edit of `c3-215-tribe.md`
-  outside `c3x change apply` breaks that fact's seal, which `c3x check` reports.
+- Goal: governance — the card leaves the C3 model no worse (the `c3-215` update itself is deferred to #211 by R4).
+- Red: not applicable — the task builds nothing; it records a deferral.
+- Green: `git diff --quiet origin/master...HEAD -- .c3 && echo "c3 unchanged"` → `c3 unchanged`, and the
+  c3x seal check below exits 0.
+- Stub check: a hand edit under `.c3/**` (which breaks a seal) fails both commands.
 
 #### Done
 
 ```bash
-python3 -c "import sys; t=open('.c3/c3-2-plugins/c3-215-tribe.md').read(); sys.exit(0 if 'permanent_api_error' in t and 'probe-model' in t and 'test-runner-permanent-api-error.sh' in t else 1)"
+git diff --quiet origin/master...HEAD -- .c3
 C3=$(ls -d ~/.claude/plugins/cache/c3-skill-marketplace/c3-skill/*/skills/c3 | tail -1) && C3X_MODE=agent bash "$C3/bin/c3x.sh" check 2>&1 | python3 -c "import sys; l=sys.stdin.read().splitlines(); sys.exit(0 if not any(x.startswith('BROKEN_SEAL') and 'runner-model-support' in x for x in l) and sum(x.startswith('BROKEN_SEAL') for x in l) <= 157 else 1)"
 ```
 
-- [ ] **Step 4: Commit**
-
-```bash
-git add .c3
-git commit -m "docs(c3): c3-215 states the model probe, the permanent API error park and the owner-acknowledged resume"
-```
+- [ ] **Step 3: Commit** — `git commit --allow-empty -m "chore(c3): defer the c3-215 reconciliation to #211 (ruling R4)"`. The final
+review treats the missing `c3-215` update as deferred by R4, not as a finding.
 
 ### Task 10: Final review
 
