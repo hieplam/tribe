@@ -1,0 +1,5 @@
+runner_serial_spawns=15
+runner_pool_spawns=15
+watchdog_spawns=11 watchdog_terminal=session_incomplete None
+supervise_spawns_before_park=23 park_reason=session_incomplete
+recovery_new_spawns=0 recovery_run_watchdog=0 recovery_park_reason=session_incomplete
