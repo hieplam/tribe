@@ -30,6 +30,16 @@ function nextUnanswered(escalations: EscalationFact[]): EscalationFact | null {
   return escalations.find((e) => e.filePresent) ?? null;
 }
 
+/** Card runner-model-support (G4): parks decided from the WATCHDOG's terminal alone. Once the owner
+ * has deleted `NEEDS_OWNER.md` for one of these, that terminal is spent: re-reading it would park
+ * again before anything ran (the 2026-10-01 incident), so the supervisor runs a fresh watchdog.
+ * Escalation and session parks are absent on purpose: their rows re-read the escalation files and
+ * answers.md the owner just edited, which is already the right recovery. */
+const WATCHDOG_TERMINAL_PARK_REASONS: ReadonlySet<string> = new Set([
+  'session_incomplete', 'permanent_api_error', 'quota_cap', 'overloaded', 'stalled', 'lock_conflict',
+  'error', 'unexpected_running', 'watchdog_no_terminal', 'watchdog_usage',
+]);
+
 /** §3.4 row 23: these five terminal reasons are `--once`-only (the watchdog's own `decide()`
  * only ever returns them when invoked with `mode: 'once'`); the supervisor always runs
  * `--follow`, so observing one here is a contract violation by the layer below, never a case to
@@ -135,6 +145,16 @@ export function decide(o: SupervisorObservation): SupervisorAction {
   if (o.watchdogLive !== null && o.watchdogLive.alive) {
     return { kind: 'await_watchdog', pid: o.watchdogLive.pid };
   }
+  // P5 (card runner-model-support, G4): the owner deleted NEEDS_OWNER.md for a park decided from
+  // the watchdog's terminal — the documented recovery. That terminal is spent, so run a fresh
+  // watchdog (still under the run cap) instead of re-deciding from it.
+  const acknowledged = o.acknowledgedPark ?? null;
+  if (acknowledged !== null && WATCHDOG_TERMINAL_PARK_REASONS.has(acknowledged.reason)) {
+    if (o.state.watchdogRuns >= o.limits.maxWatchdogRuns) {
+      return park('watchdog_run_cap', `the watchdog was re-triggered its maximum ${o.limits.maxWatchdogRuns} times`);
+    }
+    return { kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: 'owner_resume' };
+  }
 
   // --- Main rows 1-28 (§3.4), keyed on the watchdog's terminal reason.
   const w = o.lastWatchdog;
@@ -158,7 +178,13 @@ export function decide(o: SupervisorObservation): SupervisorAction {
       // the rows below are keyed on the watchdog's terminal vocabulary (success = `runner_done`).
       // `null` means "no substitution": an unrecognised run reason leaves the watchdog's own
       // terminal in force rather than falling past every row into the residual backstop.
-      reason = terminalReasonForRunReason(contradiction.reason) ?? reason;
+      //
+      // Except a `permanent_api_error` terminal about that SAME run: it is the watchdog's verdict on
+      // how that run ended, read from the session's own result line — a fact run.json's reason
+      // (`session_incomplete`) cannot express — so it is never replaced by it (card
+      // runner-model-support, G3).
+      const ownRunVerdict = reason === 'permanent_api_error' && contradiction.runId === o.watchdogRunId;
+      if (!ownRunVerdict) reason = terminalReasonForRunReason(contradiction.reason) ?? reason;
     } else {
       // G2: a newer run is alive. Re-run/attach the watchdog rather than park — bounded by the
       // same run cap and one-shot retrigger rows 16/24 already use, spelled ONCE in
@@ -257,6 +283,12 @@ export function decide(o: SupervisorObservation): SupervisorAction {
   if (reason === 'stalled') return park('stalled', 'the watchdog observed a stalled runner');
   if (reason === 'lock_conflict') return park('lock_conflict', 'the watchdog could not resolve a lock conflict');
   if (reason === 'error') return park('error', 'the watchdog reported an unrecoverable error');
+  // Card runner-model-support (G3): a permanent API error parks on the FIRST occurrence — no
+  // retrigger, because no new session can succeed until the owner fixes the cause.
+  if (reason === 'permanent_api_error') {
+    return park('permanent_api_error', 'the executor session ended on the permanent API error '
+      + `${w.terminal?.apiErrorCode ?? '(no api_error_code recorded)'}; no retry can succeed`);
+  }
 
   // Row 23: a `--once`-only reason is a contract violation by the layer below — fail closed.
   if (reason !== null && ONCE_ONLY_REASONS.has(reason)) {

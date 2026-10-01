@@ -92,6 +92,15 @@ export function decide(o: WatchdogObservation): WatchdogAction {
   // the recoverable deaths. Unknown exits must spend the same bounded crash budget as exit 3.
   const isUnknownExit = o.lastExitCode !== null && ![0, 1, 2, 3, 4].includes(o.lastExitCode);
   if (o.lastExitCode === 3 || isUnknownExit || (o.lastExitCode === null && o.crashSuspected)) {
+    // A permanent API error (card runner-model-support, G3): no relaunch can succeed, so the
+    // watchdog stops on the first occurrence — before quota, overload, crash budget and STOP,
+    // because it is a terminal fact about the run, not a request to start work (W-P1). Only a run
+    // THIS invocation tracked counts: an older run's log, read again after the owner fixed the
+    // cause and relaunched, must launch a fresh runner instead (`lastExitCodeProvenanced`).
+    const permanent = o.permanentApiError ?? null;
+    if (permanent !== null && (o.lastExitCodeProvenanced ?? true)) {
+      return { kind: 'exit', status: 'needs_human', reason: 'permanent_api_error', apiErrorCode: permanent.code };
+    }
     // W-P2: a missing or already-elapsed reset is NOT a quota signal (spec §7).
     // FIX S3: clamp the computed deadline — untrusted log content must never produce an
     // unbounded wait (`MAX_QUOTA_WAIT_MS`, defined above beside `OVERLOAD_BACKOFF_SECONDS`).

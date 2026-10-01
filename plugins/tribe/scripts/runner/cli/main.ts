@@ -43,7 +43,8 @@ import { parseSupervisorArgs, supervisorHomeFromCampaign, type SupervisorConfig 
 import { runSupervisor, type SupervisorLoopConfig, type SupervisorLoopSeam } from '../core/supervisor/loop.ts';
 import { SUPERVISOR_EXIT_NEEDS_OWNER, SUPERVISOR_EXIT_USAGE } from '../core/supervisor/model.ts';
 import { buildSupervisorIo } from '../adapters/supervisor-io.adapter.ts';
-import { sdkSpawnSession } from '../adapters/session.adapter.ts';
+import { sdkSpawnProbe, sdkSpawnSession } from '../adapters/session.adapter.ts';
+import { parseProbeArgs, renderProbeLines, runModelProbe, type ProbeSpawn } from '../core/model-probe.ts';
 import { sessionDoubleScriptPath, spawnSessionDouble } from '../adapters/session-double.adapter.ts';
 import { executorDoubleScriptPath, spawnExecutorDouble } from '../adapters/executor-double.adapter.ts';
 import type { SpawnSessionParams } from '../core/session.ts';
@@ -881,6 +882,27 @@ export async function main(): Promise<void> {
     // Re-deriving it here would duplicate that mapping outside the module that owns it.
     console.log(`status: ${terminal.statusPath}`);
     process.exit(terminal.exitCode);
+    return;
+  }
+
+  // Card runner-model-support (ruling D2): `doctor.sh --model <id>` asks this subcommand whether
+  // the runner's OWN SDK can run a model — one tiny real session, bounded, never via
+  // ANTHROPIC_API_KEY (P10). Exit 0 ok, 1 refused, 2 usage error.
+  if (argv[0] === 'probe-model') {
+    const parsed = parseProbeArgs(argv.slice(1));
+    if ('error' in parsed) {
+      console.error(`probe-model: ${parsed.error}`);
+      process.exit(2);
+      return;
+    }
+    unsetAnthropicApiKeyEnv();
+    const probeDouble = executorDoubleScriptPath();
+    const spawn: ProbeSpawn = probeDouble === null
+      ? sdkSpawnProbe
+      : (params) => spawnExecutorDouble(probeDouble, '(model-probe)', 'model-probe', { prompt: params.prompt, options: {} });
+    const verdict = await runModelProbe(parsed.model, process.cwd(), spawn, parsed.timeoutMs);
+    for (const line of renderProbeLines(verdict)) console.log(line);
+    process.exitCode = verdict.ok ? 0 : 1;
     return;
   }
 

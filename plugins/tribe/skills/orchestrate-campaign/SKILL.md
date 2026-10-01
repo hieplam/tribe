@@ -263,8 +263,15 @@ out to `bun` and `gh` and drives the Agent SDK; each is provisioned per machine,
 can install cleanly and still fail hours into a run:
 
 ```sh
-bash "$(dirname "$(dirname "$runner_dir")")/scripts/doctor.sh"
+bash "$(dirname "$(dirname "$runner_dir")")/scripts/doctor.sh" \
+  --model <the campaign's executor model> --model <its watchdog model>
 ```
+
+Pass `--model` once for every model the campaign will use — the `--model` and `--watchdog-model`
+you will give `supervise` (the same id twice is fine). For each, doctor runs one tiny real
+session through the runner's own SDK and reports `ok`, or `MISSING` with the model, the API's
+own reason and the fix — a model newer than the runner's bundled Claude Code is refused here,
+before launch, instead of failing every session of the campaign.
 
 It exits 0 when every prerequisite is present, or exits 1 naming each gap and its remedy. On a
 non-zero exit, relay the gaps to the owner and stop — do not start a campaign on a machine that
@@ -413,7 +420,8 @@ ruling UC-3).
 3. **On the wake-up, read `<campaign-home>/watchdog/status.json` FIRST, then
    `campaign-report.json`.** The watchdog's `terminal.reason` says why supervision ended
    (`runner_done` · `escalations_pending` · `session_incomplete` ·
-   `quota_cap` · `overloaded` · `stalled` · `lock_conflict` · `error` · `stop_requested`) and its
+   `quota_cap` · `overloaded` · `stalled` · `lock_conflict` · `error` · `stop_requested` ·
+   `permanent_api_error` — the session's model call failed in a way no retry fixes; its `apiErrorCode` names why) and its
    `counters` say what it already absorbed for you (quota waits, overload backoffs, crash
    relaunches). Then read `campaign-report.json` for the campaign truth: **the exit code is a
    hint, the report is the truth** — always read the report before deciding what to do next, even
@@ -669,7 +677,12 @@ it, verbatim** — it is a transcriber, never a judge:
 5. **Delete `<home>/NEEDS_OWNER.md`.** That file is a latch, not a notice — deleting it is the
    owner's explicit "I have handled it" signal, and the supervisor refuses to resume while it
    exists.
-6. **Restart the supervisor**, detached, with the exact command `NEEDS_OWNER.md` printed.
+6. **Restart the supervisor**, detached, with the exact command `NEEDS_OWNER.md` printed. For a
+   park the watchdog's terminal decided (`session_incomplete`, `permanent_api_error`, `quota_cap`,
+   `overloaded`, `stalled`, and the like), deleting the file is what lets it resume: the restarted
+   supervisor runs a fresh watchdog instead of parking again on the old terminal. Fix the cause
+   first, and `reset-card` each stopped card (runner README, "Permanent API errors and the model
+   probe").
 
 The `ruled-by: owner` marker is never load-bearing for W7 — W7's counter increments only when the
 supervisor itself spawns a ruling session, and an owner ruling involves no spawn, so it can never

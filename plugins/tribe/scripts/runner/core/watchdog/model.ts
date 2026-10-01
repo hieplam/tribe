@@ -18,7 +18,7 @@ export type WatchdogMode = 'once' | 'follow';
 export const TERMINAL_REASONS = [
   'runner_done', 'escalations_pending', 'error', 'session_incomplete',
   'stop_requested', 'runner_alive', 'lock_conflict', 'quota_cap', 'quota_wait_pending',
-  'overloaded', 'overload_backoff_pending', 'stalled',
+  'overloaded', 'overload_backoff_pending', 'stalled', 'permanent_api_error',
 ] as const;
 
 export interface WatchdogConfig {
@@ -109,6 +109,9 @@ export interface WatchdogObservation {
   /** W-P2: already validated as a FUTURE reset by the edge's clock-free parser + decide(). */
   quota: { resetsAtEpochS: number } | null;
   overload: { apiErrorStatus: number } | null;
+  /** The run's last session ended on an allowlisted permanent API error (`../api-error.ts`).
+   * Optional so every existing `decide.test.ts` fixture stays as written; absent = none. */
+  permanentApiError?: { status: number | null; code: string } | null;
   counters: WatchdogCounters;
   limits: WatchdogLimits;
   fallbackModel: string | null;
@@ -145,6 +148,8 @@ export type WatchdogAction =
        * has no other way to learn when to come back. `undefined` (never set) on every other
        * exit reason — never a fabricated value. */
       nextWakeAtMs?: number;
+      /** Set only on `permanent_api_error`: the `api_error_code` the session ended on. */
+      apiErrorCode?: string;
     };
 
 export interface WatchdogStatus {
@@ -162,7 +167,7 @@ export interface WatchdogStatus {
   counters: WatchdogCounters;
   nextWakeAt: string | null;
   stall: { logPath: string; lastMtime: string } | null;
-  terminal: { status: string; reason: string; exitCode: number } | null;
+  terminal: { status: string; reason: string; exitCode: number; apiErrorCode?: string } | null;
 }
 
 export interface WatchdogEvent {

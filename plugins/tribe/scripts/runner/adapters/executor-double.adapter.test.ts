@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnExecutorDouble as spawnExecutorDoubleWithCard } from './executor-double.adapter.ts';
+import { doubleResultMessage, spawnExecutorDouble as spawnExecutorDoubleWithCard } from './executor-double.adapter.ts';
 
 const spawnExecutorDouble = (script: string, home: string, params: Parameters<typeof spawnExecutorDoubleWithCard>[3]) =>
   spawnExecutorDoubleWithCard(script, home, 'C1', params);
@@ -39,5 +39,20 @@ describe('spawnExecutorDouble', () => {
     for await (const m of spawnExecutorDoubleWithCard(echo, '/home', 'C7', params())) msgs.push(m);
     expect((msgs[1] as { result: string }).result.split('\n')).toContain('--card');
     expect((msgs[1] as { result: string }).result).toMatch(/--card\nC7(?:\n|$)/);
+  });
+});
+
+describe('doubleResultMessage — a double can replay a REAL result line (card runner-model-support)', () => {
+  const tooOld = readFileSync(join(import.meta.dir, '..', 'fixtures', 'executor', 'result-claude-code-version-too-old.json'), 'utf8');
+  test('a whole result line on stdout is passed through as the message, under the double\'s session id', () => {
+    const m = doubleResultMessage(tooOld, 'double-1') as Record<string, unknown>;
+    expect(m).toMatchObject({ type: 'result', subtype: 'success', is_error: true, api_error_status: 400, api_error_code: 'claude_code_version_too_old', session_id: 'double-1' });
+  });
+  test('plain text stays the final text of a success result, as before', () => {
+    expect(doubleResultMessage('TASK_DONE T1 b\n', 'd')).toEqual({ type: 'result', subtype: 'success', session_id: 'd', result: 'TASK_DONE T1 b' });
+  });
+  test('JSON that is not a result message, or not JSON at all, stays plain text', () => {
+    expect(doubleResultMessage('{"type":"assistant"}', 'd')).toMatchObject({ result: '{"type":"assistant"}' });
+    expect(doubleResultMessage('{not json', 'd')).toMatchObject({ result: '{not json' });
   });
 });

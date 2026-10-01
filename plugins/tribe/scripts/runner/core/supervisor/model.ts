@@ -53,7 +53,10 @@ export type ParkReason =
   | 'watchdog_no_terminal'
   | 'watchdog_usage'
   | 'resume_blocked'
-  | 'history_rewritten';
+  | 'history_rewritten'
+  /** Card runner-model-support (G3): the executor session ended on a permanent API error
+   * (the watchdog's `permanent_api_error` terminal) — parked on the first occurrence, no retrigger. */
+  | 'permanent_api_error';
 
 /** §3.2: the typed subset of `campaign-report.json` the observation carries — `run.reason`,
  * `pending[]`, `cards[].outcome`, `cards[].escalationFile`, `cards[].question`, `stats` (§1.2's
@@ -142,7 +145,8 @@ export interface SupervisorObservation {
    * `fixtures-mirror-reality.md`), so the in-flight spawn is an equally valid liveness source. */
   watchdogLive: { pid: number; alive: boolean } | null;
   lastWatchdog: {
-    terminal: { status: string; reason: string; exitCode: number } | null;
+    /** `apiErrorCode` is present only on a `permanent_api_error` terminal. */
+    terminal: { status: string; reason: string; exitCode: number; apiErrorCode?: string } | null;
     /** The child's real exit when THIS invocation spawned it. */
     ownedExitCode: number | null;
   } | null;
@@ -164,6 +168,11 @@ export interface SupervisorObservation {
    * `supervisor/status.json`'s `terminal`. The park's stated condition, as a typed fact —
    * never parsed out of NEEDS_OWNER.md's prose (spec §2.2). */
   parkedTerminal: { reason: string; atMs: number } | null;
+  /** Card runner-model-support (G4): the park a PREVIOUS invocation recorded, when
+   * `NEEDS_OWNER.md` was already gone at THIS invocation's start — the owner deleted it, which is
+   * the documented "I have handled it" signal. Captured once at startup and cleared once acted on,
+   * so it is set on at most one tick. Optional so every existing fixture stays as written. */
+  acknowledgedPark?: { reason: string; atMs: number } | null;
   /** The supervisor's own persisted counters. */
   state: SupervisorState;
   limits: SupervisorLimits;
@@ -217,7 +226,7 @@ export type SupervisorAction =
      * `retriggers['stale_terminal']` budget for an unrelated action (`pure-core.md`: "an adapter
      * accumulating business decisions"). Additive: `ParkReason` gains nothing, and no persisted
      * artifact's shape changes. */
-    retrigger: 'stale_terminal' | null;
+    retrigger: 'stale_terminal' | 'owner_resume' | null;
   }
   | { kind: 'await_watchdog'; pid: number }
   | { kind: 'spawn_session'; session: SessionKind; cardId: string | null }

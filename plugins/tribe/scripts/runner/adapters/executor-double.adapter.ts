@@ -17,7 +17,11 @@ export function executorDoubleScriptPath(): string | null {
 }
 
 export async function* spawnExecutorDouble(
-  scriptPath: string, homeDir: string, cardId: string, params: SpawnSessionParams, timeoutMs: number = DOUBLE_TIMEOUT_MS,
+  scriptPath: string, homeDir: string, cardId: string,
+  // Only the prompt and a resumed session id are read, so the model probe (`run.ts probe-model`,
+  // whose options are not the executor's pinned block) can use this double too.
+  params: Pick<SpawnSessionParams, 'prompt'> & { options: { resume?: string } },
+  timeoutMs: number = DOUBLE_TIMEOUT_MS,
 ): AsyncGenerator<SessionMessage> {
   const sessionId = params.options.resume ?? `double-exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const dir = mkdtempSync(join(tmpdir(), 'rdo-double-'));
@@ -35,8 +39,28 @@ export async function* spawnExecutorDouble(
     });
     if (code !== 0) throw new Error(`executor session double "${scriptPath}" exited ${code}`);
     yield { type: 'system', subtype: 'init', session_id: sessionId };
-    yield { type: 'result', subtype: 'success', session_id: sessionId, result: stdout.trim() };
+    yield doubleResultMessage(stdout, sessionId);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** The double's stdout, read as the session's `result` message. A double whose LAST stdout line is
+ * a whole `result` message (the JSON a real session emits — e.g. the captured
+ * `fixtures/executor/result-claude-code-version-too-old.json`) is passed through as that message,
+ * so the runner reads exactly the bytes a real session produced; any other stdout is the session's
+ * final text, as before. The session id is the double's own, so the log file and the message agree. */
+export function doubleResultMessage(stdout: string, sessionId: string): SessionMessage {
+  const lastLine = stdout.trim().split('\n').pop() ?? '';
+  if (lastLine.startsWith('{')) {
+    try {
+      const parsed: unknown = JSON.parse(lastLine);
+      if (parsed !== null && typeof parsed === 'object' && (parsed as { type?: unknown }).type === 'result') {
+        return { ...(parsed as SessionMessage), session_id: sessionId };
+      }
+    } catch (err) {
+      if (!(err instanceof SyntaxError)) throw err; // a line that is not JSON is ordinary final text
+    }
+  }
+  return { type: 'result', subtype: 'success', session_id: sessionId, result: stdout.trim() };
 }

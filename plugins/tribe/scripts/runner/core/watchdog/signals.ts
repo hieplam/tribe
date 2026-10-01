@@ -16,6 +16,9 @@ export interface SessionSignals {
    * the future is a clock question, decided by `decide()` (W-P2), never here. */
   quota: { resetsAtEpochS: number } | null;
   overload: { apiErrorStatus: number } | null;
+  /** Present only when the LAST result in the tail ended on an allowlisted permanent API error
+   * (`../api-error.ts`); absent otherwise, like `finalLineUnparseable` below. */
+  permanentApiError?: { status: number | null; code: string };
   lastResultIsError: boolean;
   /**
    * True when the tail's LAST content line looked like it was on track to be a real
@@ -33,6 +36,8 @@ export interface SessionSignals {
    */
   finalLineUnparseable?: boolean;
 }
+
+import { permanentApiErrorOf } from '../api-error.ts';
 
 /** 429 is deliberately absent: it is the quota shape, and the quota path owns it (W-P3). */
 const OVERLOAD_STATUSES = new Set([500, 502, 503, 504, 529]);
@@ -56,6 +61,7 @@ function looksLikeTruncatedSignalLine(line: string): boolean {
 export function parseSessionSignals(tail: string): SessionSignals {
   let quota: SessionSignals['quota'] = null;
   let overload: SessionSignals['overload'] = null;
+  let permanentApiError: SessionSignals['permanentApiError'];
   let lastResultIsError = false;
   let finalLineUnparseable: boolean | undefined;
 
@@ -93,6 +99,8 @@ export function parseSessionSignals(tail: string): SessionSignals {
 
     if (message['type'] === 'result') {
       lastResultIsError = message['is_error'] === true;
+      const permanent = permanentApiErrorOf(message);
+      permanentApiError = permanent === null ? undefined : { status: permanent.status, code: permanent.code };
       const status = message['api_error_status'];
       overload =
         typeof status === 'number' && OVERLOAD_STATUSES.has(status)
@@ -101,5 +109,7 @@ export function parseSessionSignals(tail: string): SessionSignals {
     }
   }
 
-  return { quota, overload, lastResultIsError, finalLineUnparseable };
+  return permanentApiError === undefined
+    ? { quota, overload, lastResultIsError, finalLineUnparseable }
+    : { quota, overload, permanentApiError, lastResultIsError, finalLineUnparseable };
 }

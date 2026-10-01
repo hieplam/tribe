@@ -186,6 +186,15 @@ export const PARK_SENTENCES: Record<ParkReason, ParkSentence> = {
     unblock: 'Handle the prior park described in the rest of this file, delete this file once '
       + 'resolved, then re-run: {rerun}',
   },
+  permanent_api_error: {
+    what: 'An executor session ended on a permanent API error — one that no retry can fix. The '
+      + 'supervisor parked on the first occurrence and spawned nothing more.',
+    unblock: 'Fix the cause the API error code names (for claude_code_version_too_old: bump '
+      + '@anthropic-ai/claude-agent-sdk in the runner\'s package.json to the latest version and run bun '
+      + 'install in the runner directory), confirm it with doctor.sh --model <model>, reset each '
+      + 'stopped card with run.ts reset-card --home {home} --card <card>, delete this file, then '
+      + 're-run: {rerun}',
+  },
   history_rewritten: {
     what: 'A one-shot session rewrote or deleted a prior ruling in answers.md — the ruling trail '
       + 'is no longer trustworthy. This never retries.',
@@ -211,6 +220,9 @@ export interface NeedsOwnerInput {
   rulingsLandedThisRun: string[];
   watchdogRuns: number;
   lastWatchdogTerminalReason: string | null;
+  /** The `api_error_code` a `permanent_api_error` park is about — a typed fact read from the
+   * watchdog's terminal, never prose; absent or `null` for every other park. */
+  apiErrorCode?: string | null;
   /** The `ledger.jsonl` lines for this run, verbatim. */
   ledgerLines: string[];
   /** The exact `supervise` command that re-runs this campaign (composed by the CLI edge from its
@@ -244,14 +256,18 @@ export function renderNeedsOwner(ctx: NeedsOwnerInput): string {
     ? ctx.ledgerLines.join('\n')
     : '(no spawns this run)';
 
+  const apiErrorCode = ctx.apiErrorCode ?? null;
+  const reasonLine = apiErrorCode === null ? ctx.reason : `${ctx.reason} (${apiErrorCode})`;
+  const apiErrorLine = apiErrorCode === null ? '' : `\nAPI error code: \`${apiErrorCode}\``;
+
   return `# Campaign needs the owner: ${ctx.campaignSlug}
 
-**Park reason:** ${ctx.reason}
+**Park reason:** ${reasonLine}
 **At:** ${at}          **Supervisor exit:** ${SUPERVISOR_EXIT_NEEDS_OWNER}
 **Campaign home:** ${ctx.campaignHome}
 
 ## What happened
-${sentence.what}
+${sentence.what}${apiErrorLine}
 
 ## The question (when a card is parked)
 ${question}

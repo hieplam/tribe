@@ -281,6 +281,7 @@ function observe(config: WatchdogConfig, homeDir: string, io: WatchdogIO, state:
     crashSuspected,
     quota: signals?.quota ?? null,
     overload: signals?.overload ?? null,
+    permanentApiError: signals?.permanentApiError ?? null,
     counters: state.counters,
     limits: {
       stallMinutes: config.stallMinutes,
@@ -296,6 +297,7 @@ function observe(config: WatchdogConfig, homeDir: string, io: WatchdogIO, state:
   const signalDetail = signals === null ? null : {
     quota: signals.quota,
     overload: signals.overload,
+    permanentApiError: signals.permanentApiError ?? null,
     finalLineUnparseable: signals.finalLineUnparseable ?? false,
   };
 
@@ -324,7 +326,7 @@ export async function runWatchdog(
   const publish = (
     stateName: string,
     lastAction: string,
-    terminal: { status: string; reason: string; exitCode: number } | null,
+    terminal: { status: string; reason: string; exitCode: number; apiErrorCode?: string } | null,
     runnerPid: number | null,
   ): void => {
     io.writeFileAtomic(paths.status, serializeStatus(buildStatus({
@@ -367,9 +369,12 @@ export async function runWatchdog(
   // `runnerPid` defaults to `null` for every OTHER terminal reason, unchanged from before.
   const terminate = (
     status: string, reason: string, exitCode: number, runnerPid: number | null = null,
+    apiErrorCode?: string,
   ): WatchdogTerminal => {
-    publish('terminal', `exit:${status}:${reason}`, { status, reason, exitCode }, runnerPid);
-    record('exit', { status, reason, exitCode });
+    // `apiErrorCode` is present only on `permanent_api_error`; every other terminal keeps its shape.
+    const detail = apiErrorCode === undefined ? { status, reason, exitCode } : { status, reason, exitCode, apiErrorCode };
+    publish('terminal', `exit:${status}:${reason}`, detail, runnerPid);
+    record('exit', detail);
     return { exitCode, status, reason, statusPath: paths.status };
   };
 
@@ -508,7 +513,9 @@ export async function runWatchdog(
         // published status BEFORE terminate()'s own publish() reads `state.nextWakeAtMs` —
         // every other exit reason leaves `nextWakeAtMs` undefined, so this is a no-op there.
         state.nextWakeAtMs = action.nextWakeAtMs ?? null;
-        return terminate(action.status, action.reason, exitCodeOf(action), observation.run?.runnerPid ?? null);
+        return terminate(
+          action.status, action.reason, exitCodeOf(action), observation.run?.runnerPid ?? null, action.apiErrorCode,
+        );
     }
   }
 }

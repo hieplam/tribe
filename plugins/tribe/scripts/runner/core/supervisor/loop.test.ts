@@ -1225,3 +1225,42 @@ describe('runSupervisor — F-F1: a contradiction that appears AFTER a refusal r
     assertWriteSurface(seam.writes);
   });
 });
+
+describe('runSupervisor — the documented recovery resumes the campaign (card runner-model-support, G4)', () => {
+  // The 2026-10-01 shape after the owner's recovery: a previous run parked session_incomplete
+  // (supervisor/status.json), its retrigger is spent (state.json), the watchdog's terminal still
+  // says session_incomplete, and the owner has deleted NEEDS_OWNER.md.
+  const parkedFiles = (needsOwner: boolean): Record<string, string> => ({
+    [join(HOME, 'supervisor', 'status.json')]: JSON.stringify({
+      v: 1, pid: 1, updatedAt: '2026-10-01T14:37:20.685Z',
+      terminal: { status: 'needs_owner', reason: 'session_incomplete', exitCode: 20 },
+    }),
+    [join(HOME, 'supervisor', 'state.json')]: JSON.stringify({
+      v: 1, ...zeroState(), watchdogRuns: 2, retriggers: { session_incomplete: 1 },
+    }),
+    [join(HOME, 'watchdog', 'status.json')]: JSON.stringify({
+      pid: 777, terminal: { status: 'needs_human', reason: 'session_incomplete', exitCode: 10 },
+    }),
+    ...(needsOwner ? { [join(HOME, 'NEEDS_OWNER.md')]: '# parked\n' } : {}),
+  });
+
+  test('NEEDS_OWNER.md deleted: a fresh watchdog runs, and its outcome decides', async () => {
+    const seam = fakeSeam({
+      initialFiles: parkedFiles(false), initialDeadPids: [777],
+      watchdogRuns: [{ reason: 'stop_requested', exitCode: 0 }],
+    });
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+    expect(seam.spawnWatchdogCalls).toBe(1);
+    expect(result).toMatchObject({ exitCode: 0, kind: 'done', reason: 'stop_requested' });
+    const state = JSON.parse(seam.files.get(join(HOME, 'supervisor', 'state.json')) as string);
+    expect(state.retriggers.session_incomplete).toBeUndefined();
+    expect(state.watchdogRuns).toBe(3);
+  });
+
+  test('NEEDS_OWNER.md still present: still refused, nothing spawned (the latch holds)', async () => {
+    const seam = fakeSeam({ initialFiles: parkedFiles(true), initialDeadPids: [777] });
+    const result = await runSupervisor(baseConfig(), HOME, seam.io);
+    expect(seam.spawnWatchdogCalls).toBe(0);
+    expect(result).toMatchObject({ exitCode: 20, kind: 'needs_owner', reason: 'resume_blocked' });
+  });
+});

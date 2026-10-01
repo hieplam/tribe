@@ -5,6 +5,8 @@
 // `io.spawnSession` seam. Fixtures are neutral (no repo names, no campaign values, no
 // model names baked in) — the stateless-capability wall.
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { MERGE_GATE_DENIED_CHECKS_ERROR_REASON } from './merge-gate.ts';
 import {
   BACKGROUNDING_DENIED_REASON,
@@ -684,5 +686,24 @@ describe('decideScanGuardHook (R-a)', () => {
       tool_input: { command: 'find $HOME -name "*.log"' },
     });
     expect(d.hookSpecificOutput?.permissionDecision).toBe('deny');
+  });
+});
+
+describe('runSession — a permanent API error (card runner-model-support, G3)', () => {
+  test('the real 2026-10-01 result line -> outcome "error" carrying the permanent API error', async () => {
+    const line = JSON.parse(readFileSync(join(import.meta.dir, '..', 'fixtures', 'executor', 'result-claude-code-version-too-old.json'), 'utf8')) as SessionMessage;
+    const io = recordingIo();
+    io.spawnSession = () => messages([INIT_MESSAGE, { ...line, session_id: 'sess-123' }]);
+    const result = await runSession({ brief: 'x' }, fixtureConfig(), io);
+    expect(result.outcome).toBe('error');
+    expect(result.permanentApiError).toMatchObject({ status: 400, code: 'claude_code_version_too_old' });
+  });
+  test('an unknown-model 404 (no code) stays an ordinary error, with no permanent API error', async () => {
+    const line = JSON.parse(readFileSync(join(import.meta.dir, '..', 'fixtures', 'executor', 'result-model-not-found-404.json'), 'utf8')) as SessionMessage;
+    const io = recordingIo();
+    io.spawnSession = () => messages([INIT_MESSAGE, { ...line, session_id: 'sess-123' }]);
+    const result = await runSession({ brief: 'x' }, fixtureConfig(), io);
+    expect(result.outcome).toBe('error');
+    expect(result.permanentApiError).toBeUndefined();
   });
 });

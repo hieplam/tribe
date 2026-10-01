@@ -624,3 +624,32 @@ describe('decide — FIX S3: a corrupt/huge resetsAtEpochS clamps to a bounded w
 test('the watchdog vocabulary has no rulings reason any more: the runner never exits 5', () => {
   expect(TERMINAL_REASONS.filter((reason) => reason.includes('rulings'))).toEqual([]);
 });
+
+describe('decide — a permanent API error (card runner-model-support, G3)', () => {
+  const PERMANENT = { status: 400, code: 'claude_code_version_too_old' };
+  test('exit 3 with a permanent API error exits needs_human on the first occurrence, code carried', () => {
+    expect(decide(obs({ permanentApiError: PERMANENT }))).toEqual({
+      kind: 'exit', status: 'needs_human', reason: 'permanent_api_error', apiErrorCode: 'claude_code_version_too_old',
+    });
+  });
+  test('it outranks quota, overload, a spent crash budget and STOP', () => {
+    const o = obs({
+      permanentApiError: PERMANENT, quota: { resetsAtEpochS: FUTURE_RESET_S }, overload: { apiErrorStatus: 529 },
+      stopFilePresent: true, counters: { ...ZERO, crashRelaunches: 1 },
+    });
+    expect(encode(decide(o))).toBe('exit:needs_human:permanent_api_error');
+  });
+  test('a crash with no exit code to read and a permanent API error in its log exits the same way', () => {
+    expect(encode(decide(obs({ lastExitCode: null, crashSuspected: true, permanentApiError: PERMANENT }))))
+      .toBe('exit:needs_human:permanent_api_error');
+  });
+  test('an OLDER run\'s permanent error (not tracked by this invocation) launches a fresh runner', () => {
+    expect(encode(decide(obs({ permanentApiError: PERMANENT, lastExitCodeProvenanced: false })))).toBe('launch');
+  });
+  test('without the signal, exit 3 still spends the crash budget exactly as before', () => {
+    expect(encode(decide(obs({ permanentApiError: null })))).toBe('relaunch:crash');
+  });
+  test('permanent_api_error is a terminal reason', () => {
+    expect(TERMINAL_REASONS).toContain('permanent_api_error');
+  });
+});

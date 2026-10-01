@@ -152,3 +152,15 @@ describe('driveCardTurns — spec §4.4', () => {
     expect(h.prompts[1]?.split('\n')[0]).toBe('## This turn: deliver');
   });
 });
+
+describe('driveCardTurns — a permanent API error stops the card, never retryable (card runner-model-support)', () => {
+  test('stopped, retryable false, the code carried and named in the reason', async () => {
+    const h = harness([{ outcome: 'error', finalText: 'API Error: 400 ...', permanentApiError: { status: 400, code: 'claude_code_version_too_old', text: 'API Error: 400 ...' } }]);
+    const out = await driveCardTurns({ cardId: 'C1', card: h.c, tasks, planPath: 'p', delivery: { baseBranch: 'master', remote: 'origin', repoRoot: '/r' } }, h.deps);
+    expect(out).toEqual({
+      kind: 'stopped', cardId: 'C1', retryable: false, permanentApiErrorCode: 'claude_code_version_too_old',
+      reason: 'session ended on the permanent API error claude_code_version_too_old: API Error: 400 ...',
+    });
+    expect(h.events).toEqual(['turn:first']);
+  });
+});

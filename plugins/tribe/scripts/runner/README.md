@@ -438,6 +438,49 @@ recorded in `answers.md` (see "Escalation / answers workflow" below) — a plain
 ruling, so it must not fabricate one. To actually unblock such a card, either rule on it and
 archive the file per that section's ritual, or pass `--include-escalated` on the next run.
 
+## Permanent API errors and the model probe (card runner-model-support)
+
+**A model the runner's SDK cannot run is refused before launch.** The runner drives its executor
+sessions through the Claude Code binary bundled with `@anthropic-ai/claude-agent-sdk` (pinned in
+`package.json`, frozen in `bun.lock`) — never the machine's own `claude`. A model newer than that
+bundled Claude Code is refused by the API (`claude_code_version_too_old`). The `probe-model`
+subcommand asks the runner's own SDK whether it can run one model — one tiny real session (one
+turn, no tools, no settings; about a cent and a few seconds), bounded, never via
+`ANTHROPIC_API_KEY`:
+
+```sh
+bun plugins/tribe/scripts/runner/run.ts probe-model --model <id> [--timeout-seconds 10..600]
+```
+
+It prints `ok: model <id> runs on the runner's SDK (Claude Code <version>)` and exits `0`, or
+prints `refused: model <id> … — <the API's own reason> [HTTP <status>, api_error_code <code>]` and
+`fix: <what to do>` and exits `1`; a usage error exits `2`. `doctor.sh --model <id>` (repeatable)
+runs it for each model and relays those lines, so the campaign preflight names the model, the
+reason and the fix. `--dry-run` never calls a model; it stays the runner's zero-LLM check.
+
+**A permanent API error stops the campaign on its first occurrence.** `core/api-error.ts` holds the
+allowlist of `api_error_code` values that no retry can fix — today only
+`claude_code_version_too_old`, the one code a real session has been seen returning. An unknown
+model id carries no code at all (HTTP 404 only), so it stays on the ordinary path and is refused
+by `doctor.sh --model` instead. A code earns a place on the list only from a real run: treating a
+transient error as permanent would park a healthy campaign. When a session's `result` carries a
+listed code:
+
+- the runner stops that card without a retry or a fresh fallback session, and starts no further
+  card in this pass (`--max-concurrent` lets the cards already in flight finish); it exits `3`;
+- the watchdog exits `needs_human:permanent_api_error`, its `status.json` terminal carrying
+  `apiErrorCode` — only for a run this invocation tracked;
+- the supervisor parks `permanent_api_error` at once, with no retrigger; `NEEDS_OWNER.md` reads
+  `**Park reason:** permanent_api_error (<code>)` and names the code under "What happened".
+
+**The recovery resumes the campaign.** Fix the cause (for `claude_code_version_too_old`: bump the
+SDK and `bun install` here), confirm it with `doctor.sh --model <id>`, run `reset-card` for each
+stopped card, delete `NEEDS_OWNER.md`, and re-run `supervise`. A park decided from the watchdog's
+terminal (`session_incomplete`, `permanent_api_error`, `quota_cap`, `overloaded`, `stalled`,
+`lock_conflict`, `error`, `unexpected_running`, `watchdog_no_terminal`, `watchdog_usage`) whose
+`NEEDS_OWNER.md` the owner deleted is acknowledged: the supervisor runs a fresh watchdog instead
+of re-deciding from the old terminal, and that terminal's one-shot retrigger budgets start over.
+
 ## How this is normally triggered
 
 The runner is **not meant to be invoked by hand as the normal path.** It is triggered by the
@@ -969,7 +1012,7 @@ has nothing to observe. Every optional flag the runner itself accepts — `--car
 | --- | --- | --- |
 | `0` | `WATCHDOG_EXIT_DONE` | The supervised campaign reached a terminal state that needs no human (`runner_done` or `stop_requested`). |
 | `1` | `WATCHDOG_EXIT_USAGE` | A CLI argument error (bad/missing/unknown flag), or `--home` could not be resolved / is outside `$HOME/.tribe` / has no `campaign-state.json`. |
-| `10` | `WATCHDOG_EXIT_NEEDS_HUMAN` | A human must act. The exact reason is in `status.json`'s `terminal.reason` (`escalations_pending`, `error`, `quota_cap`, `overloaded`, `session_incomplete`, `lock_conflict`, `stalled`), or an unexpected internal I/O failure caught at the CLI edge. |
+| `10` | `WATCHDOG_EXIT_NEEDS_HUMAN` | A human must act. The exact reason is in `status.json`'s `terminal.reason` (`escalations_pending`, `error`, `quota_cap`, `overloaded`, `session_incomplete`, `lock_conflict`, `stalled`, `permanent_api_error`), or an unexpected internal I/O failure caught at the CLI edge. |
 | `11` | `WATCHDOG_EXIT_RUNNING` | `--once` only: the runner is still alive, or a quota/overload wait is pending — `status.json`'s `nextWakeAt` says when to re-invoke. |
 
 ### Files (all under `<home>/watchdog/`)
@@ -996,6 +1039,7 @@ The watchdog writes **nowhere else** in the campaign home — never `campaign-st
 | Runner exited `4` | `exit(needs_human:error)` |
 | Runner exited `3` or an unrecognized code (or crashed with no exit code to read), newest log's **last** `rate_limit_event` is `rejected` with a **future** `resetsAt` | `wait_until(resetsAt + --quota-grace-seconds)` then `relaunch`; count a quota wait; at `--max-quota-waits` → `exit(needs_human:quota_cap)` |
 | Runner exited `3` or an unrecognized code (or crashed with no exit code to read), no quota signal, newest log's **last** `result` line carries an overload/5xx `api_error_status` | backoff-and-`relaunch` (`30s, 60s, 120s, 240s, 480s`, clamped); count an overload backoff; at `--max-overload-backoffs` → one `--fallback-model` relaunch if configured and not yet used, else `exit(needs_human:overloaded)` |
+| Runner exited `3` or an unrecognized code (or crashed with no exit code to read), newest log's **last** `result` line carries an allowlisted permanent `api_error_code` (`core/api-error.ts`), and this invocation tracked that run | `exit(needs_human:permanent_api_error)` at once, `status.json`'s terminal carrying `apiErrorCode`; it outranks quota, overload, the crash budget and `STOP`. An older run's log read again by a fresh watchdog launches a runner instead. |
 | Runner exited `3` or an unrecognized code (or crashed with no exit code to read), no quota or overload signal | `relaunch` once; a second time → `exit(needs_human:session_incomplete)` |
 | Runner exited `1` (single-instance lock held) | `attach` if the lock holder is alive; else `relaunch` once, repeat → `exit(needs_human:lock_conflict)` |
 | Runner alive, newest log mtime unchanged for `> --stall-minutes` | record `stall`; `--follow` → `exit(needs_human:stalled)`; `--once` → `exit(running:stalled)` |
@@ -1214,12 +1258,14 @@ comments; first match wins)
 | `NEEDS_OWNER.md` is present (P2) | The supervisor re-observes before it refuses: a park whose stated condition the disk has already falsified yields `supersede_park` (`park_superseded` in `events.jsonl`, the file renamed to `NEEDS_OWNER.md.superseded-<ts>`, `counters.staleTerminals` incremented, the campaign continuing); a park that still holds yields `park(resume_blocked)` — resume stays blocked until the owner deletes it. A refusal is a refusal to resume the *existing* park, not a new park about a new condition, so it leaves `status.json`'s `terminal.reason` naming the condition the park was originally recorded with (the refusal itself is `lastAction: park:resume_blocked` and a `park` line in `events.jsonl`). That recorded condition is exactly what the NEXT restart re-checks against `runs/`, so a contradiction that only appears after several refused restarts is still detected. |
 | `STOP` file present (P3) | `exit(done:stop_requested)`. |
 | A watchdog is already live (P4) | `await_watchdog` — adopted, never relaunched. |
+| The previous run parked on a watchdog terminal and the owner has deleted `NEEDS_OWNER.md` (P5) | `run_watchdog` with retrigger `owner_resume` (under the run cap): the old terminal is spent, never re-decided; its one-shot retrigger budgets start over. |
 | No watchdog has run yet this invocation (row 27) | `run_watchdog` over the whole campaign. |
 | Watchdog terminal `runner_done` (rows 1-3) | `spawn_session(closing)` (failing closed to `park(closing_failed)` if the `verify-shipped` plugin dir is missing); `exit(done:campaign_closed)` once `state.json.closingVerified` is true. The supervisor does no ratification: rulings in `answers.md` never delay the closing session. |
 | Watchdog terminal `stop_requested` (row 4) | `exit(done:stop_requested)`. |
 | Watchdog terminal `escalations_pending` (rows 5-12) | For the next unanswered card: archive a ruling already landed in `answers.md` but not yet archived; else honour that card's own park marker; else `park(owner_only)` if its trigger is on `ownerOnlyEscalations`; else `park(repeat_escalation)` if this exact body was already ruled; else `park(w7_cap)`/`park(spawn_cap)` if a budget is spent; else `spawn_session(ruling)`. Once every escalated card is answered, `run_watchdog` scoped to just the answered + not-reached cards. |
 | Watchdog terminal `session_incomplete` (rows 16-17) | One bounded watchdog re-trigger, then `park(session_incomplete)`. |
 | Watchdog terminal `quota_cap` / `overloaded` / `stalled` / `lock_conflict` / `error` (rows 18-22) | `park` with the matching reason — never retried automatically. |
+| Watchdog terminal `permanent_api_error` | `park(permanent_api_error)` on the first occurrence, naming the `apiErrorCode` — never retried. Run.json's own `session_incomplete` for that same run never replaces it. |
 | A one-shot session just returned `failed`/`timeout` (V5/V6) | One bounded retry (`--session-retries`), then `park(<kind>_failed)`. |
 | A one-shot session just returned `history_rewritten` (V1) | `park` immediately — an integrity violation, never retried. |
 | The watchdog-run cap is spent (row 28), or an unrecognised terminal reason (including one the runner no longer emits) | `park(watchdog_run_cap)` / `park(error)` — fail closed, never guess. |

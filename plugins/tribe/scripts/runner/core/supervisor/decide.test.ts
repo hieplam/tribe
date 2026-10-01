@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { decide } from './decide.ts';
 import type { EscalationFact, ParkReason, SupervisorObservation } from './model.ts';
 
@@ -621,4 +621,64 @@ test('the function is pure: the same observation decides the same action every t
   const o = base({ lastWatchdog: terminal('quota_cap') });
   expect(decide(o)).toEqual(decide(o));
   expect(decide(o)).toEqual(decide(structuredClone(o)));
+});
+
+describe('decide — a permanent API error parks on the first occurrence (card runner-model-support, G3)', () => {
+  const RUN = '2026-10-01T14-36-20-603Z-059b';
+  const permanent = (over: Partial<SupervisorObservation> = {}) => base({
+    lastWatchdog: { terminal: { status: 'needs_human', reason: 'permanent_api_error', exitCode: 10, apiErrorCode: 'claude_code_version_too_old' }, ownedExitCode: 10 },
+    watchdogRunId: RUN,
+    runs: [{ runId: RUN, pid: 9, alive: false, endedAt: '2026-10-01T14:36:35.265Z', exitCode: 3, reason: 'session_incomplete' }],
+    ...over,
+  });
+  test('parks permanent_api_error at once, naming the code — no retrigger', () => {
+    expect(decide(permanent())).toEqual({
+      kind: 'park', reason: 'permanent_api_error',
+      detail: 'the executor session ended on the permanent API error claude_code_version_too_old; no retry can succeed',
+    });
+  });
+  test('the run\'s own finalised reason (session_incomplete) never replaces the verdict about that same run', () => {
+    expect(decide(permanent({ state: { ...base().state, watchdogRuns: 1 } })).kind).toBe('park');
+  });
+  test('a NEWER run that finalised after the terminal still decides from its own reason, as before', () => {
+    const newer = permanent({
+      runs: [
+        { runId: RUN, pid: 9, alive: false, endedAt: '2026-10-01T14:36:35.265Z', exitCode: 3, reason: 'session_incomplete' },
+        { runId: '2026-10-01T15-00-00-000Z-aaaa', pid: 10, alive: false, endedAt: '2026-10-01T15:01:00.000Z', exitCode: 0, reason: 'done' },
+      ],
+    });
+    expect(decide(newer)).toEqual({ kind: 'spawn_session', session: 'closing', cardId: null });
+  });
+});
+
+describe('decide — P5: the owner acknowledged a watchdog-terminal park (card runner-model-support, G4)', () => {
+  const acked = (reason: string, over: Partial<SupervisorObservation> = {}) => base({
+    acknowledgedPark: { reason, atMs: 900_000 },
+    lastWatchdog: terminal(reason),
+    state: { ...base().state, watchdogRuns: 2, retriggers: { session_incomplete: 1 } },
+    ...over,
+  });
+  test('the 2026-10-01 shape: a spent session_incomplete terminal runs a fresh watchdog, not a re-park', () => {
+    expect(decide(acked('session_incomplete')))
+      .toEqual({ kind: 'run_watchdog', cards: null, includeEscalated: false, retrigger: 'owner_resume' });
+  });
+  test.each(['permanent_api_error', 'quota_cap', 'overloaded', 'stalled', 'error'])('%s resumes the same way', (reason) => {
+    expect(decide(acked(reason))).toMatchObject({ kind: 'run_watchdog', retrigger: 'owner_resume' });
+  });
+  test('an escalation park (owner_only) is NOT resumed this way — its own rows re-read the edited files', () => {
+    expect(decide(acked('owner_only', { lastWatchdog: terminal('session_incomplete') })))
+      .toEqual({ kind: 'park', reason: 'session_incomplete', detail: expect.any(String) });
+  });
+  test('the watchdog-run cap still holds', () => {
+    expect(decide(acked('session_incomplete', { state: { ...base().state, watchdogRuns: 20 } })))
+      .toMatchObject({ kind: 'park', reason: 'watchdog_run_cap' });
+  });
+  test('a live watchdog is still adopted first (P4)', () => {
+    expect(decide(acked('session_incomplete', { watchdogLive: { pid: 7, alive: true } })))
+      .toEqual({ kind: 'await_watchdog', pid: 7 });
+  });
+  test('without an acknowledgement the old terminal parks exactly as before (the reproduced defect, now scoped)', () => {
+    expect(decide(acked('session_incomplete', { acknowledgedPark: null })))
+      .toMatchObject({ kind: 'park', reason: 'session_incomplete' });
+  });
 });

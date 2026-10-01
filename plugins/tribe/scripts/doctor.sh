@@ -7,13 +7,34 @@
 # with the command that fixes it — instead of letting a callee die with
 # "command not found" somewhere deep in a background run.
 #
+# Usage: doctor.sh [--model <id>]...
+#   --model <id>  (repeatable) also prove the runner's OWN SDK can run that model: one tiny real
+#                 session per model through `run.ts probe-model` (about a cent, a few seconds),
+#                 never via ANTHROPIC_API_KEY. A refusal names the model, the API's own reason
+#                 and the fix (card runner-model-support, ruling D2).
+#
 # Contract:
 #   exit 0  every required prerequisite is present
 #   exit 1  at least one is missing; each is named on stdout with its remedy
+#   exit 2  usage error (an unknown argument, or --model without a model id)
 #
 # Checks are additive and never fatal-on-first-miss: one run reports every gap, so a
 # fresh machine is provisioned in a single pass rather than one error at a time.
 set -euo pipefail
+
+MODELS=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --model)
+      # A missing value never swallows the next flag as a model id (fail-closed-edges obligation 1).
+      if [ "$#" -lt 2 ] || [ -z "$2" ] || [ "${2#-}" != "$2" ]; then
+        printf 'doctor.sh: --model needs a model id (e.g. --model claude-opus-5-5)\n' >&2
+        exit 2
+      fi
+      MODELS+=("$2"); shift 2 ;;
+    *) printf 'doctor.sh: unknown argument: %s (usage: doctor.sh [--model <id>]...)\n' "$1" >&2; exit 2 ;;
+  esac
+done
 
 MISSING=0
 ok()   { printf '  ok    %s\n' "$*"; }
@@ -97,6 +118,30 @@ else
   gap "viewer client built (dist/index.html) — the campaign viewer will refuse to start"
   fix "run: ./install.sh    (or: cd '$VIEWER_DIR' && bun run build)"
 fi
+
+# --- models: can the runner's OWN SDK run each campaign model? (ruling D2) -----------
+# One tiny real session per model through the runner's own node_modules, bounded at 180 s
+# (fail-closed-edges obligation 3). ANTHROPIC_API_KEY is removed for the probe (P10). Every
+# decision — what counts as a refusal, which fix to print — is made by the probe itself
+# (core/model-probe.ts); this block only relays its lines.
+for m in ${MODELS[@]+"${MODELS[@]}"}; do
+  if [ ! -d "$RUNNER/node_modules" ] || ! command -v bun >/dev/null 2>&1; then
+    gap "model $m — cannot be probed without bun and the runner dependencies (see above)"
+    continue
+  fi
+  rc=0
+  out="$(env -u ANTHROPIC_API_KEY perl -e 'alarm shift; exec @ARGV or die "exec: $!"' 180 \
+    bun "$RUNNER/run.ts" probe-model --model "$m" 2>&1)" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    ok "$(printf '%s\n' "$out" | sed -n 's/^ok: //p' | head -n 1)"
+  elif [ "$rc" -eq 1 ]; then
+    gap "$(printf '%s\n' "$out" | sed -n 's/^refused: //p' | head -n 1)"
+    fix "$(printf '%s\n' "$out" | sed -n 's/^fix: //p' | head -n 1)"
+  else
+    gap "model $m — the probe did not finish (exit $rc): $(printf '%s\n' "$out" | tail -n 1)"
+    fix "re-run it alone: bun '$RUNNER/run.ts' probe-model --model $m"
+  fi
+done
 
 printf '\n'
 if [ "$MISSING" -eq 0 ]; then

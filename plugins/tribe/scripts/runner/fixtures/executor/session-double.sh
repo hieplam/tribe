@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Executor session double (card runner-driver-only, spec §4.12). Reads the runner's prompt, acts on
 # DOUBLE_REPO according to DOUBLE_MODE, prints ONE terminal line. Env: DOUBLE_MODE (do-nothing |
-# premature-shipped | implement), DOUBLE_REPO, DOUBLE_BRANCH, DOUBLE_LOG (optional turn log).
+# premature-shipped | implement | result-line), DOUBLE_REPO, DOUBLE_BRANCH, DOUBLE_LOG (optional turn log),
+# DOUBLE_RESULT_FILE (result-line: a captured `result` message to print as the session's result).
 set -euo pipefail
 prompt_file=""
 while [[ $# -gt 0 ]]; do
@@ -32,5 +33,7 @@ case "$DOUBLE_MODE" in
     g "$wt" add -A
     g "$wt" commit -q -m "feat(mathx): Double" >/dev/null 2>&1 || true   # a later turn has nothing new to commit; stdout carries only the terminal line
     echo "TASK_DONE ${task:-T1} $DOUBLE_BRANCH" ;;
+  result-line)
+    cat "${DOUBLE_RESULT_FILE:?DOUBLE_RESULT_FILE names the captured result line to print}" ;;
   *) echo "session-double: unknown DOUBLE_MODE=${DOUBLE_MODE:-}" >&2; exit 2 ;;
 esac
